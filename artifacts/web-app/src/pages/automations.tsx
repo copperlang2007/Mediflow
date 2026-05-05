@@ -125,7 +125,7 @@ function ActionConfigEditor({ action, onChange }: { action: AutomationAction; on
           <Select value={(action.config.status as string) ?? ""} onValueChange={(v) => update("status", v)}>
             <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="New status" /></SelectTrigger>
             <SelectContent>
-              {["prospect", "enrolled", "retained", "lapsed", "inactive"].map((s) => (
+              {["lead", "prospect", "enrolled", "retained", "lost", "do_not_contact"].map((s) => (
                 <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>
               ))}
             </SelectContent>

@@ -78,6 +78,18 @@ export async function buildContactContext(contactId: string, orgId: string): Pro
 
   const lastActivity = activities[0];
 
+  // Determine enrollment period eligibility context
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const day = now.getDate();
+  const isAepWindow = (month === 10 && day >= 15) || month === 11 || (month === 12 && day <= 7);
+  const isOepWindow = month === 1 || (month === 3 && day <= 31);
+  const enrollmentPeriod = isAepWindow
+    ? "Annual Enrollment Period (AEP) is currently open (Oct 15 – Dec 7)"
+    : isOepWindow
+    ? "Open Enrollment Period (OEP) is currently open (Jan 1 – Mar 31)"
+    : "No major enrollment period is currently active";
+
   return [
     `CONTACT MEDICARE PROFILE`,
     `Name: ${contact.firstName} ${contact.lastName}`,
@@ -86,10 +98,14 @@ export async function buildContactContext(contactId: string, orgId: string): Pro
     `Status: ${contact.status}`,
     `Date of birth: ${contact.dob ?? "not set"}`,
     `Medicare ID: ${contact.medicareId ?? "not set"}`,
+    `State: ${contact.stateCode ?? "not set"}`,
     `Plan type: ${contact.currentPlanType ?? "not set"}`,
     `Carrier ID: ${contact.currentCarrierId ?? "not set"}`,
     `County: ${contact.county ?? "not set"}`,
+    `Health conditions: ${(contact.healthConditions ?? []).join(", ") || "none recorded"}`,
     `Tags: ${(contact.tags ?? []).join(", ") || "none"}`,
+    ``,
+    `Enrollment period context: ${enrollmentPeriod}`,
     ``,
     `Last interaction: ${lastActivity ? `${lastActivity.type} — ${lastActivity.createdAt}` : "never"}`,
     `Active sequences: ${enrollments.length > 0 ? enrollments.map((e) => e.sequenceName).join(", ") : "none"}`,

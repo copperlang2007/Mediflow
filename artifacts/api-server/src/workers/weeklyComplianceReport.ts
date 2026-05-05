@@ -24,7 +24,21 @@ import {
   notificationsTable,
   usersTable,
 } from "@workspace/db";
-import { openai } from "@workspace/integrations-openai-ai-server";
+import OpenAI from "openai";
+
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI | null {
+  if (_openai) return _openai;
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+  if (!apiKey || !baseURL) return null;
+  try {
+    _openai = new OpenAI({ apiKey, baseURL });
+    return _openai;
+  } catch {
+    return null;
+  }
+}
 import { ObjectStorageService } from "../lib/objectStorage";
 import { buildComplianceReportPdf } from "../lib/complianceReportPdf";
 import { logger } from "../lib/logger";
@@ -86,9 +100,15 @@ async function generateReportForOrg(orgId: string): Promise<void> {
     ...agentDataLines,
   ].join("\n");
 
+  const aiClient = getOpenAI();
+  if (!aiClient) {
+    logger.warn({ orgId }, "Weekly compliance report skipped — AI integration not configured");
+    return;
+  }
+
   let fullReport = "";
   try {
-    const stream = await openai.chat.completions.create({
+    const stream = await aiClient.chat.completions.create({
       model: "gpt-5.4",
       max_completion_tokens: 8192,
       messages: [{ role: "user", content: reportPrompt }],

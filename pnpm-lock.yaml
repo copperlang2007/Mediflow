@@ -214,6 +214,9 @@ importers:
       http-proxy-middleware:
         specifier: ^3.0.5
         version: 3.0.5
+      openai:
+        specifier: ^6.35.0
+        version: 6.35.0(zod@3.25.76)
       pdfkit:
         specifier: ^0.18.0
         version: 0.18.0
@@ -6375,6 +6378,10 @@ snapshots:
   once@1.4.0:
     dependencies:
       wrappy: 1.0.2
+
+  openai@6.35.0(zod@3.25.76):
+    optionalDependencies:
+      zod: 3.25.76
 
   openai@6.35.0(zod@4.3.6):
     optionalDependencies:

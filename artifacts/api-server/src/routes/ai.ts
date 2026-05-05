@@ -21,7 +21,21 @@ import {
   contactsTable,
   documentsTable,
 } from "@workspace/db";
-import { openai } from "@workspace/integrations-openai-ai-server";
+import OpenAI from "openai";
+
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI | null {
+  if (_openai) return _openai;
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+  if (!apiKey || !baseURL) return null;
+  try {
+    _openai = new OpenAI({ apiKey, baseURL });
+    return _openai;
+  } catch {
+    return null;
+  }
+}
 import {
   requireAuth,
   requirePermission,
@@ -115,13 +129,19 @@ router.post(
       { role: "user", content: processedMessage },
     ];
 
+    const aiClient = getOpenAI();
+    if (!aiClient) {
+      res.status(503).json({ error: "AI integration is not configured" });
+      return;
+    }
+
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
 
     try {
-      const stream = await openai.chat.completions.create({
+      const stream = await aiClient.chat.completions.create({
         model: "gpt-5.4",
         max_completion_tokens: 8192,
         messages: chatMessages,
@@ -195,8 +215,14 @@ router.post(
       channelInstructions,
     ].join("\n");
 
+    const aiClient = getOpenAI();
+    if (!aiClient) {
+      res.status(503).json({ error: "AI integration is not configured" });
+      return;
+    }
+
     try {
-      const response = await openai.chat.completions.create({
+      const response = await aiClient.chat.completions.create({
         model: "gpt-5.4",
         max_completion_tokens: channel === "sms" ? 256 : 1024,
         messages: [{ role: "user", content: prompt }],
@@ -289,13 +315,19 @@ router.post(
       ...agentDataLines,
     ].join("\n");
 
+    const aiClient = getOpenAI();
+    if (!aiClient) {
+      res.status(503).json({ error: "AI integration is not configured" });
+      return;
+    }
+
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
 
     try {
-      const stream = await openai.chat.completions.create({
+      const stream = await aiClient.chat.completions.create({
         model: "gpt-5.4",
         max_completion_tokens: 8192,
         messages: [{ role: "user", content: reportPrompt }],
