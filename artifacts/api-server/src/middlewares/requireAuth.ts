@@ -43,45 +43,22 @@ export const requireAuth = async (
 };
 
 /**
- * Role-based middleware. Accepts explicit roles OR a resource/action pair from
- * the centralized permission matrix. Prefer resource/action form so the matrix
- * stays as the single source of truth.
+ * Explicit-role middleware.
+ *
+ * Grants access when the authenticated user's role is one of the listed roles.
+ * Use requirePermission() for resource/action matrix lookups — these two
+ * helpers must never be conflated because role names can overlap resource names
+ * (e.g. "agent" is both a Role and a Resource), which causes silent
+ * authorization failures if a single overloaded function is used.
  */
 export function requireRole(
-  ...roles: Array<Role>
-): (req: Request, res: Response, next: NextFunction) => Promise<void>;
-
-export function requireRole(
-  resource: Resource,
-  action: Action,
-): (req: Request, res: Response, next: NextFunction) => Promise<void>;
-
-export function requireRole(
-  ...args: Array<Role | Resource | Action>
+  ...allowedRoles: Array<Role>
 ): (req: Request, res: Response, next: NextFunction) => Promise<void> {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const role = authReq.userRole;
 
-    if (!role) {
-      res.status(403).json({ error: "Forbidden" });
-      return;
-    }
-
-    let allowed = false;
-
-    if (
-      args.length === 2 &&
-      typeof args[0] === "string" &&
-      typeof args[1] === "string" &&
-      !isRole(args[0])
-    ) {
-      allowed = can(role, args[0] as Resource, args[1] as Action);
-    } else {
-      allowed = (args as Role[]).includes(role);
-    }
-
-    if (!allowed) {
+    if (!role || !allowedRoles.includes(role)) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
@@ -90,8 +67,30 @@ export function requireRole(
   };
 }
 
-function isRole(value: string): value is Role {
-  return (
-    ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "agent"] as const
-  ).includes(value as Role);
+/**
+ * Permission-matrix middleware.
+ *
+ * Consult the centralised RBAC matrix in lib/permissions.ts to decide access.
+ * Prefer this over requireRole() when checking resource/action semantics so
+ * the matrix stays the single source of truth.
+ *
+ * Separate from requireRole() to eliminate the "agent" role-vs-resource
+ * ambiguity that would exist in a single overloaded function.
+ */
+export function requirePermission(
+  resource: Resource,
+  action: Action,
+): (req: Request, res: Response, next: NextFunction) => Promise<void> {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const role = authReq.userRole;
+
+    if (!role || !can(role, resource, action)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
+    next();
+  };
 }
+

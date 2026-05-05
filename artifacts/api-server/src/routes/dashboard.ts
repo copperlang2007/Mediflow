@@ -12,11 +12,11 @@ import {
   activitiesTable,
   usersTable,
 } from "@workspace/db";
-import { requireAuth, requireRole, type AuthenticatedRequest } from "../middlewares/requireAuth";
+import { requireAuth, requirePermission, type AuthenticatedRequest } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
-router.get("/dashboard/stats", requireAuth, requireRole("dashboard", "read"), async (req: Request, res: Response): Promise<void> => {
+router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read"), async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthenticatedRequest;
   const orgId = authReq.orgId;
 
@@ -202,7 +202,7 @@ router.get("/dashboard/stats", requireAuth, requireRole("dashboard", "read"), as
   });
 });
 
-router.get("/dashboard/activity", requireAuth, requireRole("dashboard", "read"), async (req: Request, res: Response): Promise<void> => {
+router.get("/dashboard/activity", requireAuth, requirePermission("dashboard", "read"), async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthenticatedRequest;
   const { limit } = req.query as { limit?: string };
   const limitNum = Math.min(parseInt(limit ?? "20", 10) || 20, 100);

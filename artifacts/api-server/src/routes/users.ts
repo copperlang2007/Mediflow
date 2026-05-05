@@ -5,6 +5,7 @@ import { db, usersTable } from "@workspace/db";
 import {
   requireAuth,
   requireRole,
+  requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
@@ -13,6 +14,16 @@ import { type Role } from "../lib/permissions";
 const UpdateMeSchema = z.object({
   fullName: z.string().min(1).max(100).optional(),
   avatarUrl: z.string().url().optional(),
+});
+
+const UpdateUserRoleSchema = z.object({
+  role: z.enum([
+    "super_admin",
+    "agency_admin",
+    "compliance_manager",
+    "agent_support",
+    "viewer",
+  ]),
 });
 
 const VALID_ROLES: Role[] = [
@@ -28,6 +39,17 @@ function isValidRole(value: string): value is Role {
 }
 
 const router: IRouter = Router();
+
+// Group-level audit: covers reads and writes on user resources automatically.
+router.use(
+  auditMiddleware("user", undefined, {
+    includeReads: true,
+    getResourceId: (req) => {
+      const raw = req.params.userId ?? req.params.id;
+      return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
+    },
+  }),
+);
 
 router.get(
   "/users/me",
@@ -79,7 +101,7 @@ router.patch(
 router.get(
   "/users",
   requireAuth,
-  requireRole("user", "read"),
+  requirePermission("user", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { role, isActive } = req.query as {
@@ -108,29 +130,19 @@ router.get(
 router.patch(
   "/users/:userId/role",
   requireAuth,
-  requireRole("user", "admin"),
-  auditMiddleware("user", "update", {
-    getResourceId: (req) => {
-      const raw = req.params.userId;
-      return Array.isArray(raw) ? raw[0] : raw;
-    },
-  }),
+  requirePermission("user", "admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.userId)
       ? req.params.userId[0]
       : req.params.userId;
-    const { role } = req.body as { role: string };
 
-    if (!role) {
-      res.status(400).json({ error: "role is required" });
+    const parsed = UpdateUserRoleSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
       return;
     }
-
-    if (!isValidRole(role)) {
-      res.status(400).json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}` });
-      return;
-    }
+    const { role } = parsed.data;
 
     // Prevent non-super_admins from granting super_admin
     if (role === "super_admin" && authReq.userRole !== "super_admin") {

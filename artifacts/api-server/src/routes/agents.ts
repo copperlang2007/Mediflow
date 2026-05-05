@@ -9,13 +9,42 @@ import {
   ahipRecordsTable,
   type Agent,
 } from "@workspace/db";
+import { z } from "zod";
 import {
   requireAuth,
   requireRole,
+  requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { randomUUID } from "crypto";
+
+const CreateAgentSchema = z.object({
+  firstName: z.string().min(1).max(100),
+  lastName: z.string().min(1).max(100),
+  email: z.string().email(),
+  phone: z.string().max(20).optional(),
+  npn: z.string().max(20).optional(),
+  hireDate: z.string().optional(),
+  managerId: z.string().optional(),
+  notes: z.string().max(5000).optional(),
+});
+
+const UpdateAgentSchema = z.object({
+  firstName: z.string().min(1).max(100).optional(),
+  lastName: z.string().min(1).max(100).optional(),
+  email: z.string().email().optional(),
+  phone: z.string().max(20).nullable().optional(),
+  npn: z.string().max(20).nullable().optional(),
+  status: z
+    .enum(["onboarding", "active", "suspended", "offboarding", "offboarded"])
+    .optional(),
+  hireDate: z.string().nullable().optional(),
+  offboardDate: z.string().nullable().optional(),
+  managerId: z.string().nullable().optional(),
+  notes: z.string().max(5000).nullable().optional(),
+  avatarUrl: z.string().url().nullable().optional(),
+});
 
 // Valid agent status values matching the DB agentStatusEnum
 type AgentStatus = "onboarding" | "active" | "suspended" | "offboarding" | "offboarded";
@@ -33,10 +62,23 @@ function isAgentStatus(value: string): value is AgentStatus {
 
 const router: IRouter = Router();
 
+// Group-level PHI audit: logs every request (reads and writes) automatically.
+// Per-route audit middleware is intentionally absent; this single declaration
+// ensures no handler can accidentally skip audit logging.
+router.use(
+  auditMiddleware("agent", undefined, {
+    includeReads: true,
+    getResourceId: (req) => {
+      const raw = req.params.id;
+      return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
+    },
+  }),
+);
+
 router.get(
   "/agents",
   requireAuth,
-  requireRole("agent", "read"),
+  requirePermission("agent", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { status, managerId, search, limit, offset } = req.query as {
@@ -94,35 +136,16 @@ router.post(
   "/agents",
   requireAuth,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
-  auditMiddleware("agent", "create"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const {
-      firstName,
-      lastName,
-      email,
-      phone,
-      npn,
-      hireDate,
-      managerId,
-      notes,
-    } = req.body as {
-      firstName: string;
-      lastName: string;
-      email: string;
-      phone?: string;
-      npn?: string;
-      hireDate?: string;
-      managerId?: string;
-      notes?: string;
-    };
 
-    if (!firstName || !lastName || !email) {
-      res
-        .status(400)
-        .json({ error: "firstName, lastName, email are required" });
+    const parsed = CreateAgentSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
       return;
     }
+
+    const { firstName, lastName, email, phone, npn, hireDate, managerId, notes } = parsed.data;
 
     const [agent] = await db
       .insert(agentsTable)
@@ -148,7 +171,7 @@ router.post(
 router.get(
   "/agents/:id",
   requireAuth,
-  requireRole("agent", "read"),
+  requirePermission("agent", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -216,38 +239,34 @@ router.patch(
   "/agents/:id",
   requireAuth,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
-  auditMiddleware("agent", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
-    const body = req.body as Partial<Agent>;
-
-    const allowed: Array<keyof Agent> = [
-      "firstName",
-      "lastName",
-      "email",
-      "phone",
-      "npn",
-      "status",
-      "hireDate",
-      "offboardDate",
-      "managerId",
-      "notes",
-      "avatarUrl",
-    ];
-
-    const updates: Partial<Agent> = {};
-    for (const key of allowed) {
-      if (key in body) {
-        if (key === "hireDate" || key === "offboardDate") {
-          const val = body[key];
-          (updates as Record<string, unknown>)[key] = val ? new Date(String(val)) : null;
-        } else {
-          (updates as Record<string, unknown>)[key] = body[key];
-        }
-      }
+    const parsed = UpdateAgentSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
+      return;
     }
+
+    const data = parsed.data;
+    const updates: Partial<Agent> = {};
+
+    if (data.firstName !== undefined) updates.firstName = data.firstName;
+    if (data.lastName !== undefined) updates.lastName = data.lastName;
+    if (data.email !== undefined) updates.email = data.email;
+    if (data.phone !== undefined) updates.phone = data.phone;
+    if (data.npn !== undefined) updates.npn = data.npn;
+    if (data.status !== undefined) updates.status = data.status;
+    if (data.managerId !== undefined) updates.managerId = data.managerId;
+    if (data.notes !== undefined) updates.notes = data.notes;
+    if (data.avatarUrl !== undefined) updates.avatarUrl = data.avatarUrl;
+    if (data.hireDate !== undefined)
+      (updates as Record<string, unknown>).hireDate = data.hireDate ? new Date(data.hireDate) : null;
+    if (data.offboardDate !== undefined)
+      (updates as Record<string, unknown>).offboardDate = data.offboardDate
+        ? new Date(data.offboardDate)
+        : null;
 
     if (Object.keys(updates).length === 0) {
       res.status(400).json({ error: "No valid fields to update" });
@@ -273,7 +292,6 @@ router.delete(
   "/agents/:id",
   requireAuth,
   requireRole("super_admin", "agency_admin"),
-  auditMiddleware("agent", "delete"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -295,7 +313,7 @@ router.delete(
 router.get(
   "/agents/:id/compliance-score",
   requireAuth,
-  requireRole("agent", "read"),
+  requirePermission("agent", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
