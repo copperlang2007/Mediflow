@@ -218,6 +218,17 @@ export interface UpdateAgentBody {
   avatarUrl?: string;
 }
 
+export interface OffboardingReportDocument {
+  id: string;
+  name: string;
+  storageKey: string;
+  /** @nullable */
+  mimeType?: string | null;
+  /** @nullable */
+  fileSizeBytes?: number | null;
+  createdAt?: string;
+}
+
 export type ChecklistRunType =
   (typeof ChecklistRunType)[keyof typeof ChecklistRunType];
 

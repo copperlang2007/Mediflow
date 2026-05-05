@@ -119,17 +119,25 @@ export async function certExpiryCheckWorker(
       );
     }
 
-    if (daysUntilExpiry <= 30 && cert.agentEmail) {
+    // Send email to agent AND all compliance managers
+    const emailHtml = certExpiryEmailHtml({
+      agentName: `${cert.agentFirstName} ${cert.agentLastName}`,
+      carrierName: cert.carrierName,
+      certificationYear: cert.certificationYear,
+      daysUntilExpiry,
+      expiryDate: cert.expiryDate.toLocaleDateString(),
+    });
+
+    const emailRecipients: string[] = [];
+    if (cert.agentEmail) emailRecipients.push(cert.agentEmail);
+    orgAdmins.forEach((a) => { if (a.email) emailRecipients.push(a.email); });
+
+    if (emailRecipients.length > 0) {
       await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
-        to: cert.agentEmail,
+        to: emailRecipients,
         subject: `Certification expiring in ${daysUntilExpiry} days — ${cert.carrierName}`,
-        html: certExpiryEmailHtml({
-          agentName: `${cert.agentFirstName} ${cert.agentLastName}`,
-          carrierName: cert.carrierName,
-          certificationYear: cert.certificationYear,
-          daysUntilExpiry,
-          expiryDate: cert.expiryDate.toLocaleDateString(),
-        }),
+        html: emailHtml,
+        tags: { certId: cert.certId, threshold: String(nearestThreshold) },
       });
     }
   }

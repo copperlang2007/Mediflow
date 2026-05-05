@@ -58,6 +58,7 @@ import type {
   Notification,
   NotificationCount,
   OffboardResponse,
+  OffboardingReportDocument,
   Organization,
   PlatformRequirement,
   RenewalsResponse,
@@ -1353,6 +1354,98 @@ export function useGetAgentComplianceScore<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetAgentComplianceScoreQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get generated offboarding report document metadata
+ */
+export const getGetAgentOffboardingReportUrl = (id: string) => {
+  return `/api/agents/${id}/offboarding-report`;
+};
+
+export const getAgentOffboardingReport = async (
+  id: string,
+  options?: RequestInit,
+): Promise<OffboardingReportDocument> => {
+  return customFetch<OffboardingReportDocument>(
+    getGetAgentOffboardingReportUrl(id),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAgentOffboardingReportQueryKey = (id: string) => {
+  return [`/api/agents/${id}/offboarding-report`] as const;
+};
+
+export const getGetAgentOffboardingReportQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAgentOffboardingReport>>,
+  TError = ErrorType<Error>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentOffboardingReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAgentOffboardingReportQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAgentOffboardingReport>>
+  > = ({ signal }) =>
+    getAgentOffboardingReport(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAgentOffboardingReport>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAgentOffboardingReportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAgentOffboardingReport>>
+>;
+export type GetAgentOffboardingReportQueryError = ErrorType<Error>;
+
+/**
+ * @summary Get generated offboarding report document metadata
+ */
+
+export function useGetAgentOffboardingReport<
+  TData = Awaited<ReturnType<typeof getAgentOffboardingReport>>,
+  TError = ErrorType<Error>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentOffboardingReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAgentOffboardingReportQueryOptions(id, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

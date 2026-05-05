@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, sql, ilike, or, type SQL } from "drizzle-orm";
+import { eq, and, sql, ilike, or, desc, type SQL } from "drizzle-orm";
 import {
   db,
   agentsTable,
@@ -9,6 +9,7 @@ import {
   ahipRecordsTable,
   checklistRunsTable,
   checklistItemsTable,
+  documentsTable,
   type Agent,
 } from "@workspace/db";
 import { z } from "zod";
@@ -455,6 +456,54 @@ router.get(
       onboardingComplete: agent.status !== "onboarding",
       onboardingCompletedItems,
       onboardingTotalItems,
+    });
+  },
+);
+
+router.get(
+  "/agents/:id/offboarding-report",
+  requireAuth,
+  requirePermission("agent", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+    const [agent] = await db
+      .select({ id: agentsTable.id })
+      .from(agentsTable)
+      .where(and(eq(agentsTable.id, agentId), eq(agentsTable.orgId, authReq.orgId)))
+      .limit(1);
+
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    const [doc] = await db
+      .select()
+      .from(documentsTable)
+      .where(
+        and(
+          eq(documentsTable.agentId, agentId),
+          eq(documentsTable.orgId, authReq.orgId),
+          eq(documentsTable.category, "offboarding"),
+        ),
+      )
+      .orderBy(desc(documentsTable.createdAt))
+      .limit(1);
+
+    if (!doc) {
+      res.status(404).json({ error: "No offboarding report found. It may still be generating." });
+      return;
+    }
+
+    res.json({
+      id: doc.id,
+      name: doc.name,
+      storageKey: doc.storageKey,
+      mimeType: doc.mimeType,
+      fileSizeBytes: doc.fileSizeBytes,
+      createdAt: doc.createdAt,
     });
   },
 );

@@ -419,6 +419,22 @@ export const GetAgentComplianceScoreResponse = zod.object({
 });
 
 /**
+ * @summary Get generated offboarding report document metadata
+ */
+export const GetAgentOffboardingReportParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetAgentOffboardingReportResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  storageKey: zod.string(),
+  mimeType: zod.string().nullish(),
+  fileSizeBytes: zod.number().nullish(),
+  createdAt: zod.coerce.date().optional(),
+});
+
+/**
  * @summary Trigger agent offboarding
  */
 export const OffboardAgentParams = zod.object({

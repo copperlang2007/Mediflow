@@ -338,6 +338,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/ComplianceScore"
 
+  /agents/{id}/offboarding-report:
+    get:
+      operationId: getAgentOffboardingReport
+      tags: [agents]
+      summary: Get generated offboarding report document metadata
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Offboarding report metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OffboardingReportDocument"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /agents/{id}/offboard:
     post:
       operationId: offboardAgent
@@ -1761,6 +1786,27 @@ components:
           type: string
         avatarUrl:
           type: string
+
+    OffboardingReportDocument:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        storageKey:
+          type: string
+        mimeType:
+          type: ["string", "null"]
+        fileSizeBytes:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - storageKey
 
     OffboardResponse:
       type: object

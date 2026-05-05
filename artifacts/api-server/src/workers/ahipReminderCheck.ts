@@ -64,7 +64,7 @@ export async function ahipReminderCheckWorker(
 
   for (const agent of agentsWithoutAhip) {
     const orgAdmins = await db
-      .select({ id: usersTable.id })
+      .select({ id: usersTable.id, email: usersTable.email })
       .from(usersTable)
       .where(
         and(
@@ -94,14 +94,20 @@ export async function ahipReminderCheckWorker(
       );
     }
 
-    if (agent.email) {
+    // Send AHIP reminder to agent AND all compliance managers
+    const ahipEmailHtml = ahipReminderEmailHtml({
+      agentName: `${agent.firstName} ${agent.lastName}`,
+      certificationYear: year,
+    });
+    const emailRecipients: string[] = [];
+    if (agent.email) emailRecipients.push(agent.email);
+    orgAdmins.forEach((a) => { if (a.email) emailRecipients.push(a.email); });
+
+    if (emailRecipients.length > 0) {
       await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
-        to: agent.email,
-        subject: `AHIP ${year} certification reminder`,
-        html: ahipReminderEmailHtml({
-          agentName: `${agent.firstName} ${agent.lastName}`,
-          certificationYear: year,
-        }),
+        to: emailRecipients,
+        subject: `AHIP ${year} certification reminder — ${agent.firstName} ${agent.lastName}`,
+        html: ahipEmailHtml,
       });
     }
   }

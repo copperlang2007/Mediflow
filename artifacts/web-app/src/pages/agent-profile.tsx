@@ -23,6 +23,7 @@ import {
   useUpdateAgentTechStackAccount,
   useGetAgentTasks,
   useGetAgentDocuments,
+  useGetAgentOffboardingReport,
   useGetAgentComplianceScore,
   getGetAgentLicensesQueryKey,
   getGetAgentCertificationsQueryKey,
@@ -77,6 +78,7 @@ import {
   Check,
   X,
   SkipForward,
+  FileDown,
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -837,6 +839,7 @@ export default function AgentProfilePage() {
   const { data: agent, isLoading } = useGetAgent(agentId);
   const { mutateAsync: updateAgent } = useUpdateAgent();
   const { mutateAsync: offboard, isPending: offboarding } = useOffboardAgent();
+  const { data: offboardingReport } = useGetAgentOffboardingReport(agentId);
 
   const handleOffboard = async () => {
     try {
@@ -913,6 +916,22 @@ export default function AgentProfilePage() {
           </div>
 
           <div className="flex gap-2 shrink-0">
+            {offboardingReport && (
+              <Button
+                variant="outline"
+                size="sm"
+                asChild
+              >
+                <a
+                  href={`${import.meta.env.BASE_URL?.replace(/\/$/, "")}/api/agents/${agentId}/offboarding-report`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <FileDown className="h-3.5 w-3.5 mr-1.5" />
+                  Offboarding Report
+                </a>
+              </Button>
+            )}
             {agent.status !== "offboarded" && agent.status !== "offboarding" && (
               <Button
                 variant="outline"

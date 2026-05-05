@@ -50,7 +50,34 @@ export async function createChecklistRun(
   startedByUserId?: string,
 ): Promise<typeof checklistRunsTable.$inferSelect> {
   const runId = randomUUID();
-  const items = type === "onboarding" ? ONBOARDING_ITEMS : OFFBOARDING_ITEMS;
+
+  // Try to load checklist items from DB templates first (admin-customizable)
+  const [dbTemplate] = await db
+    .select({ steps: taskTemplatesTable.steps })
+    .from(taskTemplatesTable)
+    .where(
+      and(
+        eq(taskTemplatesTable.orgId, orgId),
+        eq(taskTemplatesTable.type, type),
+        eq(taskTemplatesTable.isActive, true),
+      ),
+    )
+    .orderBy(taskTemplatesTable.createdAt)
+    .limit(1);
+
+  type ItemDef = { title: string; description?: string; required: boolean; orderIndex: number };
+  let items: ItemDef[];
+
+  if (dbTemplate?.steps && Array.isArray(dbTemplate.steps) && dbTemplate.steps.length > 0) {
+    items = (dbTemplate.steps as Array<Record<string, unknown>>).map((step, i) => ({
+      title: String(step.title ?? `Step ${i + 1}`),
+      description: step.description != null ? String(step.description) : undefined,
+      required: step.required !== false,
+      orderIndex: typeof step.orderIndex === "number" ? step.orderIndex : i + 1,
+    }));
+  } else {
+    items = type === "onboarding" ? ONBOARDING_ITEMS : OFFBOARDING_ITEMS;
+  }
 
   const [run] = await db.transaction(async (tx) => {
     const [r] = await tx
