@@ -4,7 +4,7 @@ import { db, usersTable, orgSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
 
-// Simple TTL cache for org session timeout settings (refresh every 60 s)
+// TTL cache for org session timeout settings (refresh every 60 s)
 const orgTimeoutCache = new Map<string, { timeoutMinutes: number; fetchedAt: number }>();
 
 async function getOrgSessionTimeout(orgId: string): Promise<number> {
@@ -19,6 +19,16 @@ async function getOrgSessionTimeout(orgId: string): Promise<number> {
   orgTimeoutCache.set(orgId, { timeoutMinutes, fetchedAt: Date.now() });
   return timeoutMinutes;
 }
+
+// Per-session inactivity tracking: sessionId → last-activity epoch ms
+// True idle timeout — NOT token-age based. Cleaned up every 15 min.
+const sessionLastActivity = new Map<string, number>();
+setInterval(() => {
+  const cutoff = Date.now() - 2 * 60 * 60 * 1000; // discard entries >2 h old regardless
+  for (const [sid, ts] of sessionLastActivity) {
+    if (ts < cutoff) sessionLastActivity.delete(sid);
+  }
+}, 15 * 60 * 1000).unref();
 
 export type AuthenticatedRequest = Request & {
   userId: string;
@@ -50,15 +60,18 @@ export const requireAuth = async (
     return;
   }
 
-  // Session-timeout enforcement: check token age against org-configured limit
-  const iat = auth.sessionClaims?.iat as number | undefined;
-  if (iat) {
+  // Session inactivity enforcement — true idle timeout (not token-age)
+  const sessionId = auth.sessionId;
+  if (sessionId) {
     const sessionTimeoutMinutes = await getOrgSessionTimeout(user.orgId);
-    const elapsedSeconds = Math.floor(Date.now() / 1000) - iat;
-    if (elapsedSeconds > sessionTimeoutMinutes * 60) {
-      res.status(401).json({ error: "Session expired", code: "SESSION_TIMEOUT" });
+    const now = Date.now();
+    const lastActivity = sessionLastActivity.get(sessionId);
+    if (lastActivity !== undefined && now - lastActivity > sessionTimeoutMinutes * 60 * 1000) {
+      sessionLastActivity.delete(sessionId);
+      res.status(401).json({ error: "Session expired due to inactivity", code: "SESSION_TIMEOUT" });
       return;
     }
+    sessionLastActivity.set(sessionId, now);
   }
 
   const authReq = req as AuthenticatedRequest;

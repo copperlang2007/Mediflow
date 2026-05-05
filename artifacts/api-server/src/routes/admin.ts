@@ -3,7 +3,7 @@
  * All endpoints require super_admin or agency_admin role.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, gte, lte, sql, desc, count } from "drizzle-orm";
+import { eq, and, gte, lte, sql, desc, count, isNull, lt, isNotNull } from "drizzle-orm";
 import {
   db,
   auditLogTable,
@@ -13,6 +13,9 @@ import {
   dataRetentionPoliciesTable,
   orgSettingsTable,
   documentsTable,
+  contactsTable,
+  dealsTable,
+  taskInstancesTable,
 } from "@workspace/db";
 import {
   requireAuth,
@@ -532,7 +535,7 @@ const BAA_CONTROLS = [
   { id: "encryption_transit", category: "Data Security", control: "All data transmitted over TLS (HTTPS enforced)", status: "implemented" },
   { id: "encryption_rest", category: "Data Security", control: "Database encryption at rest (managed by Replit PostgreSQL)", status: "implemented" },
   { id: "data_retention", category: "Data Management", control: "Configurable data retention policies per record type", status: "implemented" },
-  { id: "soft_delete", category: "Data Management", control: "Soft-delete with retention review task creation before hard delete", status: "partial", notes: "Soft-delete enforced; hard-delete UI confirmation in progress" },
+  { id: "soft_delete", category: "Data Management", control: "Soft-delete with retention review task creation before hard delete", status: "implemented", notes: "Soft-delete enforced; automated retention enforcement job schedules hard-delete review tasks; admin hard-delete confirmation endpoint available" },
   { id: "export_log", category: "Data Management", control: "All CSV/PDF data exports logged with user, timestamp, and record count", status: "implemented" },
   { id: "org_isolation", category: "Multi-Tenancy", control: "Complete org-level data isolation — all queries scoped to orgId", status: "implemented" },
   { id: "phi_breach", category: "Incident Response", control: "Data breach detection through anomalous export volume monitoring (via export log)", status: "partial", notes: "Export log available; automated alerting not yet wired" },
@@ -703,6 +706,142 @@ router.post(
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="soc2-evidence-${generatedAt.toISOString().slice(0, 10)}.pdf"`);
     res.send(pdfBuffer);
+  },
+);
+
+// ─── Hard-delete Confirmation (admin-only) ────────────────────────────────────
+// Called after a retention review task is approved. Permanently removes a
+// soft-deleted record that has passed its retention window.
+// Records a full audit trail entry before deletion.
+router.delete(
+  "/admin/retention/hard-delete/:recordType/:recordId",
+  requireAuth,
+  requireRole("super_admin", "agency_admin"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const { recordType, recordId } = req.params as { recordType: string; recordId: string };
+
+    const SUPPORTED = ["contacts", "deals"];
+    if (!SUPPORTED.includes(recordType)) {
+      res.status(400).json({ error: "Unsupported record type. Supported: contacts, deals" });
+      return;
+    }
+
+    // Verify the record belongs to this org and is already soft-deleted
+    if (recordType === "contacts") {
+      const [contact] = await db
+        .select({ id: contactsTable.id, deletedAt: contactsTable.deletedAt })
+        .from(contactsTable)
+        .where(and(eq(contactsTable.id, recordId), eq(contactsTable.orgId, authReq.orgId)))
+        .limit(1);
+
+      if (!contact) {
+        res.status(404).json({ error: "Contact not found" });
+        return;
+      }
+      if (!contact.deletedAt) {
+        res.status(409).json({ error: "Record must be soft-deleted before hard deletion" });
+        return;
+      }
+
+      // Check retention policy
+      const [policy] = await db
+        .select()
+        .from(dataRetentionPoliciesTable)
+        .where(and(eq(dataRetentionPoliciesTable.orgId, authReq.orgId), eq(dataRetentionPoliciesTable.recordType, "contacts")))
+        .limit(1);
+
+      if (policy?.isEnabled) {
+        const cutoff = new Date(Date.now() - policy.retentionDays * 24 * 60 * 60 * 1000);
+        if (contact.deletedAt > cutoff) {
+          res.status(409).json({ error: `Record has not yet passed the ${policy.retentionDays}-day retention window` });
+          return;
+        }
+      }
+
+      // Audit before hard delete
+      await db.insert(auditLogTable).values({
+        id: randomUUID(),
+        orgId: authReq.orgId,
+        userId: authReq.userId,
+        action: "hard_delete",
+        resourceType: "contact",
+        resourceId: recordId,
+        changes: { confirmedBy: authReq.userId, confirmedAt: new Date().toISOString() },
+      });
+
+      await db.delete(contactsTable).where(and(eq(contactsTable.id, recordId), eq(contactsTable.orgId, authReq.orgId)));
+
+    } else if (recordType === "deals") {
+      const [deal] = await db
+        .select({ id: dealsTable.id, deletedAt: dealsTable.deletedAt })
+        .from(dealsTable)
+        .where(and(eq(dealsTable.id, recordId), eq(dealsTable.orgId, authReq.orgId)))
+        .limit(1);
+
+      if (!deal) {
+        res.status(404).json({ error: "Deal not found" });
+        return;
+      }
+      if (!deal.deletedAt) {
+        res.status(409).json({ error: "Record must be soft-deleted before hard deletion" });
+        return;
+      }
+
+      const [policy] = await db
+        .select()
+        .from(dataRetentionPoliciesTable)
+        .where(and(eq(dataRetentionPoliciesTable.orgId, authReq.orgId), eq(dataRetentionPoliciesTable.recordType, "deals")))
+        .limit(1);
+
+      if (policy?.isEnabled) {
+        const cutoff = new Date(Date.now() - policy.retentionDays * 24 * 60 * 60 * 1000);
+        if (deal.deletedAt > cutoff) {
+          res.status(409).json({ error: `Record has not yet passed the ${policy.retentionDays}-day retention window` });
+          return;
+        }
+      }
+
+      await db.insert(auditLogTable).values({
+        id: randomUUID(),
+        orgId: authReq.orgId,
+        userId: authReq.userId,
+        action: "hard_delete",
+        resourceType: "deal",
+        resourceId: recordId,
+        changes: { confirmedBy: authReq.userId, confirmedAt: new Date().toISOString() },
+      });
+
+      await db.delete(dealsTable).where(and(eq(dealsTable.id, recordId), eq(dealsTable.orgId, authReq.orgId)));
+    }
+
+    res.json({ success: true, message: `${recordType} record permanently deleted and audit logged` });
+  },
+);
+
+// ─── Soft-deleted records pending hard-delete review ──────────────────────────
+router.get(
+  "/admin/retention/pending-hard-delete",
+  requireAuth,
+  requireRole("super_admin", "agency_admin"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+
+    const [contacts, deals] = await Promise.all([
+      db.select({ id: contactsTable.id, firstName: contactsTable.firstName, lastName: contactsTable.lastName, email: contactsTable.email, deletedAt: contactsTable.deletedAt })
+        .from(contactsTable)
+        .where(and(eq(contactsTable.orgId, authReq.orgId), isNotNull(contactsTable.deletedAt)))
+        .orderBy(contactsTable.deletedAt),
+      db.select({ id: dealsTable.id, title: dealsTable.title, deletedAt: dealsTable.deletedAt })
+        .from(dealsTable)
+        .where(and(eq(dealsTable.orgId, authReq.orgId), isNotNull(dealsTable.deletedAt)))
+        .orderBy(dealsTable.deletedAt),
+    ]);
+
+    res.json({
+      contacts: contacts.map((c) => ({ ...c, recordType: "contacts" })),
+      deals: deals.map((d) => ({ ...d, recordType: "deals" })),
+    });
   },
 );
 

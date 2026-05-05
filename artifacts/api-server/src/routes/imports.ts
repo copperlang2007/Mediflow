@@ -589,14 +589,22 @@ async function processGhlImport(jobId: string, orgId: string, rows: Record<strin
       const dobRaw = get("dob");
       const pipelineStageRaw = get("pipelineStage");
 
-      // Duplicate check using email OR phone (either match counts as duplicate)
+      // Duplicate check: composite key (email AND phone) when both present; single-field otherwise
       let existingContact: { id: string } | null = null;
-      if (email || phone) {
-        const orConditions = [];
-        if (email) orConditions.push(eq(contactsTable.email, email));
-        if (phone) orConditions.push(eq(contactsTable.phone, phone));
+      if (email && phone) {
+        // Both identifiers: require both to match (prevents false merges from shared family contacts)
         const [existing] = await db.select({ id: contactsTable.id }).from(contactsTable)
-          .where(and(eq(contactsTable.orgId, orgId), or(...orConditions)))
+          .where(and(eq(contactsTable.orgId, orgId), eq(contactsTable.email, email), eq(contactsTable.phone, phone)))
+          .limit(1);
+        existingContact = existing ?? null;
+      } else if (email) {
+        const [existing] = await db.select({ id: contactsTable.id }).from(contactsTable)
+          .where(and(eq(contactsTable.orgId, orgId), eq(contactsTable.email, email)))
+          .limit(1);
+        existingContact = existing ?? null;
+      } else if (phone) {
+        const [existing] = await db.select({ id: contactsTable.id }).from(contactsTable)
+          .where(and(eq(contactsTable.orgId, orgId), eq(contactsTable.phone, phone)))
           .limit(1);
         existingContact = existing ?? null;
       }

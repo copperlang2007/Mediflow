@@ -58,6 +58,7 @@ export const JOB_NAMES = {
   AHIP_DEADLINE_CHECK: "check-ahip-deadlines",
   AUTOMATION_DAILY_SWEEP: "automation-daily-sweep",
   WEEKLY_COMPLIANCE_REPORT: "weekly-compliance-report",
+  RETENTION_ENFORCEMENT: "retention-enforcement",
   // Ad-hoc
   TASK_AUTO_ASSIGN: "task-auto-assign",
   RUN_AUTOMATION_RULES: "run-automation-rules",
@@ -166,6 +167,8 @@ export async function startWorkers(): Promise<void> {
   await boss.schedule(JOB_NAMES.AUTOMATION_DAILY_SWEEP, "0 1 * * *", {}, { tz: "UTC" });
   // Weekly compliance report — every Monday at 06:00 UTC
   await boss.schedule(JOB_NAMES.WEEKLY_COMPLIANCE_REPORT, "0 6 * * 1", {}, { tz: "UTC" });
+  // Daily retention enforcement — 02:00 UTC; soft-deletes expired records, creates review tasks
+  await boss.schedule(JOB_NAMES.RETENTION_ENFORCEMENT, "0 2 * * *", {}, { tz: "UTC" });
 
   // ---- Workers ----
 
@@ -279,6 +282,12 @@ export async function startWorkers(): Promise<void> {
     }
   };
   await boss.work<SendScheduledSmsPayload>(JOB_NAMES.SEND_SCHEDULED_SMS, smsHandler);
+
+  const retentionHandler: WorkHandler<Record<string, never>> = async () => {
+    const { retentionEnforcementWorker } = await import("../workers/retentionEnforcement");
+    await retentionEnforcementWorker();
+  };
+  await boss.work<Record<string, never>>(JOB_NAMES.RETENTION_ENFORCEMENT, retentionHandler);
 
   logger.info("All background workers registered");
 }
