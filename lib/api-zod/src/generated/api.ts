@@ -223,6 +223,7 @@ export const GetDashboardActivityResponse = zod.array(
  */
 export const getAgentsQueryLimitDefault = 50;
 export const getAgentsQueryOffsetDefault = 0;
+export const getAgentsQuerySortDirDefault = `asc`;
 
 export const GetAgentsQueryParams = zod.object({
   status: zod.coerce.string().optional(),
@@ -230,6 +231,17 @@ export const GetAgentsQueryParams = zod.object({
   search: zod.coerce.string().optional(),
   limit: zod.coerce.number().default(getAgentsQueryLimitDefault),
   offset: zod.coerce.number().default(getAgentsQueryOffsetDefault),
+  sortBy: zod
+    .enum([
+      "name",
+      "email",
+      "status",
+      "hireDate",
+      "licenseCount",
+      "complianceScore",
+    ])
+    .optional(),
+  sortDir: zod.enum(["asc", "desc"]).default(getAgentsQuerySortDirDefault),
 });
 
 export const GetAgentsResponse = zod.object({

@@ -1162,7 +1162,29 @@ export type GetAgentsParams = {
   search?: string;
   limit?: number;
   offset?: number;
+  sortBy?: GetAgentsSortBy;
+  sortDir?: GetAgentsSortDir;
 };
+
+export type GetAgentsSortBy =
+  (typeof GetAgentsSortBy)[keyof typeof GetAgentsSortBy];
+
+export const GetAgentsSortBy = {
+  name: "name",
+  email: "email",
+  status: "status",
+  hireDate: "hireDate",
+  licenseCount: "licenseCount",
+  complianceScore: "complianceScore",
+} as const;
+
+export type GetAgentsSortDir =
+  (typeof GetAgentsSortDir)[keyof typeof GetAgentsSortDir];
+
+export const GetAgentsSortDir = {
+  asc: "asc",
+  desc: "desc",
+} as const;
 
 export type GetCertificationMatrixParams = {
   year?: number;

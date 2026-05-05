@@ -89,12 +89,14 @@ router.get(
   requirePermission("agent", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const { status, managerId, search, limit, offset } = req.query as {
+    const { status, managerId, search, limit, offset, sortBy, sortDir } = req.query as {
       status?: string;
       managerId?: string;
       search?: string;
       limit?: string;
       offset?: string;
+      sortBy?: string;
+      sortDir?: string;
     };
 
     const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 200);
@@ -117,12 +119,27 @@ router.get(
       if (searchExpr) conditions.push(searchExpr);
     }
 
+    const dir = sortDir === "desc" ? "DESC" : "ASC";
+    const complianceScoreSql = sql`(
+      COALESCE((SELECT CAST(count(*) FILTER (WHERE status = 'active') AS FLOAT) / NULLIF(count(*), 0) FROM state_licenses WHERE agent_id = agents.id), 0) * 40 +
+      COALESCE((SELECT CAST(count(*) FILTER (WHERE status = 'passed') AS FLOAT) / NULLIF(count(*), 0) FROM carrier_certifications WHERE agent_id = agents.id), 0) * 30 +
+      CASE WHEN EXISTS (SELECT 1 FROM ahip_records WHERE agent_id = agents.id AND status = 'passed' AND certification_year = EXTRACT(YEAR FROM NOW())::int) THEN 20 ELSE 0 END +
+      COALESCE((SELECT CAST(count(*) FILTER (WHERE ci.status IN ('completed', 'skipped')) AS FLOAT) / NULLIF(count(*), 0) FROM checklist_runs cr JOIN checklist_items ci ON cr.id = ci.run_id WHERE cr.agent_id = agents.id AND cr.type = 'onboarding'), 0) * 10
+    )`;
+
+    const orderExpr =
+      sortBy === "complianceScore" ? sql`${complianceScoreSql} ${sql.raw(dir)}` :
+      sortBy === "status" ? sql`${agentsTable.status} ${sql.raw(dir)}` :
+      sortBy === "hireDate" ? sql`${agentsTable.hireDate} ${sql.raw(dir)} NULLS LAST` :
+      sortBy === "email" ? sql`${agentsTable.email} ${sql.raw(dir)}` :
+      sql`${agentsTable.lastName} ${sql.raw(dir)}, ${agentsTable.firstName} ${sql.raw(dir)}`;
+
     const [allAgents, totalResult] = await Promise.all([
       db
         .select()
         .from(agentsTable)
         .where(and(...conditions))
-        .orderBy(agentsTable.lastName, agentsTable.firstName)
+        .orderBy(orderExpr)
         .limit(limitNum)
         .offset(offsetNum),
       db
@@ -414,17 +431,30 @@ router.post(
       return;
     }
 
+    // Create checklist FIRST — only update agent status after successful creation
+    // (ensures checklist always exists when status is offboarding)
+    let run: Awaited<ReturnType<typeof createChecklistRun>>;
+    try {
+      run = await createChecklistRun(authReq.orgId, raw, "offboarding", authReq.userId);
+    } catch (err: unknown) {
+      req.log?.error({ err }, "Failed to create offboarding checklist; status not changed");
+      res.status(500).json({ error: "Failed to create offboarding checklist" });
+      return;
+    }
+
     const [updated] = await db
       .update(agentsTable)
       .set({ status: "offboarding", offboardDate: new Date() })
       .where(eq(agentsTable.id, raw))
       .returning();
 
-    const run = await createChecklistRun(authReq.orgId, raw, "offboarding", authReq.userId);
-
     res.json({ agent: updated, checklistRun: run });
   },
 );
+
+// In-memory compliance score cache: agentId → { payload, expiresAt }
+const complianceScoreCache = new Map<string, { payload: unknown; expiresAt: number }>();
+const COMPLIANCE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 router.get(
   "/agents/:id/compliance-score",
@@ -433,6 +463,12 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+    const cached = complianceScoreCache.get(raw);
+    if (cached && cached.expiresAt > Date.now()) {
+      res.json(cached.payload);
+      return;
+    }
 
     const [agent] = await db
       .select()
@@ -516,7 +552,7 @@ router.get(
       ahipScore * 0.2 +
       onboardingTaskScore * 0.1;
 
-    res.json({
+    const payload = {
       agentId: agent.id,
       totalScore: Math.round(totalScore * 10) / 10,
       licenseScore: Math.round(licenseScore * 10) / 10,
@@ -531,7 +567,10 @@ router.get(
       onboardingComplete: onboardingTotalItems > 0 && onboardingCompletedItems >= onboardingTotalItems,
       onboardingCompletedItems,
       onboardingTotalItems,
-    });
+    };
+
+    complianceScoreCache.set(raw, { payload, expiresAt: Date.now() + COMPLIANCE_CACHE_TTL_MS });
+    res.json(payload);
   },
 );
 

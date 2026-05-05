@@ -54,7 +54,7 @@ const STATUS_OPTIONS = [
   { value: "offboarded", label: "Offboarded" },
 ];
 
-type SortField = "name" | "email" | "status" | "hireDate" | "licenseCount";
+type SortField = "name" | "email" | "status" | "hireDate" | "licenseCount" | "complianceScore";
 type SortDir = "asc" | "desc";
 
 function ComplianceBar({ agentId }: { agentId: string }) {
@@ -515,15 +515,20 @@ export default function AgentsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [, navigate] = useLocation();
 
+  const serverSortFields: SortField[] = ["complianceScore", "status", "hireDate", "email", "name"];
+
   const { data, isLoading } = useGetAgents({
     search: search || undefined,
     status: status === "all" ? undefined : status,
     limit: 200,
+    ...(serverSortFields.includes(sortBy) ? { sortBy, sortDir } : {}),
   });
 
   const agents = data?.agents ?? [];
 
   const sorted = useMemo(() => {
+    // Server handles compliance/status/hireDate/email/name sort — skip client re-sort
+    if (serverSortFields.includes(sortBy)) return agents;
     const arr = [...agents];
     arr.sort((a, b) => {
       if (sortBy === "licenseCount") {
@@ -531,15 +536,10 @@ export default function AgentsPage() {
         const bv = b.activeLicenseCount ?? 0;
         return sortDir === "asc" ? av - bv : bv - av;
       }
-      let av = "";
-      let bv = "";
-      if (sortBy === "name") { av = `${a.firstName} ${a.lastName}`.toLowerCase(); bv = `${b.firstName} ${b.lastName}`.toLowerCase(); }
-      else if (sortBy === "email") { av = a.email.toLowerCase(); bv = b.email.toLowerCase(); }
-      else if (sortBy === "status") { av = a.status; bv = b.status; }
-      else if (sortBy === "hireDate") { av = a.hireDate ?? ""; bv = b.hireDate ?? ""; }
-      return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+      return 0;
     });
     return arr;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents, sortBy, sortDir]);
 
   const toggleSort = (field: SortField) => {
@@ -665,7 +665,7 @@ export default function AgentsPage() {
                 <HeaderCell field="status" label="Status" className="hidden md:flex w-24 justify-center" />
                 <HeaderCell field="hireDate" label="Hire Date" className="hidden lg:flex w-24 justify-center" />
                 <HeaderCell field="licenseCount" label="Licenses" className="hidden lg:flex w-20 justify-center" />
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-28 text-right">Compliance</span>
+                <HeaderCell field="complianceScore" label="Compliance" className="w-28 flex justify-end" />
               </div>
               <div className="divide-y divide-border">
                 {sorted.map((agent) => (

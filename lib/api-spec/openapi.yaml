@@ -235,6 +235,17 @@ paths:
           schema:
             type: integer
             default: 0
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            enum: [name, email, status, hireDate, licenseCount, complianceScore]
+        - name: sortDir
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
       responses:
         "200":
           description: List of agents

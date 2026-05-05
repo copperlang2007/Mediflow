@@ -97,6 +97,55 @@ export async function ahipReminderCheckWorker(
     return defaults;
   }
 
+  // Check each org for season-open day trigger (fire once on the opening day itself)
+  const orgIds = [...new Set(agentsWithoutAhip.map((a) => a.orgId))];
+  if (data.orgId && !orgIds.includes(data.orgId)) orgIds.push(data.orgId);
+
+  for (const orgId of orgIds) {
+    const settings = await getOrgSettings(orgId);
+    if (!settings.ahipReminderEnabled) continue;
+    const isSeasonOpenDay =
+      todayMonth === settings.ahipSeasonOpenMonth && todayDay === settings.ahipSeasonOpenDay;
+    if (!isSeasonOpenDay) continue;
+
+    const admins = await db
+      .select({ id: usersTable.id, email: usersTable.email })
+      .from(usersTable)
+      .where(
+        and(
+          eq(usersTable.orgId, orgId),
+          sql`${usersTable.role} IN ('super_admin', 'agency_admin', 'compliance_manager')`,
+          eq(usersTable.isActive, true),
+        ),
+      );
+
+    const seasonNotifs = admins.map((a) => ({
+      id: randomUUID(),
+      orgId,
+      userId: a.id,
+      type: "ahip_season_open" as const,
+      title: `AHIP ${year} enrollment season is now open`,
+      body: `The AHIP certification season for ${year} opened today. Agents can now complete their certification.`,
+      resourceType: "org",
+      resourceId: orgId,
+      priority: "normal" as const,
+    }));
+
+    if (seasonNotifs.length > 0) {
+      await db.insert(notificationsTable).values(seasonNotifs).onConflictDoNothing();
+      broadcastToUsers(
+        seasonNotifs.map((n) => n.userId),
+        { type: "notification", resourceType: "org", resourceId: orgId },
+      );
+      await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
+        to: admins.flatMap((a) => (a.email ? [a.email] : [])),
+        subject: `AHIP ${year} enrollment season is now open`,
+        html: `<p>The AHIP certification season for ${year} is now open. Please remind your agents to complete their AHIP certification before the deadline.</p>`,
+      });
+      logger.info({ orgId, year }, "AHIP season-open alert sent");
+    }
+  }
+
   for (const agent of agentsWithoutAhip) {
     const orgSettings = await getOrgSettings(agent.orgId);
 
