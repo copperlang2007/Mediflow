@@ -146,7 +146,7 @@ router.delete("/pipelines/:id/stages/:sid", requireAuth, requirePermission("cont
 router.get("/deals", requireAuth, requirePermission("contact", "read"), async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthenticatedRequest;
   const { pipelineId, stageId, status, contactId, limit, offset } = req.query as Record<string, string | undefined>;
-  const conditions = [eq(dealsTable.orgId, authReq.orgId)];
+  const conditions = [eq(dealsTable.orgId, authReq.orgId), isNull(dealsTable.deletedAt)];
   if (pipelineId) conditions.push(eq(dealsTable.pipelineId, pipelineId));
   if (stageId) conditions.push(eq(dealsTable.stageId, stageId));
   if (status) conditions.push(eq(dealsTable.status, status as "open" | "won" | "lost"));
@@ -209,7 +209,7 @@ router.get("/deals/:id", requireAuth, requirePermission("contact", "read"), asyn
     .select({ deal: dealsTable, contactFirstName: contactsTable.firstName, contactLastName: contactsTable.lastName, contactEmail: contactsTable.email })
     .from(dealsTable)
     .innerJoin(contactsTable, eq(dealsTable.contactId, contactsTable.id))
-    .where(and(eq(dealsTable.id, id), eq(dealsTable.orgId, authReq.orgId)))
+    .where(and(eq(dealsTable.id, id), eq(dealsTable.orgId, authReq.orgId), isNull(dealsTable.deletedAt)))
     .limit(1);
   if (!row) { res.status(404).json({ error: "Deal not found" }); return; }
   const history = await db.select().from(dealStageHistoryTable).where(eq(dealStageHistoryTable.dealId, id)).orderBy(desc(dealStageHistoryTable.changedAt));
@@ -219,7 +219,7 @@ router.get("/deals/:id", requireAuth, requirePermission("contact", "read"), asyn
 router.patch("/deals/:id", requireAuth, requirePermission("contact", "update"), async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthenticatedRequest;
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const [existing] = await db.select().from(dealsTable).where(and(eq(dealsTable.id, id), eq(dealsTable.orgId, authReq.orgId))).limit(1);
+  const [existing] = await db.select().from(dealsTable).where(and(eq(dealsTable.id, id), eq(dealsTable.orgId, authReq.orgId), isNull(dealsTable.deletedAt))).limit(1);
   if (!existing) { res.status(404).json({ error: "Deal not found" }); return; }
 
   const Schema = z.object({
@@ -294,7 +294,7 @@ router.get("/pipelines/:id/analytics", requireAuth, requirePermission("contact",
   if (!pipeline) { res.status(404).json({ error: "Pipeline not found" }); return; }
 
   const stages = await db.select().from(pipelineStagesTable).where(eq(pipelineStagesTable.pipelineId, pipelineId)).orderBy(asc(pipelineStagesTable.orderIndex));
-  const deals = await db.select().from(dealsTable).where(and(eq(dealsTable.pipelineId, pipelineId), eq(dealsTable.orgId, authReq.orgId)));
+  const deals = await db.select().from(dealsTable).where(and(eq(dealsTable.pipelineId, pipelineId), eq(dealsTable.orgId, authReq.orgId), isNull(dealsTable.deletedAt)));
 
   const now = Date.now();
   const stageAnalytics = stages.map((stage) => {

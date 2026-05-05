@@ -34,7 +34,7 @@ function maskContact<T extends { dob?: Date | null; medicareId?: string | null }
   if (PHI_PRIVILEGED_ROLES.has(userRole)) return contact;
   return {
     ...contact,
-    dob: contact.dob != null ? null : null,
+    dob: null,
     medicareId: contact.medicareId != null ? "***-**-****" : null,
   };
 }
@@ -237,7 +237,7 @@ router.delete(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const [existing] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId))).limit(1);
+    const [existing] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!existing) { res.status(404).json({ error: "Contact not found" }); return; }
     await db.update(contactsTable).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(contactsTable.id, id));
     res.status(204).send();
@@ -252,7 +252,7 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId))).limit(1);
+    const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
     const limitNum = Math.min(parseInt((req.query.limit as string) ?? "50", 10) || 50, 200);
     const offsetNum = parseInt((req.query.offset as string) ?? "0", 10) || 0;
@@ -269,7 +269,7 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId))).limit(1);
+    const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
 
     const LogActivitySchema = z.object({
@@ -301,7 +301,7 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const [contact] = await db.select().from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId))).limit(1);
+    const [contact] = await db.select().from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
     if (!contact.phone) { res.status(400).json({ error: "Contact has no phone number" }); return; }
     if (contact.optOutSms) { res.status(400).json({ error: "Contact has opted out of SMS" }); return; }
@@ -348,7 +348,7 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const [contact] = await db.select().from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId))).limit(1);
+    const [contact] = await db.select().from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
     if (!contact.email) { res.status(400).json({ error: "Contact has no email address" }); return; }
     if (contact.optOutEmail) { res.status(400).json({ error: "Contact has opted out of email" }); return; }
@@ -394,7 +394,7 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId))).limit(1);
+    const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
     const threads = await db.select().from(messageThreadsTable).where(and(eq(messageThreadsTable.contactId, id), eq(messageThreadsTable.orgId, authReq.orgId))).orderBy(desc(messageThreadsTable.lastMessageAt));
     res.json(threads);
@@ -409,7 +409,7 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId))).limit(1);
+    const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
     const tasks = await db.select().from(taskInstancesTable).where(and(eq(taskInstancesTable.contactId, id), eq(taskInstancesTable.orgId, authReq.orgId))).orderBy(desc(taskInstancesTable.createdAt));
     res.json(tasks);
@@ -424,7 +424,7 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId))).limit(1);
+    const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
     const enrollments = await db
       .select({ enrollment: sequenceEnrollmentsTable, sequenceName: sequencesTable.name })
@@ -453,7 +453,7 @@ router.post(
     const { ids, action, payload } = parsed.data;
 
     // Verify all contacts belong to org
-    const contacts = await db.select().from(contactsTable).where(and(inArray(contactsTable.id, ids), eq(contactsTable.orgId, authReq.orgId)));
+    const contacts = await db.select().from(contactsTable).where(and(inArray(contactsTable.id, ids), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt)));
     if (contacts.length !== ids.length) { res.status(400).json({ error: "One or more contacts not found" }); return; }
 
     switch (action) {

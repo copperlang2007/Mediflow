@@ -21,6 +21,8 @@ import {
   requireAuth,
   requireRole,
   type AuthenticatedRequest,
+  requireExportConfirm,
+  requireDestructiveConfirm,
 } from "../middlewares/requireAuth";
 import { randomUUID } from "crypto";
 import PDFDocument from "pdfkit";
@@ -83,6 +85,7 @@ router.get(
   "/admin/audit-log/export",
   requireAuth,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
+  requireExportConfirm,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { startDate, endDate, action: actionFilter, resourceType: resourceTypeFilter, userId: userIdFilter } = req.query as Record<string, string>;
@@ -148,6 +151,7 @@ router.get(
   "/admin/access-review/export",
   requireAuth,
   requireRole("super_admin", "agency_admin"),
+  requireExportConfirm,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const users = await db.select().from(usersTable).where(eq(usersTable.orgId, authReq.orgId));
@@ -245,6 +249,7 @@ router.get(
   "/admin/login-history/export",
   requireAuth,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
+  requireExportConfirm,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { userId, startDate, endDate } = req.query as Record<string, string>;
@@ -717,6 +722,7 @@ router.delete(
   "/admin/retention/hard-delete/:recordType/:recordId",
   requireAuth,
   requireRole("super_admin", "agency_admin"),
+  requireDestructiveConfirm,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { recordType, recordId } = req.params as { recordType: string; recordId: string };
