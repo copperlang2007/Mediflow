@@ -37,7 +37,7 @@ export async function buildAgentContext(agentId: string, orgId: string): Promise
   ]);
 
   const expiringLicenses = licenses.filter((l) => l.expiryDate && new Date(l.expiryDate) <= in90);
-  const expiringCerts = certs.filter((c) => c.completedDate && new Date(c.completedDate) <= in90);
+  const expiringCerts = certs.filter((c) => c.expiryDate && new Date(c.expiryDate) <= in90);
   const latestAhip = ahip[0];
 
   return [

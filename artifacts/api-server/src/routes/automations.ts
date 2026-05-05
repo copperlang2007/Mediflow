@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, gte, lte } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import {
@@ -217,9 +217,13 @@ router.get(
     const limit = Math.min(parseInt((req.query.limit as string) ?? "50", 10) || 50, 200);
     const offset = parseInt((req.query.offset as string) ?? "0", 10) || 0;
     const result = req.query.result as string | undefined;
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
 
     const conditions = [eq(automationRuleLogsTable.ruleId, id)];
     if (result) conditions.push(eq(automationRuleLogsTable.result, result as "success" | "partial" | "failed"));
+    if (startDate) conditions.push(gte(automationRuleLogsTable.executedAt, new Date(startDate)));
+    if (endDate) conditions.push(lte(automationRuleLogsTable.executedAt, new Date(endDate)));
 
     const logs = await db
       .select()

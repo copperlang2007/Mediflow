@@ -74,7 +74,7 @@ const ChatRequestSchema = z.object({
 router.post(
   "/ai/chat",
   requireAuth,
-  requirePermission("agent", "read"),
+  requirePermission("contact", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const parsed = ChatRequestSchema.safeParse(req.body);

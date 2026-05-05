@@ -28,6 +28,7 @@ import {
   useGetAutomationRuleLogs,
   getGetAutomationRulesQueryKey,
   getGetAutomationRuleLogsQueryKey,
+  GetAutomationRuleLogsResult,
   type AutomationRule,
   type AutomationCondition,
   type AutomationAction,
@@ -375,7 +376,19 @@ function RuleBuilderDialog({
 // ---- Rule Logs Modal ----
 
 function RuleLogsModal({ rule, open, onClose }: { rule: AutomationRule; open: boolean; onClose: () => void }) {
-  const { data: logs, isLoading } = useGetAutomationRuleLogs(rule.id, {}, { query: { enabled: open, queryKey: getGetAutomationRuleLogsQueryKey(rule.id, {}) } });
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [resultFilter, setResultFilter] = useState("");
+
+  const params = {
+    ...(resultFilter ? { result: resultFilter as GetAutomationRuleLogsResult } : {}),
+    ...(startDate ? { startDate } : {}),
+    ...(endDate ? { endDate } : {}),
+  };
+
+  const { data: logs, isLoading } = useGetAutomationRuleLogs(rule.id, params, {
+    query: { enabled: open, queryKey: getGetAutomationRuleLogsQueryKey(rule.id, params) },
+  });
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -386,6 +399,24 @@ function RuleLogsModal({ rule, open, onClose }: { rule: AutomationRule; open: bo
             Execution History — {rule.name}
           </DialogTitle>
         </DialogHeader>
+        <div className="flex items-center gap-2 flex-wrap pb-2">
+          <Select value={resultFilter} onValueChange={setResultFilter}>
+            <SelectTrigger className="h-7 text-xs w-32"><SelectValue placeholder="All results" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="" className="text-xs">All results</SelectItem>
+              <SelectItem value="success" className="text-xs">Success</SelectItem>
+              <SelectItem value="partial" className="text-xs">Partial</SelectItem>
+              <SelectItem value="failed" className="text-xs">Failed</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-7 text-xs w-36" placeholder="From" />
+          <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-7 text-xs w-36" placeholder="To" />
+          {(startDate || endDate || resultFilter) && (
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setStartDate(""); setEndDate(""); setResultFilter(""); }}>
+              Clear
+            </Button>
+          )}
+        </div>
         {isLoading ? (
           <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}</div>
         ) : !logs?.length ? (
