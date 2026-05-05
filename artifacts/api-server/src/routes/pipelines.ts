@@ -177,9 +177,13 @@ router.post("/deals", requireAuth, requirePermission("contact", "create"), async
   const parsed = Schema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
 
-  // Verify pipeline + stage + contact belong to org
+  // Verify pipeline belongs to org
   const [pipeline] = await db.select({ id: pipelinesTable.id }).from(pipelinesTable).where(and(eq(pipelinesTable.id, parsed.data.pipelineId), eq(pipelinesTable.orgId, authReq.orgId))).limit(1);
   if (!pipeline) { res.status(400).json({ error: "Pipeline not found" }); return; }
+  // Verify stage belongs to this specific pipeline (prevents cross-pipeline / cross-tenant stage injection)
+  const [stage] = await db.select({ id: pipelineStagesTable.id }).from(pipelineStagesTable).where(and(eq(pipelineStagesTable.id, parsed.data.stageId), eq(pipelineStagesTable.pipelineId, parsed.data.pipelineId))).limit(1);
+  if (!stage) { res.status(400).json({ error: "Stage not found in specified pipeline" }); return; }
+  // Verify contact belongs to org
   const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, parsed.data.contactId), eq(contactsTable.orgId, authReq.orgId))).limit(1);
   if (!contact) { res.status(400).json({ error: "Contact not found" }); return; }
 
@@ -229,6 +233,12 @@ router.patch("/deals/:id", requireAuth, requirePermission("contact", "update"), 
   const parsed = Schema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
   const d = parsed.data;
+
+  // If moving to a new stage, verify it belongs to the deal's pipeline (prevents cross-pipeline injection)
+  if (d.stageId !== undefined && d.stageId !== existing.stageId) {
+    const [stageCheck] = await db.select({ id: pipelineStagesTable.id }).from(pipelineStagesTable).where(and(eq(pipelineStagesTable.id, d.stageId), eq(pipelineStagesTable.pipelineId, existing.pipelineId))).limit(1);
+    if (!stageCheck) { res.status(400).json({ error: "Stage not found in deal's pipeline" }); return; }
+  }
 
   const updates: Record<string, unknown> = {};
   if (d.stageId !== undefined) updates.stageId = d.stageId;
