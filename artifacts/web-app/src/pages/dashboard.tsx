@@ -15,6 +15,8 @@ import {
   Bell,
   Clock,
   Activity,
+  ShieldCheck,
+  FolderOpen,
 } from "lucide-react";
 import {
   AreaChart,
@@ -29,6 +31,9 @@ import {
   Cell,
 } from "recharts";
 import { formatDistanceToNow, format } from "date-fns";
+import { useGetMe } from "@workspace/api-client-react";
+import { Link } from "wouter";
+import { UserPlus, PlusCircle, Settings, BookOpen } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
   onboarding: "bg-amber-100 text-amber-800",
@@ -101,10 +106,57 @@ function StatCard({
   );
 }
 
+type Role = "super_admin" | "agency_admin" | "compliance_manager" | "agent_support" | "viewer" | "agent";
+
+type QuickAction = { label: string; href: string; icon: React.ComponentType<{ className?: string }>; description: string };
+
+const QUICK_ACTIONS: Record<string, QuickAction[]> = {
+  super_admin: [
+    { label: "Add Agent", href: "/agents", icon: UserPlus, description: "Onboard a new agent" },
+    { label: "Create Task", href: "/tasks", icon: PlusCircle, description: "Assign a task" },
+    { label: "Audit Log", href: "/compliance", icon: ShieldCheck, description: "Review activity" },
+    { label: "Settings", href: "/settings", icon: Settings, description: "Manage org settings" },
+  ],
+  agency_admin: [
+    { label: "Add Agent", href: "/agents", icon: UserPlus, description: "Onboard a new agent" },
+    { label: "Create Task", href: "/tasks", icon: PlusCircle, description: "Assign a task" },
+    { label: "Audit Log", href: "/compliance", icon: ShieldCheck, description: "Review activity" },
+    { label: "Settings", href: "/settings", icon: Settings, description: "Manage org settings" },
+  ],
+  compliance_manager: [
+    { label: "Licenses", href: "/licensing", icon: FileText, description: "Review state licenses" },
+    { label: "Certifications", href: "/certifications", icon: Award, description: "Check cert status" },
+    { label: "Audit Log", href: "/compliance", icon: ShieldCheck, description: "Export audit trail" },
+    { label: "Documents", href: "/documents", icon: FolderOpen, description: "Compliance docs" },
+  ],
+  agent_support: [
+    { label: "View Agents", href: "/agents", icon: Users, description: "Browse agent roster" },
+    { label: "Create Task", href: "/tasks", icon: PlusCircle, description: "Create a task" },
+    { label: "CRM", href: "/crm", icon: PhoneCall, description: "Contact management" },
+    { label: "Documents", href: "/documents", icon: FolderOpen, description: "View documents" },
+  ],
+  viewer: [
+    { label: "Agents", href: "/agents", icon: Users, description: "View agent roster" },
+    { label: "Licenses", href: "/licensing", icon: FileText, description: "View licenses" },
+    { label: "Tasks", href: "/tasks", icon: CheckSquare, description: "View task list" },
+    { label: "Documents", href: "/documents", icon: FolderOpen, description: "View documents" },
+  ],
+  agent: [
+    { label: "My Tasks", href: "/tasks", icon: CheckSquare, description: "View assigned tasks" },
+    { label: "Licenses", href: "/licensing", icon: FileText, description: "My state licenses" },
+    { label: "Certifications", href: "/certifications", icon: Award, description: "My certifications" },
+    { label: "Training", href: "/documents", icon: BookOpen, description: "Training materials" },
+  ],
+};
+
 export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useGetDashboardStats();
   const { data: activity = [], isLoading: activityLoading } =
     useGetDashboardActivity({ limit: 15 });
+  const { data: me } = useGetMe();
+  const userRole = (me?.role ?? null) as Role | null;
+  // Fall back to viewer actions while role is loading or unset so the section is always visible.
+  const quickActions = QUICK_ACTIONS[userRole ?? "viewer"] ?? QUICK_ACTIONS.viewer;
 
   const agentPieData = stats
     ? [
@@ -125,6 +177,33 @@ export default function Dashboard() {
           Agency overview — {new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
         </p>
       </div>
+
+      {/* Role-based quick actions */}
+      {quickActions.length > 0 && (
+        <div>
+          <h2 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wider">
+            Quick Actions
+          </h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {quickActions.map((action) => {
+              const Icon = action.icon;
+              return (
+                <Link key={action.href + action.label} href={action.href}>
+                  <div className="flex flex-col items-start gap-2 p-4 rounded-xl border border-border bg-card hover:bg-accent hover:border-accent-foreground/20 transition-colors cursor-pointer group">
+                    <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/15 transition-colors">
+                      <Icon className="h-4.5 w-4.5 text-primary" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">{action.label}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">{action.description}</p>
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* License expiry alerts */}
       {stats && stats.licensesExpiringIn30Days > 0 && (

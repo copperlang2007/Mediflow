@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+import compression from "vite-plugin-compression2";
 
 const rawPort = process.env.PORT;
 
@@ -32,6 +33,14 @@ export default defineConfig({
     react(),
     tailwindcss({ optimize: false }),
     runtimeErrorOverlay(),
+    // Production: emit gzip + brotli compressed assets alongside originals.
+    // The Replit proxy / CDN serves the pre-compressed files automatically.
+    ...(process.env.NODE_ENV === "production"
+      ? [
+          compression({ algorithm: "gzip", exclude: [/\.(br)$/, /\.(gz)$/] }),
+          compression({ algorithm: "brotliCompress", exclude: [/\.(br)$/, /\.(gz)$/] }),
+        ]
+      : []),
     ...(process.env.NODE_ENV !== "production" &&
     process.env.REPL_ID !== undefined
       ? [
@@ -57,6 +66,29 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    reportCompressedSize: true,
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        // Manual chunk-splitting: keep vendor bundles separate from app code
+        // so that browser caching survives incremental app updates.
+        manualChunks: {
+          "vendor-react": ["react", "react-dom"],
+          "vendor-clerk": ["@clerk/react"],
+          "vendor-query": ["@tanstack/react-query"],
+          "vendor-charts": ["recharts"],
+          "vendor-ui": [
+            "@radix-ui/react-dialog",
+            "@radix-ui/react-dropdown-menu",
+            "@radix-ui/react-tooltip",
+            "@radix-ui/react-select",
+            "@radix-ui/react-tabs",
+          ],
+          "vendor-router": ["wouter"],
+          "vendor-utils": ["date-fns", "zod", "clsx", "tailwind-merge"],
+        },
+      },
+    },
   },
   server: {
     port,

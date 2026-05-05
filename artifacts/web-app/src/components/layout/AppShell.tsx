@@ -1,7 +1,39 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
+import { useGetMe } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
+
+type Role =
+  | "super_admin"
+  | "agency_admin"
+  | "compliance_manager"
+  | "agent_support"
+  | "viewer"
+  | "agent";
+
+const ALL_ROLES: Role[] = [
+  "super_admin", "agency_admin", "compliance_manager",
+  "agent_support", "viewer", "agent",
+];
+
+const ROLE_LABELS: Record<Role, string> = {
+  super_admin: "Super Admin",
+  agency_admin: "Agency Admin",
+  compliance_manager: "Compliance Mgr",
+  agent_support: "Agent Support",
+  viewer: "Viewer",
+  agent: "Agent",
+};
+
+const ROLE_COLORS: Record<Role, string> = {
+  super_admin: "bg-purple-100 text-purple-800",
+  agency_admin: "bg-blue-100 text-blue-800",
+  compliance_manager: "bg-teal-100 text-teal-800",
+  agent_support: "bg-sky-100 text-sky-800",
+  viewer: "bg-slate-100 text-slate-700",
+  agent: "bg-green-100 text-green-800",
+};
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -40,33 +72,51 @@ import {
 import NotificationPanel from "@/components/notifications/NotificationPanel";
 import { useSSENotifications } from "@/hooks/useSSENotifications";
 
-const navItems = [
+type NavItemDef = {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  roles: Role[];
+};
+
+type NavGroup = { group: string; items: NavItemDef[] };
+
+const navItems: NavGroup[] = [
   {
     group: "Core",
     items: [
-      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { href: "/agents", label: "Agents", icon: Users },
+      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ALL_ROLES },
+      {
+        href: "/agents", label: "Agents", icon: Users,
+        roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
+      },
     ],
   },
   {
     group: "Compliance",
     items: [
-      { href: "/licensing", label: "Licensing", icon: FileText },
-      { href: "/certifications", label: "Certifications", icon: Award },
+      { href: "/licensing", label: "Licensing", icon: FileText, roles: ALL_ROLES },
+      { href: "/certifications", label: "Certifications", icon: Award, roles: ALL_ROLES },
     ],
   },
   {
     group: "Sales",
     items: [
-      { href: "/crm", label: "CRM", icon: PhoneCall },
-      { href: "/tasks", label: "Tasks", icon: CheckSquare },
+      {
+        href: "/crm", label: "CRM", icon: PhoneCall,
+        roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
+      },
+      { href: "/tasks", label: "Tasks", icon: CheckSquare, roles: ALL_ROLES },
     ],
   },
   {
     group: "Resources",
     items: [
-      { href: "/documents", label: "Documents", icon: FolderOpen },
-      { href: "/compliance", label: "Audit & Compliance", icon: ShieldCheck },
+      { href: "/documents", label: "Documents", icon: FolderOpen, roles: ALL_ROLES },
+      {
+        href: "/compliance", label: "Audit & Compliance", icon: ShieldCheck,
+        roles: ["super_admin", "agency_admin", "compliance_manager"],
+      },
     ],
   },
 ];
@@ -136,6 +186,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
   const { unreadCount } = useSSENotifications();
+  const { data: me } = useGetMe();
+  const userRole = (me?.role ?? null) as Role | null;
+
+  // Filter nav groups to items allowed for this user's role.
+  // While role is loading, show all to avoid flicker.
+  const filteredNavItems = navItems
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (item) => !userRole || item.roles.includes(userRole),
+      ),
+    }))
+    .filter((group) => group.items.length > 0);
 
   const sidebarContent = (
     <div className={cn("flex flex-col h-full", collapsed ? "items-center" : "")}>
@@ -164,7 +227,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Nav */}
       <ScrollArea className="flex-1 py-3">
         <div className={cn("space-y-5", collapsed ? "px-2" : "px-3")}>
-          {navItems.map((group) => (
+          {filteredNavItems.map((group) => (
             <div key={group.group}>
               {!collapsed && (
                 <p className="text-[10px] uppercase tracking-widest font-semibold text-sidebar-foreground/40 px-3 mb-1">
@@ -311,6 +374,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </Button>
 
           <div className="flex-1" />
+
+          {/* Role badge */}
+          {userRole && (
+            <Badge
+              variant="secondary"
+              className={cn(
+                "text-xs font-medium hidden sm:inline-flex",
+                ROLE_COLORS[userRole] ?? "bg-slate-100 text-slate-700",
+              )}
+            >
+              {ROLE_LABELS[userRole] ?? userRole}
+            </Badge>
+          )}
 
           {/* Notification bell */}
           <div className="relative">

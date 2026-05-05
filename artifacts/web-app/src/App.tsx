@@ -23,6 +23,7 @@ const DocumentsPage = lazy(() => import("@/pages/documents"));
 const CompliancePage = lazy(() => import("@/pages/compliance"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
 const NotFound = lazy(() => import("@/pages/not-found"));
+const ForgotPasswordPage = lazy(() => import("@/pages/forgot-password"));
 
 const clerkPubKey = publishableKeyFromHost(
   window.location.hostname,
@@ -248,6 +249,9 @@ function ClerkProviderWithRoutes() {
               <Route path="/" component={HomeRedirect} />
               <Route path="/sign-in/*?" component={SignInPage} />
               <Route path="/sign-up/*?" component={SignUpPage} />
+              <Route path="/forgot-password">
+                <Suspense fallback={null}><ForgotPasswordPage /></Suspense>
+              </Route>
               <Route path="/dashboard">
                 <ProtectedLayout><Dashboard /></ProtectedLayout>
               </Route>

@@ -49,15 +49,16 @@ function buildHtmlReport(data: {
     .map(
       (l) =>
         `<tr><td>${l.stateCode}</td><td>${l.licenseType}</td><td>${l.licenseNumber ?? "—"}</td>` +
-        `<td>${l.status}</td><td>${formatDate(l.expiresAt as Date)}</td></tr>`,
+        `<td>${l.status}</td><td>${formatDate(l.expiryDate as Date)}</td></tr>`,
     )
     .join("\n");
 
   const certRows = certifications
     .map(
       (c) =>
-        `<tr><td>${c.carrierName ?? c.carrierId}</td><td>${c.certType}</td>` +
-        `<td>${c.status}</td><td>${formatDate(c.expiresAt as Date)}</td></tr>`,
+        `<tr><td>${c.carrierId}</td><td>${c.certificationYear}</td>` +
+        `<td>${c.status}</td><td>${formatDate(c.completedDate as Date)}</td>` +
+        `<td>${formatDate(c.expiryDate as Date)}</td></tr>`,
     )
     .join("\n");
 
@@ -65,7 +66,7 @@ function buildHtmlReport(data: {
     .map(
       (a) =>
         `<tr><td>${a.certificationYear}</td><td>${a.status}</td>` +
-        `<td>${formatDate(a.completedAt as Date)}</td></tr>`,
+        `<td>${formatDate(a.completedDate as Date)}</td></tr>`,
     )
     .join("\n");
 
@@ -125,7 +126,7 @@ function buildHtmlReport(data: {
   ${
     certifications.length > 0
       ? `<table>
-    <tr><th>Carrier</th><th>Type</th><th>Status</th><th>Expires</th></tr>
+    <tr><th>Carrier ID</th><th>Year</th><th>Status</th><th>Completed</th><th>Expires</th></tr>
     ${certRows}
   </table>`
       : "<p><em>No certification records.</em></p>"
