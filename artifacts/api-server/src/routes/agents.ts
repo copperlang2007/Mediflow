@@ -22,6 +22,13 @@ import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { randomUUID } from "crypto";
 import { createChecklistRun } from "./checklists";
 
+const InitialLicenseSchema = z.object({
+  stateCode: z.string().length(2).toUpperCase(),
+  licenseType: z.string().min(1).max(100),
+  licenseNumber: z.string().max(50).optional(),
+  status: z.enum(["active", "pending", "expired", "suspended", "not_appointed"]).default("pending"),
+});
+
 const CreateAgentSchema = z.object({
   firstName: z.string().min(1).max(100),
   lastName: z.string().min(1).max(100),
@@ -31,6 +38,8 @@ const CreateAgentSchema = z.object({
   hireDate: z.string().optional(),
   managerId: z.string().optional(),
   notes: z.string().max(5000).optional(),
+  checklistTemplateId: z.string().optional(),
+  initialLicense: InitialLicenseSchema.optional(),
 });
 
 const UpdateAgentSchema = z.object({
@@ -144,7 +153,7 @@ router.post(
       return;
     }
 
-    const { firstName, lastName, email, phone, npn, hireDate, managerId, notes } = parsed.data;
+    const { firstName, lastName, email, phone, npn, hireDate, managerId, notes, checklistTemplateId, initialLicense } = parsed.data;
 
     const [agent] = await db
       .insert(agentsTable)
@@ -163,11 +172,28 @@ router.post(
       })
       .returning();
 
-    createChecklistRun(authReq.orgId, agent!.id, "onboarding", authReq.userId).catch(
+    // Create onboarding checklist — honour caller-specified template if provided
+    createChecklistRun(authReq.orgId, agent!.id, "onboarding", authReq.userId, checklistTemplateId).catch(
       (err: unknown) => {
         req.log?.warn({ err }, "Failed to auto-create onboarding checklist");
       },
     );
+
+    // Create initial license record if provided
+    if (initialLicense) {
+      db.insert(stateLicensesTable)
+        .values({
+          id: randomUUID(),
+          agentId: agent!.id,
+          stateCode: initialLicense.stateCode,
+          licenseType: initialLicense.licenseType,
+          licenseNumber: initialLicense.licenseNumber ?? null,
+          status: initialLicense.status,
+        })
+        .catch((err: unknown) => {
+          req.log?.warn({ err }, "Failed to create initial license for agent");
+        });
+    }
 
     res.status(201).json(agent);
   },

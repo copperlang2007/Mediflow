@@ -1895,6 +1895,23 @@ components:
           type: string
         notes:
           type: string
+        checklistTemplateId:
+          type: string
+        initialLicense:
+          type: object
+          properties:
+            stateCode:
+              type: string
+            licenseType:
+              type: string
+            licenseNumber:
+              type: string
+            status:
+              type: string
+              enum: [active, pending, expired, suspended, not_appointed]
+          required:
+            - stateCode
+            - licenseType
       required:
         - firstName
         - lastName

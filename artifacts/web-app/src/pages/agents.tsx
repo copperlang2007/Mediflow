@@ -83,23 +83,29 @@ function SortIcon({ field, sortBy, sortDir }: { field: SortField; sortBy: SortFi
 }
 
 // Multi-step Add Agent Wizard
-type WizardStep = 1 | 2 | 3 | 4;
+type WizardStep = 1 | 2 | 3 | 4 | 5;
+
+const BLANK_FORM = {
+  firstName: "",
+  lastName: "",
+  email: "",
+  phone: "",
+  npn: "",
+  hireDate: "",
+  managerId: "",
+  checklistTemplateId: "",
+  licenseState: "",
+  licenseType: "",
+  licenseNumber: "",
+  licenseStatus: "pending" as string,
+};
 
 function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const { mutateAsync, isPending } = useCreateAgent();
   const [, navigate] = useLocation();
   const [step, setStep] = useState<WizardStep>(1);
-  const [form, setForm] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    phone: "",
-    npn: "",
-    hireDate: "",
-    managerId: "",
-    checklistTemplateId: "",
-  });
+  const [form, setForm] = useState(BLANK_FORM);
 
   const { data: usersData } = useGetUsers();
   const managerOptions = (usersData ?? []).filter(
@@ -113,12 +119,13 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
 
   const handleClose = () => {
     setStep(1);
-    setForm({ firstName: "", lastName: "", email: "", phone: "", npn: "", hireDate: "", managerId: "", checklistTemplateId: "" });
+    setForm(BLANK_FORM);
     onClose();
   };
 
   const handleSubmit = async () => {
     try {
+      const hasLicense = form.licenseState.trim().length === 2 && form.licenseType.trim().length > 0;
       const agent = await mutateAsync({
         data: {
           firstName: form.firstName.trim(),
@@ -128,6 +135,15 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
           npn: form.npn || undefined,
           hireDate: form.hireDate || undefined,
           managerId: form.managerId || undefined,
+          checklistTemplateId: form.checklistTemplateId || undefined,
+          initialLicense: hasLicense
+            ? {
+                stateCode: form.licenseState.trim().toUpperCase(),
+                licenseType: form.licenseType.trim(),
+                licenseNumber: form.licenseNumber || undefined,
+                status: form.licenseStatus as "active" | "pending" | "expired" | "suspended" | "not_appointed",
+              }
+            : undefined,
         },
       });
       toast.success(`Agent ${agent.firstName} ${agent.lastName} created — onboarding checklist started`);
@@ -147,12 +163,14 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
   const stepTitle =
     step === 1 ? "Basic Information"
     : step === 2 ? "Contact & Assignment"
-    : step === 3 ? "Onboarding Checklist"
+    : step === 3 ? "Initial License"
+    : step === 4 ? "Onboarding Checklist"
     : "Confirm Agent";
   const stepDesc =
     step === 1 ? "Enter the agent's name and email address."
     : step === 2 ? "Optional contact info, NPN, and manager assignment."
-    : step === 3 ? "Choose which onboarding checklist to start for this agent."
+    : step === 3 ? "Optionally add the agent's first state license now."
+    : step === 4 ? "Choose which onboarding checklist to start for this agent."
     : "Review the details before creating the agent.";
 
   return (
@@ -160,16 +178,16 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Add New Agent</DialogTitle>
-          <div className="flex items-center gap-2 mt-2">
-            {([1, 2, 3, 4] as const).map((s) => (
-              <div key={s} className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1 mt-2">
+            {([1, 2, 3, 4, 5] as const).map((s) => (
+              <div key={s} className="flex items-center gap-1">
                 <div
-                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors
+                  className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold transition-colors
                     ${step === s ? "bg-primary text-primary-foreground" : step > s ? "bg-green-500 text-white" : "bg-muted text-muted-foreground"}`}
                 >
                   {step > s ? "✓" : s}
                 </div>
-                {s < 4 && <div className={`w-8 h-0.5 ${step > s ? "bg-green-500" : "bg-muted"}`} />}
+                {s < 5 && <div className={`w-6 h-0.5 ${step > s ? "bg-green-500" : "bg-muted"}`} />}
               </div>
             ))}
           </div>
@@ -238,6 +256,63 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
           )}
 
           {step === 3 && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="wiz-lic-state">State Code</Label>
+                  <Input
+                    id="wiz-lic-state"
+                    value={form.licenseState}
+                    onChange={set("licenseState")}
+                    placeholder="e.g. CA"
+                    maxLength={2}
+                    className="uppercase"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="wiz-lic-type">License Type</Label>
+                  <Input
+                    id="wiz-lic-type"
+                    value={form.licenseType}
+                    onChange={set("licenseType")}
+                    placeholder="e.g. Life & Health"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="wiz-lic-num">License Number</Label>
+                <Input
+                  id="wiz-lic-num"
+                  value={form.licenseNumber}
+                  onChange={set("licenseNumber")}
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Status</Label>
+                <Select
+                  value={form.licenseStatus}
+                  onValueChange={(v) => setForm((p) => ({ ...p, licenseStatus: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="expired">Expired</SelectItem>
+                    <SelectItem value="suspended">Suspended</SelectItem>
+                    <SelectItem value="not_appointed">Not Appointed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                All fields on this step are optional — you can add licenses later from the agent profile.
+              </p>
+            </div>
+          )}
+
+          {step === 4 && (
             <div className="space-y-3">
               <button
                 type="button"
@@ -246,7 +321,7 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
                   ${form.checklistTemplateId === "" ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border"}`}
               >
                 <div className="font-medium text-sm">Default Onboarding Checklist</div>
-                <div className="text-xs text-muted-foreground mt-0.5">Standard NPN, licensing, AHIP, and e&o tasks</div>
+                <div className="text-xs text-muted-foreground mt-0.5">Standard NPN, licensing, AHIP, and E&O tasks</div>
               </button>
               {onboardingTemplates.map((t) => (
                 <button
@@ -262,11 +337,13 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
                   )}
                 </button>
               ))}
-              <p className="text-xs text-muted-foreground">The selected checklist will be started automatically on agent creation.</p>
+              <p className="text-xs text-muted-foreground">
+                The selected checklist will be started automatically when the agent is created.
+              </p>
             </div>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <div className="rounded-lg border bg-muted/30 p-4 space-y-2.5">
               <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                 <span className="text-muted-foreground">Name</span>
@@ -289,6 +366,13 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
                   <span className="text-muted-foreground">Manager</span>
                   <span className="font-medium">
                     {managerOptions.find((u) => u.id === form.managerId)?.fullName ?? "—"}
+                  </span>
+                </>}
+                {(form.licenseState || form.licenseType) && <>
+                  <span className="text-muted-foreground">Initial License</span>
+                  <span className="font-medium">
+                    {[form.licenseState.toUpperCase(), form.licenseType].filter(Boolean).join(" — ")}
+                    {form.licenseNumber ? ` #${form.licenseNumber}` : ""}
                   </span>
                 </>}
                 <span className="text-muted-foreground">Checklist</span>
@@ -314,7 +398,7 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
             </Button>
           )}
           <Button type="button" variant="outline" onClick={handleClose}>Cancel</Button>
-          {step < 4 ? (
+          {step < 5 ? (
             <Button
               type="button"
               disabled={step === 1 && !step1Valid}

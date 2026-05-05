@@ -276,6 +276,17 @@ export const CreateAgentBody = zod.object({
   hireDate: zod.coerce.date().optional(),
   managerId: zod.string().optional(),
   notes: zod.string().optional(),
+  checklistTemplateId: zod.string().optional(),
+  initialLicense: zod
+    .object({
+      stateCode: zod.string(),
+      licenseType: zod.string(),
+      licenseNumber: zod.string().optional(),
+      status: zod
+        .enum(["active", "pending", "expired", "suspended", "not_appointed"])
+        .optional(),
+    })
+    .optional(),
 });
 
 /**

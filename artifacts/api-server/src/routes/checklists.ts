@@ -48,20 +48,20 @@ export async function createChecklistRun(
   agentId: string,
   type: "onboarding" | "offboarding",
   startedByUserId?: string,
+  templateId?: string,
 ): Promise<typeof checklistRunsTable.$inferSelect> {
   const runId = randomUUID();
 
   // Try to load checklist items from DB templates first (admin-customizable)
+  // If a specific templateId was provided, use it; otherwise pick the first active one
+  const templateConditions = templateId
+    ? [eq(taskTemplatesTable.id, templateId), eq(taskTemplatesTable.orgId, orgId)]
+    : [eq(taskTemplatesTable.orgId, orgId), eq(taskTemplatesTable.type, type), eq(taskTemplatesTable.isActive, true)];
+
   const [dbTemplate] = await db
     .select({ steps: taskTemplatesTable.steps })
     .from(taskTemplatesTable)
-    .where(
-      and(
-        eq(taskTemplatesTable.orgId, orgId),
-        eq(taskTemplatesTable.type, type),
-        eq(taskTemplatesTable.isActive, true),
-      ),
-    )
+    .where(and(...templateConditions))
     .orderBy(taskTemplatesTable.createdAt)
     .limit(1);
 

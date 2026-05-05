@@ -182,6 +182,24 @@ export interface AgentListResponse {
   offset: number;
 }
 
+export type CreateAgentBodyInitialLicenseStatus =
+  (typeof CreateAgentBodyInitialLicenseStatus)[keyof typeof CreateAgentBodyInitialLicenseStatus];
+
+export const CreateAgentBodyInitialLicenseStatus = {
+  active: "active",
+  pending: "pending",
+  expired: "expired",
+  suspended: "suspended",
+  not_appointed: "not_appointed",
+} as const;
+
+export type CreateAgentBodyInitialLicense = {
+  stateCode: string;
+  licenseType: string;
+  licenseNumber?: string;
+  status?: CreateAgentBodyInitialLicenseStatus;
+};
+
 export interface CreateAgentBody {
   firstName: string;
   lastName: string;
@@ -191,6 +209,8 @@ export interface CreateAgentBody {
   hireDate?: string;
   managerId?: string;
   notes?: string;
+  checklistTemplateId?: string;
+  initialLicense?: CreateAgentBodyInitialLicense;
 }
 
 export type UpdateAgentBodyStatus =
