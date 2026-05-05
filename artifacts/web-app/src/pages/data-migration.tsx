@@ -515,7 +515,7 @@ export default function DataMigrationPage() {
               title="Import Contacts from CSV"
               description="Upload any CSV with contact data. Map your columns to MediFlow fields. All contacts will be imported as leads."
               uploadEndpoint="/api/imports/contacts/upload"
-              validateEndpoint="/api/imports/contacts/upload"
+              validateEndpoint="/api/imports/contacts/validate"
               confirmEndpoint="/api/imports/contacts/confirm"
             />
           </TabsContent>

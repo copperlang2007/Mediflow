@@ -4,7 +4,7 @@
  * Uses multer for multipart file upload + streaming CSV parse.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, or } from "drizzle-orm";
 import {
   db,
   agentsTable,
@@ -12,6 +12,13 @@ import {
   leadsTable,
   importJobsTable,
   activitiesTable,
+  stateLicensesTable,
+  carrierCertificationsTable,
+  carriersTable,
+  taskInstancesTable,
+  dealsTable,
+  pipelineStagesTable,
+  pipelinesTable,
 } from "@workspace/db";
 import { requireAuth, requireRole, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { randomUUID } from "crypto";
@@ -21,8 +28,8 @@ import { parse } from "csv-parse/sync";
 const router: IRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-// In-memory progress store (per job — for SSE streaming)
-const jobProgress = new Map<string, { status: string; processed: number; total: number; errors: unknown[] }>();
+// In-memory progress store (per job — scoped per org to prevent IDOR)
+const jobProgress = new Map<string, { status: string; processed: number; total: number; errors: unknown[]; orgId: string }>();
 
 function parseCSV(buffer: Buffer): { headers: string[]; rows: Record<string, string>[] } {
   const records = parse(buffer, { columns: true, skip_empty_lines: true, trim: true, relax_quotes: true }) as Record<string, string>[];
@@ -160,7 +167,7 @@ router.post(
       fileName: req.file.originalname,
     });
 
-    jobProgress.set(jobId, { status: "processing", processed: 0, total: rows.length, errors: [] });
+    jobProgress.set(jobId, { status: "processing", processed: 0, total: rows.length, errors: [], orgId: authReq.orgId });
 
     // Process in background
     void processMondayImport(jobId, authReq.orgId, rows, mapping).catch(console.error);
@@ -199,11 +206,23 @@ async function processMondayImport(jobId: string, orgId: string, rows: Record<st
       // Check duplicate by email
       if (email) {
         const [existing] = await db.select({ id: agentsTable.id }).from(agentsTable).where(and(eq(agentsTable.orgId, orgId), eq(agentsTable.email, email))).limit(1);
-        if (existing) { errors++; errorList.push({ row: i + 2, message: `Duplicate email: ${email}` }); continue; }
+        if (existing) {
+          // Update existing agent instead of skipping — merge strategy
+          await db.update(agentsTable).set({
+            ...(npn && { npn }),
+            ...(phone && { phone }),
+            ...(hireDate && !isNaN(hireDate.getTime()) && { hireDate }),
+          }).where(eq(agentsTable.id, existing.id));
+          // Still attempt to import license / carrier below using existing agent id
+          await importMondayAgentRelations(get, orgId, existing.id);
+          created++; // count as created/updated
+          continue;
+        }
       }
 
+      const agentId = randomUUID();
       await db.insert(agentsTable).values({
-        id: randomUUID(),
+        id: agentId,
         orgId,
         firstName,
         lastName,
@@ -213,6 +232,9 @@ async function processMondayImport(jobId: string, orgId: string, rows: Record<st
         status: status as "onboarding" | "active" | "suspended" | "offboarding" | "offboarded",
         hireDate: hireDate && !isNaN(hireDate.getTime()) ? hireDate : undefined,
       });
+
+      // Import related records: licenses, carrier certs, tasks
+      await importMondayAgentRelations(get, orgId, agentId);
 
       created++;
     } catch {
@@ -241,13 +263,95 @@ async function processMondayImport(jobId: string, orgId: string, rows: Record<st
   }).where(eq(importJobsTable.id, jobId));
 }
 
-// Step 4: SSE progress
+async function importMondayAgentRelations(get: (f: string) => string, orgId: string, agentId: string) {
+  // State license import
+  const licenseState = get("licenseState").toUpperCase();
+  const licenseType = get("licenseType") || "Life and Health";
+  const licenseNumber = get("licenseNumber") || null;
+  const licenseExpiryRaw = get("licenseExpiry");
+  const licenseStatusRaw = get("licenseStatus").toLowerCase();
+
+  if (licenseState && US_STATES.has(licenseState)) {
+    const licenseExpiry = licenseExpiryRaw ? new Date(licenseExpiryRaw) : null;
+    const licenseStatus = ["active", "expired", "pending", "cancelled"].includes(licenseStatusRaw) ? licenseStatusRaw : "active";
+    // Upsert by (agentId, stateCode, licenseType)
+    const [existingLic] = await db.select({ id: stateLicensesTable.id })
+      .from(stateLicensesTable)
+      .where(and(eq(stateLicensesTable.agentId, agentId), eq(stateLicensesTable.stateCode, licenseState), eq(stateLicensesTable.licenseType, licenseType)))
+      .limit(1);
+    if (!existingLic) {
+      await db.insert(stateLicensesTable).values({
+        id: randomUUID(),
+        agentId,
+        stateCode: licenseState,
+        licenseType,
+        licenseNumber: licenseNumber ?? undefined,
+        status: licenseStatus as "active" | "expired" | "pending" | "suspended" | "not_appointed",
+        expiryDate: licenseExpiry && !isNaN(licenseExpiry.getTime()) ? licenseExpiry : undefined,
+      });
+    }
+  }
+
+  // Carrier certification import
+  const carrierName = get("carrierName");
+  if (carrierName) {
+    const [carrier] = await db.select({ id: carriersTable.id })
+      .from(carriersTable)
+      .where(and(eq(carriersTable.orgId, orgId), eq(carriersTable.name, carrierName)))
+      .limit(1);
+    if (carrier) {
+      const certYear = new Date().getFullYear();
+      const [existingCert] = await db.select({ id: carrierCertificationsTable.id })
+        .from(carrierCertificationsTable)
+        .where(and(eq(carrierCertificationsTable.agentId, agentId), eq(carrierCertificationsTable.carrierId, carrier.id), eq(carrierCertificationsTable.certificationYear, certYear)))
+        .limit(1);
+      if (!existingCert) {
+        await db.insert(carrierCertificationsTable).values({
+          id: randomUUID(),
+          agentId,
+          carrierId: carrier.id,
+          certificationYear: certYear,
+          status: "not_started",
+        });
+      }
+    }
+  }
+
+  // Task import — create a task_instance if taskTitle is provided
+  const taskTitle = get("taskTitle");
+  const taskNotes = get("notes");
+  if (taskTitle) {
+    await db.insert(taskInstancesTable).values({
+      id: randomUUID(),
+      orgId,
+      agentId,
+      title: taskTitle,
+      description: taskNotes || undefined,
+      status: "open",
+      priority: "medium",
+      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // default 7 days
+    });
+  }
+}
+
+// Step 4: SSE progress — org-scoped to prevent IDOR across orgs
 router.get(
   "/imports/progress/:jobId",
   requireAuth,
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
     const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0]! : req.params.jobId;
+
+    // Pre-flight org ownership check before opening SSE stream
+    const mem = jobProgress.get(jobId);
+    if (mem) {
+      if (mem.orgId !== authReq.orgId) { res.status(403).json({ error: "Forbidden" }); return; }
+    } else {
+      const [job] = await db.select({ orgId: importJobsTable.orgId }).from(importJobsTable)
+        .where(and(eq(importJobsTable.id, jobId), eq(importJobsTable.orgId, authReq.orgId))).limit(1);
+      if (!job) { res.status(404).json({ error: "Job not found" }); return; }
+    }
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -257,18 +361,19 @@ router.get(
     const send = (data: unknown) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
     const interval = setInterval(async () => {
-      const mem = jobProgress.get(jobId);
-      if (mem) {
-        send({ status: mem.status, processed: mem.processed, total: mem.total, errorCount: mem.errors.length });
-        if (mem.status === "completed" || mem.status === "failed") {
+      const current = jobProgress.get(jobId);
+      if (current) {
+        send({ status: current.status, processed: current.processed, total: current.total, errorCount: current.errors.length });
+        if (current.status === "completed" || current.status === "failed") {
           clearInterval(interval);
           res.end();
         }
         return;
       }
 
-      // Fall back to DB
-      const [job] = await db.select().from(importJobsTable).where(eq(importJobsTable.id, jobId)).limit(1);
+      // Fall back to DB — always scoped by orgId
+      const [job] = await db.select().from(importJobsTable)
+        .where(and(eq(importJobsTable.id, jobId), eq(importJobsTable.orgId, authReq.orgId))).limit(1);
       if (!job) { send({ error: "Job not found" }); clearInterval(interval); res.end(); return; }
       send({ status: job.status, processed: job.processedRows, total: job.totalRows, errorCount: job.errorCount });
       if (job.status === "completed" || job.status === "failed") { clearInterval(interval); res.end(); }
@@ -414,7 +519,7 @@ router.post(
       fileName: req.file.originalname,
     });
 
-    jobProgress.set(jobId, { status: "processing", processed: 0, total: rows.length, errors: [] });
+    jobProgress.set(jobId, { status: "processing", processed: 0, total: rows.length, errors: [], orgId: authReq.orgId });
     void processGhlImport(jobId, authReq.orgId, rows, mapping, duplicateAction).catch(console.error);
 
     res.json({ jobId, totalRows: rows.length });
@@ -425,6 +530,14 @@ async function processGhlImport(jobId: string, orgId: string, rows: Record<strin
   const progress = jobProgress.get(jobId)!;
   let created = 0, updated = 0, skipped = 0, errors = 0;
   const errorList: unknown[] = [];
+
+  // Pre-load pipelines for deal creation
+  const allPipelines = await db.select({ id: pipelinesTable.id }).from(pipelinesTable).where(eq(pipelinesTable.orgId, orgId));
+  const pipelineIds = allPipelines.map((p) => p.id);
+  const allStages = pipelineIds.length > 0
+    ? await db.select({ id: pipelineStagesTable.id, name: pipelineStagesTable.name, pipelineId: pipelineStagesTable.pipelineId })
+        .from(pipelineStagesTable).where(inArray(pipelineStagesTable.pipelineId, pipelineIds))
+    : [];
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
@@ -447,15 +560,18 @@ async function processGhlImport(jobId: string, orgId: string, rows: Record<strin
       const zipCode = get("zipCode") || null;
       const leadSource = get("leadSource") || null;
       const dobRaw = get("dob");
+      const pipelineStageRaw = get("pipelineStage");
 
-      // Duplicate check
-      let existingContact = null;
+      // Duplicate check using email OR phone (either match counts as duplicate)
+      let existingContact: { id: string } | null = null;
       if (email || phone) {
-        const conditions = [eq(contactsTable.orgId, orgId)];
+        const orConditions = [];
+        if (email) orConditions.push(eq(contactsTable.email, email));
+        if (phone) orConditions.push(eq(contactsTable.phone, phone));
         const [existing] = await db.select({ id: contactsTable.id }).from(contactsTable)
-          .where(and(eq(contactsTable.orgId, orgId), email ? eq(contactsTable.email, email) : eq(contactsTable.phone, phone ?? "")))
+          .where(and(eq(contactsTable.orgId, orgId), or(...orConditions)))
           .limit(1);
-        existingContact = existing;
+        existingContact = existing ?? null;
       }
 
       if (existingContact) {
@@ -469,10 +585,11 @@ async function processGhlImport(jobId: string, orgId: string, rows: Record<strin
             updatedAt: new Date(),
           }).where(eq(contactsTable.id, existingContact.id));
           updated++;
-          // Add notes as activity
           if (notes) {
             await db.insert(activitiesTable).values({ id: randomUUID(), orgId, contactId: existingContact.id, type: "note", body: notes });
           }
+          // Still try to create deal if stage is mapped
+          if (pipelineStageRaw) await createGhlDeal(orgId, existingContact.id, pipelineStageRaw, allStages);
           continue;
         }
         // create_new falls through
@@ -498,6 +615,9 @@ async function processGhlImport(jobId: string, orgId: string, rows: Record<strin
         await db.insert(activitiesTable).values({ id: randomUUID(), orgId, contactId, type: "note", body: notes });
       }
 
+      // Create deal if pipelineStage is mapped
+      if (pipelineStageRaw) await createGhlDeal(orgId, contactId, pipelineStageRaw, allStages);
+
       created++;
     } catch {
       errors++;
@@ -521,7 +641,77 @@ async function processGhlImport(jobId: string, orgId: string, rows: Record<strin
   }).where(eq(importJobsTable.id, jobId));
 }
 
+async function createGhlDeal(orgId: string, contactId: string, pipelineStageRaw: string, allStages: { id: string; name: string; pipelineId: string }[]) {
+  const matchedStage = allStages.find((s) => s.name.toLowerCase() === pipelineStageRaw.toLowerCase());
+  if (!matchedStage) return;
+  await db.insert(dealsTable).values({
+    id: randomUUID(),
+    orgId,
+    contactId,
+    pipelineId: matchedStage.pipelineId,
+    stageId: matchedStage.id,
+    title: "GHL Import",
+    status: "open",
+  });
+}
+
 // ─── Generic CSV Contact Importer ─────────────────────────────────────────────
+
+// ─── Generic CSV Contact Validate ─────────────────────────────────────────────
+// Step 2: validate mapping + detect duplicates (returns same shape as monday/ghl validate)
+router.post(
+  "/imports/contacts/validate",
+  requireAuth,
+  requireRole("super_admin", "agency_admin"),
+  upload.single("file"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
+    const mapping = req.body.mapping ? JSON.parse(req.body.mapping as string) as Record<string, string> : {};
+    const { rows } = parseCSV(req.file.buffer);
+    const errors: { row: number; field: string; message: string }[] = [];
+
+    const getCol = (field: string) => Object.keys(mapping).find((k) => mapping[k] === field);
+    const firstNameCol = getCol("firstName");
+    const lastNameCol = getCol("lastName");
+    const fullNameCol = getCol("fullName");
+    const emailCol = getCol("email");
+    const phoneCol = getCol("phone");
+
+    const emails = emailCol ? rows.map((r) => r[emailCol]?.trim()).filter(Boolean) as string[] : [];
+    const phones = phoneCol ? rows.map((r) => r[phoneCol]?.trim()).filter(Boolean) as string[] : [];
+
+    const [existingEmails, existingPhones] = await Promise.all([
+      emails.length > 0 ? db.select({ email: contactsTable.email }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.email, emails))) : Promise.resolve([]),
+      phones.length > 0 ? db.select({ phone: contactsTable.phone }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.phone, phones))) : Promise.resolve([]),
+    ]);
+    const existingEmailSet = new Set(existingEmails.map((e) => e.email).filter(Boolean));
+    const existingPhoneSet = new Set(existingPhones.map((p) => p.phone).filter(Boolean));
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const fn = firstNameCol ? row[firstNameCol]?.trim() : fullNameCol ? row[fullNameCol]?.split(" ")[0] : "";
+      const ln = lastNameCol ? row[lastNameCol]?.trim() : fullNameCol ? row[fullNameCol]?.split(" ").slice(1).join(" ") : "";
+      if (!fn) errors.push({ row: i + 2, field: "firstName", message: "First name required" });
+      if (!ln) errors.push({ row: i + 2, field: "lastName", message: "Last name required" });
+      if (emailCol && row[emailCol] && existingEmailSet.has(row[emailCol].trim())) {
+        errors.push({ row: i + 2, field: "email", message: `Duplicate email: ${row[emailCol].trim()}` });
+      }
+      if (phoneCol && row[phoneCol] && existingPhoneSet.has(row[phoneCol].trim())) {
+        errors.push({ row: i + 2, field: "phone", message: `Duplicate phone: ${row[phoneCol].trim()}` });
+      }
+    }
+
+    res.json({
+      totalRows: rows.length,
+      validRows: rows.length - new Set(errors.map((e) => e.row)).size,
+      errorCount: errors.length,
+      errors: errors.slice(0, 200),
+      duplicateEmails: existingEmailSet.size,
+      duplicatePhones: existingPhoneSet.size,
+    });
+  },
+);
 
 router.post(
   "/imports/contacts/upload",
@@ -587,7 +777,7 @@ router.post(
       columnMapping: mapping as Record<string, unknown>, fileName: req.file.originalname,
     });
 
-    jobProgress.set(jobId, { status: "processing", processed: 0, total: rows.length, errors: [] });
+    jobProgress.set(jobId, { status: "processing", processed: 0, total: rows.length, errors: [], orgId: authReq.orgId });
     void processCsvContactImport(jobId, authReq.orgId, rows, mapping).catch(console.error);
 
     res.json({ jobId, totalRows: rows.length });

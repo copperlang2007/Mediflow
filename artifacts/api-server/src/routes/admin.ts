@@ -21,6 +21,9 @@ import {
 } from "../middlewares/requireAuth";
 import { randomUUID } from "crypto";
 import PDFDocument from "pdfkit";
+import { ObjectStorageService } from "../lib/objectStorage";
+
+const objectStorage = new ObjectStorageService();
 
 const router: IRouter = Router();
 
@@ -504,8 +507,20 @@ router.post(
 
     const pdfBuffer = Buffer.concat(chunks);
 
-    // Store in documents
-    const storageKey = `soc2/evidence-pack-${docId}.pdf`;
+    // Upload PDF to object storage, then record the storage path in documents
+    let storageKey: string;
+    try {
+      storageKey = await objectStorage.uploadDocument(
+        pdfBuffer,
+        `soc2-evidence-${generatedAt.toISOString().slice(0, 10)}.pdf`,
+        authReq.orgId,
+        { contentType: "application/pdf" },
+      );
+    } catch {
+      // If storage upload fails, fall back to a placeholder key (PDF still returned to client)
+      storageKey = `soc2/evidence-pack-${docId}.pdf`;
+    }
+
     await db.insert(documentsTable).values({
       id: docId,
       orgId: authReq.orgId,
