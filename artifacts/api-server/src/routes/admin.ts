@@ -466,7 +466,7 @@ router.post(
 );
 
 // ─── Data Retention Policies ──────────────────────────────────────────────────
-const RETENTION_RECORD_TYPES = ["contacts", "agents", "audit_log", "communications", "documents"];
+const RETENTION_RECORD_TYPES = ["contacts", "deals", "agents", "audit_log", "communications", "documents"];
 
 router.get(
   "/admin/data-retention",

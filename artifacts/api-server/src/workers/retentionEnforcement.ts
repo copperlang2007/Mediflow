@@ -96,6 +96,7 @@ export async function retentionEnforcementWorker(): Promise<void> {
         }
 
         // Phase 2: create hard-delete review tasks for already-soft-deleted contacts past window
+        // Idempotent: skip if an open review task for this contact already exists (title-keyed)
         const softDeleted = await db
           .select({ id: contactsTable.id, firstName: contactsTable.firstName, lastName: contactsTable.lastName, deletedAt: contactsTable.deletedAt })
           .from(contactsTable)
@@ -108,10 +109,18 @@ export async function retentionEnforcementWorker(): Promise<void> {
           );
 
         for (const contact of softDeleted) {
+          const taskTitle = `Hard-delete approval required: contact ${contact.firstName} ${contact.lastName}`;
+          const [existingTask] = await db
+            .select({ id: taskInstancesTable.id })
+            .from(taskInstancesTable)
+            .where(and(eq(taskInstancesTable.orgId, org.id), eq(taskInstancesTable.title, taskTitle), eq(taskInstancesTable.status, "open")))
+            .limit(1);
+          if (existingTask) continue;
+
           await db.insert(taskInstancesTable).values({
             id: randomUUID(),
             orgId: org.id,
-            title: `Hard-delete approval required: contact ${contact.firstName} ${contact.lastName}`,
+            title: taskTitle,
             description: `Contact was soft-deleted and has now exceeded the ${policy.retentionDays}-day retention window. Approve permanent deletion via Admin > Compliance > Data Retention.`,
             status: "open",
             priority: "high",
@@ -177,6 +186,7 @@ export async function retentionEnforcementWorker(): Promise<void> {
         }
 
         // Phase 2: hard-delete review tasks for already-soft-deleted deals past window
+        // Idempotent: skip if an open review task for this deal already exists (title-keyed)
         const softDeletedDeals = await db
           .select({ id: dealsTable.id, title: dealsTable.title, deletedAt: dealsTable.deletedAt })
           .from(dealsTable)
@@ -189,10 +199,18 @@ export async function retentionEnforcementWorker(): Promise<void> {
           );
 
         for (const deal of softDeletedDeals) {
+          const taskTitle = `Hard-delete approval required: deal "${deal.title}"`;
+          const [existingTask] = await db
+            .select({ id: taskInstancesTable.id })
+            .from(taskInstancesTable)
+            .where(and(eq(taskInstancesTable.orgId, org.id), eq(taskInstancesTable.title, taskTitle), eq(taskInstancesTable.status, "open")))
+            .limit(1);
+          if (existingTask) continue;
+
           await db.insert(taskInstancesTable).values({
             id: randomUUID(),
             orgId: org.id,
-            title: `Hard-delete approval required: deal "${deal.title}"`,
+            title: taskTitle,
             description: `Deal was soft-deleted and has now exceeded the ${policy.retentionDays}-day retention window. Approve permanent deletion via Admin > Compliance > Data Retention.`,
             status: "open",
             priority: "high",
