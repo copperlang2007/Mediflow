@@ -33,7 +33,8 @@ export type Resource =
   | "audit_log"
   | "storage"
   | "compliance_report"
-  | "retention_alert";
+  | "retention_alert"
+  | "dashboard";
 
 export type Action = "read" | "create" | "update" | "delete" | "admin";
 
@@ -157,6 +158,16 @@ const MATRIX: PermissionMatrix = {
   retention_alert: {
     read: ["super_admin", "agency_admin", "compliance_manager"],
     update: ["super_admin", "agency_admin", "compliance_manager"],
+  },
+  dashboard: {
+    read: [
+      "super_admin",
+      "agency_admin",
+      "compliance_manager",
+      "agent_support",
+      "viewer",
+      "agent",
+    ],
   },
 };
 

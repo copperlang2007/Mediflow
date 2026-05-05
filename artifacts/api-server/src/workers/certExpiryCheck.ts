@@ -15,6 +15,7 @@ import {
   notificationsTable,
 } from "@workspace/db";
 import { type CertExpiryCheckPayload } from "../lib/jobs";
+import { broadcastToUsers } from "../lib/sseManager";
 import { logger } from "../lib/logger";
 
 const ALERT_THRESHOLDS_DAYS = [90, 60, 30, 14, 7];
@@ -91,6 +92,10 @@ export async function certExpiryCheckWorker(
 
     if (notifInserts.length > 0) {
       await db.insert(notificationsTable).values(notifInserts).onConflictDoNothing();
+      broadcastToUsers(
+        notifInserts.map((n) => n.userId),
+        { type: "notification", resourceType: "certification", resourceId: cert.certId },
+      );
     }
   }
 

@@ -16,6 +16,7 @@ import {
 } from "@workspace/db";
 import { type LicenseExpiryCheckPayload, enqueue, JOB_NAMES } from "../lib/jobs";
 import { licenseExpiryEmailHtml } from "../lib/email";
+import { broadcastToUsers } from "../lib/sseManager";
 import { logger } from "../lib/logger";
 
 const ALERT_THRESHOLDS_DAYS = [90, 60, 30, 14, 7];
@@ -91,6 +92,10 @@ export async function licenseExpiryCheckWorker(
 
     if (notifInserts.length > 0) {
       await db.insert(notificationsTable).values(notifInserts).onConflictDoNothing();
+      broadcastToUsers(
+        notifInserts.map((n) => n.userId),
+        { type: "notification", resourceType: "license", resourceId: license.licenseId },
+      );
     }
 
     if (daysUntilExpiry <= 30 && license.agentEmail) {

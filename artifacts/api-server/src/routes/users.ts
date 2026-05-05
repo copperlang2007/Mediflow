@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, and } from "drizzle-orm";
+import { z } from "zod";
 import { db, usersTable } from "@workspace/db";
 import {
   requireAuth,
@@ -8,6 +9,11 @@ import {
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { type Role } from "../lib/permissions";
+
+const UpdateMeSchema = z.object({
+  fullName: z.string().min(1).max(100).optional(),
+  avatarUrl: z.string().url().optional(),
+});
 
 const VALID_ROLES: Role[] = [
   "super_admin",
@@ -48,10 +54,13 @@ router.patch(
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const { fullName, avatarUrl } = req.body as {
-      fullName?: string;
-      avatarUrl?: string;
-    };
+
+    const parsed = UpdateMeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
+      return;
+    }
+    const { fullName, avatarUrl } = parsed.data;
 
     const updates: Partial<typeof usersTable.$inferInsert> = {};
     if (fullName != null) updates.fullName = fullName;

@@ -1,9 +1,17 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { getAuth } from "@clerk/express";
 import { db, usersTable, organizationsTable } from "@workspace/db";
 import { randomUUID } from "crypto";
 import { logger } from "../lib/logger";
+
+const ProvisionSchema = z.object({
+  email: z.string().email(),
+  fullName: z.string().min(1).max(100),
+  orgName: z.string().min(1).max(100).optional(),
+  orgSlug: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/).optional(),
+});
 
 const router: IRouter = Router();
 
@@ -32,17 +40,13 @@ router.post("/auth/provision", async (req: Request, res: Response): Promise<void
     return;
   }
 
-  const { email, fullName, orgName, orgSlug } = req.body as {
-    email?: string;
-    fullName?: string;
-    orgName?: string;
-    orgSlug?: string;
-  };
-
-  if (!email || !fullName) {
-    res.status(400).json({ error: "email and fullName are required for provisioning" });
+  const bodyParsed = ProvisionSchema.safeParse(req.body);
+  if (!bodyParsed.success) {
+    res.status(400).json({ error: "Invalid request body", details: bodyParsed.error.issues });
     return;
   }
+
+  const { email, fullName, orgName, orgSlug } = bodyParsed.data;
 
   const orgId = randomUUID();
   const slug = orgSlug ?? orgName?.toLowerCase().replace(/[^a-z0-9]/g, "-") ?? orgId;

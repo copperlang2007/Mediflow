@@ -16,6 +16,7 @@ import {
 } from "@workspace/db";
 import { type AhipDeadlineCheckPayload, enqueue, JOB_NAMES } from "../lib/jobs";
 import { ahipReminderEmailHtml } from "../lib/email";
+import { broadcastToUsers } from "../lib/sseManager";
 import { logger } from "../lib/logger";
 
 export async function ahipReminderCheckWorker(
@@ -87,6 +88,10 @@ export async function ahipReminderCheckWorker(
 
     if (notifInserts.length > 0) {
       await db.insert(notificationsTable).values(notifInserts).onConflictDoNothing();
+      broadcastToUsers(
+        notifInserts.map((n) => n.userId),
+        { type: "notification", resourceType: "agent", resourceId: agent.id },
+      );
     }
 
     if (agent.email) {

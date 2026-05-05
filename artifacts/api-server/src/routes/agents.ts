@@ -36,6 +36,7 @@ const router: IRouter = Router();
 router.get(
   "/agents",
   requireAuth,
+  requireRole("agent", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { status, managerId, search, limit, offset } = req.query as {
@@ -147,6 +148,7 @@ router.post(
 router.get(
   "/agents/:id",
   requireAuth,
+  requireRole("agent", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -293,6 +295,7 @@ router.delete(
 router.get(
   "/agents/:id/compliance-score",
   requireAuth,
+  requireRole("agent", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

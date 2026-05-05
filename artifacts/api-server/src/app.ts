@@ -11,6 +11,7 @@ import {
   getClerkProxyHost,
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
+import webhooksRouter from "./routes/webhooks";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
@@ -112,6 +113,11 @@ app.use(
     ),
   })),
 );
+
+// Twilio inbound webhooks — mounted at root (not under /api) so Twilio can
+// reach them without API auth middleware. Signature validation is enforced
+// inside the handler itself.
+app.use(webhooksRouter);
 
 app.use("/api", router);
 

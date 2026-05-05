@@ -17,12 +17,14 @@ import {
   optOutsTable,
   messageThreadsTable,
   messagesTable,
+  agentsTable,
 } from "@workspace/db";
 import {
   validateTwilioWebhookSignature,
   classifyInboundMessage,
   type TwilioInboundPayload,
 } from "../lib/sms";
+import { broadcastToUser } from "../lib/sseManager";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -185,6 +187,23 @@ router.post(
           { contactId: contact.id, threadId: thread.id },
           "Inbound SMS stored",
         );
+
+        // Notify the assigned agent (if any) via SSE
+        if (contact.assignedAgentId) {
+          const [assignedAgent] = await db
+            .select({ userId: agentsTable.userId })
+            .from(agentsTable)
+            .where(eq(agentsTable.id, contact.assignedAgentId))
+            .limit(1);
+
+          if (assignedAgent?.userId) {
+            broadcastToUser(assignedAgent.userId, {
+              type: "inbound_sms",
+              threadId: thread.id,
+              contactId: contact.id,
+            });
+          }
+        }
       } else {
         logger.info({ from }, "Inbound SMS from unknown number — no contact found");
       }
