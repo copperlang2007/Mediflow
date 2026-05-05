@@ -200,6 +200,18 @@ router.get(
 
     if (!(await getAgentOrFail(agentId, authReq.orgId, res))) return;
 
+    // Verify :lid belongs to this agent (prevents IDOR — alert metadata from another agent)
+    const [license] = await db
+      .select({ id: stateLicensesTable.id })
+      .from(stateLicensesTable)
+      .where(and(eq(stateLicensesTable.id, licenseId), eq(stateLicensesTable.agentId, agentId)))
+      .limit(1);
+
+    if (!license) {
+      res.status(404).json({ error: "License not found" });
+      return;
+    }
+
     const alerts = await db
       .select()
       .from(licenseRenewalAlertsTable)

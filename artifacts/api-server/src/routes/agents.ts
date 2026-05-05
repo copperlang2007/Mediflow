@@ -464,12 +464,7 @@ router.get(
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
-    const cached = complianceScoreCache.get(raw);
-    if (cached && cached.expiresAt > Date.now()) {
-      res.json(cached.payload);
-      return;
-    }
-
+    // Validate org ownership FIRST — cache must never bypass authorization
     const [agent] = await db
       .select()
       .from(agentsTable)
@@ -478,6 +473,14 @@ router.get(
 
     if (!agent) {
       res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    // Cache keyed by orgId+agentId so cross-org collisions are impossible
+    const cacheKey = `${authReq.orgId}:${raw}`;
+    const cached = complianceScoreCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      res.json(cached.payload);
       return;
     }
 
@@ -569,7 +572,7 @@ router.get(
       onboardingTotalItems,
     };
 
-    complianceScoreCache.set(raw, { payload, expiresAt: Date.now() + COMPLIANCE_CACHE_TTL_MS });
+    complianceScoreCache.set(cacheKey, { payload, expiresAt: Date.now() + COMPLIANCE_CACHE_TTL_MS });
     res.json(payload);
   },
 );
