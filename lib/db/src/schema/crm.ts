@@ -7,6 +7,7 @@ import {
   jsonb,
   real,
   pgEnum,
+  index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -47,46 +48,53 @@ export const activityTypeEnum = pgEnum("activity_type", [
   "sequence_step",
 ]);
 
-export const contactsTable = pgTable("contacts", {
-  id: text("id").primaryKey(),
-  orgId: text("org_id")
-    .notNull()
-    .references(() => organizationsTable.id),
-  assignedAgentId: text("assigned_agent_id").references(() => agentsTable.id, {
-    onDelete: "set null",
-  }),
-  firstName: text("first_name").notNull(),
-  lastName: text("last_name").notNull(),
-  email: text("email"),
-  phone: text("phone"),
-  dob: timestamp("dob", { withTimezone: true }),
-  medicareId: text("medicare_id"),
-  currentPlanType: planTypeEnum("current_plan_type"),
-  currentCarrierId: text("current_carrier_id").references(
-    () => carriersTable.id,
-    { onDelete: "set null" }
-  ),
-  planYear: integer("plan_year"),
-  county: text("county"),
-  stateCode: text("state_code"),
-  zipCode: text("zip_code"),
-  preferredLanguage: text("preferred_language"),
-  pcpName: text("pcp_name"),
-  pcpNpi: text("pcp_npi"),
-  healthConditions: text("health_conditions").array(),
-  leadSource: text("lead_source"),
-  status: contactStatusEnum("status").notNull().default("lead"),
-  optOutSms: boolean("opt_out_sms").notNull().default(false),
-  optOutEmail: boolean("opt_out_email").notNull().default(false),
-  tags: text("tags").array(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow()
-    .$onUpdate(() => new Date()),
-});
+export const contactsTable = pgTable(
+  "contacts",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizationsTable.id),
+    assignedAgentId: text("assigned_agent_id").references(() => agentsTable.id, {
+      onDelete: "set null",
+    }),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name").notNull(),
+    email: text("email"),
+    phone: text("phone"),
+    dob: timestamp("dob", { withTimezone: true }),
+    medicareId: text("medicare_id"),
+    currentPlanType: planTypeEnum("current_plan_type"),
+    currentCarrierId: text("current_carrier_id").references(
+      () => carriersTable.id,
+      { onDelete: "set null" }
+    ),
+    planYear: integer("plan_year"),
+    county: text("county"),
+    stateCode: text("state_code"),
+    zipCode: text("zip_code"),
+    preferredLanguage: text("preferred_language"),
+    pcpName: text("pcp_name"),
+    pcpNpi: text("pcp_npi"),
+    healthConditions: text("health_conditions").array(),
+    leadSource: text("lead_source"),
+    status: contactStatusEnum("status").notNull().default("lead"),
+    optOutSms: boolean("opt_out_sms").notNull().default(false),
+    optOutEmail: boolean("opt_out_email").notNull().default(false),
+    tags: text("tags").array(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index("contacts_org_id_status_idx").on(t.orgId, t.status),
+    index("contacts_org_id_assigned_agent_idx").on(t.orgId, t.assignedAgentId),
+  ],
+);
 
 export const insertContactSchema = createInsertSchema(contactsTable).omit({
   createdAt: true,
@@ -95,30 +103,37 @@ export const insertContactSchema = createInsertSchema(contactsTable).omit({
 export type InsertContact = z.infer<typeof insertContactSchema>;
 export type Contact = typeof contactsTable.$inferSelect;
 
-export const leadsTable = pgTable("leads", {
-  id: text("id").primaryKey(),
-  orgId: text("org_id")
-    .notNull()
-    .references(() => organizationsTable.id),
-  contactId: text("contact_id")
-    .notNull()
-    .references(() => contactsTable.id, { onDelete: "cascade" }),
-  assignedAgentId: text("assigned_agent_id").references(() => agentsTable.id, {
-    onDelete: "set null",
-  }),
-  source: text("source"),
-  sourceDetail: text("source_detail"),
-  score: integer("score").notNull().default(0),
-  status: leadStatusEnum("status").notNull().default("new"),
-  convertedAt: timestamp("converted_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow()
-    .$onUpdate(() => new Date()),
-});
+export const leadsTable = pgTable(
+  "leads",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizationsTable.id),
+    contactId: text("contact_id")
+      .notNull()
+      .references(() => contactsTable.id, { onDelete: "cascade" }),
+    assignedAgentId: text("assigned_agent_id").references(() => agentsTable.id, {
+      onDelete: "set null",
+    }),
+    source: text("source"),
+    sourceDetail: text("source_detail"),
+    score: integer("score").notNull().default(0),
+    status: leadStatusEnum("status").notNull().default("new"),
+    convertedAt: timestamp("converted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index("leads_org_id_status_idx").on(t.orgId, t.status),
+    index("leads_org_id_assigned_agent_idx").on(t.orgId, t.assignedAgentId),
+  ],
+);
 
 export const insertLeadSchema = createInsertSchema(leadsTable).omit({
   createdAt: true,
@@ -214,27 +229,34 @@ export const dealStageHistoryTable = pgTable("deal_stage_history", {
 
 export type DealStageHistory = typeof dealStageHistoryTable.$inferSelect;
 
-export const activitiesTable = pgTable("activities", {
-  id: text("id").primaryKey(),
-  orgId: text("org_id")
-    .notNull()
-    .references(() => organizationsTable.id),
-  contactId: text("contact_id").references(() => contactsTable.id, {
-    onDelete: "set null",
-  }),
-  agentId: text("agent_id").references(() => agentsTable.id, {
-    onDelete: "set null",
-  }),
-  dealId: text("deal_id"),
-  taskId: text("task_id"),
-  type: activityTypeEnum("type").notNull(),
-  body: text("body"),
-  metadata: jsonb("metadata"),
-  createdBy: text("created_by"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const activitiesTable = pgTable(
+  "activities",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizationsTable.id),
+    contactId: text("contact_id").references(() => contactsTable.id, {
+      onDelete: "set null",
+    }),
+    agentId: text("agent_id").references(() => agentsTable.id, {
+      onDelete: "set null",
+    }),
+    dealId: text("deal_id"),
+    taskId: text("task_id"),
+    type: activityTypeEnum("type").notNull(),
+    body: text("body"),
+    metadata: jsonb("metadata"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("activities_org_id_created_at_idx").on(t.orgId, t.createdAt),
+    index("activities_contact_id_idx").on(t.contactId),
+  ],
+);
 
 export const insertActivitySchema = createInsertSchema(activitiesTable).omit({
   createdAt: true,

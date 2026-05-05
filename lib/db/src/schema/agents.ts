@@ -6,6 +6,7 @@ import {
   integer,
   pgEnum,
   real,
+  index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -41,31 +42,38 @@ export const techAccountStatusEnum = pgEnum("tech_account_status", [
   "deprovisioned",
 ]);
 
-export const agentsTable = pgTable("agents", {
-  id: text("id").primaryKey(),
-  orgId: text("org_id")
-    .notNull()
-    .references(() => organizationsTable.id),
-  userId: text("user_id"),
-  npn: text("npn"),
-  firstName: text("first_name").notNull(),
-  lastName: text("last_name").notNull(),
-  email: text("email").notNull(),
-  phone: text("phone"),
-  avatarUrl: text("avatar_url"),
-  status: agentStatusEnum("status").notNull().default("onboarding"),
-  hireDate: timestamp("hire_date", { withTimezone: true }),
-  offboardDate: timestamp("offboard_date", { withTimezone: true }),
-  managerId: text("manager_id"),
-  notes: text("notes"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow()
-    .$onUpdate(() => new Date()),
-});
+export const agentsTable = pgTable(
+  "agents",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizationsTable.id),
+    userId: text("user_id"),
+    npn: text("npn"),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone"),
+    avatarUrl: text("avatar_url"),
+    status: agentStatusEnum("status").notNull().default("onboarding"),
+    hireDate: timestamp("hire_date", { withTimezone: true }),
+    offboardDate: timestamp("offboard_date", { withTimezone: true }),
+    managerId: text("manager_id"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index("agents_org_id_idx").on(t.orgId),
+    index("agents_org_id_status_idx").on(t.orgId, t.status),
+  ],
+);
 
 export const insertAgentSchema = createInsertSchema(agentsTable).omit({
   createdAt: true,
@@ -74,27 +82,40 @@ export const insertAgentSchema = createInsertSchema(agentsTable).omit({
 export type InsertAgent = z.infer<typeof insertAgentSchema>;
 export type Agent = typeof agentsTable.$inferSelect;
 
-export const stateLicensesTable = pgTable("state_licenses", {
-  id: text("id").primaryKey(),
-  agentId: text("agent_id")
-    .notNull()
-    .references(() => agentsTable.id, { onDelete: "cascade" }),
-  stateCode: text("state_code").notNull(),
-  licenseType: text("license_type").notNull(),
-  licenseNumber: text("license_number"),
-  issueDate: timestamp("issue_date", { withTimezone: true }),
-  expiryDate: timestamp("expiry_date", { withTimezone: true }),
-  status: licenseStatusEnum("status").notNull().default("pending"),
-  renewalSubmittedAt: timestamp("renewal_submitted_at", { withTimezone: true }),
-  documentKey: text("document_key"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow()
-    .$onUpdate(() => new Date()),
-});
+export const stateLicensesTable = pgTable(
+  "state_licenses",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agentsTable.id, { onDelete: "cascade" }),
+    stateCode: text("state_code").notNull(),
+    licenseType: text("license_type").notNull(),
+    licenseNumber: text("license_number"),
+    issueDate: timestamp("issue_date", { withTimezone: true }),
+    expiryDate: timestamp("expiry_date", { withTimezone: true }),
+    status: licenseStatusEnum("status").notNull().default("pending"),
+    renewalSubmittedAt: timestamp("renewal_submitted_at", {
+      withTimezone: true,
+    }),
+    documentKey: text("document_key"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index("state_licenses_agent_id_idx").on(t.agentId),
+    index("state_licenses_agent_id_status_idx").on(t.agentId, t.status),
+    index("state_licenses_agent_id_expiry_date_idx").on(
+      t.agentId,
+      t.expiryDate,
+    ),
+  ],
+);
 
 export const insertStateLicenseSchema = createInsertSchema(
   stateLicensesTable
@@ -134,53 +155,70 @@ export const insertCarrierSchema = createInsertSchema(carriersTable).omit({
 export type InsertCarrier = z.infer<typeof insertCarrierSchema>;
 export type Carrier = typeof carriersTable.$inferSelect;
 
-export const carrierCertificationsTable = pgTable("carrier_certifications", {
-  id: text("id").primaryKey(),
-  agentId: text("agent_id")
-    .notNull()
-    .references(() => agentsTable.id, { onDelete: "cascade" }),
-  carrierId: text("carrier_id")
-    .notNull()
-    .references(() => carriersTable.id),
-  certificationYear: integer("certification_year").notNull(),
-  status: certStatusEnum("status").notNull().default("not_started"),
-  completedDate: timestamp("completed_date", { withTimezone: true }),
-  expiryDate: timestamp("expiry_date", { withTimezone: true }),
-  score: real("score"),
-  documentKey: text("document_key"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow()
-    .$onUpdate(() => new Date()),
-});
+export const carrierCertificationsTable = pgTable(
+  "carrier_certifications",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agentsTable.id, { onDelete: "cascade" }),
+    carrierId: text("carrier_id")
+      .notNull()
+      .references(() => carriersTable.id),
+    certificationYear: integer("certification_year").notNull(),
+    status: certStatusEnum("status").notNull().default("not_started"),
+    completedDate: timestamp("completed_date", { withTimezone: true }),
+    expiryDate: timestamp("expiry_date", { withTimezone: true }),
+    score: real("score"),
+    documentKey: text("document_key"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index("carrier_certs_agent_id_idx").on(t.agentId),
+    index("carrier_certs_agent_id_year_idx").on(t.agentId, t.certificationYear),
+  ],
+);
 
 export const insertCarrierCertSchema = createInsertSchema(
   carrierCertificationsTable
 ).omit({ createdAt: true, updatedAt: true });
 export type InsertCarrierCert = z.infer<typeof insertCarrierCertSchema>;
-export type CarrierCertification = typeof carrierCertificationsTable.$inferSelect;
+export type CarrierCertification =
+  typeof carrierCertificationsTable.$inferSelect;
 
-export const ahipRecordsTable = pgTable("ahip_records", {
-  id: text("id").primaryKey(),
-  agentId: text("agent_id")
-    .notNull()
-    .references(() => agentsTable.id, { onDelete: "cascade" }),
-  certificationYear: integer("certification_year").notNull(),
-  status: certStatusEnum("status").notNull().default("not_started"),
-  score: real("score"),
-  completedDate: timestamp("completed_date", { withTimezone: true }),
-  documentKey: text("document_key"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow()
-    .$onUpdate(() => new Date()),
-});
+export const ahipRecordsTable = pgTable(
+  "ahip_records",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agentsTable.id, { onDelete: "cascade" }),
+    certificationYear: integer("certification_year").notNull(),
+    status: certStatusEnum("status").notNull().default("not_started"),
+    score: real("score"),
+    completedDate: timestamp("completed_date", { withTimezone: true }),
+    documentKey: text("document_key"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index("ahip_records_agent_id_year_idx").on(
+      t.agentId,
+      t.certificationYear,
+    ),
+  ],
+);
 
 export const insertAhipRecordSchema = createInsertSchema(ahipRecordsTable).omit(
   { createdAt: true, updatedAt: true }

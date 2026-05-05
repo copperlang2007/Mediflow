@@ -6,6 +6,7 @@ import {
   integer,
   jsonb,
   pgEnum,
+  index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -67,33 +68,41 @@ export const taskTemplatesTable = pgTable("task_templates", {
 
 export type TaskTemplate = typeof taskTemplatesTable.$inferSelect;
 
-export const taskInstancesTable = pgTable("task_instances", {
-  id: text("id").primaryKey(),
-  orgId: text("org_id")
-    .notNull()
-    .references(() => organizationsTable.id),
-  templateId: text("template_id"),
-  agentId: text("agent_id").references(() => agentsTable.id, {
-    onDelete: "set null",
-  }),
-  contactId: text("contact_id"),
-  title: text("title").notNull(),
-  description: text("description"),
-  dueDate: timestamp("due_date", { withTimezone: true }),
-  assignedTo: text("assigned_to"),
-  assignedToUserId: text("assigned_to_user_id"),
-  status: taskStatusEnum("status").notNull().default("open"),
-  priority: taskPriorityEnum("priority").notNull().default("medium"),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-  createdBy: text("created_by"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow()
-    .$onUpdate(() => new Date()),
-});
+export const taskInstancesTable = pgTable(
+  "task_instances",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizationsTable.id),
+    templateId: text("template_id"),
+    agentId: text("agent_id").references(() => agentsTable.id, {
+      onDelete: "set null",
+    }),
+    contactId: text("contact_id"),
+    title: text("title").notNull(),
+    description: text("description"),
+    dueDate: timestamp("due_date", { withTimezone: true }),
+    assignedTo: text("assigned_to"),
+    assignedToUserId: text("assigned_to_user_id"),
+    status: taskStatusEnum("status").notNull().default("open"),
+    priority: taskPriorityEnum("priority").notNull().default("medium"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    index("task_instances_org_id_status_idx").on(t.orgId, t.status),
+    index("task_instances_org_id_due_date_idx").on(t.orgId, t.dueDate),
+    index("task_instances_assigned_to_user_idx").on(t.assignedToUserId),
+  ],
+);
 
 export const insertTaskInstanceSchema = createInsertSchema(
   taskInstancesTable

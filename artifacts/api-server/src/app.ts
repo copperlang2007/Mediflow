@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import helmet from "helmet";
@@ -112,12 +112,12 @@ const userLimiter = rateLimit({
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { keyGeneratorIpFallback: false },
   keyGenerator: (req) => {
     const { userId } = getAuth(req);
     if (userId) return `user:${userId}`;
     return req.ip ?? "unknown";
   },
-  skip: (req) => !req.headers.authorization && !req.cookies?.["__session"],
   message: { error: "Request rate limit exceeded." },
 });
 app.use("/api", userLimiter);
@@ -128,5 +128,20 @@ app.use("/api", userLimiter);
 app.use(webhooksRouter);
 
 app.use("/api", router);
+
+// Global typed error handler — must be registered last, after all routes.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err: unknown, req: Request, res: Response, _next: NextFunction): void => {
+  req.log.error({ err }, "Unhandled error");
+  const httpErr = err as { status?: number; statusCode?: number };
+  const status = httpErr.status ?? httpErr.statusCode ?? 500;
+  const message =
+    process.env.NODE_ENV === "production"
+      ? "Internal server error"
+      : err instanceof Error
+        ? err.message
+        : "Internal server error";
+  res.status(status).json({ error: message });
+});
 
 export default app;

@@ -1,0 +1,25 @@
+CREATE INDEX IF NOT EXISTS "users_org_id_idx" ON "users" ("org_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "users_org_id_role_idx" ON "users" ("org_id","role");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "users_org_id_is_active_idx" ON "users" ("org_id","is_active");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "audit_log_org_id_created_at_idx" ON "audit_log" ("org_id","created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "audit_log_org_id_user_id_idx" ON "audit_log" ("org_id","user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "audit_log_org_id_resource_type_idx" ON "audit_log" ("org_id","resource_type");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "agents_org_id_idx" ON "agents" ("org_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "agents_org_id_status_idx" ON "agents" ("org_id","status");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "state_licenses_agent_id_idx" ON "state_licenses" ("agent_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "state_licenses_agent_id_status_idx" ON "state_licenses" ("agent_id","status");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "state_licenses_agent_id_expiry_date_idx" ON "state_licenses" ("agent_id","expiry_date");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "carrier_certs_agent_id_idx" ON "carrier_certifications" ("agent_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "carrier_certs_agent_id_year_idx" ON "carrier_certifications" ("agent_id","certification_year");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "ahip_records_agent_id_year_idx" ON "ahip_records" ("agent_id","certification_year");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "task_instances_org_id_status_idx" ON "task_instances" ("org_id","status");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "task_instances_org_id_due_date_idx" ON "task_instances" ("org_id","due_date");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "task_instances_assigned_to_user_idx" ON "task_instances" ("assigned_to_user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "notifications_user_id_idx" ON "notifications" ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "notifications_user_id_read_at_idx" ON "notifications" ("user_id","read_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "contacts_org_id_status_idx" ON "contacts" ("org_id","status");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "contacts_org_id_assigned_agent_idx" ON "contacts" ("org_id","assigned_agent_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "leads_org_id_status_idx" ON "leads" ("org_id","status");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "leads_org_id_assigned_agent_idx" ON "leads" ("org_id","assigned_agent_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "activities_org_id_created_at_idx" ON "activities" ("org_id","created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "activities_contact_id_idx" ON "activities" ("contact_id");

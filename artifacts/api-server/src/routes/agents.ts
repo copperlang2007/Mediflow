@@ -12,7 +12,6 @@ import {
 import { z } from "zod";
 import {
   requireAuth,
-  requireRole,
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
@@ -46,7 +45,6 @@ const UpdateAgentSchema = z.object({
   avatarUrl: z.string().url().nullable().optional(),
 });
 
-// Valid agent status values matching the DB agentStatusEnum
 type AgentStatus = "onboarding" | "active" | "suspended" | "offboarding" | "offboarded";
 const VALID_AGENT_STATUSES: AgentStatus[] = [
   "onboarding",
@@ -62,9 +60,6 @@ function isAgentStatus(value: string): value is AgentStatus {
 
 const router: IRouter = Router();
 
-// Group-level PHI audit: logs every request (reads and writes) automatically.
-// Per-route audit middleware is intentionally absent; this single declaration
-// ensures no handler can accidentally skip audit logging.
 router.use(
   auditMiddleware("agent", undefined, {
     includeReads: true,
@@ -135,7 +130,7 @@ router.get(
 router.post(
   "/agents",
   requireAuth,
-  requireRole("super_admin", "agency_admin", "compliance_manager"),
+  requirePermission("agent", "create"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
 
@@ -238,7 +233,7 @@ router.get(
 router.patch(
   "/agents/:id",
   requireAuth,
-  requireRole("super_admin", "agency_admin", "compliance_manager"),
+  requirePermission("agent", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -291,7 +286,7 @@ router.patch(
 router.delete(
   "/agents/:id",
   requireAuth,
-  requireRole("super_admin", "agency_admin"),
+  requirePermission("agent", "delete"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

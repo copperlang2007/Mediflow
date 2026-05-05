@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { ClerkProvider, SignIn, SignUp, Show, useClerk } from "@clerk/react";
+import { ClerkProvider, SignIn, SignUp, Show, useClerk, useUser, useAuth } from "@clerk/react";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
 import { Switch, Route, useLocation, Router as WouterRouter, Redirect } from "wouter";
@@ -195,6 +195,51 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
+function ProvisionUser() {
+  const { user, isSignedIn } = useUser();
+  const { getToken } = useAuth();
+  const qc = useQueryClient();
+
+  useEffect(() => {
+    if (!isSignedIn || !user) return;
+
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const token = await getToken();
+        const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+        await fetch(`${base}/api/auth/provision`, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            email: user.primaryEmailAddress?.emailAddress ?? "",
+            fullName:
+              user.fullName ??
+              `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim(),
+          }),
+        });
+        if (!cancelled) {
+          void qc.invalidateQueries({ queryKey: ["users", "me"] });
+        }
+      } catch {
+        // will retry on the next sign-in
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSignedIn, user?.id]);
+
+  return null;
+}
+
 function ClerkQueryClientCacheInvalidator() {
   const { addListener } = useClerk();
   const qc = useQueryClient();
@@ -243,6 +288,7 @@ function ClerkProviderWithRoutes() {
     >
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
+          <ProvisionUser />
           <ClerkQueryClientCacheInvalidator />
           <ErrorBoundary>
             <Switch>

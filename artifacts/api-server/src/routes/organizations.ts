@@ -2,7 +2,11 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, organizationsTable } from "@workspace/db";
-import { requireAuth, requireRole, type AuthenticatedRequest } from "../middlewares/requireAuth";
+import {
+  requireAuth,
+  requirePermission,
+  type AuthenticatedRequest,
+} from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 
 const UpdateOrgSchema = z.object({
@@ -12,30 +16,34 @@ const UpdateOrgSchema = z.object({
 
 const router: IRouter = Router();
 
-// Group-level audit: covers all org reads and writes automatically.
 router.use(auditMiddleware("org", undefined, { includeReads: true }));
 
-router.get("/organizations/me", requireAuth, async (req: Request, res: Response): Promise<void> => {
-  const authReq = req as AuthenticatedRequest;
+router.get(
+  "/organizations/me",
+  requireAuth,
+  requirePermission("org", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
 
-  const [org] = await db
-    .select()
-    .from(organizationsTable)
-    .where(eq(organizationsTable.id, authReq.orgId))
-    .limit(1);
+    const [org] = await db
+      .select()
+      .from(organizationsTable)
+      .where(eq(organizationsTable.id, authReq.orgId))
+      .limit(1);
 
-  if (!org) {
-    res.status(404).json({ error: "Organization not found" });
-    return;
-  }
+    if (!org) {
+      res.status(404).json({ error: "Organization not found" });
+      return;
+    }
 
-  res.json(org);
-});
+    res.json(org);
+  },
+);
 
 router.patch(
   "/organizations/me",
   requireAuth,
-  requireRole("super_admin", "agency_admin"),
+  requirePermission("org", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
 
@@ -57,7 +65,7 @@ router.patch(
       .returning();
 
     res.json(org);
-  }
+  },
 );
 
 export default router;
