@@ -13692,3 +13692,96 @@ export const useAiComplianceReport = <
 > => {
   return useMutation(getAiComplianceReportMutationOptions(options));
 };
+
+/**
+ * @summary Download a stored compliance report PDF by document ID
+ */
+export const getGetComplianceReportDownloadUrl = (documentId: string) => {
+  return `/api/ai/compliance-report/${documentId}`;
+};
+
+export const getComplianceReportDownload = async (
+  documentId: string,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getGetComplianceReportDownloadUrl(documentId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetComplianceReportDownloadQueryKey = (documentId: string) => {
+  return [`/api/ai/compliance-report/${documentId}`] as const;
+};
+
+export const getGetComplianceReportDownloadQueryOptions = <
+  TData = Awaited<ReturnType<typeof getComplianceReportDownload>>,
+  TError = ErrorType<void | Error>,
+>(
+  documentId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getComplianceReportDownload>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetComplianceReportDownloadQueryKey(documentId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getComplianceReportDownload>>
+  > = ({ signal }) =>
+    getComplianceReportDownload(documentId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!documentId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getComplianceReportDownload>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetComplianceReportDownloadQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getComplianceReportDownload>>
+>;
+export type GetComplianceReportDownloadQueryError = ErrorType<void | Error>;
+
+/**
+ * @summary Download a stored compliance report PDF by document ID
+ */
+
+export function useGetComplianceReportDownload<
+  TData = Awaited<ReturnType<typeof getComplianceReportDownload>>,
+  TError = ErrorType<void | Error>,
+>(
+  documentId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getComplianceReportDownload>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetComplianceReportDownloadQueryOptions(
+    documentId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}

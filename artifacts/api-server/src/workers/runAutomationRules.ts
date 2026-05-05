@@ -21,6 +21,7 @@ import {
   notificationsTable,
   stateLicensesTable,
   carrierCertificationsTable,
+  sequenceEnrollmentsTable,
   taskInstancesTable,
   usersTable,
   agentsTable,
@@ -206,6 +207,30 @@ async function executeAction(
     case "enroll_sequence": {
       const { sequenceId } = action.config as { sequenceId: string };
       if (resourceType === "contact" && resourceId && sequenceId) {
+        // Create (or verify) an active enrollment record before scheduling the
+        // first step — sendSequenceStepWorker requires an active enrollment row.
+        const existing = await db
+          .select({ id: sequenceEnrollmentsTable.id })
+          .from(sequenceEnrollmentsTable)
+          .where(
+            and(
+              eq(sequenceEnrollmentsTable.sequenceId, sequenceId),
+              eq(sequenceEnrollmentsTable.contactId, resourceId),
+              eq(sequenceEnrollmentsTable.status, "active"),
+            ),
+          )
+          .limit(1);
+
+        if (!existing.length) {
+          await db.insert(sequenceEnrollmentsTable).values({
+            id: randomUUID(),
+            sequenceId,
+            contactId: resourceId,
+            status: "active",
+            nextStepIndex: 0,
+          });
+        }
+
         await enqueue(JOB_NAMES.SEND_SEQUENCE_STEP, {
           sequenceId,
           contactId: resourceId,

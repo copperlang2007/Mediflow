@@ -3175,6 +3175,27 @@ paths:
           content:
             text/event-stream: {}
 
+  /ai/compliance-report/{documentId}:
+    get:
+      operationId: getComplianceReportDownload
+      tags: [ai]
+      summary: Download a stored compliance report PDF by document ID
+      parameters:
+        - in: path
+          name: documentId
+          required: true
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect to signed download URL
+        "404":
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
 components:
   schemas:
     HealthStatus:

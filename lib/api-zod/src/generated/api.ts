@@ -3597,3 +3597,10 @@ export const AiDraftResponse = zod.object({
   subject: zod.string().optional(),
   aiAssisted: zod.boolean(),
 });
+
+/**
+ * @summary Download a stored compliance report PDF by document ID
+ */
+export const GetComplianceReportDownloadParams = zod.object({
+  documentId: zod.coerce.string(),
+});
