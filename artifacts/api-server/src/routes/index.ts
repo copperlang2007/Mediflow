@@ -8,6 +8,15 @@ import agentsRouter from "./agents";
 import notificationsRouter from "./notifications";
 import auditRouter from "./audit";
 import storageRouter from "./storage";
+import licensesRouter from "./licenses";
+import certificationsRouter from "./certifications";
+import ahipRouter from "./ahip";
+import carriersRouter from "./carriers";
+import checklistsRouter from "./checklists";
+import techstackRouter from "./techstack";
+import tasksRouter from "./tasks";
+import agentDocumentsRouter from "./agentDocuments";
+import renewalsRouter from "./renewals";
 
 const router: IRouter = Router();
 
@@ -20,5 +29,14 @@ router.use(agentsRouter);
 router.use(notificationsRouter);
 router.use(auditRouter);
 router.use(storageRouter);
+router.use(licensesRouter);
+router.use(certificationsRouter);
+router.use(ahipRouter);
+router.use(carriersRouter);
+router.use(checklistsRouter);
+router.use(techstackRouter);
+router.use(tasksRouter);
+router.use(agentDocumentsRouter);
+router.use(renewalsRouter);
 
 export default router;

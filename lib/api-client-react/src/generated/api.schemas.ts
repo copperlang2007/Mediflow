@@ -23,6 +23,8 @@ export const UserRole = {
   super_admin: "super_admin",
   agency_admin: "agency_admin",
   compliance_manager: "compliance_manager",
+  agent_support: "agent_support",
+  viewer: "viewer",
   agent: "agent",
 } as const;
 
@@ -53,6 +55,8 @@ export const UpdateUserRoleBodyRole = {
   super_admin: "super_admin",
   agency_admin: "agency_admin",
   compliance_manager: "compliance_manager",
+  agent_support: "agent_support",
+  viewer: "viewer",
   agent: "agent",
 } as const;
 
@@ -157,8 +161,6 @@ export interface Agent {
   managerId?: string | null;
   /** @nullable */
   notes?: string | null;
-  /** @nullable */
-  complianceScore?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -169,10 +171,7 @@ export type AgentDetail = Agent & {
   activeLicensesCount?: number;
   certificationsCount?: number;
   activeCertificationsCount?: number;
-  /**
-   * AHIP status for current year
-   * @nullable
-   */
+  /** @nullable */
   ahipCurrentYear?: string | null;
 };
 
@@ -219,6 +218,40 @@ export interface UpdateAgentBody {
   avatarUrl?: string;
 }
 
+export type ChecklistRunType =
+  (typeof ChecklistRunType)[keyof typeof ChecklistRunType];
+
+export const ChecklistRunType = {
+  onboarding: "onboarding",
+  offboarding: "offboarding",
+} as const;
+
+export type ChecklistRunStatus =
+  (typeof ChecklistRunStatus)[keyof typeof ChecklistRunStatus];
+
+export const ChecklistRunStatus = {
+  in_progress: "in_progress",
+  completed: "completed",
+} as const;
+
+export interface ChecklistRun {
+  id: string;
+  orgId: string;
+  agentId: string;
+  type: ChecklistRunType;
+  status: ChecklistRunStatus;
+  startedAt: string;
+  /** @nullable */
+  completedAt?: string | null;
+  /** @nullable */
+  completedBy?: string | null;
+}
+
+export interface OffboardResponse {
+  agent: Agent;
+  checklistRun: ChecklistRun;
+}
+
 export interface ComplianceScore {
   agentId: string;
   totalScore: number;
@@ -232,6 +265,582 @@ export interface ComplianceScore {
   totalCertifications: number;
   ahipCompleted: boolean;
   onboardingComplete: boolean;
+}
+
+export type StateLicenseStatus =
+  (typeof StateLicenseStatus)[keyof typeof StateLicenseStatus];
+
+export const StateLicenseStatus = {
+  active: "active",
+  pending: "pending",
+  expired: "expired",
+  suspended: "suspended",
+  not_appointed: "not_appointed",
+} as const;
+
+export interface StateLicense {
+  id: string;
+  agentId: string;
+  stateCode: string;
+  licenseType: string;
+  /** @nullable */
+  licenseNumber?: string | null;
+  /** @nullable */
+  issueDate?: string | null;
+  /** @nullable */
+  expiryDate?: string | null;
+  status: StateLicenseStatus;
+  /** @nullable */
+  renewalSubmittedAt?: string | null;
+  /** @nullable */
+  documentKey?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CreateLicenseBodyStatus =
+  (typeof CreateLicenseBodyStatus)[keyof typeof CreateLicenseBodyStatus];
+
+export const CreateLicenseBodyStatus = {
+  active: "active",
+  pending: "pending",
+  expired: "expired",
+  suspended: "suspended",
+  not_appointed: "not_appointed",
+} as const;
+
+export interface CreateLicenseBody {
+  stateCode: string;
+  licenseType: string;
+  licenseNumber?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  status?: CreateLicenseBodyStatus;
+}
+
+export type UpdateLicenseBodyStatus =
+  (typeof UpdateLicenseBodyStatus)[keyof typeof UpdateLicenseBodyStatus];
+
+export const UpdateLicenseBodyStatus = {
+  active: "active",
+  pending: "pending",
+  expired: "expired",
+  suspended: "suspended",
+  not_appointed: "not_appointed",
+} as const;
+
+export interface UpdateLicenseBody {
+  stateCode?: string;
+  licenseType?: string;
+  licenseNumber?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  status?: UpdateLicenseBodyStatus;
+  renewalSubmittedAt?: string;
+  documentKey?: string;
+}
+
+export interface Carrier {
+  id: string;
+  orgId: string;
+  name: string;
+  /** @nullable */
+  cmsContractNumber?: string | null;
+  /** @nullable */
+  logoUrl?: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface CreateCarrierBody {
+  name: string;
+  cmsContractNumber?: string;
+  logoUrl?: string;
+}
+
+export interface UpdateCarrierBody {
+  name?: string;
+  cmsContractNumber?: string;
+  logoUrl?: string;
+  isActive?: boolean;
+}
+
+export interface SeedCarriersResponse {
+  seeded: number;
+  carriers: Carrier[];
+}
+
+export type CarrierCertificationStatus =
+  (typeof CarrierCertificationStatus)[keyof typeof CarrierCertificationStatus];
+
+export const CarrierCertificationStatus = {
+  not_started: "not_started",
+  in_progress: "in_progress",
+  passed: "passed",
+  failed: "failed",
+  waived: "waived",
+} as const;
+
+export interface CarrierCertification {
+  id: string;
+  agentId: string;
+  carrierId: string;
+  carrierName: string;
+  certificationYear: number;
+  status: CarrierCertificationStatus;
+  /** @nullable */
+  completedDate?: string | null;
+  /** @nullable */
+  expiryDate?: string | null;
+  /** @nullable */
+  score?: number | null;
+  /** @nullable */
+  documentKey?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CreateCertificationBodyStatus =
+  (typeof CreateCertificationBodyStatus)[keyof typeof CreateCertificationBodyStatus];
+
+export const CreateCertificationBodyStatus = {
+  not_started: "not_started",
+  in_progress: "in_progress",
+  passed: "passed",
+  failed: "failed",
+  waived: "waived",
+} as const;
+
+export interface CreateCertificationBody {
+  carrierId: string;
+  certificationYear: number;
+  status?: CreateCertificationBodyStatus;
+  completedDate?: string;
+  expiryDate?: string;
+  score?: number;
+  documentKey?: string;
+}
+
+export type UpdateCertificationBodyStatus =
+  (typeof UpdateCertificationBodyStatus)[keyof typeof UpdateCertificationBodyStatus];
+
+export const UpdateCertificationBodyStatus = {
+  not_started: "not_started",
+  in_progress: "in_progress",
+  passed: "passed",
+  failed: "failed",
+  waived: "waived",
+} as const;
+
+export interface UpdateCertificationBody {
+  status?: UpdateCertificationBodyStatus;
+  completedDate?: string;
+  expiryDate?: string;
+  score?: number;
+  documentKey?: string;
+}
+
+export type CertificationMatrixAgentsItem = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  status: string;
+};
+
+export type CertificationMatrixCertMap = {
+  [key: string]: { [key: string]: string };
+};
+
+export interface CertificationMatrix {
+  year: number;
+  carriers: Carrier[];
+  agents: CertificationMatrixAgentsItem[];
+  certMap: CertificationMatrixCertMap;
+}
+
+export type AhipRecordStatus =
+  (typeof AhipRecordStatus)[keyof typeof AhipRecordStatus];
+
+export const AhipRecordStatus = {
+  not_started: "not_started",
+  in_progress: "in_progress",
+  passed: "passed",
+  failed: "failed",
+  waived: "waived",
+} as const;
+
+export interface AhipRecord {
+  id: string;
+  agentId: string;
+  certificationYear: number;
+  status: AhipRecordStatus;
+  /** @nullable */
+  score?: number | null;
+  /** @nullable */
+  completedDate?: string | null;
+  /** @nullable */
+  documentKey?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CreateAhipBodyStatus =
+  (typeof CreateAhipBodyStatus)[keyof typeof CreateAhipBodyStatus];
+
+export const CreateAhipBodyStatus = {
+  not_started: "not_started",
+  in_progress: "in_progress",
+  passed: "passed",
+  failed: "failed",
+  waived: "waived",
+} as const;
+
+export interface CreateAhipBody {
+  certificationYear: number;
+  status?: CreateAhipBodyStatus;
+  score?: number;
+  completedDate?: string;
+  documentKey?: string;
+}
+
+export type UpdateAhipBodyStatus =
+  (typeof UpdateAhipBodyStatus)[keyof typeof UpdateAhipBodyStatus];
+
+export const UpdateAhipBodyStatus = {
+  not_started: "not_started",
+  in_progress: "in_progress",
+  passed: "passed",
+  failed: "failed",
+  waived: "waived",
+} as const;
+
+export interface UpdateAhipBody {
+  status?: UpdateAhipBodyStatus;
+  score?: number;
+  completedDate?: string;
+  documentKey?: string;
+}
+
+export type AhipDashboardRecordsItem = {
+  agentId: string;
+  firstName: string;
+  lastName: string;
+  status: string;
+  /** @nullable */
+  score?: number | null;
+  /** @nullable */
+  completedDate?: string | null;
+};
+
+export interface AhipDashboard {
+  year: number;
+  totalActiveAgents: number;
+  passedCount: number;
+  completionRate: number;
+  records: AhipDashboardRecordsItem[];
+}
+
+export type ChecklistItemStatus =
+  (typeof ChecklistItemStatus)[keyof typeof ChecklistItemStatus];
+
+export const ChecklistItemStatus = {
+  pending: "pending",
+  completed: "completed",
+  skipped: "skipped",
+} as const;
+
+export interface ChecklistItem {
+  id: string;
+  runId: string;
+  title: string;
+  /** @nullable */
+  description?: string | null;
+  required: boolean;
+  orderIndex: number;
+  status: ChecklistItemStatus;
+  /** @nullable */
+  completedAt?: string | null;
+  /** @nullable */
+  completedByUserId?: string | null;
+  /** @nullable */
+  notes?: string | null;
+}
+
+export type ChecklistRunDetail = ChecklistRun & {
+  items: ChecklistItem[];
+};
+
+export type CreateChecklistBodyType =
+  (typeof CreateChecklistBodyType)[keyof typeof CreateChecklistBodyType];
+
+export const CreateChecklistBodyType = {
+  onboarding: "onboarding",
+  offboarding: "offboarding",
+} as const;
+
+export interface CreateChecklistBody {
+  type: CreateChecklistBodyType;
+}
+
+export type UpdateChecklistItemBodyStatus =
+  (typeof UpdateChecklistItemBodyStatus)[keyof typeof UpdateChecklistItemBodyStatus];
+
+export const UpdateChecklistItemBodyStatus = {
+  pending: "pending",
+  completed: "completed",
+  skipped: "skipped",
+} as const;
+
+export interface UpdateChecklistItemBody {
+  status: UpdateChecklistItemBodyStatus;
+  notes?: string;
+}
+
+export type TechStackAccountStatus =
+  (typeof TechStackAccountStatus)[keyof typeof TechStackAccountStatus];
+
+export const TechStackAccountStatus = {
+  provisioned: "provisioned",
+  pending: "pending",
+  deprovisioned: "deprovisioned",
+} as const;
+
+export interface TechStackAccount {
+  id: string;
+  agentId: string;
+  platformName: string;
+  /** @nullable */
+  platformCategory?: string | null;
+  status: TechStackAccountStatus;
+  /** @nullable */
+  accountIdentifier?: string | null;
+  /** @nullable */
+  provisionedAt?: string | null;
+  /** @nullable */
+  deprovisionedAt?: string | null;
+  /** @nullable */
+  notes?: string | null;
+}
+
+export type CreateTechStackAccountBodyStatus =
+  (typeof CreateTechStackAccountBodyStatus)[keyof typeof CreateTechStackAccountBodyStatus];
+
+export const CreateTechStackAccountBodyStatus = {
+  provisioned: "provisioned",
+  pending: "pending",
+  deprovisioned: "deprovisioned",
+} as const;
+
+export interface CreateTechStackAccountBody {
+  platformName: string;
+  platformCategory?: string;
+  status?: CreateTechStackAccountBodyStatus;
+  accountIdentifier?: string;
+  notes?: string;
+}
+
+export type UpdateTechStackAccountBodyStatus =
+  (typeof UpdateTechStackAccountBodyStatus)[keyof typeof UpdateTechStackAccountBodyStatus];
+
+export const UpdateTechStackAccountBodyStatus = {
+  provisioned: "provisioned",
+  pending: "pending",
+  deprovisioned: "deprovisioned",
+} as const;
+
+export interface UpdateTechStackAccountBody {
+  status?: UpdateTechStackAccountBodyStatus;
+  accountIdentifier?: string;
+  notes?: string;
+}
+
+export interface PlatformRequirement {
+  id: string;
+  orgId: string;
+  platformName: string;
+  /** @nullable */
+  platformCategory?: string | null;
+  isRequired: boolean;
+  onboardingOrder: number;
+}
+
+export interface CreatePlatformRequirementBody {
+  platformName: string;
+  platformCategory?: string;
+  isRequired?: boolean;
+  onboardingOrder?: number;
+}
+
+export interface UpdatePlatformRequirementBody {
+  platformName?: string;
+  platformCategory?: string;
+  isRequired?: boolean;
+  onboardingOrder?: number;
+}
+
+export type TaskStatus = (typeof TaskStatus)[keyof typeof TaskStatus];
+
+export const TaskStatus = {
+  open: "open",
+  in_progress: "in_progress",
+  completed: "completed",
+  cancelled: "cancelled",
+} as const;
+
+export type TaskPriority = (typeof TaskPriority)[keyof typeof TaskPriority];
+
+export const TaskPriority = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  urgent: "urgent",
+} as const;
+
+export interface Task {
+  id: string;
+  orgId: string;
+  /** @nullable */
+  templateId?: string | null;
+  /** @nullable */
+  agentId?: string | null;
+  /** @nullable */
+  contactId?: string | null;
+  title: string;
+  /** @nullable */
+  description?: string | null;
+  /** @nullable */
+  dueDate?: string | null;
+  /** @nullable */
+  assignedTo?: string | null;
+  /** @nullable */
+  assignedToUserId?: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  /** @nullable */
+  completedAt?: string | null;
+  /** @nullable */
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskListResponse {
+  tasks: Task[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export type CreateTaskBodyPriority =
+  (typeof CreateTaskBodyPriority)[keyof typeof CreateTaskBodyPriority];
+
+export const CreateTaskBodyPriority = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  urgent: "urgent",
+} as const;
+
+export interface CreateTaskBody {
+  agentId?: string;
+  contactId?: string;
+  title: string;
+  description?: string;
+  dueDate?: string;
+  assignedTo?: string;
+  assignedToUserId?: string;
+  priority?: CreateTaskBodyPriority;
+  templateId?: string;
+}
+
+export type UpdateTaskBodyStatus =
+  (typeof UpdateTaskBodyStatus)[keyof typeof UpdateTaskBodyStatus];
+
+export const UpdateTaskBodyStatus = {
+  open: "open",
+  in_progress: "in_progress",
+  completed: "completed",
+  cancelled: "cancelled",
+} as const;
+
+export type UpdateTaskBodyPriority =
+  (typeof UpdateTaskBodyPriority)[keyof typeof UpdateTaskBodyPriority];
+
+export const UpdateTaskBodyPriority = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  urgent: "urgent",
+} as const;
+
+export interface UpdateTaskBody {
+  title?: string;
+  description?: string;
+  dueDate?: string;
+  assignedTo?: string;
+  assignedToUserId?: string;
+  status?: UpdateTaskBodyStatus;
+  priority?: UpdateTaskBodyPriority;
+}
+
+export interface AgentDocument {
+  id: string;
+  orgId: string;
+  /** @nullable */
+  agentId?: string | null;
+  name: string;
+  category: string;
+  storageKey: string;
+  /** @nullable */
+  fileSizeBytes?: number | null;
+  /** @nullable */
+  mimeType?: string | null;
+  /** @nullable */
+  uploadedBy?: string | null;
+  createdAt: string;
+}
+
+export interface CreateDocumentBody {
+  name: string;
+  category?: string;
+  storageKey: string;
+  fileSizeBytes?: number;
+  mimeType?: string;
+}
+
+export type RenewalItemType =
+  (typeof RenewalItemType)[keyof typeof RenewalItemType];
+
+export const RenewalItemType = {
+  license: "license",
+  certification: "certification",
+} as const;
+
+export type RenewalItemUrgency =
+  (typeof RenewalItemUrgency)[keyof typeof RenewalItemUrgency];
+
+export const RenewalItemUrgency = {
+  critical: "critical",
+  warning: "warning",
+  notice: "notice",
+} as const;
+
+export interface RenewalItem {
+  id: string;
+  agentId: string;
+  agentName: string;
+  type: RenewalItemType;
+  detail: string;
+  expiryDate: string;
+  status: string;
+  daysUntilExpiry: number;
+  urgency: RenewalItemUrgency;
+}
+
+export interface RenewalsResponse {
+  renewals: RenewalItem[];
+  total: number;
+  daysAhead: number;
 }
 
 export type NotificationMetadata = { [key: string]: unknown };
@@ -312,6 +921,26 @@ export type GetAgentsParams = {
   search?: string;
   limit?: number;
   offset?: number;
+};
+
+export type GetCertificationMatrixParams = {
+  year?: number;
+};
+
+export type GetAhipDashboardParams = {
+  year?: number;
+};
+
+export type GetTasksParams = {
+  status?: string;
+  agentId?: string;
+  assignedToUserId?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type GetRenewalsParams = {
+  days?: number;
 };
 
 export type GetNotificationsParams = {

@@ -17,6 +17,7 @@ import {
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { randomUUID } from "crypto";
+import { createChecklistRun } from "./checklists";
 
 const CreateAgentSchema = z.object({
   firstName: z.string().min(1).max(100),
@@ -109,7 +110,7 @@ router.get(
         .select()
         .from(agentsTable)
         .where(and(...conditions))
-        .orderBy(agentsTable.createdAt)
+        .orderBy(agentsTable.lastName, agentsTable.firstName)
         .limit(limitNum)
         .offset(offsetNum),
       db
@@ -158,6 +159,12 @@ router.post(
         status: "onboarding",
       })
       .returning();
+
+    createChecklistRun(authReq.orgId, agent!.id, "onboarding", authReq.userId).catch(
+      (err: unknown) => {
+        req.log?.warn({ err }, "Failed to auto-create onboarding checklist");
+      },
+    );
 
     res.status(201).json(agent);
   },
@@ -302,6 +309,42 @@ router.delete(
     }
 
     res.sendStatus(204);
+  },
+);
+
+router.post(
+  "/agents/:id/offboard",
+  requireAuth,
+  requirePermission("agent", "update"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+    const [agent] = await db
+      .select()
+      .from(agentsTable)
+      .where(and(eq(agentsTable.id, raw), eq(agentsTable.orgId, authReq.orgId)))
+      .limit(1);
+
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    if (agent.status === "offboarded") {
+      res.status(409).json({ error: "Agent is already offboarded" });
+      return;
+    }
+
+    const [updated] = await db
+      .update(agentsTable)
+      .set({ status: "offboarding", offboardDate: new Date() })
+      .where(eq(agentsTable.id, raw))
+      .returning();
+
+    const run = await createChecklistRun(authReq.orgId, raw, "offboarding", authReq.userId);
+
+    res.json({ agent: updated, checklistRun: run });
   },
 );
 

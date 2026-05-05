@@ -8,7 +8,6 @@
 import * as zod from "zod";
 
 /**
- * Returns server health status
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
@@ -27,6 +26,8 @@ export const GetMeResponse = zod.object({
     "super_admin",
     "agency_admin",
     "compliance_manager",
+    "agent_support",
+    "viewer",
     "agent",
   ]),
   avatarUrl: zod.string().nullish(),
@@ -53,6 +54,8 @@ export const UpdateMeResponse = zod.object({
     "super_admin",
     "agency_admin",
     "compliance_manager",
+    "agent_support",
+    "viewer",
     "agent",
   ]),
   avatarUrl: zod.string().nullish(),
@@ -79,6 +82,8 @@ export const GetUsersResponseItem = zod.object({
     "super_admin",
     "agency_admin",
     "compliance_manager",
+    "agent_support",
+    "viewer",
     "agent",
   ]),
   avatarUrl: zod.string().nullish(),
@@ -101,6 +106,8 @@ export const UpdateUserRoleBody = zod.object({
     "super_admin",
     "agency_admin",
     "compliance_manager",
+    "agent_support",
+    "viewer",
     "agent",
   ]),
 });
@@ -114,6 +121,8 @@ export const UpdateUserRoleResponse = zod.object({
     "super_admin",
     "agency_admin",
     "compliance_manager",
+    "agent_support",
+    "viewer",
     "agent",
   ]),
   avatarUrl: zod.string().nullish(),
@@ -246,7 +255,6 @@ export const GetAgentsResponse = zod.object({
       offboardDate: zod.coerce.date().nullish(),
       managerId: zod.string().nullish(),
       notes: zod.string().nullish(),
-      complianceScore: zod.number().nullish(),
       createdAt: zod.coerce.date(),
       updatedAt: zod.coerce.date(),
     }),
@@ -299,7 +307,6 @@ export const GetAgentResponse = zod
     offboardDate: zod.coerce.date().nullish(),
     managerId: zod.string().nullish(),
     notes: zod.string().nullish(),
-    complianceScore: zod.number().nullish(),
     createdAt: zod.coerce.date(),
     updatedAt: zod.coerce.date(),
   })
@@ -315,6 +322,8 @@ export const GetAgentResponse = zod
             "super_admin",
             "agency_admin",
             "compliance_manager",
+            "agent_support",
+            "viewer",
             "agent",
           ]),
           avatarUrl: zod.string().nullish(),
@@ -328,10 +337,7 @@ export const GetAgentResponse = zod
       activeLicensesCount: zod.number().optional(),
       certificationsCount: zod.number().optional(),
       activeCertificationsCount: zod.number().optional(),
-      ahipCurrentYear: zod
-        .string()
-        .nullish()
-        .describe("AHIP status for current year"),
+      ahipCurrentYear: zod.string().nullish(),
     }),
   );
 
@@ -379,7 +385,6 @@ export const UpdateAgentResponse = zod.object({
   offboardDate: zod.coerce.date().nullish(),
   managerId: zod.string().nullish(),
   notes: zod.string().nullish(),
-  complianceScore: zod.number().nullish(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -411,6 +416,862 @@ export const GetAgentComplianceScoreResponse = zod.object({
   totalCertifications: zod.number(),
   ahipCompleted: zod.boolean(),
   onboardingComplete: zod.boolean(),
+});
+
+/**
+ * @summary Trigger agent offboarding
+ */
+export const OffboardAgentParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const OffboardAgentResponse = zod.object({
+  agent: zod.object({
+    id: zod.string(),
+    orgId: zod.string(),
+    userId: zod.string().nullish(),
+    npn: zod.string().nullish(),
+    firstName: zod.string(),
+    lastName: zod.string(),
+    email: zod.string(),
+    phone: zod.string().nullish(),
+    avatarUrl: zod.string().nullish(),
+    status: zod.enum([
+      "onboarding",
+      "active",
+      "suspended",
+      "offboarding",
+      "offboarded",
+    ]),
+    hireDate: zod.coerce.date().nullish(),
+    offboardDate: zod.coerce.date().nullish(),
+    managerId: zod.string().nullish(),
+    notes: zod.string().nullish(),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  }),
+  checklistRun: zod.object({
+    id: zod.string(),
+    orgId: zod.string(),
+    agentId: zod.string(),
+    type: zod.enum(["onboarding", "offboarding"]),
+    status: zod.enum(["in_progress", "completed"]),
+    startedAt: zod.coerce.date(),
+    completedAt: zod.coerce.date().nullish(),
+    completedBy: zod.string().nullish(),
+  }),
+});
+
+/**
+ * @summary List licenses for an agent
+ */
+export const GetAgentLicensesParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetAgentLicensesResponseItem = zod.object({
+  id: zod.string(),
+  agentId: zod.string(),
+  stateCode: zod.string(),
+  licenseType: zod.string(),
+  licenseNumber: zod.string().nullish(),
+  issueDate: zod.coerce.date().nullish(),
+  expiryDate: zod.coerce.date().nullish(),
+  status: zod.enum([
+    "active",
+    "pending",
+    "expired",
+    "suspended",
+    "not_appointed",
+  ]),
+  renewalSubmittedAt: zod.coerce.date().nullish(),
+  documentKey: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const GetAgentLicensesResponse = zod.array(GetAgentLicensesResponseItem);
+
+/**
+ * @summary Add a state license to an agent
+ */
+export const CreateAgentLicenseParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const CreateAgentLicenseBody = zod.object({
+  stateCode: zod.string(),
+  licenseType: zod.string(),
+  licenseNumber: zod.string().optional(),
+  issueDate: zod.coerce.date().optional(),
+  expiryDate: zod.coerce.date().optional(),
+  status: zod
+    .enum(["active", "pending", "expired", "suspended", "not_appointed"])
+    .optional(),
+});
+
+/**
+ * @summary Update a state license
+ */
+export const UpdateAgentLicenseParams = zod.object({
+  id: zod.coerce.string(),
+  lid: zod.coerce.string(),
+});
+
+export const UpdateAgentLicenseBody = zod.object({
+  stateCode: zod.string().optional(),
+  licenseType: zod.string().optional(),
+  licenseNumber: zod.string().optional(),
+  issueDate: zod.coerce.date().optional(),
+  expiryDate: zod.coerce.date().optional(),
+  status: zod
+    .enum(["active", "pending", "expired", "suspended", "not_appointed"])
+    .optional(),
+  renewalSubmittedAt: zod.coerce.date().optional(),
+  documentKey: zod.string().optional(),
+});
+
+export const UpdateAgentLicenseResponse = zod.object({
+  id: zod.string(),
+  agentId: zod.string(),
+  stateCode: zod.string(),
+  licenseType: zod.string(),
+  licenseNumber: zod.string().nullish(),
+  issueDate: zod.coerce.date().nullish(),
+  expiryDate: zod.coerce.date().nullish(),
+  status: zod.enum([
+    "active",
+    "pending",
+    "expired",
+    "suspended",
+    "not_appointed",
+  ]),
+  renewalSubmittedAt: zod.coerce.date().nullish(),
+  documentKey: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete a state license
+ */
+export const DeleteAgentLicenseParams = zod.object({
+  id: zod.coerce.string(),
+  lid: zod.coerce.string(),
+});
+
+/**
+ * @summary List carrier certifications for an agent
+ */
+export const GetAgentCertificationsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetAgentCertificationsResponseItem = zod.object({
+  id: zod.string(),
+  agentId: zod.string(),
+  carrierId: zod.string(),
+  carrierName: zod.string(),
+  certificationYear: zod.number(),
+  status: zod.enum([
+    "not_started",
+    "in_progress",
+    "passed",
+    "failed",
+    "waived",
+  ]),
+  completedDate: zod.coerce.date().nullish(),
+  expiryDate: zod.coerce.date().nullish(),
+  score: zod.number().nullish(),
+  documentKey: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const GetAgentCertificationsResponse = zod.array(
+  GetAgentCertificationsResponseItem,
+);
+
+/**
+ * @summary Add a carrier certification
+ */
+export const CreateAgentCertificationParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const CreateAgentCertificationBody = zod.object({
+  carrierId: zod.string(),
+  certificationYear: zod.number(),
+  status: zod
+    .enum(["not_started", "in_progress", "passed", "failed", "waived"])
+    .optional(),
+  completedDate: zod.coerce.date().optional(),
+  expiryDate: zod.coerce.date().optional(),
+  score: zod.number().optional(),
+  documentKey: zod.string().optional(),
+});
+
+/**
+ * @summary Update a carrier certification
+ */
+export const UpdateAgentCertificationParams = zod.object({
+  id: zod.coerce.string(),
+  cid: zod.coerce.string(),
+});
+
+export const UpdateAgentCertificationBody = zod.object({
+  status: zod
+    .enum(["not_started", "in_progress", "passed", "failed", "waived"])
+    .optional(),
+  completedDate: zod.coerce.date().optional(),
+  expiryDate: zod.coerce.date().optional(),
+  score: zod.number().optional(),
+  documentKey: zod.string().optional(),
+});
+
+export const UpdateAgentCertificationResponse = zod.object({
+  id: zod.string(),
+  agentId: zod.string(),
+  carrierId: zod.string(),
+  carrierName: zod.string(),
+  certificationYear: zod.number(),
+  status: zod.enum([
+    "not_started",
+    "in_progress",
+    "passed",
+    "failed",
+    "waived",
+  ]),
+  completedDate: zod.coerce.date().nullish(),
+  expiryDate: zod.coerce.date().nullish(),
+  score: zod.number().nullish(),
+  documentKey: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete a carrier certification
+ */
+export const DeleteAgentCertificationParams = zod.object({
+  id: zod.coerce.string(),
+  cid: zod.coerce.string(),
+});
+
+/**
+ * @summary Get agency-wide certification matrix
+ */
+export const GetCertificationMatrixQueryParams = zod.object({
+  year: zod.coerce.number().optional(),
+});
+
+export const GetCertificationMatrixResponse = zod.object({
+  year: zod.number(),
+  carriers: zod.array(
+    zod.object({
+      id: zod.string(),
+      orgId: zod.string(),
+      name: zod.string(),
+      cmsContractNumber: zod.string().nullish(),
+      logoUrl: zod.string().nullish(),
+      isActive: zod.boolean(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+  agents: zod.array(
+    zod.object({
+      id: zod.string(),
+      firstName: zod.string(),
+      lastName: zod.string(),
+      status: zod.string(),
+    }),
+  ),
+  certMap: zod.record(zod.string(), zod.record(zod.string(), zod.string())),
+});
+
+/**
+ * @summary List AHIP records for an agent
+ */
+export const GetAgentAhipParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetAgentAhipResponseItem = zod.object({
+  id: zod.string(),
+  agentId: zod.string(),
+  certificationYear: zod.number(),
+  status: zod.enum([
+    "not_started",
+    "in_progress",
+    "passed",
+    "failed",
+    "waived",
+  ]),
+  score: zod.number().nullish(),
+  completedDate: zod.coerce.date().nullish(),
+  documentKey: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const GetAgentAhipResponse = zod.array(GetAgentAhipResponseItem);
+
+/**
+ * @summary Create an AHIP record for an agent
+ */
+export const CreateAgentAhipParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const CreateAgentAhipBody = zod.object({
+  certificationYear: zod.number(),
+  status: zod
+    .enum(["not_started", "in_progress", "passed", "failed", "waived"])
+    .optional(),
+  score: zod.number().optional(),
+  completedDate: zod.coerce.date().optional(),
+  documentKey: zod.string().optional(),
+});
+
+/**
+ * @summary Update an AHIP record
+ */
+export const UpdateAgentAhipParams = zod.object({
+  id: zod.coerce.string(),
+  aid: zod.coerce.string(),
+});
+
+export const UpdateAgentAhipBody = zod.object({
+  status: zod
+    .enum(["not_started", "in_progress", "passed", "failed", "waived"])
+    .optional(),
+  score: zod.number().optional(),
+  completedDate: zod.coerce.date().optional(),
+  documentKey: zod.string().optional(),
+});
+
+export const UpdateAgentAhipResponse = zod.object({
+  id: zod.string(),
+  agentId: zod.string(),
+  certificationYear: zod.number(),
+  status: zod.enum([
+    "not_started",
+    "in_progress",
+    "passed",
+    "failed",
+    "waived",
+  ]),
+  score: zod.number().nullish(),
+  completedDate: zod.coerce.date().nullish(),
+  documentKey: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Get agency-wide AHIP completion dashboard
+ */
+export const GetAhipDashboardQueryParams = zod.object({
+  year: zod.coerce.number().optional(),
+});
+
+export const GetAhipDashboardResponse = zod.object({
+  year: zod.number(),
+  totalActiveAgents: zod.number(),
+  passedCount: zod.number(),
+  completionRate: zod.number(),
+  records: zod.array(
+    zod.object({
+      agentId: zod.string(),
+      firstName: zod.string(),
+      lastName: zod.string(),
+      status: zod.string(),
+      score: zod.number().nullish(),
+      completedDate: zod.coerce.date().nullish(),
+    }),
+  ),
+});
+
+/**
+ * @summary List carriers for the organization
+ */
+export const GetCarriersResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  cmsContractNumber: zod.string().nullish(),
+  logoUrl: zod.string().nullish(),
+  isActive: zod.boolean(),
+  createdAt: zod.coerce.date(),
+});
+export const GetCarriersResponse = zod.array(GetCarriersResponseItem);
+
+/**
+ * @summary Create a carrier
+ */
+export const CreateCarrierBody = zod.object({
+  name: zod.string(),
+  cmsContractNumber: zod.string().optional(),
+  logoUrl: zod.string().optional(),
+});
+
+/**
+ * @summary Seed default Medicare carriers
+ */
+export const SeedCarriersResponse = zod.object({
+  seeded: zod.number(),
+  carriers: zod.array(
+    zod.object({
+      id: zod.string(),
+      orgId: zod.string(),
+      name: zod.string(),
+      cmsContractNumber: zod.string().nullish(),
+      logoUrl: zod.string().nullish(),
+      isActive: zod.boolean(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary Update a carrier
+ */
+export const UpdateCarrierParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateCarrierBody = zod.object({
+  name: zod.string().optional(),
+  cmsContractNumber: zod.string().optional(),
+  logoUrl: zod.string().optional(),
+  isActive: zod.boolean().optional(),
+});
+
+export const UpdateCarrierResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  cmsContractNumber: zod.string().nullish(),
+  logoUrl: zod.string().nullish(),
+  isActive: zod.boolean(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete a carrier
+ */
+export const DeleteCarrierParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary List checklist runs for an agent
+ */
+export const GetAgentChecklistsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetAgentChecklistsResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  agentId: zod.string(),
+  type: zod.enum(["onboarding", "offboarding"]),
+  status: zod.enum(["in_progress", "completed"]),
+  startedAt: zod.coerce.date(),
+  completedAt: zod.coerce.date().nullish(),
+  completedBy: zod.string().nullish(),
+});
+export const GetAgentChecklistsResponse = zod.array(
+  GetAgentChecklistsResponseItem,
+);
+
+/**
+ * @summary Start a checklist run for an agent
+ */
+export const CreateAgentChecklistParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const CreateAgentChecklistBody = zod.object({
+  type: zod.enum(["onboarding", "offboarding"]),
+});
+
+/**
+ * @summary Get a checklist run with its items
+ */
+export const GetAgentChecklistParams = zod.object({
+  id: zod.coerce.string(),
+  runId: zod.coerce.string(),
+});
+
+export const GetAgentChecklistResponse = zod
+  .object({
+    id: zod.string(),
+    orgId: zod.string(),
+    agentId: zod.string(),
+    type: zod.enum(["onboarding", "offboarding"]),
+    status: zod.enum(["in_progress", "completed"]),
+    startedAt: zod.coerce.date(),
+    completedAt: zod.coerce.date().nullish(),
+    completedBy: zod.string().nullish(),
+  })
+  .and(
+    zod.object({
+      items: zod.array(
+        zod.object({
+          id: zod.string(),
+          runId: zod.string(),
+          title: zod.string(),
+          description: zod.string().nullish(),
+          required: zod.boolean(),
+          orderIndex: zod.number(),
+          status: zod.enum(["pending", "completed", "skipped"]),
+          completedAt: zod.coerce.date().nullish(),
+          completedByUserId: zod.string().nullish(),
+          notes: zod.string().nullish(),
+        }),
+      ),
+    }),
+  );
+
+/**
+ * @summary Update a checklist item status
+ */
+export const UpdateChecklistItemParams = zod.object({
+  runId: zod.coerce.string(),
+  itemId: zod.coerce.string(),
+});
+
+export const UpdateChecklistItemBody = zod.object({
+  status: zod.enum(["pending", "completed", "skipped"]),
+  notes: zod.string().optional(),
+});
+
+export const UpdateChecklistItemResponse = zod.object({
+  id: zod.string(),
+  runId: zod.string(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  required: zod.boolean(),
+  orderIndex: zod.number(),
+  status: zod.enum(["pending", "completed", "skipped"]),
+  completedAt: zod.coerce.date().nullish(),
+  completedByUserId: zod.string().nullish(),
+  notes: zod.string().nullish(),
+});
+
+/**
+ * @summary List tech stack accounts for an agent
+ */
+export const GetAgentTechStackParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetAgentTechStackResponseItem = zod.object({
+  id: zod.string(),
+  agentId: zod.string(),
+  platformName: zod.string(),
+  platformCategory: zod.string().nullish(),
+  status: zod.enum(["provisioned", "pending", "deprovisioned"]),
+  accountIdentifier: zod.string().nullish(),
+  provisionedAt: zod.coerce.date().nullish(),
+  deprovisionedAt: zod.coerce.date().nullish(),
+  notes: zod.string().nullish(),
+});
+export const GetAgentTechStackResponse = zod.array(
+  GetAgentTechStackResponseItem,
+);
+
+/**
+ * @summary Add a tech stack account to an agent
+ */
+export const CreateAgentTechStackAccountParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const CreateAgentTechStackAccountBody = zod.object({
+  platformName: zod.string(),
+  platformCategory: zod.string().optional(),
+  status: zod.enum(["provisioned", "pending", "deprovisioned"]).optional(),
+  accountIdentifier: zod.string().optional(),
+  notes: zod.string().optional(),
+});
+
+/**
+ * @summary Update a tech stack account
+ */
+export const UpdateAgentTechStackAccountParams = zod.object({
+  id: zod.coerce.string(),
+  aid: zod.coerce.string(),
+});
+
+export const UpdateAgentTechStackAccountBody = zod.object({
+  status: zod.enum(["provisioned", "pending", "deprovisioned"]).optional(),
+  accountIdentifier: zod.string().optional(),
+  notes: zod.string().optional(),
+});
+
+export const UpdateAgentTechStackAccountResponse = zod.object({
+  id: zod.string(),
+  agentId: zod.string(),
+  platformName: zod.string(),
+  platformCategory: zod.string().nullish(),
+  status: zod.enum(["provisioned", "pending", "deprovisioned"]),
+  accountIdentifier: zod.string().nullish(),
+  provisionedAt: zod.coerce.date().nullish(),
+  deprovisionedAt: zod.coerce.date().nullish(),
+  notes: zod.string().nullish(),
+});
+
+/**
+ * @summary List platform requirements
+ */
+export const GetPlatformRequirementsResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  platformName: zod.string(),
+  platformCategory: zod.string().nullish(),
+  isRequired: zod.boolean(),
+  onboardingOrder: zod.number(),
+});
+export const GetPlatformRequirementsResponse = zod.array(
+  GetPlatformRequirementsResponseItem,
+);
+
+/**
+ * @summary Create a platform requirement
+ */
+export const CreatePlatformRequirementBody = zod.object({
+  platformName: zod.string(),
+  platformCategory: zod.string().optional(),
+  isRequired: zod.boolean().optional(),
+  onboardingOrder: zod.number().optional(),
+});
+
+/**
+ * @summary Update a platform requirement
+ */
+export const UpdatePlatformRequirementParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdatePlatformRequirementBody = zod.object({
+  platformName: zod.string().optional(),
+  platformCategory: zod.string().optional(),
+  isRequired: zod.boolean().optional(),
+  onboardingOrder: zod.number().optional(),
+});
+
+export const UpdatePlatformRequirementResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  platformName: zod.string(),
+  platformCategory: zod.string().nullish(),
+  isRequired: zod.boolean(),
+  onboardingOrder: zod.number(),
+});
+
+/**
+ * @summary Delete a platform requirement
+ */
+export const DeletePlatformRequirementParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary List tasks for organization
+ */
+export const getTasksQueryLimitDefault = 50;
+export const getTasksQueryOffsetDefault = 0;
+
+export const GetTasksQueryParams = zod.object({
+  status: zod.coerce.string().optional(),
+  agentId: zod.coerce.string().optional(),
+  assignedToUserId: zod.coerce.string().optional(),
+  limit: zod.coerce.number().default(getTasksQueryLimitDefault),
+  offset: zod.coerce.number().default(getTasksQueryOffsetDefault),
+});
+
+export const GetTasksResponse = zod.object({
+  tasks: zod.array(
+    zod.object({
+      id: zod.string(),
+      orgId: zod.string(),
+      templateId: zod.string().nullish(),
+      agentId: zod.string().nullish(),
+      contactId: zod.string().nullish(),
+      title: zod.string(),
+      description: zod.string().nullish(),
+      dueDate: zod.coerce.date().nullish(),
+      assignedTo: zod.string().nullish(),
+      assignedToUserId: zod.string().nullish(),
+      status: zod.enum(["open", "in_progress", "completed", "cancelled"]),
+      priority: zod.enum(["low", "medium", "high", "urgent"]),
+      completedAt: zod.coerce.date().nullish(),
+      createdBy: zod.string().nullish(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+    }),
+  ),
+  total: zod.number(),
+  limit: zod.number(),
+  offset: zod.number(),
+});
+
+/**
+ * @summary Create a task
+ */
+export const CreateTaskBody = zod.object({
+  agentId: zod.string().optional(),
+  contactId: zod.string().optional(),
+  title: zod.string(),
+  description: zod.string().optional(),
+  dueDate: zod.coerce.date().optional(),
+  assignedTo: zod.string().optional(),
+  assignedToUserId: zod.string().optional(),
+  priority: zod.enum(["low", "medium", "high", "urgent"]).optional(),
+  templateId: zod.string().optional(),
+});
+
+/**
+ * @summary Update a task
+ */
+export const UpdateTaskParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateTaskBody = zod.object({
+  title: zod.string().optional(),
+  description: zod.string().optional(),
+  dueDate: zod.coerce.date().optional(),
+  assignedTo: zod.string().optional(),
+  assignedToUserId: zod.string().optional(),
+  status: zod
+    .enum(["open", "in_progress", "completed", "cancelled"])
+    .optional(),
+  priority: zod.enum(["low", "medium", "high", "urgent"]).optional(),
+});
+
+export const UpdateTaskResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  templateId: zod.string().nullish(),
+  agentId: zod.string().nullish(),
+  contactId: zod.string().nullish(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  dueDate: zod.coerce.date().nullish(),
+  assignedTo: zod.string().nullish(),
+  assignedToUserId: zod.string().nullish(),
+  status: zod.enum(["open", "in_progress", "completed", "cancelled"]),
+  priority: zod.enum(["low", "medium", "high", "urgent"]),
+  completedAt: zod.coerce.date().nullish(),
+  createdBy: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete a task
+ */
+export const DeleteTaskParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary List tasks for an agent
+ */
+export const GetAgentTasksParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetAgentTasksResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  templateId: zod.string().nullish(),
+  agentId: zod.string().nullish(),
+  contactId: zod.string().nullish(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  dueDate: zod.coerce.date().nullish(),
+  assignedTo: zod.string().nullish(),
+  assignedToUserId: zod.string().nullish(),
+  status: zod.enum(["open", "in_progress", "completed", "cancelled"]),
+  priority: zod.enum(["low", "medium", "high", "urgent"]),
+  completedAt: zod.coerce.date().nullish(),
+  createdBy: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const GetAgentTasksResponse = zod.array(GetAgentTasksResponseItem);
+
+/**
+ * @summary List documents for an agent
+ */
+export const GetAgentDocumentsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetAgentDocumentsResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  agentId: zod.string().nullish(),
+  name: zod.string(),
+  category: zod.string(),
+  storageKey: zod.string(),
+  fileSizeBytes: zod.number().nullish(),
+  mimeType: zod.string().nullish(),
+  uploadedBy: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+});
+export const GetAgentDocumentsResponse = zod.array(
+  GetAgentDocumentsResponseItem,
+);
+
+/**
+ * @summary Add a document record for an agent
+ */
+export const CreateAgentDocumentParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const CreateAgentDocumentBody = zod.object({
+  name: zod.string(),
+  category: zod.string().optional(),
+  storageKey: zod.string(),
+  fileSizeBytes: zod.number().optional(),
+  mimeType: zod.string().optional(),
+});
+
+/**
+ * @summary Delete a document
+ */
+export const DeleteDocumentParams = zod.object({
+  docId: zod.coerce.string(),
+});
+
+/**
+ * @summary Get upcoming license and certification renewals
+ */
+export const getRenewalsQueryDaysDefault = 90;
+
+export const GetRenewalsQueryParams = zod.object({
+  days: zod.coerce.number().default(getRenewalsQueryDaysDefault),
+});
+
+export const GetRenewalsResponse = zod.object({
+  renewals: zod.array(
+    zod.object({
+      id: zod.string(),
+      agentId: zod.string(),
+      agentName: zod.string(),
+      type: zod.enum(["license", "certification"]),
+      detail: zod.string(),
+      expiryDate: zod.coerce.date(),
+      status: zod.string(),
+      daysUntilExpiry: zod.number(),
+      urgency: zod.enum(["critical", "warning", "notice"]),
+    }),
+  ),
+  total: zod.number(),
+  daysAhead: zod.number(),
 });
 
 /**

@@ -15,6 +15,7 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 // Route-level lazy loading
 const Dashboard = lazy(() => import("@/pages/dashboard"));
 const AgentsPage = lazy(() => import("@/pages/agents"));
+const AgentProfilePage = lazy(() => import("@/pages/agent-profile"));
 const LicensingPage = lazy(() => import("@/pages/licensing"));
 const CertificationsPage = lazy(() => import("@/pages/certifications"));
 const CRMPage = lazy(() => import("@/pages/crm"));
@@ -300,6 +301,9 @@ function ClerkProviderWithRoutes() {
               </Route>
               <Route path="/dashboard">
                 <ProtectedLayout><Dashboard /></ProtectedLayout>
+              </Route>
+              <Route path="/agents/:id">
+                <ProtectedLayout><AgentProfilePage /></ProtectedLayout>
               </Route>
               <Route path="/agents">
                 <ProtectedLayout><AgentsPage /></ProtectedLayout>

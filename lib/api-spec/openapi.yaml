@@ -17,6 +17,24 @@ tags:
     description: Dashboard metrics and activity
   - name: agents
     description: Agent lifecycle management
+  - name: licenses
+    description: State license management
+  - name: certifications
+    description: Carrier certification management
+  - name: ahip
+    description: AHIP annual certification
+  - name: carriers
+    description: Carrier management
+  - name: checklists
+    description: Onboarding and offboarding checklists
+  - name: techstack
+    description: Tech stack accounts and platform requirements
+  - name: tasks
+    description: Task management
+  - name: documents
+    description: Document storage
+  - name: renewals
+    description: License and certification renewal alerts
   - name: notifications
     description: Notification management
   - name: audit
@@ -30,7 +48,6 @@ paths:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -321,6 +338,846 @@ paths:
               schema:
                 $ref: "#/components/schemas/ComplianceScore"
 
+  /agents/{id}/offboard:
+    post:
+      operationId: offboardAgent
+      tags: [agents]
+      summary: Trigger agent offboarding
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Offboarding initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OffboardResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Already offboarded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /agents/{id}/licenses:
+    get:
+      operationId: getAgentLicenses
+      tags: [licenses]
+      summary: List licenses for an agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of licenses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StateLicense"
+    post:
+      operationId: createAgentLicense
+      tags: [licenses]
+      summary: Add a state license to an agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLicenseBody"
+      responses:
+        "201":
+          description: Created license
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StateLicense"
+
+  /agents/{id}/licenses/{lid}:
+    patch:
+      operationId: updateAgentLicense
+      tags: [licenses]
+      summary: Update a state license
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: lid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLicenseBody"
+      responses:
+        "200":
+          description: Updated license
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StateLicense"
+    delete:
+      operationId: deleteAgentLicense
+      tags: [licenses]
+      summary: Delete a state license
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: lid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /agents/{id}/certifications:
+    get:
+      operationId: getAgentCertifications
+      tags: [certifications]
+      summary: List carrier certifications for an agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of certifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CarrierCertification"
+    post:
+      operationId: createAgentCertification
+      tags: [certifications]
+      summary: Add a carrier certification
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCertificationBody"
+      responses:
+        "201":
+          description: Created certification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CarrierCertification"
+
+  /agents/{id}/certifications/{cid}:
+    patch:
+      operationId: updateAgentCertification
+      tags: [certifications]
+      summary: Update a carrier certification
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCertificationBody"
+      responses:
+        "200":
+          description: Updated certification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CarrierCertification"
+    delete:
+      operationId: deleteAgentCertification
+      tags: [certifications]
+      summary: Delete a carrier certification
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /certifications/matrix:
+    get:
+      operationId: getCertificationMatrix
+      tags: [certifications]
+      summary: Get agency-wide certification matrix
+      parameters:
+        - name: year
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Certification matrix
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificationMatrix"
+
+  /agents/{id}/ahip:
+    get:
+      operationId: getAgentAhip
+      tags: [ahip]
+      summary: List AHIP records for an agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of AHIP records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AhipRecord"
+    post:
+      operationId: createAgentAhip
+      tags: [ahip]
+      summary: Create an AHIP record for an agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAhipBody"
+      responses:
+        "201":
+          description: Created AHIP record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AhipRecord"
+
+  /agents/{id}/ahip/{aid}:
+    patch:
+      operationId: updateAgentAhip
+      tags: [ahip]
+      summary: Update an AHIP record
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: aid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAhipBody"
+      responses:
+        "200":
+          description: Updated AHIP record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AhipRecord"
+
+  /ahip/dashboard:
+    get:
+      operationId: getAhipDashboard
+      tags: [ahip]
+      summary: Get agency-wide AHIP completion dashboard
+      parameters:
+        - name: year
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: AHIP dashboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AhipDashboard"
+
+  /carriers:
+    get:
+      operationId: getCarriers
+      tags: [carriers]
+      summary: List carriers for the organization
+      responses:
+        "200":
+          description: List of carriers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Carrier"
+    post:
+      operationId: createCarrier
+      tags: [carriers]
+      summary: Create a carrier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCarrierBody"
+      responses:
+        "201":
+          description: Created carrier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Carrier"
+
+  /carriers/seed:
+    post:
+      operationId: seedCarriers
+      tags: [carriers]
+      summary: Seed default Medicare carriers
+      responses:
+        "200":
+          description: Seeded carriers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeedCarriersResponse"
+
+  /carriers/{id}:
+    patch:
+      operationId: updateCarrier
+      tags: [carriers]
+      summary: Update a carrier
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCarrierBody"
+      responses:
+        "200":
+          description: Updated carrier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Carrier"
+    delete:
+      operationId: deleteCarrier
+      tags: [carriers]
+      summary: Delete a carrier
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /agents/{id}/checklists:
+    get:
+      operationId: getAgentChecklists
+      tags: [checklists]
+      summary: List checklist runs for an agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of checklist runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChecklistRun"
+    post:
+      operationId: createAgentChecklist
+      tags: [checklists]
+      summary: Start a checklist run for an agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChecklistBody"
+      responses:
+        "201":
+          description: Created checklist run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChecklistRun"
+
+  /agents/{id}/checklists/{runId}:
+    get:
+      operationId: getAgentChecklist
+      tags: [checklists]
+      summary: Get a checklist run with its items
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Checklist run with items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChecklistRunDetail"
+
+  /checklists/{runId}/items/{itemId}:
+    patch:
+      operationId: updateChecklistItem
+      tags: [checklists]
+      summary: Update a checklist item status
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateChecklistItemBody"
+      responses:
+        "200":
+          description: Updated item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChecklistItem"
+
+  /agents/{id}/tech-stack:
+    get:
+      operationId: getAgentTechStack
+      tags: [techstack]
+      summary: List tech stack accounts for an agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of tech stack accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TechStackAccount"
+    post:
+      operationId: createAgentTechStackAccount
+      tags: [techstack]
+      summary: Add a tech stack account to an agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTechStackAccountBody"
+      responses:
+        "201":
+          description: Created account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TechStackAccount"
+
+  /agents/{id}/tech-stack/{aid}:
+    patch:
+      operationId: updateAgentTechStackAccount
+      tags: [techstack]
+      summary: Update a tech stack account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: aid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTechStackAccountBody"
+      responses:
+        "200":
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TechStackAccount"
+
+  /platform-requirements:
+    get:
+      operationId: getPlatformRequirements
+      tags: [techstack]
+      summary: List platform requirements
+      responses:
+        "200":
+          description: List of requirements
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PlatformRequirement"
+    post:
+      operationId: createPlatformRequirement
+      tags: [techstack]
+      summary: Create a platform requirement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePlatformRequirementBody"
+      responses:
+        "201":
+          description: Created requirement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformRequirement"
+
+  /platform-requirements/{id}:
+    patch:
+      operationId: updatePlatformRequirement
+      tags: [techstack]
+      summary: Update a platform requirement
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePlatformRequirementBody"
+      responses:
+        "200":
+          description: Updated requirement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformRequirement"
+    delete:
+      operationId: deletePlatformRequirement
+      tags: [techstack]
+      summary: Delete a platform requirement
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /tasks:
+    get:
+      operationId: getTasks
+      tags: [tasks]
+      summary: List tasks for organization
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: agentId
+          in: query
+          schema:
+            type: string
+        - name: assignedToUserId
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Task list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskListResponse"
+    post:
+      operationId: createTask
+      tags: [tasks]
+      summary: Create a task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskBody"
+      responses:
+        "201":
+          description: Created task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+
+  /tasks/{id}:
+    patch:
+      operationId: updateTask
+      tags: [tasks]
+      summary: Update a task
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTaskBody"
+      responses:
+        "200":
+          description: Updated task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+    delete:
+      operationId: deleteTask
+      tags: [tasks]
+      summary: Delete a task
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /agents/{id}/tasks:
+    get:
+      operationId: getAgentTasks
+      tags: [tasks]
+      summary: List tasks for an agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Task"
+
+  /agents/{id}/documents:
+    get:
+      operationId: getAgentDocuments
+      tags: [documents]
+      summary: List documents for an agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of documents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AgentDocument"
+    post:
+      operationId: createAgentDocument
+      tags: [documents]
+      summary: Add a document record for an agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDocumentBody"
+      responses:
+        "201":
+          description: Created document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentDocument"
+
+  /documents/{docId}:
+    delete:
+      operationId: deleteDocument
+      tags: [documents]
+      summary: Delete a document
+      parameters:
+        - name: docId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /renewals:
+    get:
+      operationId: getRenewals
+      tags: [renewals]
+      summary: Get upcoming license and certification renewals
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 90
+      responses:
+        "200":
+          description: Renewal items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenewalsResponse"
+
   /notifications:
     get:
       operationId: getNotifications
@@ -510,7 +1367,7 @@ components:
           type: string
         role:
           type: string
-          enum: [super_admin, agency_admin, compliance_manager, agent]
+          enum: [super_admin, agency_admin, compliance_manager, agent_support, viewer, agent]
         avatarUrl:
           type: ["string", "null"]
         isActive:
@@ -547,7 +1404,7 @@ components:
       properties:
         role:
           type: string
-          enum: [super_admin, agency_admin, compliance_manager, agent]
+          enum: [super_admin, agency_admin, compliance_manager, agent_support, viewer, agent]
       required:
         - role
 
@@ -728,8 +1585,6 @@ components:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
-        complianceScore:
-          type: ["number", "null"]
         createdAt:
           type: string
           format: date-time
@@ -763,7 +1618,6 @@ components:
               type: integer
             ahipCurrentYear:
               type: ["string", "null"]
-              description: "AHIP status for current year"
 
     AgentListResponse:
       type: object
@@ -838,6 +1692,17 @@ components:
         avatarUrl:
           type: string
 
+    OffboardResponse:
+      type: object
+      properties:
+        agent:
+          $ref: "#/components/schemas/Agent"
+        checklistRun:
+          $ref: "#/components/schemas/ChecklistRun"
+      required:
+        - agent
+        - checklistRun
+
     ComplianceScore:
       type: object
       properties:
@@ -878,6 +1743,802 @@ components:
         - totalCertifications
         - ahipCompleted
         - onboardingComplete
+
+    StateLicense:
+      type: object
+      properties:
+        id:
+          type: string
+        agentId:
+          type: string
+        stateCode:
+          type: string
+        licenseType:
+          type: string
+        licenseNumber:
+          type: ["string", "null"]
+        issueDate:
+          type: ["string", "null"]
+          format: date-time
+        expiryDate:
+          type: ["string", "null"]
+          format: date-time
+        status:
+          type: string
+          enum: [active, pending, expired, suspended, not_appointed]
+        renewalSubmittedAt:
+          type: ["string", "null"]
+          format: date-time
+        documentKey:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - agentId
+        - stateCode
+        - licenseType
+        - status
+        - createdAt
+        - updatedAt
+
+    CreateLicenseBody:
+      type: object
+      properties:
+        stateCode:
+          type: string
+        licenseType:
+          type: string
+        licenseNumber:
+          type: string
+        issueDate:
+          type: string
+          format: date-time
+        expiryDate:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, pending, expired, suspended, not_appointed]
+      required:
+        - stateCode
+        - licenseType
+
+    UpdateLicenseBody:
+      type: object
+      properties:
+        stateCode:
+          type: string
+        licenseType:
+          type: string
+        licenseNumber:
+          type: string
+        issueDate:
+          type: string
+          format: date-time
+        expiryDate:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, pending, expired, suspended, not_appointed]
+        renewalSubmittedAt:
+          type: string
+          format: date-time
+        documentKey:
+          type: string
+
+    Carrier:
+      type: object
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        name:
+          type: string
+        cmsContractNumber:
+          type: ["string", "null"]
+        logoUrl:
+          type: ["string", "null"]
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - orgId
+        - name
+        - isActive
+        - createdAt
+
+    CreateCarrierBody:
+      type: object
+      properties:
+        name:
+          type: string
+        cmsContractNumber:
+          type: string
+        logoUrl:
+          type: string
+      required:
+        - name
+
+    UpdateCarrierBody:
+      type: object
+      properties:
+        name:
+          type: string
+        cmsContractNumber:
+          type: string
+        logoUrl:
+          type: string
+        isActive:
+          type: boolean
+
+    SeedCarriersResponse:
+      type: object
+      properties:
+        seeded:
+          type: integer
+        carriers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Carrier"
+      required:
+        - seeded
+        - carriers
+
+    CarrierCertification:
+      type: object
+      properties:
+        id:
+          type: string
+        agentId:
+          type: string
+        carrierId:
+          type: string
+        carrierName:
+          type: string
+        certificationYear:
+          type: integer
+        status:
+          type: string
+          enum: [not_started, in_progress, passed, failed, waived]
+        completedDate:
+          type: ["string", "null"]
+          format: date-time
+        expiryDate:
+          type: ["string", "null"]
+          format: date-time
+        score:
+          type: ["number", "null"]
+        documentKey:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - agentId
+        - carrierId
+        - carrierName
+        - certificationYear
+        - status
+        - createdAt
+        - updatedAt
+
+    CreateCertificationBody:
+      type: object
+      properties:
+        carrierId:
+          type: string
+        certificationYear:
+          type: integer
+        status:
+          type: string
+          enum: [not_started, in_progress, passed, failed, waived]
+        completedDate:
+          type: string
+          format: date-time
+        expiryDate:
+          type: string
+          format: date-time
+        score:
+          type: number
+        documentKey:
+          type: string
+      required:
+        - carrierId
+        - certificationYear
+
+    UpdateCertificationBody:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [not_started, in_progress, passed, failed, waived]
+        completedDate:
+          type: string
+          format: date-time
+        expiryDate:
+          type: string
+          format: date-time
+        score:
+          type: number
+        documentKey:
+          type: string
+
+    CertificationMatrix:
+      type: object
+      properties:
+        year:
+          type: integer
+        carriers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Carrier"
+        agents:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              firstName:
+                type: string
+              lastName:
+                type: string
+              status:
+                type: string
+            required:
+              - id
+              - firstName
+              - lastName
+              - status
+        certMap:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: string
+      required:
+        - year
+        - carriers
+        - agents
+        - certMap
+
+    AhipRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        agentId:
+          type: string
+        certificationYear:
+          type: integer
+        status:
+          type: string
+          enum: [not_started, in_progress, passed, failed, waived]
+        score:
+          type: ["number", "null"]
+        completedDate:
+          type: ["string", "null"]
+          format: date-time
+        documentKey:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - agentId
+        - certificationYear
+        - status
+        - createdAt
+        - updatedAt
+
+    CreateAhipBody:
+      type: object
+      properties:
+        certificationYear:
+          type: integer
+        status:
+          type: string
+          enum: [not_started, in_progress, passed, failed, waived]
+        score:
+          type: number
+        completedDate:
+          type: string
+          format: date-time
+        documentKey:
+          type: string
+      required:
+        - certificationYear
+
+    UpdateAhipBody:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [not_started, in_progress, passed, failed, waived]
+        score:
+          type: number
+        completedDate:
+          type: string
+          format: date-time
+        documentKey:
+          type: string
+
+    AhipDashboard:
+      type: object
+      properties:
+        year:
+          type: integer
+        totalActiveAgents:
+          type: integer
+        passedCount:
+          type: integer
+        completionRate:
+          type: number
+        records:
+          type: array
+          items:
+            type: object
+            properties:
+              agentId:
+                type: string
+              firstName:
+                type: string
+              lastName:
+                type: string
+              status:
+                type: string
+              score:
+                type: ["number", "null"]
+              completedDate:
+                type: ["string", "null"]
+                format: date-time
+            required:
+              - agentId
+              - firstName
+              - lastName
+              - status
+      required:
+        - year
+        - totalActiveAgents
+        - passedCount
+        - completionRate
+        - records
+
+    ChecklistRun:
+      type: object
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        agentId:
+          type: string
+        type:
+          type: string
+          enum: [onboarding, offboarding]
+        status:
+          type: string
+          enum: [in_progress, completed]
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: ["string", "null"]
+          format: date-time
+        completedBy:
+          type: ["string", "null"]
+      required:
+        - id
+        - orgId
+        - agentId
+        - type
+        - status
+        - startedAt
+
+    ChecklistItem:
+      type: object
+      properties:
+        id:
+          type: string
+        runId:
+          type: string
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        required:
+          type: boolean
+        orderIndex:
+          type: integer
+        status:
+          type: string
+          enum: [pending, completed, skipped]
+        completedAt:
+          type: ["string", "null"]
+          format: date-time
+        completedByUserId:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+      required:
+        - id
+        - runId
+        - title
+        - required
+        - orderIndex
+        - status
+
+    ChecklistRunDetail:
+      allOf:
+        - $ref: "#/components/schemas/ChecklistRun"
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/ChecklistItem"
+          required:
+            - items
+
+    CreateChecklistBody:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [onboarding, offboarding]
+      required:
+        - type
+
+    UpdateChecklistItemBody:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, completed, skipped]
+        notes:
+          type: string
+      required:
+        - status
+
+    TechStackAccount:
+      type: object
+      properties:
+        id:
+          type: string
+        agentId:
+          type: string
+        platformName:
+          type: string
+        platformCategory:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [provisioned, pending, deprovisioned]
+        accountIdentifier:
+          type: ["string", "null"]
+        provisionedAt:
+          type: ["string", "null"]
+          format: date-time
+        deprovisionedAt:
+          type: ["string", "null"]
+          format: date-time
+        notes:
+          type: ["string", "null"]
+      required:
+        - id
+        - agentId
+        - platformName
+        - status
+
+    CreateTechStackAccountBody:
+      type: object
+      properties:
+        platformName:
+          type: string
+        platformCategory:
+          type: string
+        status:
+          type: string
+          enum: [provisioned, pending, deprovisioned]
+        accountIdentifier:
+          type: string
+        notes:
+          type: string
+      required:
+        - platformName
+
+    UpdateTechStackAccountBody:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [provisioned, pending, deprovisioned]
+        accountIdentifier:
+          type: string
+        notes:
+          type: string
+
+    PlatformRequirement:
+      type: object
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        platformName:
+          type: string
+        platformCategory:
+          type: ["string", "null"]
+        isRequired:
+          type: boolean
+        onboardingOrder:
+          type: integer
+      required:
+        - id
+        - orgId
+        - platformName
+        - isRequired
+        - onboardingOrder
+
+    CreatePlatformRequirementBody:
+      type: object
+      properties:
+        platformName:
+          type: string
+        platformCategory:
+          type: string
+        isRequired:
+          type: boolean
+        onboardingOrder:
+          type: integer
+      required:
+        - platformName
+
+    UpdatePlatformRequirementBody:
+      type: object
+      properties:
+        platformName:
+          type: string
+        platformCategory:
+          type: string
+        isRequired:
+          type: boolean
+        onboardingOrder:
+          type: integer
+
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        templateId:
+          type: ["string", "null"]
+        agentId:
+          type: ["string", "null"]
+        contactId:
+          type: ["string", "null"]
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        dueDate:
+          type: ["string", "null"]
+          format: date-time
+        assignedTo:
+          type: ["string", "null"]
+        assignedToUserId:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [open, in_progress, completed, cancelled]
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        completedAt:
+          type: ["string", "null"]
+          format: date-time
+        createdBy:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - orgId
+        - title
+        - status
+        - priority
+        - createdAt
+        - updatedAt
+
+    TaskListResponse:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required:
+        - tasks
+        - total
+        - limit
+        - offset
+
+    CreateTaskBody:
+      type: object
+      properties:
+        agentId:
+          type: string
+        contactId:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        dueDate:
+          type: string
+          format: date-time
+        assignedTo:
+          type: string
+        assignedToUserId:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        templateId:
+          type: string
+      required:
+        - title
+
+    UpdateTaskBody:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        dueDate:
+          type: string
+          format: date-time
+        assignedTo:
+          type: string
+        assignedToUserId:
+          type: string
+        status:
+          type: string
+          enum: [open, in_progress, completed, cancelled]
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+
+    AgentDocument:
+      type: object
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        agentId:
+          type: ["string", "null"]
+        name:
+          type: string
+        category:
+          type: string
+        storageKey:
+          type: string
+        fileSizeBytes:
+          type: ["integer", "null"]
+        mimeType:
+          type: ["string", "null"]
+        uploadedBy:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - orgId
+        - name
+        - category
+        - storageKey
+        - createdAt
+
+    CreateDocumentBody:
+      type: object
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+        storageKey:
+          type: string
+        fileSizeBytes:
+          type: integer
+        mimeType:
+          type: string
+      required:
+        - name
+        - storageKey
+
+    RenewalItem:
+      type: object
+      properties:
+        id:
+          type: string
+        agentId:
+          type: string
+        agentName:
+          type: string
+        type:
+          type: string
+          enum: [license, certification]
+        detail:
+          type: string
+        expiryDate:
+          type: string
+          format: date-time
+        status:
+          type: string
+        daysUntilExpiry:
+          type: integer
+        urgency:
+          type: string
+          enum: [critical, warning, notice]
+      required:
+        - id
+        - agentId
+        - agentName
+        - type
+        - detail
+        - expiryDate
+        - status
+        - daysUntilExpiry
+        - urgency
+
+    RenewalsResponse:
+      type: object
+      properties:
+        renewals:
+          type: array
+          items:
+            $ref: "#/components/schemas/RenewalItem"
+        total:
+          type: integer
+        daysAhead:
+          type: integer
+      required:
+        - renewals
+        - total
+        - daysAhead
 
     Notification:
       type: object

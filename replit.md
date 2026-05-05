@@ -92,20 +92,45 @@ lib/
 - `GET/PATCH /organizations/me` — org management
 - `GET /dashboard/stats` — aggregate dashboard stats
 - `GET /dashboard/activity` — recent activity feed
-- `GET/POST /agents` — agent roster (requireAuth + per-method RBAC)
+- `GET/POST /agents` — agent roster; POST auto-creates onboarding checklist
 - `GET /agents/:id` — agent detail with compliance summary
-- `PATCH /agents/:id` — update agent (compliance_manager+, audit-logged)
-- `DELETE /agents/:id` — delete agent (agency_admin+, audit-logged)
-- `GET /agents/:id/compliance-score` — calculated score
+- `PATCH /agents/:id` — update agent
+- `DELETE /agents/:id` — delete agent (agency_admin+)
+- `GET /agents/:id/compliance-score` — calculated compliance score (license/cert/ahip/onboarding)
+- `POST /agents/:id/offboard` — start offboarding (sets status + creates offboarding checklist)
+- `GET/POST /agents/:id/licenses` — state licenses CRUD
+- `PATCH/DELETE /agents/:id/licenses/:lid` — update/delete license
+- `GET/POST /agents/:id/certifications` — carrier certifications CRUD
+- `PATCH/DELETE /agents/:id/certifications/:cid` — update/delete certification
+- `GET/POST /agents/:id/ahip` — AHIP records CRUD
+- `PATCH/DELETE /agents/:id/ahip/:aid` — update/delete AHIP record
+- `GET /agents/:id/checklists` — list checklist runs
+- `POST /agents/:id/checklists` — start new checklist run
+- `GET /agents/:id/checklists/:runId` — get checklist run + items
+- `PATCH /checklists/:runId/items/:itemId` — update checklist item status
+- `GET/POST /agents/:id/techstack` — tech stack accounts CRUD
+- `PATCH/DELETE /agents/:id/techstack/:aid` — update/delete tech stack account
+- `GET/POST /tasks` — org-wide tasks
+- `PATCH/DELETE /tasks/:id` — update/delete task
+- `GET /agents/:id/tasks` — tasks for specific agent
+- `GET/POST /agents/:id/documents` — agent documents
+- `PATCH/DELETE /agents/:id/documents/:did` — update/delete document
+- `GET /carriers` — list carriers
+- `POST /carriers` — create carrier (agency_admin+)
+- `PATCH /carriers/:id` — update carrier
+- `POST /carriers/seed` — seed default Medicare carriers
+- `GET /renewals` — upcoming license/cert renewals (?days=90)
+- `GET /ahip/dashboard` — AHIP completion stats by year
+- `GET /certifications/matrix` — carrier cert matrix by year
 - `GET /notifications` — user notifications
 - `GET /notifications/count` — unread badge count
 - `GET /notifications/stream` — SSE real-time push stream
 - `POST /notifications/read-all` — bulk mark read
 - `PATCH /notifications/:id/read` — mark single read
 - `GET /audit-log` — HIPAA audit trail (compliance_manager+ only)
-- `POST /storage/uploads/request-url` — presigned upload URL (auth required)
+- `POST /storage/uploads/request-url` — presigned upload URL
 - `GET /storage/public-objects/*` — public assets (no auth)
-- `GET /storage/objects/*` — private files (auth + ACL required)
+- `GET /storage/objects/*` — private files (auth + ACL)
 
 ## Security Architecture
 
