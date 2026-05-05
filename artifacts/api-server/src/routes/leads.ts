@@ -108,6 +108,27 @@ router.post(
   },
 );
 
+// GET /leads/stats — MUST be registered before /leads/:id to prevent route shadowing
+router.get(
+  "/leads/stats",
+  requireAuth,
+  requirePermission("contact", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const bySource = await db
+      .select({ source: leadsTable.source, count: sql<number>`count(*)`, avgScore: sql<number>`avg(${leadsTable.score})` })
+      .from(leadsTable)
+      .where(eq(leadsTable.orgId, authReq.orgId))
+      .groupBy(leadsTable.source);
+    const byStatus = await db
+      .select({ status: leadsTable.status, count: sql<number>`count(*)` })
+      .from(leadsTable)
+      .where(eq(leadsTable.orgId, authReq.orgId))
+      .groupBy(leadsTable.status);
+    res.json({ bySource, byStatus });
+  },
+);
+
 // GET /leads/:id
 router.get(
   "/leads/:id",
@@ -180,27 +201,6 @@ router.post(
     await db.insert(activitiesTable).values({ id: randomUUID(), orgId: authReq.orgId, contactId: row.lead.contactId, type: "status_change", body: "Lead converted to prospect", createdBy: authReq.userId });
 
     res.json({ success: true, contactId: row.lead.contactId });
-  },
-);
-
-// GET /leads/stats — source analytics
-router.get(
-  "/leads/stats",
-  requireAuth,
-  requirePermission("contact", "read"),
-  async (req: Request, res: Response): Promise<void> => {
-    const authReq = req as AuthenticatedRequest;
-    const bySource = await db
-      .select({ source: leadsTable.source, count: sql<number>`count(*)`, avgScore: sql<number>`avg(${leadsTable.score})` })
-      .from(leadsTable)
-      .where(eq(leadsTable.orgId, authReq.orgId))
-      .groupBy(leadsTable.source);
-    const byStatus = await db
-      .select({ status: leadsTable.status, count: sql<number>`count(*)` })
-      .from(leadsTable)
-      .where(eq(leadsTable.orgId, authReq.orgId))
-      .groupBy(leadsTable.status);
-    res.json({ bySource, byStatus });
   },
 );
 

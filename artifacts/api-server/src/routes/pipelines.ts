@@ -21,7 +21,7 @@ import { auditMiddleware } from "../middlewares/auditMiddleware";
 const router: IRouter = Router();
 
 router.use(
-  auditMiddleware("pipeline", undefined, {
+  auditMiddleware("deal", undefined, {
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.id;
@@ -35,8 +35,10 @@ router.use(
 router.get("/pipelines", requireAuth, requirePermission("contact", "read"), async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthenticatedRequest;
   const pipelines = await db.select().from(pipelinesTable).where(eq(pipelinesTable.orgId, authReq.orgId)).orderBy(asc(pipelinesTable.createdAt));
-  // Attach stages to each pipeline
-  const stageRows = await db.select().from(pipelineStagesTable).where(sql`${pipelineStagesTable.pipelineId} IN (${sql.join(pipelines.map((p) => sql`${p.id}`), sql`, `)})`).orderBy(asc(pipelineStagesTable.orderIndex));
+  // Attach stages to each pipeline — guard against empty IN () when no pipelines exist
+  const stageRows = pipelines.length > 0
+    ? await db.select().from(pipelineStagesTable).where(sql`${pipelineStagesTable.pipelineId} IN (${sql.join(pipelines.map((p) => sql`${p.id}`), sql`, `)})`).orderBy(asc(pipelineStagesTable.orderIndex))
+    : [];
   const stagesByPipeline = new Map<string, typeof stageRows>();
   for (const s of stageRows) {
     if (!stagesByPipeline.has(s.pipelineId)) stagesByPipeline.set(s.pipelineId, []);
