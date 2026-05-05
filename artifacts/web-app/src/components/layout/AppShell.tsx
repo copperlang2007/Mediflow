@@ -70,6 +70,9 @@ import {
   ChevronLeft,
   RefreshCcw,
   Zap,
+  BarChart2,
+  Lock,
+  Database,
 } from "lucide-react";
 import NotificationPanel from "@/components/notifications/NotificationPanel";
 import { useSSENotifications } from "@/hooks/useSSENotifications";
@@ -127,10 +130,27 @@ const navItems: NavGroup[] = [
     ],
   },
   {
+    group: "Analytics",
+    items: [
+      {
+        href: "/reports", label: "Reports", icon: BarChart2,
+        roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
+      },
+    ],
+  },
+  {
     group: "Settings",
     items: [
       {
         href: "/automations", label: "Automations", icon: Zap,
+        roles: ["super_admin", "agency_admin"],
+      },
+      {
+        href: "/admin-compliance", label: "HIPAA / SOC 2", icon: Lock,
+        roles: ["super_admin", "agency_admin", "compliance_manager"],
+      },
+      {
+        href: "/data-migration", label: "Data Migration", icon: Database,
         roles: ["super_admin", "agency_admin"],
       },
     ],

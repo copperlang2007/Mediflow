@@ -61,6 +61,12 @@ tags:
     description: Automation rules engine
   - name: ai
     description: AI assistant, outreach drafting, and compliance reports
+  - name: reports
+    description: Analytics and performance reporting
+  - name: admin
+    description: HIPAA/SOC 2 compliance administration
+  - name: imports
+    description: Data migration importers (Monday.com, GoHighLevel, CSV)
 
 paths:
   /healthz:
@@ -5666,3 +5672,1108 @@ components:
         subject: { type: string }
         aiAssisted: { type: boolean }
       required: [draft, aiAssisted]
+
+  /reports/agent-performance:
+    get:
+      operationId: getAgentPerformanceReport
+      tags: [reports]
+      summary: Agent performance metrics report
+      parameters:
+        - in: query
+          name: startDate
+          schema: { type: string, format: date }
+        - in: query
+          name: endDate
+          schema: { type: string, format: date }
+        - in: query
+          name: managerId
+          schema: { type: string }
+        - in: query
+          name: agentId
+          schema: { type: string }
+      responses:
+        "200":
+          description: Agent performance data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AgentPerformanceRow"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /reports/agent-performance/export:
+    get:
+      operationId: exportAgentPerformanceReport
+      tags: [reports]
+      summary: Export agent performance as CSV
+      parameters:
+        - in: query
+          name: startDate
+          schema: { type: string, format: date }
+        - in: query
+          name: endDate
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /reports/pipeline:
+    get:
+      operationId: getPipelineReport
+      tags: [reports]
+      summary: Pipeline funnel and conversion report
+      parameters:
+        - in: query
+          name: startDate
+          schema: { type: string, format: date }
+        - in: query
+          name: endDate
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Pipeline report
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PipelineReportRow"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /reports/leads:
+    get:
+      operationId: getLeadsReport
+      tags: [reports]
+      summary: Lead source and conversion report
+      parameters:
+        - in: query
+          name: startDate
+          schema: { type: string, format: date }
+        - in: query
+          name: endDate
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Lead source report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeadsReport"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /reports/compliance-matrix:
+    get:
+      operationId: getComplianceMatrixReport
+      tags: [reports]
+      summary: License, certification, and AHIP compliance matrix
+      responses:
+        "200":
+          description: Compliance matrix report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplianceMatrixReport"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /reports/communications:
+    get:
+      operationId: getCommunicationsReport
+      tags: [reports]
+      summary: SMS and email volume report
+      parameters:
+        - in: query
+          name: startDate
+          schema: { type: string, format: date }
+        - in: query
+          name: endDate
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Communications report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommunicationsReport"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /reports/retention:
+    get:
+      operationId: getRetentionReport
+      tags: [reports]
+      summary: Member retention report
+      responses:
+        "200":
+          description: Retention report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionReport"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/audit-log:
+    get:
+      operationId: getAdminAuditLog
+      tags: [admin]
+      summary: Admin-level audit log viewer with enriched user info
+      parameters:
+        - in: query
+          name: userId
+          schema: { type: string }
+        - in: query
+          name: action
+          schema: { type: string }
+        - in: query
+          name: resourceType
+          schema: { type: string }
+        - in: query
+          name: startDate
+          schema: { type: string, format: date }
+        - in: query
+          name: endDate
+          schema: { type: string, format: date }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50 }
+        - in: query
+          name: offset
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedAuditLog"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/audit-log/export:
+    get:
+      operationId: exportAdminAuditLog
+      tags: [admin]
+      summary: Export audit log as CSV
+      parameters:
+        - in: query
+          name: startDate
+          schema: { type: string, format: date }
+        - in: query
+          name: endDate
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/access-review:
+    get:
+      operationId: getAccessReview
+      tags: [admin]
+      summary: User access review for SOC 2 compliance
+      responses:
+        "200":
+          description: User access list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserAccessReviewRow"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/access-review/export:
+    get:
+      operationId: exportAccessReview
+      tags: [admin]
+      summary: Export access review as CSV
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/users/{userId}/deactivate:
+    post:
+      operationId: deactivateUser
+      tags: [admin]
+      summary: Deactivate a user account
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: User deactivated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                required: [success]
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/users/{userId}/reactivate:
+    post:
+      operationId: reactivateUser
+      tags: [admin]
+      summary: Reactivate a user account
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: User reactivated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                required: [success]
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/login-history:
+    get:
+      operationId: getLoginHistory
+      tags: [admin]
+      summary: Login event history for HIPAA audit
+      parameters:
+        - in: query
+          name: userId
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100 }
+        - in: query
+          name: offset
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Login history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedLoginHistory"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/export-log:
+    get:
+      operationId: getExportLog
+      tags: [admin]
+      summary: Data export audit log
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50 }
+        - in: query
+          name: offset
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Export log
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedExportLog"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/session-config:
+    get:
+      operationId: getSessionConfig
+      tags: [admin]
+      summary: Get session timeout configuration
+      responses:
+        "200":
+          description: Session config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionConfig"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    put:
+      operationId: updateSessionConfig
+      tags: [admin]
+      summary: Update session timeout configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionConfig"
+      responses:
+        "200":
+          description: Updated session config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionConfig"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/data-retention:
+    get:
+      operationId: getDataRetentionPolicies
+      tags: [admin]
+      summary: Get data retention policies
+      responses:
+        "200":
+          description: Data retention policies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DataRetentionPolicy"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    put:
+      operationId: updateDataRetentionPolicy
+      tags: [admin]
+      summary: Update a data retention policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDataRetentionPolicyBody"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                required: [success]
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/baa-checklist:
+    get:
+      operationId: getBaaChecklist
+      tags: [admin]
+      summary: HIPAA BAA readiness checklist
+      responses:
+        "200":
+          description: BAA controls list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BaaControl"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/soc2-evidence-pack:
+    post:
+      operationId: generateSoc2EvidencePack
+      tags: [admin]
+      summary: Generate SOC 2 evidence PDF report
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /imports/monday/upload:
+    post:
+      operationId: uploadMondayImport
+      tags: [imports]
+      summary: Upload and parse a Monday.com CSV for field mapping
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        "200":
+          description: Parsed headers and sample rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportUploadResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /imports/monday/validate:
+    post:
+      operationId: validateMondayImport
+      tags: [imports]
+      summary: Validate Monday.com CSV with field mapping applied
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                mapping:
+                  type: string
+                  description: JSON stringified field mapping
+              required: [file]
+      responses:
+        "200":
+          description: Validation summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportValidationResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /imports/monday/confirm:
+    post:
+      operationId: confirmMondayImport
+      tags: [imports]
+      summary: Confirm and start Monday.com CSV import job
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                mapping:
+                  type: string
+              required: [file]
+      responses:
+        "200":
+          description: Import job started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportJobStarted"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /imports/ghl/upload:
+    post:
+      operationId: uploadGhlImport
+      tags: [imports]
+      summary: Upload and parse a GoHighLevel CSV for field mapping
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        "200":
+          description: Parsed headers and sample rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportUploadResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /imports/ghl/validate:
+    post:
+      operationId: validateGhlImport
+      tags: [imports]
+      summary: Validate GoHighLevel CSV with field mapping applied
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                mapping:
+                  type: string
+              required: [file]
+      responses:
+        "200":
+          description: Validation summary with duplicate detection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GhlValidationResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /imports/ghl/confirm:
+    post:
+      operationId: confirmGhlImport
+      tags: [imports]
+      summary: Confirm and start GoHighLevel CSV import job
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                mapping:
+                  type: string
+                duplicateAction:
+                  type: string
+                  enum: [skip, merge, create_new]
+              required: [file]
+      responses:
+        "200":
+          description: Import job started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportJobStarted"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /imports/contacts/upload:
+    post:
+      operationId: uploadContactsImport
+      tags: [imports]
+      summary: Upload and parse a generic contacts CSV for field mapping
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        "200":
+          description: Parsed headers and sample rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportUploadResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /imports/contacts/confirm:
+    post:
+      operationId: confirmContactsImport
+      tags: [imports]
+      summary: Confirm and start generic contacts CSV import job
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                mapping:
+                  type: string
+              required: [file]
+      responses:
+        "200":
+          description: Import job started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportJobStarted"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /imports/progress/{jobId}:
+    get:
+      operationId: getImportProgress
+      tags: [imports]
+      summary: SSE stream of import job progress
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /imports/history:
+    get:
+      operationId: getImportHistory
+      tags: [imports]
+      summary: List all import jobs for the organization
+      responses:
+        "200":
+          description: Import job list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ImportJob"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /imports/{jobId}/errors.csv:
+    get:
+      operationId: getImportErrorsCsv
+      tags: [imports]
+      summary: Download error CSV for a completed import job
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+    AgentPerformanceRow:
+      type: object
+      properties:
+        agentId: { type: string }
+        agentName: { type: string }
+        email: { type: string }
+        status: { type: string }
+        contactsWorked: { type: integer }
+        callsLogged: { type: integer }
+        dealsWon: { type: integer }
+        dealValueWon: { type: number }
+        enrolledContacts: { type: integer }
+        complianceScore: { type: integer }
+        licensesActive: { type: integer }
+        licensesExpiring: { type: integer }
+        certificationsPassed: { type: integer }
+        ahipStatus: { type: string }
+      required: [agentId, agentName, email, status, contactsWorked, callsLogged, dealsWon, dealValueWon, enrolledContacts, complianceScore, licensesActive, licensesExpiring, certificationsPassed, ahipStatus]
+
+    PipelineFunnelStage:
+      type: object
+      properties:
+        stageId: { type: string }
+        stageName: { type: string }
+        orderIndex: { type: integer }
+        dealCount: { type: integer }
+        totalValue: { type: number }
+        wonCount: { type: integer }
+        lostCount: { type: integer }
+      required: [stageId, stageName, orderIndex, dealCount, totalValue, wonCount, lostCount]
+
+    PipelineReportRow:
+      type: object
+      properties:
+        pipelineId: { type: string }
+        pipelineName: { type: string }
+        totalDeals: { type: integer }
+        wonDeals: { type: integer }
+        lostDeals: { type: integer }
+        winRate: { type: number }
+        totalWonValue: { type: number }
+        funnel:
+          type: array
+          items:
+            $ref: "#/components/schemas/PipelineFunnelStage"
+      required: [pipelineId, pipelineName, totalDeals, wonDeals, lostDeals, winRate, totalWonValue, funnel]
+
+    LeadSourceRow:
+      type: object
+      properties:
+        source: { type: string }
+        total: { type: integer }
+        converted: { type: integer }
+        enrolled: { type: integer }
+        conversionRate: { type: number }
+        enrollmentRate: { type: number }
+      required: [source, total, converted, enrolled, conversionRate, enrollmentRate]
+
+    LeadsReport:
+      type: object
+      properties:
+        sourceBreakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeadSourceRow"
+        trend:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string }
+              count: { type: integer }
+            required: [date, count]
+        totalLeads: { type: integer }
+        convertedLeads: { type: integer }
+      required: [sourceBreakdown, trend, totalLeads, convertedLeads]
+
+    ComplianceMatrixReport:
+      type: object
+      properties:
+        licenseMatrix: { type: array, items: { type: object } }
+        expiryByMonth: { type: array, items: { type: object } }
+        carrierCertCompletion: { type: array, items: { type: object } }
+        ahipTrend: { type: array, items: { type: object } }
+      required: [licenseMatrix, expiryByMonth, carrierCertCompletion, ahipTrend]
+
+    CommunicationsReport:
+      type: object
+      properties:
+        totalSms: { type: integer }
+        totalEmail: { type: integer }
+        aiAssistedSms: { type: integer }
+        aiAssistedEmail: { type: integer }
+        trend:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string }
+              sms: { type: integer }
+              email: { type: integer }
+            required: [date, sms, email]
+      required: [totalSms, totalEmail, aiAssistedSms, aiAssistedEmail, trend]
+
+    RetentionReport:
+      type: object
+      properties:
+        enrolledContacts: { type: integer }
+        lostContacts: { type: integer }
+        atRiskContacts: { type: integer }
+        retentionRate: { type: number }
+        atRiskRate: { type: number }
+      required: [enrolledContacts, lostContacts, atRiskContacts, retentionRate, atRiskRate]
+
+    PaginatedAuditLog:
+      type: object
+      properties:
+        entries: { type: array, items: { type: object } }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+      required: [entries, total, limit, offset]
+
+    UserAccessReviewRow:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string }
+        fullName: { type: string }
+        role: { type: string }
+        isActive: { type: boolean }
+        lastLoginAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+      required: [id, email, fullName, role, isActive, createdAt]
+
+    LoginEvent:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        userId: { type: string, nullable: true }
+        email: { type: string, nullable: true }
+        success: { type: boolean }
+        ipAddress: { type: string, nullable: true }
+        userAgent: { type: string, nullable: true }
+        failureReason: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+      required: [id, orgId, success, createdAt]
+
+    PaginatedLoginHistory:
+      type: object
+      properties:
+        events: { type: array, items: { $ref: "#/components/schemas/LoginEvent" } }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+      required: [events, total, limit, offset]
+
+    ExportLogEntry:
+      type: object
+      properties:
+        id: { type: string }
+        userId: { type: string, nullable: true }
+        exportType: { type: string }
+        filters: { type: object, nullable: true }
+        recordCount: { type: integer, nullable: true }
+        createdAt: { type: string, format: date-time }
+        userFullName: { type: string, nullable: true }
+      required: [id, exportType, createdAt]
+
+    PaginatedExportLog:
+      type: object
+      properties:
+        exports: { type: array, items: { $ref: "#/components/schemas/ExportLogEntry" } }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+      required: [exports, total, limit, offset]
+
+    SessionConfig:
+      type: object
+      properties:
+        sessionTimeoutMinutes:
+          type: integer
+          enum: [15, 30, 60]
+      required: [sessionTimeoutMinutes]
+
+    DataRetentionPolicy:
+      type: object
+      properties:
+        id: { type: string, nullable: true }
+        orgId: { type: string }
+        recordType: { type: string }
+        retentionDays: { type: integer }
+        isEnabled: { type: boolean }
+        updatedAt: { type: string, format: date-time }
+        updatedByUserId: { type: string, nullable: true }
+      required: [orgId, recordType, retentionDays, isEnabled]
+
+    UpdateDataRetentionPolicyBody:
+      type: object
+      properties:
+        recordType: { type: string }
+        retentionDays: { type: integer }
+        isEnabled: { type: boolean }
+      required: [recordType, retentionDays, isEnabled]
+
+    BaaControl:
+      type: object
+      properties:
+        id: { type: string }
+        category: { type: string }
+        control: { type: string }
+        status:
+          type: string
+          enum: [implemented, partial, not_implemented]
+        notes: { type: string }
+      required: [id, category, control, status]
+
+    ImportUploadResponse:
+      type: object
+      properties:
+        headers: { type: array, items: { type: string } }
+        sampleRows: { type: array, items: { type: object } }
+        totalRows: { type: integer }
+        suggestedMapping: { type: object }
+        targetFields:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              label: { type: string }
+              required: { type: boolean }
+            required: [field, label]
+      required: [headers, sampleRows, totalRows, suggestedMapping, targetFields]
+
+    ImportValidationResponse:
+      type: object
+      properties:
+        totalRows: { type: integer }
+        errorCount: { type: integer }
+        validRows: { type: integer }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              row: { type: integer }
+              field: { type: string }
+              message: { type: string }
+              value: { type: string }
+            required: [row, field, message]
+      required: [totalRows, errorCount, validRows, errors]
+
+    GhlValidationResponse:
+      type: object
+      properties:
+        totalRows: { type: integer }
+        errorCount: { type: integer }
+        validRows: { type: integer }
+        errors: { type: array, items: { type: object } }
+        duplicateEmails: { type: integer }
+        duplicatePhones: { type: integer }
+      required: [totalRows, errorCount, validRows, errors, duplicateEmails, duplicatePhones]
+
+    ImportJobStarted:
+      type: object
+      properties:
+        jobId: { type: string }
+        totalRows: { type: integer }
+      required: [jobId, totalRows]
+
+    ImportJob:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        userId: { type: string, nullable: true }
+        importType: { type: string }
+        status: { type: string }
+        totalRows: { type: integer }
+        processedRows: { type: integer }
+        createdCount: { type: integer }
+        updatedCount: { type: integer }
+        skippedCount: { type: integer }
+        errorCount: { type: integer }
+        fileName: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+      required: [id, orgId, importType, status, totalRows, processedRows, createdCount, updatedCount, skippedCount, errorCount, createdAt]

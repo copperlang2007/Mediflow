@@ -26,6 +26,9 @@ const CompliancePage = lazy(() => import("@/pages/compliance"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
 const RenewalsPage = lazy(() => import("@/pages/renewals"));
 const AutomationsPage = lazy(() => import("@/pages/automations"));
+const ReportsPage = lazy(() => import("@/pages/reports"));
+const AdminCompliancePage = lazy(() => import("@/pages/admin-compliance"));
+const DataMigrationPage = lazy(() => import("@/pages/data-migration"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const ForgotPasswordPage = lazy(() => import("@/pages/forgot-password"));
 
@@ -334,6 +337,15 @@ function ClerkProviderWithRoutes() {
               </Route>
               <Route path="/automations">
                 <ProtectedLayout><AutomationsPage /></ProtectedLayout>
+              </Route>
+              <Route path="/reports">
+                <ProtectedLayout><ReportsPage /></ProtectedLayout>
+              </Route>
+              <Route path="/admin-compliance">
+                <ProtectedLayout><AdminCompliancePage /></ProtectedLayout>
+              </Route>
+              <Route path="/data-migration">
+                <ProtectedLayout><DataMigrationPage /></ProtectedLayout>
               </Route>
               <Route path="/compliance">
                 <ProtectedLayout><CompliancePage /></ProtectedLayout>

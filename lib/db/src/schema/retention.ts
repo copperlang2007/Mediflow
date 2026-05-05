@@ -5,8 +5,10 @@ import {
   pgEnum,
   integer,
   jsonb,
+  index,
 } from "drizzle-orm/pg-core";
 import { organizationsTable } from "./core";
+import { usersTable } from "./core";
 import { contactsTable } from "./crm";
 
 export const retentionFlagTypeEnum = pgEnum("retention_flag_type", [
@@ -48,24 +50,35 @@ export const retentionFlagsTable = pgTable("retention_flags", {
 
 export type RetentionFlag = typeof retentionFlagsTable.$inferSelect;
 
-export const importJobsTable = pgTable("import_jobs", {
-  id: text("id").primaryKey(),
-  orgId: text("org_id")
-    .notNull()
-    .references(() => organizationsTable.id),
-  source: importSourceEnum("source").notNull(),
-  status: importStatusEnum("status").notNull().default("pending"),
-  fileKey: text("file_key"),
-  totalRows: integer("total_rows").notNull().default(0),
-  processedRows: integer("processed_rows").notNull().default(0),
-  errorRows: integer("error_rows").notNull().default(0),
-  errors: jsonb("errors"),
-  startedAt: timestamp("started_at", { withTimezone: true }),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-  createdBy: text("created_by"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const importJobsTable = pgTable(
+  "import_jobs",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizationsTable.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => usersTable.id, { onDelete: "set null" }),
+    importType: text("import_type").notNull().default("csv_contacts"),
+    status: text("status").notNull().default("pending"),
+    totalRows: integer("total_rows").notNull().default(0),
+    processedRows: integer("processed_rows").notNull().default(0),
+    createdCount: integer("created_count").notNull().default(0),
+    updatedCount: integer("updated_count").notNull().default(0),
+    skippedCount: integer("skipped_count").notNull().default(0),
+    errorCount: integer("error_count").notNull().default(0),
+    errors: jsonb("errors"),
+    columnMapping: jsonb("column_mapping"),
+    options: jsonb("options"),
+    fileName: text("file_name"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("import_jobs_org_id_created_at_idx").on(t.orgId, t.createdAt),
+    index("import_jobs_org_id_status_idx").on(t.orgId, t.status),
+  ],
+);
 
 export type ImportJob = typeof importJobsTable.$inferSelect;

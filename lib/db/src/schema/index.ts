@@ -8,3 +8,6 @@ export * from "./automations";
 export * from "./notifications";
 export * from "./retention";
 export * from "./settings";
+export * from "./analytics";
+export * from "./conversations";
+export * from "./messages";

@@ -80,7 +80,11 @@ lib/
 - `communications.ts` — message_threads, messages, email_templates, sms_templates, opt_outs
 - `automations.ts` — sequences, sequence_steps, sequence_enrollments, automation_rules, automation_rule_logs
 - `notifications.ts` — notifications (with priority, resourceType, resourceId)
-- `retention.ts` — retention_flags
+- `retention.ts` — retention_flags, import_jobs
+- `settings.ts` — org_settings (sessionTimeoutMinutes)
+- `analytics.ts` — login_events, data_export_log, data_retention_policies
+- `conversations.ts` — conversations (AI chat sessions)
+- `messages.ts` — messages (AI chat messages)
 
 ## API Routes (all prefixed /api)
 
@@ -180,6 +184,35 @@ lib/
 - `POST /ai/chat` — SSE streaming context-aware chat (system-prompt injected with live DB data)
 - `POST /ai/draft` — draft SMS or email for a contact (contactId + type + goal)
 - `POST /ai/compliance-report` — SSE streaming agency-wide compliance intelligence report
+- `GET /ai/compliance-report/:documentId` — download stored compliance report PDF
+- `GET /reports/agent-performance` — agent performance metrics (?startDate&endDate)
+- `GET /reports/pipeline` — pipeline funnel analytics (?startDate&endDate)
+- `GET /reports/leads` — lead source breakdown + trend (?startDate&endDate)
+- `GET /reports/compliance-matrix` — license/cert/AHIP compliance matrix
+- `GET /reports/communications` — SMS/email volume with AI-assist rate (?startDate&endDate)
+- `GET /reports/retention` — member retention/at-risk/lost counts
+- `GET /admin/audit-log` — paginated audit trail with CSV export (compliance_manager+)
+- `GET /admin/audit-log/export` — CSV download of audit log
+- `GET /admin/access-review` — all users with roles + last login (agency_admin+)
+- `GET /admin/access-review/export` — CSV export of user access
+- `POST /admin/users/:userId/deactivate` — deactivate user
+- `POST /admin/users/:userId/reactivate` — reactivate user
+- `GET /admin/login-history` — login event history with success/fail
+- `GET /admin/export-log` — data export audit log
+- `GET /admin/session-config` — session timeout config
+- `PUT /admin/session-config` — update session timeout
+- `GET /admin/data-retention` — retention policies per record type
+- `PUT /admin/data-retention` — update retention policy
+- `GET /admin/baa-checklist` — HIPAA/SOC2 controls checklist
+- `POST /admin/soc2-evidence-pack` — generate SOC2 evidence PDF (streams PDF)
+- `POST /imports/monday/upload` — parse Monday.com CSV, return headers + mapping suggestions
+- `POST /imports/monday/validate` — validate field mapping, return error list
+- `POST /imports/monday/confirm` — start async import job, returns jobId
+- `POST /imports/ghl/upload|validate|confirm` — GoHighLevel contact import wizard
+- `POST /imports/contacts/upload|confirm` — generic CSV contact import
+- `GET /imports/progress/:jobId` — SSE stream of import job progress
+- `GET /imports/history` — list past import jobs
+- `GET /imports/:jobId/errors.csv` — download error rows for a past import
 - `GET /audit-log` — HIPAA audit trail (compliance_manager+ only)
 - `POST /storage/uploads/request-url` — presigned upload URL
 - `GET /storage/public-objects/*` — public assets (no auth)
@@ -228,7 +261,7 @@ Ad-hoc jobs (enqueue via `enqueue(JOB_NAMES.X, data)`):
 - **Error boundary**: `ErrorBoundary` component wraps each page; global boundary wraps the router
 - **Auth**: Clerk `ClerkProvider` → signs in/out users; `Show` components gate authenticated routes
 - **Theme**: Navy sidebar (`221 50% 18%`), Medicare blue primary (`221 83% 43%`), cyan accent (`199 89% 48%`)
-- **AI panel**: `components/ai-assistant.tsx` — floating Bot button + right-side SSE chat drawer; slash commands; context-aware (reads page type/agentId/contactId)
+- **AI panel**: `components/ai-assistant/AiAssistantPanel.tsx` — floating Bot button + right-side SSE chat drawer; slash commands; context-aware (reads page type/agentId/contactId)
 - **Automations page**: `pages/automations.tsx` — rule builder with trigger picker, condition builder, multi-action list, enable/disable toggle, execution history modal, manual run
 - **CRM contact**: "Draft with AI" button in Send SMS and Send Email modals (calls POST /ai/draft)
 - **Compliance page**: "AI Compliance Report" card at top with SSE streaming report generator

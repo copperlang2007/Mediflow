@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 
 import { conversations } from "./conversations";
 
-export const messages = pgTable("messages", {
+export const aiMessages = pgTable("ai_messages", {
   id: serial("id").primaryKey(),
   conversationId: integer("conversation_id")
     .notNull()
@@ -14,10 +14,10 @@ export const messages = pgTable("messages", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const insertMessageSchema = createInsertSchema(messages).omit({
+export const insertAiMessageSchema = createInsertSchema(aiMessages).omit({
   id: true,
   createdAt: true,
 });
 
-export type Message = typeof messages.$inferSelect;
-export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type AiMessage = typeof aiMessages.$inferSelect;
+export type InsertAiMessage = z.infer<typeof insertAiMessageSchema>;
