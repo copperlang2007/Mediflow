@@ -1,16 +1,3 @@
-/**
- * Automatic PHI Audit Logging Middleware.
- *
- * Attach to any route group to guarantee audit trail entries are written
- * without individual handlers needing to remember to call auditLog().
- *
- * Usage (group):
- *   router.use(auditMiddleware("agent", "read"));
- *
- * Usage (per-route):
- *   router.patch("/agents/:id", auditMiddleware("agent", "update"), handler)
- */
-
 import { type Request, type Response, type NextFunction } from "express";
 import { db, auditLogTable } from "@workspace/db";
 import { type AuthenticatedRequest } from "./requireAuth";

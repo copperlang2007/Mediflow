@@ -1,6 +1,24 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryCache, MutationCache } from "@tanstack/react-query";
+import { toast } from "sonner";
+
+function toMessage(error: unknown): string {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return (error as { message: string }).message;
+  }
+  return "An unexpected error occurred";
+}
 
 export const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error) => {
+      toast.error(toMessage(error));
+    },
+  }),
+  mutationCache: new MutationCache({
+    onError: (error) => {
+      toast.error(toMessage(error));
+    },
+  }),
   defaultOptions: {
     queries: {
       staleTime: 30_000,

@@ -38,27 +38,18 @@ export const requireAuth = async (
   authReq.userId = user.id;
   authReq.orgId = user.orgId;
   authReq.userRole = user.role as Role;
+  authReq.log = req.log.child({ userId: user.id, orgId: user.orgId, role: user.role });
 
   next();
 };
 
-/**
- * Explicit-role middleware.
- *
- * Grants access when the authenticated user's role is one of the listed roles.
- * Use requirePermission() for resource/action matrix lookups — these two
- * helpers must never be conflated because role names can overlap resource names
- * (e.g. "agent" is both a Role and a Resource), which causes silent
- * authorization failures if a single overloaded function is used.
- */
 export function requireRole(
   ...allowedRoles: Array<Role>
 ): (req: Request, res: Response, next: NextFunction) => Promise<void> {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const role = authReq.userRole;
 
-    if (!role || !allowedRoles.includes(role)) {
+    if (!authReq.userRole || !allowedRoles.includes(authReq.userRole)) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
@@ -67,25 +58,14 @@ export function requireRole(
   };
 }
 
-/**
- * Permission-matrix middleware.
- *
- * Consult the centralised RBAC matrix in lib/permissions.ts to decide access.
- * Prefer this over requireRole() when checking resource/action semantics so
- * the matrix stays the single source of truth.
- *
- * Separate from requireRole() to eliminate the "agent" role-vs-resource
- * ambiguity that would exist in a single overloaded function.
- */
 export function requirePermission(
   resource: Resource,
   action: Action,
 ): (req: Request, res: Response, next: NextFunction) => Promise<void> {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const role = authReq.userRole;
 
-    if (!role || !can(role, resource, action)) {
+    if (!authReq.userRole || !can(authReq.userRole, resource, action)) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
@@ -93,4 +73,3 @@ export function requirePermission(
     next();
   };
 }
-
