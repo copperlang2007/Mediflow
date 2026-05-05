@@ -24,6 +24,21 @@ import { enqueue, JOB_NAMES } from "../lib/jobs";
 
 const router: IRouter = Router();
 
+// PHI masking — roles that may see full DOB and Medicare ID
+const PHI_PRIVILEGED_ROLES = new Set(["super_admin", "agency_admin", "compliance_manager"]);
+
+function maskContact<T extends { dob?: Date | null; medicareId?: string | null }>(
+  contact: T,
+  userRole: string,
+): T {
+  if (PHI_PRIVILEGED_ROLES.has(userRole)) return contact;
+  return {
+    ...contact,
+    dob: contact.dob != null ? null : null,
+    medicareId: contact.medicareId != null ? "***-**-****" : null,
+  };
+}
+
 router.use(
   auditMiddleware("contact", undefined, {
     includeReads: false,
@@ -112,7 +127,7 @@ router.get(
       db.select({ count: sql<number>`count(*)` }).from(contactsTable).where(and(...conditions)),
     ]);
 
-    res.json({ data: contacts, total: Number(totalRes[0]?.count ?? 0) });
+    res.json({ data: contacts.map((c) => maskContact(c, authReq.userRole)), total: Number(totalRes[0]?.count ?? 0) });
   },
 );
 
@@ -167,7 +182,7 @@ router.get(
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const [contact] = await db.select().from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
-    res.json(contact);
+    res.json(maskContact(contact, authReq.userRole));
   },
 );
 

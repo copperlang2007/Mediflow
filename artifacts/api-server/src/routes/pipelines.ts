@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, sql, desc, asc } from "drizzle-orm";
+import { eq, and, sql, desc, asc, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import {
@@ -272,6 +272,18 @@ router.patch("/deals/:id", requireAuth, requirePermission("contact", "update"), 
   }
 
   res.json(updated);
+});
+
+// DELETE /deals/:id — soft-delete (sets deletedAt; hard-delete requires admin retention confirmation)
+router.delete("/deals/:id", requireAuth, requirePermission("contact", "delete"), async (req: Request, res: Response): Promise<void> => {
+  const authReq = req as AuthenticatedRequest;
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const [existing] = await db.select({ id: dealsTable.id }).from(dealsTable)
+    .where(and(eq(dealsTable.id, id), eq(dealsTable.orgId, authReq.orgId), isNull(dealsTable.deletedAt)))
+    .limit(1);
+  if (!existing) { res.status(404).json({ error: "Deal not found" }); return; }
+  await db.update(dealsTable).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(dealsTable.id, id));
+  res.sendStatus(204);
 });
 
 // GET /pipelines/:id/analytics

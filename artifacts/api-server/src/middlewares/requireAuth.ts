@@ -113,3 +113,33 @@ export function requirePermission(
     next();
   };
 }
+
+/**
+ * Requires the caller to send `X-Confirm-Export: true` to acknowledge
+ * that a bulk PHI export is intentional. Used on CSV/export endpoints.
+ */
+export function requireExportConfirm(req: Request, res: Response, next: NextFunction): void {
+  if (req.headers["x-confirm-export"] !== "true") {
+    res.status(428).json({
+      error: "Export confirmation required",
+      hint: "Include header X-Confirm-Export: true to proceed with bulk data export",
+    });
+    return;
+  }
+  next();
+}
+
+/**
+ * Requires the caller to send `X-Confirm-Destructive: true` before
+ * any hard-delete or irreversible bulk operation.
+ */
+export function requireDestructiveConfirm(req: Request, res: Response, next: NextFunction): void {
+  if (req.headers["x-confirm-destructive"] !== "true") {
+    res.status(428).json({
+      error: "Destructive operation confirmation required",
+      hint: "Include header X-Confirm-Destructive: true to proceed",
+    });
+    return;
+  }
+  next();
+}

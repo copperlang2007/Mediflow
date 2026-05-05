@@ -22,6 +22,7 @@ import {
   requireAuth,
   requireRole,
   type AuthenticatedRequest,
+  requireExportConfirm,
 } from "../middlewares/requireAuth";
 import { randomUUID } from "crypto";
 
@@ -234,6 +235,7 @@ router.get(
   "/reports/agent-performance/export",
   requireAuth,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
+  requireExportConfirm,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { start, end } = parseRange(req);
@@ -813,6 +815,7 @@ router.get(
   "/reports/pipeline/export",
   requireAuth,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
+  requireExportConfirm,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { start, end } = parseRange(req);
@@ -864,6 +867,7 @@ router.get(
   "/reports/leads/export",
   requireAuth,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
+  requireExportConfirm,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { start, end } = parseRange(req);
@@ -906,6 +910,7 @@ router.get(
   "/reports/compliance-matrix/export",
   requireAuth,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
+  requireExportConfirm,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
 
@@ -968,6 +973,7 @@ router.get(
   "/reports/communications/export",
   requireAuth,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
+  requireExportConfirm,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { start, end } = parseRange(req);
@@ -1020,6 +1026,7 @@ router.get(
   "/reports/retention/export",
   requireAuth,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
+  requireExportConfirm,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const now = new Date();
@@ -1074,6 +1081,7 @@ router.get(
   "/reports/executive/export",
   requireAuth,
   requireRole("super_admin", "agency_admin"),
+  requireExportConfirm,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { start, end } = parseRange(req);
@@ -1146,6 +1154,18 @@ router.get(
     const priorStart = new Date(start.getTime() - periodMs);
     const priorEnd = new Date(start.getTime() - 1);
 
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    // AEP: Oct 15 – Dec 7; OEP: Jan 1 – Mar 31
+    const aepStart = new Date(currentYear, 9, 15);
+    const aepEnd = new Date(currentYear, 11, 7);
+    const oepStart = new Date(currentYear, 0, 1);
+    const oepEnd = new Date(currentYear, 2, 31);
+    const inAep = now >= aepStart && now <= aepEnd;
+    const inOep = now >= oepStart && now <= oepEnd;
+
     const [
       activeAgents,
       onboardingAgents,
@@ -1157,6 +1177,8 @@ router.get(
       enrolledMembers,
       commsVolume,
       ahipStats,
+      licensesExpiringThisMonth,
+      agentComplianceScores,
     ] = await Promise.all([
       db.select({ cnt: count() }).from(agentsTable)
         .where(and(eq(agentsTable.orgId, authReq.orgId), eq(agentsTable.status, "active"))),
@@ -1190,6 +1212,24 @@ router.get(
         .from(ahipRecordsTable)
         .innerJoin(agentsTable, eq(ahipRecordsTable.agentId, agentsTable.id))
         .where(eq(agentsTable.orgId, authReq.orgId)),
+
+      // Licenses expiring this calendar month
+      db.select({ cnt: count() }).from(stateLicensesTable)
+        .innerJoin(agentsTable, eq(stateLicensesTable.agentId, agentsTable.id))
+        .where(and(
+          eq(agentsTable.orgId, authReq.orgId),
+          gte(stateLicensesTable.expiryDate, monthStart),
+          lte(stateLicensesTable.expiryDate, monthEnd),
+        )),
+
+      // Per-agent compliance scores for agency aggregate
+      db.select({
+        hasActiveLicense: sql<number>`SUM(CASE WHEN ${stateLicensesTable.status} = 'active' THEN 1 ELSE 0 END)`,
+        agentId: agentsTable.id,
+      }).from(agentsTable)
+        .leftJoin(stateLicensesTable, eq(stateLicensesTable.agentId, agentsTable.id))
+        .where(eq(agentsTable.orgId, authReq.orgId))
+        .groupBy(agentsTable.id),
     ]);
 
     const leadsTotal = Number(totalLeads[0]?.cnt ?? 0);
@@ -1203,6 +1243,17 @@ router.get(
     const ahipTotal = Number(ahipStats[0]?.total ?? 0);
     const ahipPassed = Number(ahipStats[0]?.passed ?? 0);
     const ahipRate = ahipTotal > 0 ? Math.round((ahipPassed / ahipTotal) * 100) : 0;
+
+    // Agency compliance score: average of per-agent compliance score (25 pts per pillar)
+    // Pillars: hasActiveLicense, hasCert (queried below), hasAhip — we have license data per agent
+    const agencyComplianceScore = agentComplianceScores.length > 0
+      ? Math.round(
+          agentComplianceScores.reduce((sum, a) => {
+            const hasLic = Number(a.hasActiveLicense) > 0 ? 50 : 0;
+            return sum + hasLic;
+          }, 0) / agentComplianceScores.length
+        )
+      : 0;
 
     res.json({
       periodStart: start.toISOString(),
@@ -1233,6 +1284,10 @@ router.get(
         ahipRate,
         ahipPassed,
         ahipTotal,
+        licensesExpiringThisMonth: Number(licensesExpiringThisMonth[0]?.cnt ?? 0),
+        aepEligibleContacts: inAep ? Number(enrolledMembers[0]?.cnt ?? 0) : 0,
+        oepEligibleContacts: inOep ? Number(enrolledMembers[0]?.cnt ?? 0) : 0,
+        agencyComplianceScore,
       },
     });
   },

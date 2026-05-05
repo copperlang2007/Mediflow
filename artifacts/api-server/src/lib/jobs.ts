@@ -59,6 +59,10 @@ export const JOB_NAMES = {
   AUTOMATION_DAILY_SWEEP: "automation-daily-sweep",
   WEEKLY_COMPLIANCE_REPORT: "weekly-compliance-report",
   RETENTION_ENFORCEMENT: "retention-enforcement",
+  // Import workers (ad-hoc, enqueued from import routes)
+  IMPORT_MONDAY: "import-monday",
+  IMPORT_GHL: "import-ghl",
+  IMPORT_CSV_CONTACTS: "import-csv-contacts",
   // Ad-hoc
   TASK_AUTO_ASSIGN: "task-auto-assign",
   RUN_AUTOMATION_RULES: "run-automation-rules",
@@ -288,6 +292,25 @@ export async function startWorkers(): Promise<void> {
     await retentionEnforcementWorker();
   };
   await boss.work<Record<string, never>>(JOB_NAMES.RETENTION_ENFORCEMENT, retentionHandler);
+
+  // ---- Import workers (ad-hoc, triggered by import routes) ----
+  const importMondayHandler: WorkHandler<{ jobId: string }> = async (jobs) => {
+    const { importMondayWorker } = await import("../workers/importProcessing");
+    for (const job of jobs) await importMondayWorker(job.data);
+  };
+  await boss.work<{ jobId: string }>(JOB_NAMES.IMPORT_MONDAY, importMondayHandler);
+
+  const importGhlHandler: WorkHandler<{ jobId: string }> = async (jobs) => {
+    const { importGhlWorker } = await import("../workers/importProcessing");
+    for (const job of jobs) await importGhlWorker(job.data);
+  };
+  await boss.work<{ jobId: string }>(JOB_NAMES.IMPORT_GHL, importGhlHandler);
+
+  const importCsvHandler: WorkHandler<{ jobId: string }> = async (jobs) => {
+    const { importCsvContactsWorker } = await import("../workers/importProcessing");
+    for (const job of jobs) await importCsvContactsWorker(job.data);
+  };
+  await boss.work<{ jobId: string }>(JOB_NAMES.IMPORT_CSV_CONTACTS, importCsvHandler);
 
   logger.info("All background workers registered");
 }

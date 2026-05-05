@@ -21,6 +21,7 @@ import {
   pipelinesTable,
 } from "@workspace/db";
 import { requireAuth, requireRole, type AuthenticatedRequest } from "../middlewares/requireAuth";
+import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { randomUUID } from "crypto";
 import multer from "multer";
 import { parse } from "csv-parse/sync";
@@ -207,11 +208,11 @@ router.post(
       status: "processing",
       totalRows: rows.length,
       columnMapping: mapping as Record<string, unknown>,
+      options: { rows, mapping } as Record<string, unknown>,
       fileName: req.file.originalname,
     });
 
-    // Process in background — progress persisted to DB
-    void processMondayImport(jobId, authReq.orgId, rows, mapping).catch(console.error);
+    await enqueue(JOB_NAMES.IMPORT_MONDAY, { jobId });
 
     res.json({ jobId, totalRows: rows.length });
   },
@@ -225,7 +226,7 @@ async function persistProgress(jobId: string, processedRows: number, errorCount:
   }).where(eq(importJobsTable.id, jobId));
 }
 
-async function processMondayImport(jobId: string, orgId: string, rows: Record<string, string>[], mapping: Record<string, string>) {
+export async function processMondayImport(jobId: string, orgId: string, rows: Record<string, string>[], mapping: Record<string, string>) {
   let created = 0, errors = 0;
   const errorList: unknown[] = [];
 
@@ -544,17 +545,17 @@ router.post(
       id: jobId, orgId: authReq.orgId, userId: authReq.userId,
       importType: "gohighlevel", status: "processing", totalRows: rows.length,
       columnMapping: mapping as Record<string, unknown>,
-      options: { duplicateAction } as Record<string, unknown>,
+      options: { rows, mapping, duplicateAction } as Record<string, unknown>,
       fileName: req.file.originalname,
     });
 
-    void processGhlImport(jobId, authReq.orgId, rows, mapping, duplicateAction).catch(console.error);
+    await enqueue(JOB_NAMES.IMPORT_GHL, { jobId });
 
     res.json({ jobId, totalRows: rows.length });
   },
 );
 
-async function processGhlImport(jobId: string, orgId: string, rows: Record<string, string>[], mapping: Record<string, string>, duplicateAction: string) {
+export async function processGhlImport(jobId: string, orgId: string, rows: Record<string, string>[], mapping: Record<string, string>, duplicateAction: string) {
   let created = 0, updated = 0, skipped = 0, errors = 0;
   const errorList: unknown[] = [];
 
@@ -805,16 +806,18 @@ router.post(
     await db.insert(importJobsTable).values({
       id: jobId, orgId: authReq.orgId, userId: authReq.userId,
       importType: "csv_contacts", status: "processing", totalRows: rows.length,
-      columnMapping: mapping as Record<string, unknown>, fileName: req.file.originalname,
+      columnMapping: mapping as Record<string, unknown>,
+      options: { rows, mapping } as Record<string, unknown>,
+      fileName: req.file.originalname,
     });
 
-    void processCsvContactImport(jobId, authReq.orgId, rows, mapping).catch(console.error);
+    await enqueue(JOB_NAMES.IMPORT_CSV_CONTACTS, { jobId });
 
     res.json({ jobId, totalRows: rows.length });
   },
 );
 
-async function processCsvContactImport(jobId: string, orgId: string, rows: Record<string, string>[], mapping: Record<string, string>) {
+export async function processCsvContactImport(jobId: string, orgId: string, rows: Record<string, string>[], mapping: Record<string, string>) {
   let created = 0, errors = 0;
   const errorList: unknown[] = [];
 
