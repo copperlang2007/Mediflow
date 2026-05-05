@@ -53,6 +53,8 @@ export async function licenseExpiryCheckWorker(
       agentLastName: agentsTable.lastName,
       agentEmail: agentsTable.email,
       orgId: agentsTable.orgId,
+      agentUserId: agentsTable.userId,
+      managerId: agentsTable.managerId,
     })
     .from(stateLicensesTable)
     .innerJoin(agentsTable, eq(stateLicensesTable.agentId, agentsTable.id))
@@ -89,7 +91,7 @@ export async function licenseExpiryCheckWorker(
     const pendingThresholds = crossedThresholds.filter((t) => !alreadySentSet.has(t));
     if (pendingThresholds.length === 0) continue;
 
-    // Fetch compliance managers + admins once per license (shared across all pending thresholds)
+    // Fetch org-level admins/compliance roles for oversight notifications
     const orgAdmins = await db
       .select({ id: usersTable.id, email: usersTable.email })
       .from(usersTable)
@@ -101,12 +103,34 @@ export async function licenseExpiryCheckWorker(
         ),
       );
 
+    // Fetch the agent's assigned manager (if any) — may not be in org admin roles
+    let managerUser: { id: string; email: string } | null = null;
+    if (license.managerId) {
+      const [mu] = await db
+        .select({ id: usersTable.id, email: usersTable.email })
+        .from(usersTable)
+        .where(and(eq(usersTable.id, license.managerId), eq(usersTable.isActive, true)))
+        .limit(1);
+      managerUser = mu ?? null;
+    }
+
+    // Build deduplicated recipient sets: org admins + manager + agent user
+    const notifUserIdSet = new Set<string>(orgAdmins.map((a) => a.id));
+    if (managerUser) notifUserIdSet.add(managerUser.id);
+    if (license.agentUserId) notifUserIdSet.add(license.agentUserId);
+    const notifUserIds = Array.from(notifUserIdSet);
+
+    const emailSet = new Set<string>();
+    if (license.agentEmail) emailSet.add(license.agentEmail);
+    if (managerUser?.email) emailSet.add(managerUser.email);
+    orgAdmins.forEach((a) => { if (a.email) emailSet.add(a.email); });
+
     for (const threshold of pendingThresholds) {
-      // Create in-app notifications for managers
-      const notifInserts = orgAdmins.map((admin) => ({
+      // Create in-app notifications for agent + manager + org admins
+      const notifInserts = notifUserIds.map((uid) => ({
         id: randomUUID(),
         orgId: license.orgId,
-        userId: admin.id,
+        userId: uid,
         type: "license_expiry_alert",
         title: `License expiring in ${daysUntilExpiry} days`,
         body: `${license.agentFirstName} ${license.agentLastName}: ${license.stateCode} ${license.licenseType} expires ${license.expiryDate!.toLocaleDateString()}`,
@@ -125,7 +149,7 @@ export async function licenseExpiryCheckWorker(
         );
       }
 
-      // Send email to agent AND all managers
+      // Send email to agent + manager + org admins
       const emailHtml = licenseExpiryEmailHtml({
         agentName: `${license.agentFirstName} ${license.agentLastName}`,
         stateCode: license.stateCode,
@@ -134,9 +158,7 @@ export async function licenseExpiryCheckWorker(
         expiryDate: license.expiryDate!.toLocaleDateString(),
       });
 
-      const emailRecipients: string[] = [];
-      if (license.agentEmail) emailRecipients.push(license.agentEmail);
-      orgAdmins.forEach((a) => { if (a.email) emailRecipients.push(a.email); });
+      const emailRecipients = Array.from(emailSet);
 
       if (emailRecipients.length > 0) {
         await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {

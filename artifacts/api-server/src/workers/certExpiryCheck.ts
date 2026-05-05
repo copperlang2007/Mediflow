@@ -55,6 +55,8 @@ export async function certExpiryCheckWorker(
       agentLastName: agentsTable.lastName,
       agentEmail: agentsTable.email,
       orgId: agentsTable.orgId,
+      agentUserId: agentsTable.userId,
+      managerId: agentsTable.managerId,
     })
     .from(carrierCertificationsTable)
     .innerJoin(agentsTable, eq(carrierCertificationsTable.agentId, agentsTable.id))
@@ -91,7 +93,7 @@ export async function certExpiryCheckWorker(
     const pendingThresholds = crossedThresholds.filter((t) => !alreadySentSet.has(t));
     if (pendingThresholds.length === 0) continue;
 
-    // Fetch compliance managers + admins once per cert
+    // Fetch org-level admins/compliance roles for oversight notifications
     const orgAdmins = await db
       .select({ id: usersTable.id, email: usersTable.email })
       .from(usersTable)
@@ -103,12 +105,34 @@ export async function certExpiryCheckWorker(
         ),
       );
 
+    // Fetch the agent's assigned manager (if any) — may not be in org admin roles
+    let managerUser: { id: string; email: string } | null = null;
+    if (cert.managerId) {
+      const [mu] = await db
+        .select({ id: usersTable.id, email: usersTable.email })
+        .from(usersTable)
+        .where(and(eq(usersTable.id, cert.managerId), eq(usersTable.isActive, true)))
+        .limit(1);
+      managerUser = mu ?? null;
+    }
+
+    // Build deduplicated recipient sets: org admins + manager + agent user
+    const notifUserIdSet = new Set<string>(orgAdmins.map((a) => a.id));
+    if (managerUser) notifUserIdSet.add(managerUser.id);
+    if (cert.agentUserId) notifUserIdSet.add(cert.agentUserId);
+    const notifUserIds = Array.from(notifUserIdSet);
+
+    const emailSet = new Set<string>();
+    if (cert.agentEmail) emailSet.add(cert.agentEmail);
+    if (managerUser?.email) emailSet.add(managerUser.email);
+    orgAdmins.forEach((a) => { if (a.email) emailSet.add(a.email); });
+
     for (const threshold of pendingThresholds) {
-      // Create in-app notifications for managers
-      const notifInserts = orgAdmins.map((admin) => ({
+      // Create in-app notifications for agent + manager + org admins
+      const notifInserts = notifUserIds.map((uid) => ({
         id: randomUUID(),
         orgId: cert.orgId,
-        userId: admin.id,
+        userId: uid,
         type: "cert_expiry_alert",
         title: `Certification expiring in ${daysUntilExpiry} days`,
         body: `${cert.agentFirstName} ${cert.agentLastName}: ${cert.carrierName} (${cert.certificationYear}) expires ${cert.expiryDate!.toLocaleDateString()}`,
@@ -127,7 +151,7 @@ export async function certExpiryCheckWorker(
         );
       }
 
-      // Send email to agent AND all compliance managers
+      // Send email to agent + manager + org admins
       const emailHtml = certExpiryEmailHtml({
         agentName: `${cert.agentFirstName} ${cert.agentLastName}`,
         carrierName: cert.carrierName,
@@ -136,9 +160,7 @@ export async function certExpiryCheckWorker(
         expiryDate: cert.expiryDate!.toLocaleDateString(),
       });
 
-      const emailRecipients: string[] = [];
-      if (cert.agentEmail) emailRecipients.push(cert.agentEmail);
-      orgAdmins.forEach((a) => { if (a.email) emailRecipients.push(a.email); });
+      const emailRecipients = Array.from(emailSet);
 
       if (emailRecipients.length > 0) {
         await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
