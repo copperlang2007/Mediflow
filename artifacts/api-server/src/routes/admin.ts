@@ -340,6 +340,27 @@ router.delete(
     const authReq = req as AuthenticatedRequest;
     const sessionId = param(req.params.sessionId);
 
+    // Fetch session from Clerk to get the owning userId
+    let clerkSession: Awaited<ReturnType<typeof clerkClient.sessions.getSession>>;
+    try {
+      clerkSession = await clerkClient.sessions.getSession(sessionId);
+    } catch {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+    if (!clerkSession?.userId) { res.status(404).json({ error: "Session not found" }); return; }
+
+    // Verify the session's user belongs to the caller's org (prevent cross-tenant revocation)
+    const [sessionOwner] = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(and(eq(usersTable.id, clerkSession.userId), eq(usersTable.orgId, authReq.orgId)))
+      .limit(1);
+    if (!sessionOwner) {
+      res.status(403).json({ error: "Session does not belong to your organization" });
+      return;
+    }
+
     await clerkClient.sessions.revokeSession(sessionId);
     await db.insert(auditLogTable).values({
       id: randomUUID(),
@@ -349,6 +370,7 @@ router.delete(
       action: "revoke_session",
       resourceType: "session",
       resourceId: sessionId,
+      changes: { targetUserId: clerkSession.userId },
       ipAddress: req.ip ?? null,
     });
 

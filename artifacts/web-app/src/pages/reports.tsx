@@ -20,7 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   BarChart2, TrendingUp, Users, MessageSquare,
   ShieldCheck, RefreshCcw, Download, AlertTriangle,
-  CheckCircle2, XCircle,
+  CheckCircle2, XCircle, Printer, DollarSign, Activity,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 
@@ -143,7 +143,12 @@ function PipelineTab() {
 
   return (
     <div className="space-y-6">
-      <DateRangePicker value={range} onChange={setRange} />
+      <div className="flex items-center justify-between">
+        <DateRangePicker value={range} onChange={setRange} />
+        <Button variant="outline" size="sm" className="print:hidden" onClick={() => window.print()}>
+          <Printer className="h-4 w-4 mr-1.5" /> Print
+        </Button>
+      </div>
 
       {data.map((pipeline) => (
         <Card key={pipeline.pipelineId}>
@@ -195,7 +200,17 @@ function LeadsTab() {
 
   return (
     <div className="space-y-6">
-      <DateRangePicker value={range} onChange={setRange} />
+      <div className="flex items-center justify-between">
+        <DateRangePicker value={range} onChange={setRange} />
+        <div className="flex gap-2 print:hidden">
+          <Button variant="outline" size="sm" onClick={() => {
+            const rows = [["Source", "Total", "Converted", "Conv%", "Enrolled"], ...data.sourceBreakdown.map((r) => [r.source, r.total, r.converted, r.conversionRate + "%", r.enrolled])];
+            const csv = rows.map((r) => r.join(",")).join("\n");
+            const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "leads-report.csv"; a.click();
+          }}><Download className="h-4 w-4 mr-1.5" /> Export CSV</Button>
+          <Button variant="outline" size="sm" onClick={() => window.print()}><Printer className="h-4 w-4 mr-1.5" /> Print</Button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <StatCard title="Total Leads" value={data.totalLeads} icon={<Users className="h-5 w-5 text-blue-500" />} />
@@ -280,6 +295,12 @@ function ComplianceMatrixTab() {
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end print:hidden">
+        <Button variant="outline" size="sm" onClick={() => window.print()}>
+          <Printer className="h-4 w-4 mr-1.5" /> Print
+        </Button>
+      </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
@@ -615,6 +636,114 @@ function RetentionTab() {
   );
 }
 
+// ─── Executive KPI Tab ────────────────────────────────────────────────────────
+function ExecutiveTab() {
+  const [range, setRange] = useState({ start: dateOffset(30), end: today() });
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["reports", "executive", range],
+    queryFn: () => apiFetch<ExecutiveReport>(`/api/reports/executive?startDate=${range.start}&endDate=${range.end}`),
+  });
+
+  if (isLoading) return <LoadingSkeleton />;
+  if (!data) return <EmptyState message="No executive data available." />;
+
+  const leadsTrend = data.leads.changePercent;
+
+  return (
+    <div className="space-y-6 print:space-y-4">
+      <div className="flex items-center justify-between print:hidden">
+        <DateRangePicker value={range} onChange={setRange} />
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => {
+            const rows = [
+              ["Metric", "Value"],
+              ["Active Agents", data.agents.active],
+              ["Onboarding Agents", data.agents.onboarding],
+              ["New Leads", data.leads.total],
+              ["Prior Period Leads", data.leads.priorPeriod],
+              ["Lead Change %", data.leads.changePercent != null ? data.leads.changePercent + "%" : "N/A"],
+              ["Deals Won", data.deals.won],
+              ["Deals Lost", data.deals.lost],
+              ["Win Rate", data.deals.winRate + "%"],
+              ["Won Value", data.deals.wonValue],
+              ["Active Pipeline Value", data.deals.activePipelineValue],
+              ["Enrolled Members", data.members.enrolled],
+              ["Outbound Messages", data.communications.outbound],
+              ["AHIP Pass Rate", data.compliance.ahipRate + "%"],
+            ];
+            const csv = rows.map((r) => r.join(",")).join("\n");
+            const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "executive-report.csv"; a.click();
+          }}><Download className="h-4 w-4 mr-1.5" /> Export CSV</Button>
+          <Button variant="outline" size="sm" onClick={() => window.print()}><Printer className="h-4 w-4 mr-1.5" /> Print</Button>
+        </div>
+      </div>
+
+      {/* Section: Agency Workforce */}
+      <div>
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Workforce</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard title="Active Agents" value={data.agents.active} icon={<Users className="h-5 w-5 text-blue-500" />} />
+          <StatCard title="In Onboarding" value={data.agents.onboarding} icon={<Activity className="h-5 w-5 text-yellow-500" />} />
+          <StatCard title="Enrolled Members" value={data.members.enrolled.toLocaleString()} icon={<ShieldCheck className="h-5 w-5 text-green-500" />} />
+          <StatCard title="AHIP Pass Rate" value={`${data.compliance.ahipRate}%`} subtitle={`${data.compliance.ahipPassed}/${data.compliance.ahipTotal} agents`} icon={<CheckCircle2 className="h-5 w-5 text-purple-500" />} />
+        </div>
+      </div>
+
+      {/* Section: Sales & Pipeline */}
+      <div>
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Sales & Pipeline</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard
+            title="New Leads"
+            value={data.leads.total.toLocaleString()}
+            subtitle={leadsTrend != null ? `${leadsTrend >= 0 ? "+" : ""}${leadsTrend}% vs prior period` : undefined}
+            icon={<TrendingUp className={`h-5 w-5 ${leadsTrend != null && leadsTrend >= 0 ? "text-green-500" : "text-red-500"}`} />}
+          />
+          <StatCard title="Deals Won" value={data.deals.won} subtitle={`Win rate: ${data.deals.winRate}%`} icon={<CheckCircle2 className="h-5 w-5 text-green-500" />} />
+          <StatCard title="Won Value" value={`$${data.deals.wonValue.toLocaleString()}`} icon={<DollarSign className="h-5 w-5 text-green-600" />} />
+          <StatCard title="Active Pipeline" value={`$${data.deals.activePipelineValue.toLocaleString()}`} icon={<BarChart2 className="h-5 w-5 text-blue-500" />} />
+        </div>
+      </div>
+
+      {/* Section: Win rate + comms summary */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader><CardTitle>Deal Outcomes</CardTitle><CardDescription>Period: {range.start} – {range.end}</CardDescription></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie
+                  data={[
+                    { name: "Won", value: data.deals.won },
+                    { name: "Lost", value: data.deals.lost },
+                  ]}
+                  cx="50%" cy="50%" innerRadius={55} outerRadius={80} dataKey="value"
+                >
+                  <Cell fill="#10b981" />
+                  <Cell fill="#ef4444" />
+                </Pie>
+                <Tooltip />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+            <p className="text-center text-2xl font-bold mt-1">{data.deals.winRate}% <span className="text-sm font-normal text-muted-foreground">win rate</span></p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Communications Volume</CardTitle><CardDescription>Outbound messages sent this period</CardDescription></CardHeader>
+          <CardContent className="flex flex-col items-center justify-center h-40">
+            <MessageSquare className="h-10 w-10 text-blue-400 mb-2" />
+            <p className="text-4xl font-bold">{data.communications.outbound.toLocaleString()}</p>
+            <p className="text-sm text-muted-foreground mt-1">outbound messages</p>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function today() { return new Date().toISOString().slice(0, 10); }
 function dateOffset(days: number) { return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10); }
@@ -691,6 +820,17 @@ type RetentionReport = {
   reEnrollmentOpportunity?: number;
 };
 
+type ExecutiveReport = {
+  periodStart: string;
+  periodEnd: string;
+  agents: { active: number; onboarding: number };
+  leads: { total: number; priorPeriod: number; changePercent: number | null };
+  deals: { won: number; lost: number; winRate: number; wonValue: number; activePipelineValue: number };
+  members: { enrolled: number };
+  communications: { outbound: number };
+  compliance: { ahipRate: number; ahipPassed: number; ahipTotal: number };
+};
+
 // ─── Main Reports Page ────────────────────────────────────────────────────────
 export default function ReportsPage() {
   const { data: me } = useGetMe();
@@ -709,8 +849,9 @@ export default function ReportsPage() {
         <p className="text-muted-foreground mt-1">Agency performance, compliance, and pipeline analytics.</p>
       </div>
 
-      <Tabs defaultValue="agent-performance">
+      <Tabs defaultValue="executive">
         <TabsList className="flex-wrap h-auto gap-1">
+          <TabsTrigger value="executive">Executive</TabsTrigger>
           <TabsTrigger value="agent-performance">Agent Performance</TabsTrigger>
           <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
           <TabsTrigger value="leads">Lead Sources</TabsTrigger>
@@ -720,6 +861,7 @@ export default function ReportsPage() {
         </TabsList>
 
         <div className="mt-6">
+          <TabsContent value="executive"><ExecutiveTab /></TabsContent>
           <TabsContent value="agent-performance"><AgentPerformanceTab /></TabsContent>
           <TabsContent value="pipeline"><PipelineTab /></TabsContent>
           <TabsContent value="leads"><LeadsTab /></TabsContent>

@@ -104,16 +104,34 @@ function AuditDiffDialog({ entry, onClose }: { entry: AuditEntry; onClose: () =>
 function AuditLogTab() {
   const [page, setPage] = useState(0);
   const [selectedEntry, setSelectedEntry] = useState<AuditEntry | null>(null);
+  const [filterAction, setFilterAction] = useState<string>("all");
+  const [filterResource, setFilterResource] = useState<string>("all");
+  const [filterStartDate, setFilterStartDate] = useState<string>("");
+  const [filterEndDate, setFilterEndDate] = useState<string>("");
   const limit = 50;
 
+  const buildParams = () => {
+    const p = new URLSearchParams({ limit: String(limit), offset: String(page * limit) });
+    if (filterAction && filterAction !== "all") p.set("action", filterAction);
+    if (filterResource && filterResource !== "all") p.set("resourceType", filterResource);
+    if (filterStartDate) p.set("startDate", filterStartDate);
+    if (filterEndDate) p.set("endDate", filterEndDate);
+    return p.toString();
+  };
+
   const { data, isLoading } = useQuery({
-    queryKey: ["admin", "audit-log", page],
-    queryFn: () => apiFetch<AuditLogResponse>(`/api/admin/audit-log?limit=${limit}&offset=${page * limit}`),
+    queryKey: ["admin", "audit-log", page, filterAction, filterResource, filterStartDate, filterEndDate],
+    queryFn: () => apiFetch<AuditLogResponse>(`/api/admin/audit-log?${buildParams()}`),
   });
 
   const handleExport = async () => {
     const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-    const res = await fetch(`${base}/api/admin/audit-log/export`, { credentials: "include" });
+    const p = new URLSearchParams();
+    if (filterStartDate) p.set("startDate", filterStartDate);
+    if (filterEndDate) p.set("endDate", filterEndDate);
+    if (filterAction && filterAction !== "all") p.set("action", filterAction);
+    if (filterResource && filterResource !== "all") p.set("resourceType", filterResource);
+    const res = await fetch(`${base}/api/admin/audit-log/export?${p.toString()}`, { credentials: "include" });
     const blob = await res.blob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -121,13 +139,72 @@ function AuditLogTab() {
     a.click();
   };
 
+  const handleResetFilters = () => {
+    setFilterAction("all");
+    setFilterResource("all");
+    setFilterStartDate("");
+    setFilterEndDate("");
+    setPage(0);
+  };
+
+  const RESOURCE_TYPES = ["contact", "agent", "deal", "lead", "pipeline", "stage", "import", "session", "user", "automation", "carrier_cert", "license"];
+  const ACTION_TYPES = ["create", "update", "delete", "export", "login", "logout", "force_logout", "revoke_session", "invite_user", "import"];
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Complete immutable audit trail of all data access and modifications. Click any row to view before/after diff.</p>
+        <p className="text-sm text-muted-foreground">Complete immutable audit trail. Click any row to view before/after diff.</p>
         <Button variant="outline" size="sm" onClick={handleExport}>
           <Download className="h-4 w-4 mr-1.5" /> Export CSV
         </Button>
+      </div>
+
+      {/* Filter row */}
+      <div className="flex flex-wrap gap-2 items-end">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">Action</label>
+          <Select value={filterAction} onValueChange={(v) => { setFilterAction(v); setPage(0); }}>
+            <SelectTrigger className="h-8 w-36 text-xs"><SelectValue placeholder="All actions" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All actions</SelectItem>
+              {ACTION_TYPES.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">Resource</label>
+          <Select value={filterResource} onValueChange={(v) => { setFilterResource(v); setPage(0); }}>
+            <SelectTrigger className="h-8 w-36 text-xs"><SelectValue placeholder="All resources" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All resources</SelectItem>
+              {RESOURCE_TYPES.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">From</label>
+          <input
+            type="date"
+            value={filterStartDate}
+            onChange={(e) => { setFilterStartDate(e.target.value); setPage(0); }}
+            className="h-8 px-2 text-xs rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">To</label>
+          <input
+            type="date"
+            value={filterEndDate}
+            onChange={(e) => { setFilterEndDate(e.target.value); setPage(0); }}
+            className="h-8 px-2 text-xs rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        {(filterAction !== "all" || filterResource !== "all" || filterStartDate || filterEndDate) && (
+          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={handleResetFilters}>
+            <RefreshCcw className="h-3 w-3 mr-1" /> Clear
+          </Button>
+        )}
+        {data && <span className="text-xs text-muted-foreground ml-auto">{data.total.toLocaleString()} entries</span>}
       </div>
 
       {selectedEntry && <AuditDiffDialog entry={selectedEntry} onClose={() => setSelectedEntry(null)} />}

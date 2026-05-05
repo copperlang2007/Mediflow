@@ -667,7 +667,19 @@ router.get(
       if (!agentCommsMap[e.agentId]) agentCommsMap[e.agentId] = { agentId: e.agentId, smsSent: 0, emailSent: 0 };
       agentCommsMap[e.agentId].emailSent = Number(e.cnt);
     }
+    // Enrich byAgent with agent names
+    const agentIdsComms = Object.keys(agentCommsMap);
+    const agentNameRows = agentIdsComms.length > 0
+      ? await db
+        .select({ id: agentsTable.id, firstName: agentsTable.firstName, lastName: agentsTable.lastName })
+        .from(agentsTable)
+        .where(inArray(agentsTable.id, agentIdsComms))
+      : [];
+    const agentNameLookup: Record<string, string> = {};
+    for (const a of agentNameRows) agentNameLookup[a.id] = `${a.firstName} ${a.lastName}`;
+
     const byAgent = Object.values(agentCommsMap)
+      .map((a) => ({ ...a, agentName: agentNameLookup[a.agentId] ?? "Unknown Agent" }))
       .sort((a, b) => (b.smsSent + b.emailSent) - (a.smsSent + a.emailSent))
       .slice(0, 10);
 
@@ -791,6 +803,110 @@ router.get(
       oepWindow: { start: oepStart.toISOString(), end: oepEnd.toISOString(), isActive: inOepWindow },
       // Re-enrollment opportunity: enrolled contacts eligible for AEP/OEP changes
       reEnrollmentOpportunity: inAepWindow || inOepWindow ? enrolledCount : 0,
+    });
+  },
+);
+
+// ─── Executive KPI Report ──────────────────────────────────────────────────────
+router.get(
+  "/reports/executive",
+  requireAuth,
+  requireRole("super_admin", "agency_admin"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const { start, end } = parseRange(req);
+    const periodMs = end.getTime() - start.getTime();
+    const priorStart = new Date(start.getTime() - periodMs);
+    const priorEnd = new Date(start.getTime() - 1);
+
+    const [
+      activeAgents,
+      onboardingAgents,
+      totalLeads,
+      priorLeads,
+      dealsWon,
+      dealsLost,
+      activePipeline,
+      enrolledMembers,
+      commsVolume,
+      ahipStats,
+    ] = await Promise.all([
+      db.select({ cnt: count() }).from(agentsTable)
+        .where(and(eq(agentsTable.orgId, authReq.orgId), eq(agentsTable.status, "active"))),
+
+      db.select({ cnt: count() }).from(agentsTable)
+        .where(and(eq(agentsTable.orgId, authReq.orgId), eq(agentsTable.status, "onboarding"))),
+
+      db.select({ cnt: count() }).from(contactsTable)
+        .where(and(eq(contactsTable.orgId, authReq.orgId), gte(contactsTable.createdAt, start), lte(contactsTable.createdAt, end))),
+
+      db.select({ cnt: count() }).from(contactsTable)
+        .where(and(eq(contactsTable.orgId, authReq.orgId), gte(contactsTable.createdAt, priorStart), lte(contactsTable.createdAt, priorEnd))),
+
+      db.select({ cnt: count(), val: sum(dealsTable.valueEst) }).from(dealsTable)
+        .where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "won"), gte(dealsTable.wonAt, start), lte(dealsTable.wonAt, end))),
+
+      db.select({ cnt: count() }).from(dealsTable)
+        .where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "lost"), gte(dealsTable.updatedAt, start), lte(dealsTable.updatedAt, end))),
+
+      db.select({ val: sum(dealsTable.valueEst) }).from(dealsTable)
+        .where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "open"))),
+
+      db.select({ cnt: count() }).from(contactsTable)
+        .where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"))),
+
+      db.select({ cnt: count() }).from(messagesTable)
+        .innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id))
+        .where(and(eq(messageThreadsTable.orgId, authReq.orgId), eq(messagesTable.direction, "outbound"), gte(messagesTable.createdAt, start), lte(messagesTable.createdAt, end))),
+
+      db.select({ total: count(), passed: sum(sql<number>`CASE WHEN ${ahipRecordsTable.status} = 'passed' THEN 1 ELSE 0 END`) })
+        .from(ahipRecordsTable)
+        .innerJoin(agentsTable, eq(ahipRecordsTable.agentId, agentsTable.id))
+        .where(eq(agentsTable.orgId, authReq.orgId)),
+    ]);
+
+    const leadsTotal = Number(totalLeads[0]?.cnt ?? 0);
+    const leadsPrior = Number(priorLeads[0]?.cnt ?? 0);
+    const leadsChangePct = leadsPrior > 0 ? Math.round(((leadsTotal - leadsPrior) / leadsPrior) * 100) : null;
+
+    const wonCount = Number(dealsWon[0]?.cnt ?? 0);
+    const lostCount = Number(dealsLost[0]?.cnt ?? 0);
+    const winRate = (wonCount + lostCount) > 0 ? Math.round((wonCount / (wonCount + lostCount)) * 100) : 0;
+
+    const ahipTotal = Number(ahipStats[0]?.total ?? 0);
+    const ahipPassed = Number(ahipStats[0]?.passed ?? 0);
+    const ahipRate = ahipTotal > 0 ? Math.round((ahipPassed / ahipTotal) * 100) : 0;
+
+    res.json({
+      periodStart: start.toISOString(),
+      periodEnd: end.toISOString(),
+      agents: {
+        active: Number(activeAgents[0]?.cnt ?? 0),
+        onboarding: Number(onboardingAgents[0]?.cnt ?? 0),
+      },
+      leads: {
+        total: leadsTotal,
+        priorPeriod: leadsPrior,
+        changePercent: leadsChangePct,
+      },
+      deals: {
+        won: wonCount,
+        lost: lostCount,
+        winRate,
+        wonValue: Number(dealsWon[0]?.val ?? 0),
+        activePipelineValue: Number(activePipeline[0]?.val ?? 0),
+      },
+      members: {
+        enrolled: Number(enrolledMembers[0]?.cnt ?? 0),
+      },
+      communications: {
+        outbound: Number(commsVolume[0]?.cnt ?? 0),
+      },
+      compliance: {
+        ahipRate,
+        ahipPassed,
+        ahipTotal,
+      },
     });
   },
 );
