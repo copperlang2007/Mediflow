@@ -28,8 +28,11 @@ import { parse } from "csv-parse/sync";
 const router: IRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-// In-memory progress store (per job — scoped per org to prevent IDOR)
-const jobProgress = new Map<string, { status: string; processed: number; total: number; errors: unknown[]; orgId: string }>();
+// On startup: mark any jobs that were still "processing" as "failed" (orphaned by prior crash/restart)
+void db.update(importJobsTable)
+  .set({ status: "failed" })
+  .where(eq(importJobsTable.status, "processing"))
+  .catch(console.error);
 
 function parseCSV(buffer: Buffer): { headers: string[]; rows: Record<string, string>[] } {
   const records = parse(buffer, { columns: true, skip_empty_lines: true, trim: true, relax_quotes: true }) as Record<string, string>[];
@@ -207,17 +210,22 @@ router.post(
       fileName: req.file.originalname,
     });
 
-    jobProgress.set(jobId, { status: "processing", processed: 0, total: rows.length, errors: [], orgId: authReq.orgId });
-
-    // Process in background
+    // Process in background — progress persisted to DB
     void processMondayImport(jobId, authReq.orgId, rows, mapping).catch(console.error);
 
     res.json({ jobId, totalRows: rows.length });
   },
 );
 
+async function persistProgress(jobId: string, processedRows: number, errorCount: number, errorList: unknown[]) {
+  await db.update(importJobsTable).set({
+    processedRows,
+    errorCount,
+    errors: errorList as Record<string, unknown>[],
+  }).where(eq(importJobsTable.id, jobId));
+}
+
 async function processMondayImport(jobId: string, orgId: string, rows: Record<string, string>[], mapping: Record<string, string>) {
-  const progress = jobProgress.get(jobId)!;
   let created = 0, errors = 0;
   const errorList: unknown[] = [];
 
@@ -282,16 +290,12 @@ async function processMondayImport(jobId: string, orgId: string, rows: Record<st
       errorList.push({ row: i + 2, message: "Failed to create agent record" });
     }
 
-    progress.processed = i + 1;
-    progress.errors = errorList;
-    jobProgress.set(jobId, progress);
-
-    // Small delay to avoid overwhelming DB
-    if (i % 50 === 0) await new Promise((r) => setTimeout(r, 10));
+    // Persist progress to DB every 50 rows (restart-safe)
+    if (i % 50 === 0) {
+      await persistProgress(jobId, i + 1, errors, errorList);
+      await new Promise((r) => setTimeout(r, 10));
+    }
   }
-
-  progress.status = "completed";
-  jobProgress.set(jobId, progress);
 
   await db.update(importJobsTable).set({
     status: "completed",
@@ -383,15 +387,10 @@ router.get(
     const authReq = req as AuthenticatedRequest;
     const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0]! : req.params.jobId;
 
-    // Pre-flight org ownership check before opening SSE stream
-    const mem = jobProgress.get(jobId);
-    if (mem) {
-      if (mem.orgId !== authReq.orgId) { res.status(403).json({ error: "Forbidden" }); return; }
-    } else {
-      const [job] = await db.select({ orgId: importJobsTable.orgId }).from(importJobsTable)
-        .where(and(eq(importJobsTable.id, jobId), eq(importJobsTable.orgId, authReq.orgId))).limit(1);
-      if (!job) { res.status(404).json({ error: "Job not found" }); return; }
-    }
+    // Pre-flight org ownership check (DB-only, no in-memory map)
+    const [preflight] = await db.select({ orgId: importJobsTable.orgId }).from(importJobsTable)
+      .where(and(eq(importJobsTable.id, jobId), eq(importJobsTable.orgId, authReq.orgId))).limit(1);
+    if (!preflight) { res.status(404).json({ error: "Job not found" }); return; }
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -400,18 +399,8 @@ router.get(
 
     const send = (data: unknown) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
+    // Always stream progress from DB — restart-safe
     const interval = setInterval(async () => {
-      const current = jobProgress.get(jobId);
-      if (current) {
-        send({ status: current.status, processed: current.processed, total: current.total, errorCount: current.errors.length });
-        if (current.status === "completed" || current.status === "failed") {
-          clearInterval(interval);
-          res.end();
-        }
-        return;
-      }
-
-      // Fall back to DB — always scoped by orgId
       const [job] = await db.select().from(importJobsTable)
         .where(and(eq(importJobsTable.id, jobId), eq(importJobsTable.orgId, authReq.orgId))).limit(1);
       if (!job) { send({ error: "Job not found" }); clearInterval(interval); res.end(); return; }
@@ -559,7 +548,6 @@ router.post(
       fileName: req.file.originalname,
     });
 
-    jobProgress.set(jobId, { status: "processing", processed: 0, total: rows.length, errors: [], orgId: authReq.orgId });
     void processGhlImport(jobId, authReq.orgId, rows, mapping, duplicateAction).catch(console.error);
 
     res.json({ jobId, totalRows: rows.length });
@@ -567,7 +555,6 @@ router.post(
 );
 
 async function processGhlImport(jobId: string, orgId: string, rows: Record<string, string>[], mapping: Record<string, string>, duplicateAction: string) {
-  const progress = jobProgress.get(jobId)!;
   let created = 0, updated = 0, skipped = 0, errors = 0;
   const errorList: unknown[] = [];
 
@@ -664,15 +651,11 @@ async function processGhlImport(jobId: string, orgId: string, rows: Record<strin
       errorList.push({ row: i + 2, message: "Failed to create contact" });
     }
 
-    progress.processed = i + 1;
-    progress.errors = errorList;
-    jobProgress.set(jobId, progress);
-
-    if (i % 50 === 0) await new Promise((r) => setTimeout(r, 10));
+    if (i % 50 === 0) {
+      await persistProgress(jobId, i + 1, errors, errorList);
+      await new Promise((r) => setTimeout(r, 10));
+    }
   }
-
-  progress.status = "completed";
-  jobProgress.set(jobId, progress);
 
   await db.update(importJobsTable).set({
     status: "completed", processedRows: rows.length, createdCount: created,
@@ -817,7 +800,6 @@ router.post(
       columnMapping: mapping as Record<string, unknown>, fileName: req.file.originalname,
     });
 
-    jobProgress.set(jobId, { status: "processing", processed: 0, total: rows.length, errors: [], orgId: authReq.orgId });
     void processCsvContactImport(jobId, authReq.orgId, rows, mapping).catch(console.error);
 
     res.json({ jobId, totalRows: rows.length });
@@ -825,7 +807,6 @@ router.post(
 );
 
 async function processCsvContactImport(jobId: string, orgId: string, rows: Record<string, string>[], mapping: Record<string, string>) {
-  const progress = jobProgress.get(jobId)!;
   let created = 0, errors = 0;
   const errorList: unknown[] = [];
 
@@ -869,14 +850,11 @@ async function processCsvContactImport(jobId: string, orgId: string, rows: Recor
       errorList.push({ row: i + 2, message: "Failed to create contact" });
     }
 
-    progress.processed = i + 1;
-    progress.errors = errorList;
-    jobProgress.set(jobId, progress);
-    if (i % 50 === 0) await new Promise((r) => setTimeout(r, 10));
+    if (i % 50 === 0) {
+      await persistProgress(jobId, i + 1, errors, errorList);
+      await new Promise((r) => setTimeout(r, 10));
+    }
   }
-
-  progress.status = "completed";
-  jobProgress.set(jobId, progress);
 
   await db.update(importJobsTable).set({
     status: "completed", processedRows: rows.length, createdCount: created,

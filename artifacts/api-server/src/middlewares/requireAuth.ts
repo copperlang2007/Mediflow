@@ -1,8 +1,24 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { getAuth } from "@clerk/express";
-import { db, usersTable } from "@workspace/db";
+import { db, usersTable, orgSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
+
+// Simple TTL cache for org session timeout settings (refresh every 60 s)
+const orgTimeoutCache = new Map<string, { timeoutMinutes: number; fetchedAt: number }>();
+
+async function getOrgSessionTimeout(orgId: string): Promise<number> {
+  const cached = orgTimeoutCache.get(orgId);
+  if (cached && Date.now() - cached.fetchedAt < 60_000) return cached.timeoutMinutes;
+  const [settings] = await db
+    .select({ sessionTimeoutMinutes: orgSettingsTable.sessionTimeoutMinutes })
+    .from(orgSettingsTable)
+    .where(eq(orgSettingsTable.orgId, orgId))
+    .limit(1);
+  const timeoutMinutes = settings?.sessionTimeoutMinutes ?? 30;
+  orgTimeoutCache.set(orgId, { timeoutMinutes, fetchedAt: Date.now() });
+  return timeoutMinutes;
+}
 
 export type AuthenticatedRequest = Request & {
   userId: string;
@@ -32,6 +48,17 @@ export const requireAuth = async (
   if (!user || !user.isActive) {
     res.status(401).json({ error: "User not found or inactive" });
     return;
+  }
+
+  // Session-timeout enforcement: check token age against org-configured limit
+  const iat = auth.sessionClaims?.iat as number | undefined;
+  if (iat) {
+    const sessionTimeoutMinutes = await getOrgSessionTimeout(user.orgId);
+    const elapsedSeconds = Math.floor(Date.now() / 1000) - iat;
+    if (elapsedSeconds > sessionTimeoutMinutes * 60) {
+      res.status(401).json({ error: "Session expired", code: "SESSION_TIMEOUT" });
+      return;
+    }
   }
 
   const authReq = req as AuthenticatedRequest;

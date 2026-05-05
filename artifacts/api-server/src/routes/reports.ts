@@ -62,6 +62,7 @@ router.get(
     const agents = await db
       .select({
         id: agentsTable.id,
+        userId: agentsTable.userId,
         firstName: agentsTable.firstName,
         lastName: agentsTable.lastName,
         email: agentsTable.email,
@@ -210,7 +211,7 @@ router.get(
         email: agent.email,
         status: agent.status,
         contactsWorked: Number(contactCounts.find((c) => c.agentId === agent.id)?.cnt ?? 0),
-        callsLogged: Number(callCounts.find((c) => c.agentId === agent.id)?.cnt ?? 0),
+        callsLogged: Number(callCounts.find((c) => c.agentId === agent.userId || c.agentId === agent.id)?.cnt ?? 0),
         smsSent: Number(smsPerAgent.find((s) => s.agentId === agent.id)?.cnt ?? 0),
         emailSent: Number(emailPerAgent.find((e) => e.agentId === agent.id)?.cnt ?? 0),
         dealsWon: Number(dealsCounts.find((d) => d.agentId === agent.id)?.cnt ?? 0),
