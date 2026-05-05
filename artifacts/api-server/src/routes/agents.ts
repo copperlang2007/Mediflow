@@ -195,6 +195,19 @@ router.post(
 
     const { firstName, lastName, email, phone, npn, hireDate, managerId, notes, checklistTemplateId, initialLicense } = parsed.data;
 
+    // Validate managerId belongs to the same org
+    if (managerId) {
+      const [mgr] = await db
+        .select({ id: usersTable.id })
+        .from(usersTable)
+        .where(and(eq(usersTable.id, managerId), eq(usersTable.orgId, authReq.orgId)))
+        .limit(1);
+      if (!mgr) {
+        res.status(400).json({ error: "managerId does not belong to this organisation" });
+        return;
+      }
+    }
+
     const [agent] = await db
       .insert(agentsTable)
       .values({
@@ -261,12 +274,12 @@ router.get(
       return;
     }
 
-    let manager = null;
+    let manager: { id: string; fullName: string; email: string; role: string } | null = null;
     if (agent.managerId) {
       const [m] = await db
-        .select()
+        .select({ id: usersTable.id, fullName: usersTable.fullName, email: usersTable.email, role: usersTable.role })
         .from(usersTable)
-        .where(eq(usersTable.id, agent.managerId))
+        .where(and(eq(usersTable.id, agent.managerId), eq(usersTable.orgId, authReq.orgId)))
         .limit(1);
       manager = m ?? null;
     }
@@ -355,7 +368,21 @@ router.patch(
     if (data.phone !== undefined) updates.phone = data.phone;
     if (data.npn !== undefined) updates.npn = data.npn;
     if (data.status !== undefined) updates.status = data.status;
-    if (data.managerId !== undefined) updates.managerId = data.managerId;
+    if (data.managerId !== undefined) {
+      // Validate new managerId belongs to same org (null = clear manager, always allowed)
+      if (data.managerId !== null) {
+        const [mgr] = await db
+          .select({ id: usersTable.id })
+          .from(usersTable)
+          .where(and(eq(usersTable.id, data.managerId), eq(usersTable.orgId, authReq.orgId)))
+          .limit(1);
+        if (!mgr) {
+          res.status(400).json({ error: "managerId does not belong to this organisation" });
+          return;
+        }
+      }
+      updates.managerId = data.managerId;
+    }
     if (data.notes !== undefined) updates.notes = data.notes;
     if (data.avatarUrl !== undefined) updates.avatarUrl = data.avatarUrl;
     if (data.hireDate !== undefined)

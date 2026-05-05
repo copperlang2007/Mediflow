@@ -118,6 +118,25 @@ router.post(
       return;
     }
 
+    // Verify the resource exists and belongs to the caller's org
+    if (rawType === "license") {
+      const [lic] = await db
+        .select({ id: stateLicensesTable.id })
+        .from(stateLicensesTable)
+        .innerJoin(agentsTable, eq(stateLicensesTable.agentId, agentsTable.id))
+        .where(and(eq(stateLicensesTable.id, rawId), eq(agentsTable.orgId, authReq.orgId)))
+        .limit(1);
+      if (!lic) { res.status(404).json({ error: "License not found" }); return; }
+    } else {
+      const [cert] = await db
+        .select({ id: carrierCertificationsTable.id })
+        .from(carrierCertificationsTable)
+        .innerJoin(agentsTable, eq(carrierCertificationsTable.agentId, agentsTable.id))
+        .where(and(eq(carrierCertificationsTable.id, rawId), eq(agentsTable.orgId, authReq.orgId)))
+        .limit(1);
+      if (!cert) { res.status(404).json({ error: "Certification not found" }); return; }
+    }
+
     const snoozedUntil = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
     await db
@@ -148,6 +167,25 @@ router.post(
     if (!["license", "certification"].includes(rawType)) {
       res.status(400).json({ error: "resourceType must be 'license' or 'certification'" });
       return;
+    }
+
+    // Verify the resource exists and belongs to the caller's org
+    if (rawType === "license") {
+      const [lic] = await db
+        .select({ id: stateLicensesTable.id })
+        .from(stateLicensesTable)
+        .innerJoin(agentsTable, eq(stateLicensesTable.agentId, agentsTable.id))
+        .where(and(eq(stateLicensesTable.id, rawId), eq(agentsTable.orgId, authReq.orgId)))
+        .limit(1);
+      if (!lic) { res.status(404).json({ error: "License not found" }); return; }
+    } else {
+      const [cert] = await db
+        .select({ id: carrierCertificationsTable.id })
+        .from(carrierCertificationsTable)
+        .innerJoin(agentsTable, eq(carrierCertificationsTable.agentId, agentsTable.id))
+        .where(and(eq(carrierCertificationsTable.id, rawId), eq(agentsTable.orgId, authReq.orgId)))
+        .limit(1);
+      if (!cert) { res.status(404).json({ error: "Certification not found" }); return; }
     }
 
     // Resolve = snooze for 1 year (effectively dismiss until next renewal cycle)
