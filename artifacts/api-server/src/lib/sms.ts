@@ -1,19 +1,6 @@
-/**
- * SMS client (Twilio).
- *
- * Provides a typed interface for sending outbound SMS and validating inbound
- * webhooks. Twilio webhook signature validation is implemented directly using
- * Node's built-in crypto — no twilio npm package required.
- *
- * Required environment secrets:
- *   TWILIO_ACCOUNT_SID   — Twilio Account SID
- *   TWILIO_AUTH_TOKEN    — Twilio Auth Token
- *   TWILIO_FROM_NUMBER   — E.164 format: +15551234567
- *
- * All send operations never throw synchronously.
- */
-
 import crypto from "crypto";
+import { eq } from "drizzle-orm";
+import { db, optOutsTable } from "@workspace/db";
 import { logger } from "./logger";
 
 export interface SendSmsOptions {
@@ -73,10 +60,6 @@ function basicAuth(): string {
   return `Basic ${Buffer.from(creds).toString("base64")}`;
 }
 
-/**
- * Send an outbound SMS via Twilio Messages API.
- * Returns a result object — never throws.
- */
 export async function sendSms(
   opts: SendSmsOptions,
 ): Promise<SmsResult | SmsError> {
@@ -137,17 +120,29 @@ export async function sendSms(
   }
 }
 
-/**
- * Validate that an inbound Twilio webhook originates from Twilio.
- *
- * Algorithm (per Twilio docs):
- * 1. Take the full URL of the request.
- * 2. Sort POST params alphabetically and append key+value pairs to the URL.
- * 3. Compute HMAC-SHA1 of the string using the Auth Token as key.
- * 4. Base64-encode and compare using timing-safe equality.
- *
- * Returns false if the Auth Token is not configured (requests dropped).
- */
+export async function sendSMS(
+  to: string,
+  body: string,
+  agentId: string,
+): Promise<SmsResult | SmsError> {
+  const [optOut] = await db
+    .select({ id: optOutsTable.id })
+    .from(optOutsTable)
+    .where(eq(optOutsTable.phone, to))
+    .limit(1);
+
+  if (optOut) {
+    logger.warn({ to, agentId }, "SMS blocked: recipient has opted out");
+    return { success: false, error: "Recipient has opted out of SMS" };
+  }
+
+  const result = await sendSms({ to, body });
+  if (result.success) {
+    logger.info({ to, agentId, sid: result.sid }, "SMS sent");
+  }
+  return result;
+}
+
 export function validateTwilioWebhookSignature(
   url: string,
   params: Record<string, string>,
@@ -188,9 +183,6 @@ export function validateTwilioWebhookSignature(
   }
 }
 
-/**
- * Parse an inbound Twilio message body and classify the keyword intent.
- */
 export function classifyInboundMessage(body: string): {
   isOptOut: boolean;
   isOptIn: boolean;

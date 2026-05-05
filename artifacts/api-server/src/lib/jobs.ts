@@ -5,7 +5,7 @@
  *  Scheduled (cron):
  *    license-expiry-check        daily 08:00 UTC
  *    cert-expiry-check           daily 08:05 UTC
- *    ahip-deadline-check         monthly 1st 09:00 UTC
+ *    check-ahip-deadlines        weekly Monday 08:10 UTC
  *
  *  Ad-hoc (enqueue via `enqueue(JOB_NAMES.X, data)`):
  *    task-auto-assign            on agent creation / status change
@@ -54,7 +54,7 @@ export const JOB_NAMES = {
   // Scheduled
   LICENSE_EXPIRY_CHECK: "license-expiry-check",
   CERT_EXPIRY_CHECK: "cert-expiry-check",
-  AHIP_REMINDER_CHECK: "ahip-reminder-check",
+  AHIP_DEADLINE_CHECK: "check-ahip-deadlines",
   AUTOMATION_WEEKLY_SWEEP: "automation-weekly-sweep",
   // Ad-hoc
   TASK_AUTO_ASSIGN: "task-auto-assign",
@@ -121,6 +121,7 @@ export interface SendScheduledEmailPayload {
 export interface SendScheduledSmsPayload {
   to: string;
   body: string;
+  agentId?: string;
   mediaUrl?: string[];
 }
 
@@ -157,8 +158,8 @@ export async function startWorkers(): Promise<void> {
   await boss.schedule(JOB_NAMES.LICENSE_EXPIRY_CHECK, "0 8 * * *", {}, { tz: "UTC" });
   // Daily carrier cert expiry check at 08:05 UTC
   await boss.schedule(JOB_NAMES.CERT_EXPIRY_CHECK, "5 8 * * *", {}, { tz: "UTC" });
-  // Weekly AHIP reminder check — every Monday at 08:10 UTC
-  await boss.schedule(JOB_NAMES.AHIP_REMINDER_CHECK, "10 8 * * 1", {}, { tz: "UTC" });
+  // Weekly AHIP deadline check — every Monday at 08:10 UTC
+  await boss.schedule(JOB_NAMES.AHIP_DEADLINE_CHECK, "10 8 * * 1", {}, { tz: "UTC" });
   // Weekly automation sweep — every Monday at 09:00 UTC (time-based rules)
   await boss.schedule(JOB_NAMES.AUTOMATION_WEEKLY_SWEEP, "0 9 * * 1", {}, { tz: "UTC" });
 
@@ -186,7 +187,7 @@ export async function startWorkers(): Promise<void> {
     const { ahipReminderCheckWorker } = await import("../workers/ahipReminderCheck");
     for (const job of jobs) await ahipReminderCheckWorker(job.data);
   };
-  await boss.work<AhipDeadlineCheckPayload>(JOB_NAMES.AHIP_REMINDER_CHECK, ahipHandler);
+  await boss.work<AhipDeadlineCheckPayload>(JOB_NAMES.AHIP_DEADLINE_CHECK, ahipHandler);
 
   const weeklyAutomationSweepHandler: WorkHandler<Record<string, never>> = async () => {
     const { weeklyAutomationSweepWorker } = await import(
@@ -257,9 +258,9 @@ export async function startWorkers(): Promise<void> {
   const smsHandler: WorkHandler<SendScheduledSmsPayload> = async (
     jobs: Job<SendScheduledSmsPayload>[],
   ) => {
-    const { sendSms } = await import("./sms");
+    const { sendSMS } = await import("./sms");
     for (const job of jobs) {
-      await sendSms({ to: job.data.to, body: job.data.body, mediaUrl: job.data.mediaUrl });
+      await sendSMS(job.data.to, job.data.body, job.data.agentId ?? "system");
     }
   };
   await boss.work<SendScheduledSmsPayload>(JOB_NAMES.SEND_SCHEDULED_SMS, smsHandler);

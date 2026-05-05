@@ -13,6 +13,8 @@ import {
 import router from "./routes";
 import webhooksRouter from "./routes/webhooks";
 import { logger } from "./lib/logger";
+import { requireAuth, requirePermission, type AuthenticatedRequest } from "./middlewares/requireAuth";
+import { addSseSubscriber, removeSseSubscriber } from "./lib/sseManager";
 
 const app: Express = express();
 
@@ -122,10 +124,33 @@ const userLimiter = rateLimit({
 });
 app.use("/api", userLimiter);
 
-// Twilio inbound webhooks — mounted at root (not under /api) so Twilio can
-// reach them without API auth middleware. Signature validation is enforced
-// inside the handler itself.
+// Twilio inbound webhooks — mounted at root so Twilio can reach them without
+// API auth middleware. Signature validation is enforced inside the handler.
 app.use(webhooksRouter);
+
+// SSE spec alias: GET /sse/notifications (mirrors /api/notifications/stream)
+app.get(
+  "/sse/notifications",
+  requireAuth,
+  requirePermission("notification", "read"),
+  (req: Request, res: Response): void => {
+    const authReq = req as AuthenticatedRequest;
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    res.write(": connected\n\n");
+    const heartbeat = setInterval(() => {
+      try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
+    }, 25_000);
+    addSseSubscriber(authReq.userId, res);
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      removeSseSubscriber(authReq.userId, res);
+    });
+  },
+);
 
 app.use("/api", router);
 
