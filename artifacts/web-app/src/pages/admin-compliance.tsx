@@ -386,8 +386,25 @@ function LoginHistoryTab() {
 
   const successRate = data ? Math.round((data.events.filter((e: LoginEvent) => e.success).length / (data.events.length || 1)) * 100) : null;
 
+  const handleExport = async () => {
+    const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+    const res = await fetch(`${base}/api/admin/login-history/export`, { credentials: "include" });
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `login-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+  };
+
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">Authentication event log with IP, device, and success/failure tracking.</p>
+        <Button variant="outline" size="sm" onClick={handleExport}>
+          <Download className="h-4 w-4 mr-1.5" /> Export CSV
+        </Button>
+      </div>
+
       {successRate !== null && (
         <div className="grid grid-cols-3 gap-4">
           <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Total Events</p><p className="text-2xl font-bold">{data?.total.toLocaleString()}</p></CardContent></Card>

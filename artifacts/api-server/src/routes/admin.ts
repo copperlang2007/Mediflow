@@ -236,6 +236,52 @@ router.get(
   },
 );
 
+// ─── Login History CSV Export ─────────────────────────────────────────────────
+router.get(
+  "/admin/login-history/export",
+  requireAuth,
+  requireRole("super_admin", "agency_admin", "compliance_manager"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const { userId, startDate, endDate } = req.query as Record<string, string>;
+
+    const conditions = [eq(loginEventsTable.orgId, authReq.orgId)];
+    if (userId) conditions.push(eq(loginEventsTable.userId, userId));
+    if (startDate) conditions.push(gte(loginEventsTable.createdAt, new Date(startDate)));
+    if (endDate) conditions.push(lte(loginEventsTable.createdAt, new Date(endDate)));
+
+    const events = await db.select().from(loginEventsTable)
+      .where(and(...conditions))
+      .orderBy(desc(loginEventsTable.createdAt))
+      .limit(10000);
+
+    const header = ["Timestamp", "User ID", "Email", "Result", "IP Address", "User Agent", "Failure Reason"];
+    const rows = events.map((e) => [
+      e.createdAt.toISOString(),
+      e.userId ?? "",
+      e.email ?? "",
+      e.success ? "success" : "failed",
+      e.ipAddress ?? "",
+      e.userAgent ?? "",
+      e.failureReason ?? "",
+    ]);
+    const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+
+    await db.insert(dataExportLogTable).values({
+      id: randomUUID(),
+      orgId: authReq.orgId,
+      userId: authReq.userId,
+      exportType: "login_history_csv",
+      filters: { userId, startDate, endDate },
+      recordCount: events.length,
+    });
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="login-history-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(csv);
+  },
+);
+
 // ─── Data Export Log ──────────────────────────────────────────────────────────
 router.get(
   "/admin/export-log",
