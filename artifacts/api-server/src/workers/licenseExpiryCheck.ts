@@ -94,7 +94,7 @@ export async function licenseExpiryCheckWorker(
     }
 
     if (daysUntilExpiry <= 30 && license.agentEmail) {
-      await enqueue(JOB_NAMES.SEND_EMAIL, {
+      await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
         to: license.agentEmail,
         subject: `License expiring in ${daysUntilExpiry} days — ${license.stateCode} ${license.licenseType}`,
         html: licenseExpiryEmailHtml({

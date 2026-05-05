@@ -38,7 +38,7 @@ import {
   ChevronLeft,
 } from "lucide-react";
 import NotificationPanel from "@/components/notifications/NotificationPanel";
-import { useGetNotificationCount } from "@workspace/api-client-react";
+import { useSSENotifications } from "@/hooks/useSSENotifications";
 
 const navItems = [
   {
@@ -135,10 +135,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { signOut } = useClerk();
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-  const { data: notifCount } = useGetNotificationCount({
-    query: { refetchInterval: 30_000 } as any,
-  });
-  const unreadCount = notifCount?.unread ?? 0;
+  const { unreadCount } = useSSENotifications();
 
   const sidebarContent = (
     <div className={cn("flex flex-col h-full", collapsed ? "items-center" : "")}>

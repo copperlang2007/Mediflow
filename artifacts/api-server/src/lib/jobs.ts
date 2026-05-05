@@ -1,12 +1,21 @@
 /**
  * Background job queue built on pg-boss.
  *
- * Provides a typed singleton queue for:
- *  - License expiry notifications (scheduled daily)
- *  - AHIP reminder emails (scheduled monthly)
- *  - Task auto-assignment on agent events
- *  - Automation rule evaluation
- *  - Fire-and-forget email / SMS sends
+ * Complete job registry:
+ *  Scheduled (cron):
+ *    license-expiry-check        daily 08:00 UTC
+ *    cert-expiry-check           daily 08:05 UTC
+ *    ahip-deadline-check         monthly 1st 09:00 UTC
+ *
+ *  Ad-hoc (enqueue via `enqueue(JOB_NAMES.X, data)`):
+ *    task-auto-assign            on agent creation / status change
+ *    run-automation-rules        on trigger events
+ *    send-sequence-step          outreach sequence scheduler
+ *    generate-offboarding-pdf    on agent offboard
+ *    send-scheduled-email        deferred transactional email
+ *    send-scheduled-sms          deferred transactional SMS
+ *
+ * IMPORTANT: pg-boss v12 requires createQueue() before schedule()/work().
  */
 
 import { PgBoss, type Job, type WorkHandler } from "pg-boss";
@@ -39,24 +48,35 @@ export async function getQueue(): Promise<PgBoss> {
   return _boss;
 }
 
+// ---- Job name registry ----
+
 export const JOB_NAMES = {
+  // Scheduled
   LICENSE_EXPIRY_CHECK: "license-expiry-check",
-  AHIP_REMINDER_CHECK: "ahip-reminder-check",
+  CERT_EXPIRY_CHECK: "cert-expiry-check",
+  AHIP_DEADLINE_CHECK: "ahip-deadline-check",
+  // Ad-hoc
   TASK_AUTO_ASSIGN: "task-auto-assign",
-  AUTOMATION_RULE_EVAL: "automation-rule-eval",
-  SEND_EMAIL: "send-email",
-  SEND_SMS: "send-sms",
+  RUN_AUTOMATION_RULES: "run-automation-rules",
+  SEND_SEQUENCE_STEP: "send-sequence-step",
+  GENERATE_OFFBOARDING_PDF: "generate-offboarding-pdf",
+  SEND_SCHEDULED_EMAIL: "send-scheduled-email",
+  SEND_SCHEDULED_SMS: "send-scheduled-sms",
 } as const;
 
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
 
-// ----- Typed job payloads -----
+// ---- Typed job payloads ----
 
 export interface LicenseExpiryCheckPayload {
   orgId?: string;
 }
 
-export interface AhipReminderCheckPayload {
+export interface CertExpiryCheckPayload {
+  orgId?: string;
+}
+
+export interface AhipDeadlineCheckPayload {
   orgId?: string;
   certificationYear?: number;
 }
@@ -67,22 +87,43 @@ export interface TaskAutoAssignPayload {
   trigger: "agent_created" | "agent_status_changed";
 }
 
-export interface AutomationRuleEvalPayload {
+export interface RunAutomationRulesPayload {
   orgId: string;
-  ruleId?: string;
+  trigger: string;
+  resourceType: string;
+  resourceId: string;
+  context?: Record<string, unknown>;
 }
 
-export interface SendEmailPayload {
+export interface SendSequenceStepPayload {
+  sequenceId: string;
+  contactId: string;
+  stepIndex: number;
+  channel: "email" | "sms";
+}
+
+export interface GenerateOffboardingPdfPayload {
+  agentId: string;
+  orgId: string;
+  offboardDate: string;
+}
+
+export interface SendScheduledEmailPayload {
   to: string | string[];
   subject: string;
   html: string;
   text?: string;
+  replyTo?: string;
+  tags?: Record<string, string>;
 }
 
-export interface SendSmsPayload {
+export interface SendScheduledSmsPayload {
   to: string;
   body: string;
+  mediaUrl?: string[];
 }
+
+// ---- Enqueue helper ----
 
 /** Send a typed job to the queue. Never throws. */
 export async function enqueue<T extends Record<string, unknown>>(
@@ -99,53 +140,86 @@ export async function enqueue<T extends Record<string, unknown>>(
   }
 }
 
-/**
- * Register all background workers.
- * Called from index.ts after pg-boss starts.
- * WorkHandler receives Job<T>[] (batch).
- */
+// ---- Worker registration ----
+
 export async function startWorkers(): Promise<void> {
   const boss = await getQueue();
 
-  // Create all queues before scheduling or registering workers (pg-boss v12 requirement)
+  // Create all queues first (pg-boss v12 requirement)
   for (const name of Object.values(JOB_NAMES)) {
     await boss.createQueue(name);
   }
 
+  // ---- Scheduled jobs ----
+
   // Daily license expiry check at 08:00 UTC
   await boss.schedule(JOB_NAMES.LICENSE_EXPIRY_CHECK, "0 8 * * *", {}, { tz: "UTC" });
-  // Monthly AHIP reminder on 1st of month at 09:00 UTC
-  await boss.schedule(JOB_NAMES.AHIP_REMINDER_CHECK, "0 9 1 * *", {}, { tz: "UTC" });
+  // Daily carrier cert expiry check at 08:05 UTC
+  await boss.schedule(JOB_NAMES.CERT_EXPIRY_CHECK, "5 8 * * *", {}, { tz: "UTC" });
+  // Monthly AHIP deadline check on 1st of month at 09:00 UTC
+  await boss.schedule(JOB_NAMES.AHIP_DEADLINE_CHECK, "0 9 1 * *", {}, { tz: "UTC" });
 
-  // License expiry worker
-  const licenseHandler: WorkHandler<LicenseExpiryCheckPayload> = async (jobs: Job<LicenseExpiryCheckPayload>[]) => {
+  // ---- Workers ----
+
+  const licenseHandler: WorkHandler<LicenseExpiryCheckPayload> = async (
+    jobs: Job<LicenseExpiryCheckPayload>[],
+  ) => {
     const { licenseExpiryCheckWorker } = await import("../workers/licenseExpiryCheck");
-    for (const job of jobs) {
-      await licenseExpiryCheckWorker(job.data);
-    }
+    for (const job of jobs) await licenseExpiryCheckWorker(job.data);
   };
   await boss.work<LicenseExpiryCheckPayload>(JOB_NAMES.LICENSE_EXPIRY_CHECK, licenseHandler);
 
-  // AHIP reminder worker
-  const ahipHandler: WorkHandler<AhipReminderCheckPayload> = async (jobs: Job<AhipReminderCheckPayload>[]) => {
-    const { ahipReminderCheckWorker } = await import("../workers/ahipReminderCheck");
-    for (const job of jobs) {
-      await ahipReminderCheckWorker(job.data);
-    }
+  const certHandler: WorkHandler<CertExpiryCheckPayload> = async (
+    jobs: Job<CertExpiryCheckPayload>[],
+  ) => {
+    const { certExpiryCheckWorker } = await import("../workers/certExpiryCheck");
+    for (const job of jobs) await certExpiryCheckWorker(job.data);
   };
-  await boss.work<AhipReminderCheckPayload>(JOB_NAMES.AHIP_REMINDER_CHECK, ahipHandler);
+  await boss.work<CertExpiryCheckPayload>(JOB_NAMES.CERT_EXPIRY_CHECK, certHandler);
 
-  // Task auto-assign worker
-  const taskHandler: WorkHandler<TaskAutoAssignPayload> = async (jobs: Job<TaskAutoAssignPayload>[]) => {
+  const ahipHandler: WorkHandler<AhipDeadlineCheckPayload> = async (
+    jobs: Job<AhipDeadlineCheckPayload>[],
+  ) => {
+    const { ahipReminderCheckWorker } = await import("../workers/ahipReminderCheck");
+    for (const job of jobs) await ahipReminderCheckWorker(job.data);
+  };
+  await boss.work<AhipDeadlineCheckPayload>(JOB_NAMES.AHIP_DEADLINE_CHECK, ahipHandler);
+
+  const taskHandler: WorkHandler<TaskAutoAssignPayload> = async (
+    jobs: Job<TaskAutoAssignPayload>[],
+  ) => {
     const { taskAutoAssignWorker } = await import("../workers/taskAutoAssign");
-    for (const job of jobs) {
-      await taskAutoAssignWorker(job.data);
-    }
+    for (const job of jobs) await taskAutoAssignWorker(job.data);
   };
   await boss.work<TaskAutoAssignPayload>(JOB_NAMES.TASK_AUTO_ASSIGN, taskHandler);
 
-  // Email send worker
-  const emailHandler: WorkHandler<SendEmailPayload> = async (jobs: Job<SendEmailPayload>[]) => {
+  const automationHandler: WorkHandler<RunAutomationRulesPayload> = async (
+    jobs: Job<RunAutomationRulesPayload>[],
+  ) => {
+    logger.info({ count: jobs.length }, "Automation rules eval — handler placeholder");
+  };
+  await boss.work<RunAutomationRulesPayload>(JOB_NAMES.RUN_AUTOMATION_RULES, automationHandler);
+
+  const sequenceHandler: WorkHandler<SendSequenceStepPayload> = async (
+    jobs: Job<SendSequenceStepPayload>[],
+  ) => {
+    logger.info({ count: jobs.length }, "Sequence step send — handler placeholder");
+  };
+  await boss.work<SendSequenceStepPayload>(JOB_NAMES.SEND_SEQUENCE_STEP, sequenceHandler);
+
+  const offboardingPdfHandler: WorkHandler<GenerateOffboardingPdfPayload> = async (
+    jobs: Job<GenerateOffboardingPdfPayload>[],
+  ) => {
+    logger.info({ count: jobs.length }, "Offboarding PDF generation — handler placeholder");
+  };
+  await boss.work<GenerateOffboardingPdfPayload>(
+    JOB_NAMES.GENERATE_OFFBOARDING_PDF,
+    offboardingPdfHandler,
+  );
+
+  const emailHandler: WorkHandler<SendScheduledEmailPayload> = async (
+    jobs: Job<SendScheduledEmailPayload>[],
+  ) => {
     const { sendEmail } = await import("./email");
     for (const job of jobs) {
       const toArray = Array.isArray(job.data.to) ? job.data.to : [job.data.to];
@@ -154,19 +228,22 @@ export async function startWorkers(): Promise<void> {
         subject: job.data.subject,
         html: job.data.html,
         text: job.data.text,
+        replyTo: job.data.replyTo,
+        tags: job.data.tags,
       });
     }
   };
-  await boss.work<SendEmailPayload>(JOB_NAMES.SEND_EMAIL, emailHandler);
+  await boss.work<SendScheduledEmailPayload>(JOB_NAMES.SEND_SCHEDULED_EMAIL, emailHandler);
 
-  // SMS send worker
-  const smsHandler: WorkHandler<SendSmsPayload> = async (jobs: Job<SendSmsPayload>[]) => {
+  const smsHandler: WorkHandler<SendScheduledSmsPayload> = async (
+    jobs: Job<SendScheduledSmsPayload>[],
+  ) => {
     const { sendSms } = await import("./sms");
     for (const job of jobs) {
-      await sendSms({ to: job.data.to, body: job.data.body });
+      await sendSms({ to: job.data.to, body: job.data.body, mediaUrl: job.data.mediaUrl });
     }
   };
-  await boss.work<SendSmsPayload>(JOB_NAMES.SEND_SMS, smsHandler);
+  await boss.work<SendScheduledSmsPayload>(JOB_NAMES.SEND_SCHEDULED_SMS, smsHandler);
 
   logger.info("All background workers registered");
 }

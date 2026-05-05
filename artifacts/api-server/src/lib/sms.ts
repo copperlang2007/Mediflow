@@ -1,17 +1,19 @@
 /**
  * SMS client (Twilio).
  *
- * Provides a typed interface for sending outbound SMS and handling inbound
- * webhooks (see routes/webhooks.ts).
+ * Provides a typed interface for sending outbound SMS and validating inbound
+ * webhooks. Twilio webhook signature validation is implemented directly using
+ * Node's built-in crypto — no twilio npm package required.
  *
  * Required environment secrets:
  *   TWILIO_ACCOUNT_SID   — Twilio Account SID
  *   TWILIO_AUTH_TOKEN    — Twilio Auth Token
  *   TWILIO_FROM_NUMBER   — E.164 format: +15551234567
  *
- * All send operations are fire-and-forget safe — never throw synchronously.
+ * All send operations never throw synchronously.
  */
 
+import crypto from "crypto";
 import { logger } from "./logger";
 
 export interface SendSmsOptions {
@@ -33,7 +35,7 @@ export interface SmsError {
   code?: number;
 }
 
-export interface TwilioInboundWebhookPayload {
+export interface TwilioInboundPayload {
   MessageSid: string;
   AccountSid: string;
   From: string;
@@ -41,9 +43,24 @@ export interface TwilioInboundWebhookPayload {
   Body: string;
   NumMedia: string;
   MediaUrl0?: string;
+  [key: string]: string | undefined;
 }
 
-function isConfigured(): boolean {
+export type SmsOptOutKeyword = "STOP" | "STOPALL" | "UNSUBSCRIBE" | "CANCEL" | "END" | "QUIT";
+
+export const OPT_OUT_KEYWORDS: SmsOptOutKeyword[] = [
+  "STOP",
+  "STOPALL",
+  "UNSUBSCRIBE",
+  "CANCEL",
+  "END",
+  "QUIT",
+];
+
+export const OPT_IN_KEYWORDS = ["START", "UNSTOP", "YES"];
+export const HELP_KEYWORDS = ["HELP", "INFO"];
+
+export function isConfigured(): boolean {
   return Boolean(
     process.env.TWILIO_ACCOUNT_SID &&
       process.env.TWILIO_AUTH_TOKEN &&
@@ -94,14 +111,23 @@ export async function sendSms(
       },
     );
 
-    const data = await res.json() as { sid?: string; status?: string; code?: number; message?: string };
+    const data = await res.json() as {
+      sid?: string;
+      status?: string;
+      code?: number;
+      message?: string;
+    };
 
     if (!res.ok) {
       logger.error(
         { to: opts.to, status: res.status, code: data.code },
         `SMS send failed: ${data.message ?? res.statusText}`,
       );
-      return { success: false, error: data.message ?? res.statusText, code: data.code };
+      return {
+        success: false,
+        error: data.message ?? res.statusText,
+        code: data.code,
+      };
     }
 
     return { sid: data.sid!, status: data.status!, success: true };
@@ -112,19 +138,70 @@ export async function sendSms(
 }
 
 /**
- * Validate that an inbound Twilio webhook originates from Twilio by checking
- * the X-Twilio-Signature header.
+ * Validate that an inbound Twilio webhook originates from Twilio.
  *
- * NOTE: Full signature validation requires the twilio npm package's
- * validateRequest() helper. This stub does the structural check; install
- * and wire the full implementation when inbound SMS is enabled.
+ * Algorithm (per Twilio docs):
+ * 1. Take the full URL of the request.
+ * 2. Sort POST params alphabetically and append key+value pairs to the URL.
+ * 3. Compute HMAC-SHA1 of the string using the Auth Token as key.
+ * 4. Base64-encode and compare using timing-safe equality.
+ *
+ * Returns false if the Auth Token is not configured (requests dropped).
  */
 export function validateTwilioWebhookSignature(
   url: string,
   params: Record<string, string>,
   signature: string,
 ): boolean {
-  if (!process.env.TWILIO_AUTH_TOKEN) return false;
-  logger.warn("Twilio webhook signature validation: full HMAC-SHA1 not implemented; install 'twilio' package");
-  return Boolean(signature);
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  if (!authToken) {
+    logger.error("TWILIO_AUTH_TOKEN not set — cannot validate webhook signature");
+    return false;
+  }
+
+  if (!signature) {
+    logger.warn("Twilio webhook: missing X-Twilio-Signature header");
+    return false;
+  }
+
+  // Build string: URL + sorted param key-value pairs (no delimiters)
+  const sortedKeys = Object.keys(params).sort();
+  let str = url;
+  for (const key of sortedKeys) {
+    str += key + (params[key] ?? "");
+  }
+
+  // HMAC-SHA1 → base64
+  const expected = crypto
+    .createHmac("sha1", authToken)
+    .update(str, "utf8")
+    .digest("base64");
+
+  // Constant-time comparison to prevent timing attacks
+  try {
+    const expectedBuf = Buffer.from(expected);
+    const signatureBuf = Buffer.from(signature);
+    if (expectedBuf.length !== signatureBuf.length) return false;
+    return crypto.timingSafeEqual(expectedBuf, signatureBuf);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Parse an inbound Twilio message body and classify the keyword intent.
+ */
+export function classifyInboundMessage(body: string): {
+  isOptOut: boolean;
+  isOptIn: boolean;
+  isHelp: boolean;
+  normalised: string;
+} {
+  const normalised = body.trim().toUpperCase().replace(/[^A-Z]/g, "");
+  return {
+    isOptOut: (OPT_OUT_KEYWORDS as string[]).includes(normalised),
+    isOptIn: OPT_IN_KEYWORDS.includes(normalised),
+    isHelp: HELP_KEYWORDS.includes(normalised),
+    normalised,
+  };
 }

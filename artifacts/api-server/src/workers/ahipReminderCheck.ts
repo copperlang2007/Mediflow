@@ -14,12 +14,12 @@ import {
   usersTable,
   notificationsTable,
 } from "@workspace/db";
-import { type AhipReminderCheckPayload, enqueue, JOB_NAMES } from "../lib/jobs";
+import { type AhipDeadlineCheckPayload, enqueue, JOB_NAMES } from "../lib/jobs";
 import { ahipReminderEmailHtml } from "../lib/email";
 import { logger } from "../lib/logger";
 
 export async function ahipReminderCheckWorker(
-  data: AhipReminderCheckPayload,
+  data: AhipDeadlineCheckPayload,
 ): Promise<void> {
   const year = data.certificationYear ?? new Date().getFullYear();
 
@@ -90,7 +90,7 @@ export async function ahipReminderCheckWorker(
     }
 
     if (agent.email) {
-      await enqueue(JOB_NAMES.SEND_EMAIL, {
+      await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
         to: agent.email,
         subject: `AHIP ${year} certification reminder`,
         html: ahipReminderEmailHtml({

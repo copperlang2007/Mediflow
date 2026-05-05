@@ -8,6 +8,7 @@ import agentsRouter from "./agents";
 import notificationsRouter from "./notifications";
 import auditRouter from "./audit";
 import storageRouter from "./storage";
+import webhooksRouter from "./webhooks";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use(agentsRouter);
 router.use(notificationsRouter);
 router.use(auditRouter);
 router.use(storageRouter);
+router.use(webhooksRouter);
 
 export default router;

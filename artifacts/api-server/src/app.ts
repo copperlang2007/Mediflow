@@ -15,14 +15,23 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
-// Derive the exact origin that browsers will send.
-// In production this is the app's public domain; in dev it's the Replit proxy.
-function resolveAllowedOrigin(): string | undefined {
+/**
+ * Derive the exact origin that browsers will send.
+ * In production this is the app's public domain; in dev it's the Replit proxy.
+ *
+ * Security policy: if no origin can be resolved, CORS is DENIED (false),
+ * not opened. This is intentionally strict — set ALLOWED_ORIGIN or ensure
+ * REPLIT_DEV_DOMAIN is present in the environment.
+ */
+function resolveAllowedOrigin(): string | false {
   const explicit = process.env.ALLOWED_ORIGIN;
   if (explicit) return explicit;
   const replDomain = process.env.REPLIT_DEV_DOMAIN;
   if (replDomain) return `https://${replDomain}`;
-  return undefined;
+  logger.warn(
+    "CORS: neither ALLOWED_ORIGIN nor REPLIT_DEV_DOMAIN is set — cross-origin requests will be denied",
+  );
+  return false;
 }
 
 const allowedOrigin = resolveAllowedOrigin();
@@ -32,28 +41,18 @@ app.use(
     logger,
     serializers: {
       req(req) {
-        return {
-          id: req.id,
-          method: req.method,
-          url: req.url?.split("?")[0],
-        };
+        return { id: req.id, method: req.method, url: req.url?.split("?")[0] };
       },
       res(res) {
-        return {
-          statusCode: res.statusCode,
-        };
+        return { statusCode: res.statusCode };
       },
     },
   }),
 );
 
-app.use(
-  helmet({
-    crossOriginResourcePolicy: { policy: "cross-origin" },
-  }),
-);
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 
-// CORS — lock to the known app origin (not wildcard)
+// CORS — locked to exact known origin; never falls back to wildcard
 app.use(
   cors({
     credentials: true,
@@ -65,7 +64,7 @@ app.use(
             callback(new Error(`CORS: origin ${origin} not allowed`));
           }
         }
-      : true, // dev fallback — only when no domain can be resolved
+      : false,
   }),
 );
 
