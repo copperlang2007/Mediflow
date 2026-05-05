@@ -156,7 +156,12 @@ export async function startWorkers(): Promise<void> {
 
   // Create all queues first (pg-boss v12 requirement)
   for (const name of Object.values(JOB_NAMES)) {
-    await boss.createQueue(name);
+    if (name === JOB_NAMES.RUN_AUTOMATION_RULES) {
+      // Automation rule jobs get 3 retries with 60s exponential backoff
+      await boss.createQueue(name, { retryLimit: 3, retryDelay: 60, retryBackoff: true });
+    } else {
+      await boss.createQueue(name);
+    }
   }
 
   // ---- Scheduled jobs ----

@@ -33,6 +33,8 @@ const TRIGGER_TYPES = [
   "ahip_deadline",
   "lead_status_changed",
   "lead_created",
+  "contact_created",
+  "contact_status_changed",
   "contact_no_activity",
   "deal_stage_changed",
   "task_overdue",

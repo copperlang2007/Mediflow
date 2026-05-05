@@ -169,6 +169,20 @@ router.post(
       tags: d.tags ?? [],
       assignedAgentId: d.assignedAgentId ?? null,
     }).returning();
+
+    void enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+      orgId: authReq.orgId,
+      trigger: "contact_created",
+      resourceType: "contact",
+      resourceId: contact.id,
+      context: {
+        status: contact.status,
+        stateCode: contact.stateCode,
+        source: contact.leadSource,
+        assignedAgentId: contact.assignedAgentId,
+      },
+    });
+
     res.status(201).json(contact);
   },
 );
@@ -225,7 +239,23 @@ router.patch(
     if (d.assignedAgentId !== undefined) updates.assignedAgentId = d.assignedAgentId;
 
     if (Object.keys(updates).length === 0) { res.status(400).json({ error: "No fields to update" }); return; }
+
+    const [existingContact] = d.status !== undefined
+      ? await db.select({ status: contactsTable.status }).from(contactsTable).where(eq(contactsTable.id, id)).limit(1)
+      : [null];
+
     const [updated] = await db.update(contactsTable).set(updates).where(eq(contactsTable.id, id)).returning();
+
+    if (d.status !== undefined && existingContact && d.status !== existingContact.status) {
+      void enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+        orgId: authReq.orgId,
+        trigger: "contact_status_changed",
+        resourceType: "contact",
+        resourceId: id,
+        context: { oldStatus: existingContact.status, newStatus: d.status },
+      });
+    }
+
     res.json(updated);
   },
 );

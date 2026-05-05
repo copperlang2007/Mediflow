@@ -419,6 +419,7 @@ export async function runAutomationRulesWorker(
 
     const actions = (rule.actions as AutomationAction[] | null) ?? [];
     const actionsExecuted: string[] = [];
+    const actionErrors: string[] = [];
     let result: "success" | "partial" | "failed" = "success";
 
     for (const action of actions) {
@@ -426,6 +427,8 @@ export async function runAutomationRulesWorker(
         await executeAction(action, { orgId, resourceType, resourceId });
         actionsExecuted.push(action.type);
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        actionErrors.push(`${action.type}: ${msg}`);
         logger.error(
           { err, ruleId: rule.id, actionType: action.type },
           "Automation action failed",
@@ -442,6 +445,7 @@ export async function runAutomationRulesWorker(
       matchedRecordId: resourceId,
       actionsExecuted,
       result,
+      errorMessage: actionErrors.length > 0 ? actionErrors.join("; ") : null,
     });
 
     await db
