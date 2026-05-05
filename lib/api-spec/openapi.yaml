@@ -1100,6 +1100,76 @@ paths:
                 items:
                   $ref: "#/components/schemas/Task"
 
+  /task-templates:
+    get:
+      operationId: getTaskTemplates
+      tags: [tasks]
+      summary: List task templates for the organization
+      responses:
+        "200":
+          description: List of task templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaskTemplate"
+    post:
+      operationId: createTaskTemplate
+      tags: [tasks]
+      summary: Create a task template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskTemplateBody"
+      responses:
+        "201":
+          description: Created task template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskTemplate"
+
+  /task-templates/{id}:
+    patch:
+      operationId: updateTaskTemplate
+      tags: [tasks]
+      summary: Update a task template
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTaskTemplateBody"
+      responses:
+        "200":
+          description: Updated task template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskTemplate"
+    delete:
+      operationId: deleteTaskTemplate
+      tags: [tasks]
+      summary: Soft-delete a task template
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
   /agents/{id}/documents:
     get:
       operationId: getAgentDocuments
@@ -2323,6 +2393,98 @@ components:
           type: boolean
         onboardingOrder:
           type: integer
+
+    TaskTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        name:
+          type: string
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        type:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        triggerEvent:
+          type: ["string", "null"]
+        dueDaysFromTrigger:
+          type: ["integer", "null"]
+        isActive:
+          type: boolean
+        steps:
+          type: ["array", "null"]
+          items: {}
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - orgId
+        - name
+        - title
+        - type
+        - priority
+        - isActive
+        - createdAt
+        - updatedAt
+
+    CreateTaskTemplateBody:
+      type: object
+      required: [name, title]
+      properties:
+        name:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+          default: custom
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        triggerEvent:
+          type: string
+        dueDaysFromTrigger:
+          type: integer
+        steps:
+          type: array
+          items: {}
+
+    UpdateTaskTemplateBody:
+      type: object
+      properties:
+        name:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        triggerEvent:
+          type: string
+        dueDaysFromTrigger:
+          type: integer
+        isActive:
+          type: boolean
+        steps:
+          type: array
+          items: {}
 
     Task:
       type: object

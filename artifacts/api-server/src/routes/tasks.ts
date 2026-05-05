@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, and, sql, desc, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
-import { db, agentsTable, taskInstancesTable } from "@workspace/db";
+import { db, agentsTable, taskInstancesTable, taskTemplatesTable } from "@workspace/db";
 import {
   requireAuth,
   requirePermission,
@@ -214,6 +214,145 @@ router.delete(
 
     if (!deleted) {
       res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    res.sendStatus(204);
+  },
+);
+
+// =====================================================================
+// Task Template CRUD — admin management of reusable task templates
+// =====================================================================
+
+const CreateTemplateSchema = z.object({
+  name: z.string().min(1).max(200),
+  title: z.string().min(1).max(500),
+  description: z.string().max(2000).optional(),
+  type: z.string().default("custom"),
+  priority: z.enum(["low", "medium", "high", "urgent"]).default("medium"),
+  triggerEvent: z.string().optional(),
+  dueDaysFromTrigger: z.number().int().min(1).optional(),
+  steps: z.array(z.record(z.unknown())).optional(),
+});
+
+const UpdateTemplateSchema = CreateTemplateSchema.partial().extend({
+  isActive: z.boolean().optional(),
+});
+
+router.get(
+  "/task-templates",
+  requireAuth,
+  requirePermission("task_instance", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+
+    const templates = await db
+      .select()
+      .from(taskTemplatesTable)
+      .where(and(eq(taskTemplatesTable.orgId, authReq.orgId), eq(taskTemplatesTable.isActive, true)))
+      .orderBy(taskTemplatesTable.name);
+
+    res.json(templates);
+  },
+);
+
+router.post(
+  "/task-templates",
+  requireAuth,
+  requirePermission("task_instance", "create"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+
+    const parsed = CreateTemplateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
+      return;
+    }
+
+    const [template] = await db
+      .insert(taskTemplatesTable)
+      .values({
+        id: randomUUID(),
+        orgId: authReq.orgId,
+        name: parsed.data.name,
+        title: parsed.data.title,
+        description: parsed.data.description ?? null,
+        type: parsed.data.type,
+        priority: parsed.data.priority,
+        triggerEvent: parsed.data.triggerEvent ?? null,
+        dueDaysFromTrigger: parsed.data.dueDaysFromTrigger ?? null,
+        steps: parsed.data.steps ?? null,
+        isActive: true,
+      })
+      .returning();
+
+    res.status(201).json(template);
+  },
+);
+
+router.patch(
+  "/task-templates/:id",
+  requireAuth,
+  requirePermission("task_instance", "update"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const templateId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+    const parsed = UpdateTemplateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
+      return;
+    }
+
+    const updates: Record<string, unknown> = {};
+    const d = parsed.data;
+    if (d.name !== undefined) updates.name = d.name;
+    if (d.title !== undefined) updates.title = d.title;
+    if (d.description !== undefined) updates.description = d.description;
+    if (d.type !== undefined) updates.type = d.type;
+    if (d.priority !== undefined) updates.priority = d.priority;
+    if (d.triggerEvent !== undefined) updates.triggerEvent = d.triggerEvent;
+    if (d.dueDaysFromTrigger !== undefined) updates.dueDaysFromTrigger = d.dueDaysFromTrigger;
+    if (d.steps !== undefined) updates.steps = d.steps;
+    if (d.isActive !== undefined) updates.isActive = d.isActive;
+
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({ error: "No fields to update" });
+      return;
+    }
+
+    const [template] = await db
+      .update(taskTemplatesTable)
+      .set(updates)
+      .where(and(eq(taskTemplatesTable.id, templateId), eq(taskTemplatesTable.orgId, authReq.orgId)))
+      .returning();
+
+    if (!template) {
+      res.status(404).json({ error: "Template not found" });
+      return;
+    }
+
+    res.json(template);
+  },
+);
+
+router.delete(
+  "/task-templates/:id",
+  requireAuth,
+  requirePermission("task_instance", "delete"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const templateId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+    const [template] = await db
+      .update(taskTemplatesTable)
+      .set({ isActive: false })
+      .where(and(eq(taskTemplatesTable.id, templateId), eq(taskTemplatesTable.orgId, authReq.orgId)))
+      .returning();
+
+    if (!template) {
+      res.status(404).json({ error: "Template not found" });
       return;
     }
 

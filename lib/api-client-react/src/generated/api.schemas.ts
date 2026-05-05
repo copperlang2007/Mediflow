@@ -678,6 +678,79 @@ export interface UpdatePlatformRequirementBody {
   onboardingOrder?: number;
 }
 
+export type TaskTemplatePriority =
+  (typeof TaskTemplatePriority)[keyof typeof TaskTemplatePriority];
+
+export const TaskTemplatePriority = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  urgent: "urgent",
+} as const;
+
+export interface TaskTemplate {
+  id: string;
+  orgId: string;
+  name: string;
+  title: string;
+  /** @nullable */
+  description?: string | null;
+  type: string;
+  priority: TaskTemplatePriority;
+  /** @nullable */
+  triggerEvent?: string | null;
+  /** @nullable */
+  dueDaysFromTrigger?: number | null;
+  isActive: boolean;
+  /** @nullable */
+  steps?: unknown[] | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CreateTaskTemplateBodyPriority =
+  (typeof CreateTaskTemplateBodyPriority)[keyof typeof CreateTaskTemplateBodyPriority];
+
+export const CreateTaskTemplateBodyPriority = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  urgent: "urgent",
+} as const;
+
+export interface CreateTaskTemplateBody {
+  name: string;
+  title: string;
+  description?: string;
+  type?: string;
+  priority?: CreateTaskTemplateBodyPriority;
+  triggerEvent?: string;
+  dueDaysFromTrigger?: number;
+  steps?: unknown[];
+}
+
+export type UpdateTaskTemplateBodyPriority =
+  (typeof UpdateTaskTemplateBodyPriority)[keyof typeof UpdateTaskTemplateBodyPriority];
+
+export const UpdateTaskTemplateBodyPriority = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  urgent: "urgent",
+} as const;
+
+export interface UpdateTaskTemplateBody {
+  name?: string;
+  title?: string;
+  description?: string;
+  type?: string;
+  priority?: UpdateTaskTemplateBodyPriority;
+  triggerEvent?: string;
+  dueDaysFromTrigger?: number;
+  isActive?: boolean;
+  steps?: unknown[];
+}
+
 export type TaskStatus = (typeof TaskStatus)[keyof typeof TaskStatus];
 
 export const TaskStatus = {

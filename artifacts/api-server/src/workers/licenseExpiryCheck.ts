@@ -5,7 +5,7 @@
  * creates in-app notifications, and enqueues reminder emails.
  */
 
-import { and, eq, sql, not, exists } from "drizzle-orm";
+import { and, eq, sql, not, exists, gt, inArray } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -78,17 +78,32 @@ export async function licenseExpiryCheckWorker(
         ),
       );
 
-    const notifInserts = orgAdmins.map((admin) => ({
-      id: randomUUID(),
-      orgId: license.orgId,
-      userId: admin.id,
-      type: "license_expiry_alert",
-      title: `License expiring in ${daysUntilExpiry} days`,
-      body: `${license.agentFirstName} ${license.agentLastName}: ${license.stateCode} ${license.licenseType} expires ${license.expiryDate!.toLocaleDateString()}`,
-      resourceType: "license",
-      resourceId: license.licenseId,
-      priority: daysUntilExpiry <= 30 ? "high" : "normal",
-    }));
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const existingNotifs = await db
+      .select({ userId: notificationsTable.userId })
+      .from(notificationsTable)
+      .where(
+        and(
+          eq(notificationsTable.type, "license_expiry_alert"),
+          eq(notificationsTable.resourceId, license.licenseId),
+          gt(notificationsTable.createdAt, yesterday),
+        ),
+      );
+    const alreadyNotified = new Set(existingNotifs.map((n) => n.userId));
+
+    const notifInserts = orgAdmins
+      .filter((admin) => !alreadyNotified.has(admin.id))
+      .map((admin) => ({
+        id: randomUUID(),
+        orgId: license.orgId,
+        userId: admin.id,
+        type: "license_expiry_alert",
+        title: `License expiring in ${daysUntilExpiry} days`,
+        body: `${license.agentFirstName} ${license.agentLastName}: ${license.stateCode} ${license.licenseType} expires ${license.expiryDate!.toLocaleDateString()}`,
+        resourceType: "license",
+        resourceId: license.licenseId,
+        priority: daysUntilExpiry <= 30 ? "high" : "normal",
+      }));
 
     if (notifInserts.length > 0) {
       await db.insert(notificationsTable).values(notifInserts).onConflictDoNothing();

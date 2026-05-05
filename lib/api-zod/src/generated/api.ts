@@ -1203,6 +1203,84 @@ export const GetAgentTasksResponseItem = zod.object({
 export const GetAgentTasksResponse = zod.array(GetAgentTasksResponseItem);
 
 /**
+ * @summary List task templates for the organization
+ */
+export const GetTaskTemplatesResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  type: zod.string(),
+  priority: zod.enum(["low", "medium", "high", "urgent"]),
+  triggerEvent: zod.string().nullish(),
+  dueDaysFromTrigger: zod.number().nullish(),
+  isActive: zod.boolean(),
+  steps: zod.array(zod.unknown()).nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const GetTaskTemplatesResponse = zod.array(GetTaskTemplatesResponseItem);
+
+/**
+ * @summary Create a task template
+ */
+export const createTaskTemplateBodyTypeDefault = `custom`;
+
+export const CreateTaskTemplateBody = zod.object({
+  name: zod.string(),
+  title: zod.string(),
+  description: zod.string().optional(),
+  type: zod.string().default(createTaskTemplateBodyTypeDefault),
+  priority: zod.enum(["low", "medium", "high", "urgent"]).optional(),
+  triggerEvent: zod.string().optional(),
+  dueDaysFromTrigger: zod.number().optional(),
+  steps: zod.array(zod.unknown()).optional(),
+});
+
+/**
+ * @summary Update a task template
+ */
+export const UpdateTaskTemplateParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateTaskTemplateBody = zod.object({
+  name: zod.string().optional(),
+  title: zod.string().optional(),
+  description: zod.string().optional(),
+  type: zod.string().optional(),
+  priority: zod.enum(["low", "medium", "high", "urgent"]).optional(),
+  triggerEvent: zod.string().optional(),
+  dueDaysFromTrigger: zod.number().optional(),
+  isActive: zod.boolean().optional(),
+  steps: zod.array(zod.unknown()).optional(),
+});
+
+export const UpdateTaskTemplateResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  type: zod.string(),
+  priority: zod.enum(["low", "medium", "high", "urgent"]),
+  triggerEvent: zod.string().nullish(),
+  dueDaysFromTrigger: zod.number().nullish(),
+  isActive: zod.boolean(),
+  steps: zod.array(zod.unknown()).nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Soft-delete a task template
+ */
+export const DeleteTaskTemplateParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
  * @summary List documents for an agent
  */
 export const GetAgentDocumentsParams = zod.object({

@@ -7,6 +7,8 @@ import {
   stateLicensesTable,
   carrierCertificationsTable,
   ahipRecordsTable,
+  checklistRunsTable,
+  checklistItemsTable,
   type Agent,
 } from "@workspace/db";
 import { z } from "zod";
@@ -368,7 +370,8 @@ router.get(
     }
 
     const currentYear = new Date().getFullYear();
-    const [licenses, certs, ahip] = await Promise.all([
+
+    const [licenses, certs, ahip, onboardingRun] = await Promise.all([
       db
         .select()
         .from(stateLicensesTable)
@@ -387,7 +390,39 @@ router.get(
           ),
         )
         .limit(1),
+      db
+        .select({ id: checklistRunsTable.id })
+        .from(checklistRunsTable)
+        .where(
+          and(
+            eq(checklistRunsTable.agentId, agent.id),
+            eq(checklistRunsTable.orgId, authReq.orgId),
+            sql`${checklistRunsTable.type} = 'onboarding'`,
+          ),
+        )
+        .orderBy(sql`${checklistRunsTable.startedAt} desc`)
+        .limit(1),
     ]);
+
+    let onboardingTaskScore = 0;
+    let onboardingCompletedItems = 0;
+    let onboardingTotalItems = 0;
+
+    if (onboardingRun[0]) {
+      const items = await db
+        .select({ status: checklistItemsTable.status })
+        .from(checklistItemsTable)
+        .where(eq(checklistItemsTable.runId, onboardingRun[0].id));
+
+      onboardingTotalItems = items.length;
+      onboardingCompletedItems = items.filter(
+        (i) => i.status === "completed" || i.status === "skipped",
+      ).length;
+      onboardingTaskScore =
+        onboardingTotalItems > 0
+          ? (onboardingCompletedItems / onboardingTotalItems) * 100
+          : 0;
+    }
 
     const activeLicenses = licenses.filter((l) => l.status === "active").length;
     const activeCerts = certs.filter((c) => c.status === "passed").length;
@@ -398,13 +433,12 @@ router.get(
     const certScore =
       certs.length > 0 ? (activeCerts / certs.length) * 100 : 0;
     const ahipScore = ahipCompleted ? 100 : 0;
-    const onboardingScore = agent.status !== "onboarding" ? 100 : 50;
 
     const totalScore =
-      licenseScore * 0.35 +
+      licenseScore * 0.4 +
       certScore * 0.3 +
       ahipScore * 0.2 +
-      onboardingScore * 0.15;
+      onboardingTaskScore * 0.1;
 
     res.json({
       agentId: agent.id,
@@ -412,13 +446,15 @@ router.get(
       licenseScore: Math.round(licenseScore * 10) / 10,
       certificationScore: Math.round(certScore * 10) / 10,
       ahipScore,
-      onboardingScore,
+      onboardingScore: Math.round(onboardingTaskScore * 10) / 10,
       activeLicenses,
       totalLicenses: licenses.length,
       activeCertifications: activeCerts,
       totalCertifications: certs.length,
       ahipCompleted,
       onboardingComplete: agent.status !== "onboarding",
+      onboardingCompletedItems,
+      onboardingTotalItems,
     });
   },
 );

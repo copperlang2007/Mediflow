@@ -9,6 +9,7 @@ import {
   checklistItemsTable,
   taskTemplatesTable,
 } from "@workspace/db";
+import { enqueue, JOB_NAMES } from "../lib/jobs";
 import {
   requireAuth,
   requirePermission,
@@ -219,7 +220,12 @@ router.patch(
     }
 
     const [run] = await db
-      .select({ id: checklistRunsTable.id, orgId: checklistRunsTable.orgId, agentId: checklistRunsTable.agentId })
+      .select({
+        id: checklistRunsTable.id,
+        orgId: checklistRunsTable.orgId,
+        agentId: checklistRunsTable.agentId,
+        type: checklistRunsTable.type,
+      })
       .from(checklistRunsTable)
       .where(eq(checklistRunsTable.id, runId))
       .limit(1);
@@ -261,6 +267,19 @@ router.patch(
         .update(checklistRunsTable)
         .set({ status: "completed", completedAt: new Date(), completedBy: authReq.userId })
         .where(eq(checklistRunsTable.id, runId));
+
+      if (run.type === "offboarding") {
+        await db
+          .update(agentsTable)
+          .set({ status: "offboarded" })
+          .where(eq(agentsTable.id, run.agentId));
+
+        await enqueue(JOB_NAMES.GENERATE_OFFBOARDING_PDF, {
+          agentId: run.agentId,
+          orgId: run.orgId,
+          offboardDate: new Date().toISOString(),
+        });
+      }
     }
 
     res.json(item);

@@ -244,6 +244,29 @@ ${opts.pendingSteps.length > 0 ? `
 <p style="color:#64748b;font-size:13px;margin:0">Please contact your manager if you have any questions about the offboarding process.</p>`);
 }
 
+// --- Carrier cert expiry ---
+
+export function certExpiryEmailHtml(opts: {
+  agentName: string;
+  carrierName: string;
+  certificationYear: number;
+  daysUntilExpiry: number;
+  expiryDate: string;
+}): string {
+  const urgency = opts.daysUntilExpiry <= 30 ? "⚠️ URGENT: " : "";
+  const badgeColor = opts.daysUntilExpiry <= 14 ? "#dc2626" : opts.daysUntilExpiry <= 30 ? "#d97706" : "#2563eb";
+  return wrap(`
+<h2 style="margin:0 0 4px;font-size:18px;color:#0f172a">${urgency}Carrier Certification Expiring in ${opts.daysUntilExpiry} Day${opts.daysUntilExpiry !== 1 ? "s" : ""}</h2>
+<span style="display:inline-block;background:${badgeColor};color:#fff;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;margin-bottom:16px">${opts.daysUntilExpiry <= 30 ? "Action Required" : "Upcoming"}</span>
+<p style="color:#475569;margin:0 0 12px">Hi ${opts.agentName},</p>
+<p style="color:#475569;margin:0 0 16px">Your <strong>${opts.carrierName} ${opts.certificationYear}</strong> certification expires on <strong>${opts.expiryDate}</strong>. Please renew your certification to continue selling ${opts.carrierName} Medicare plans.</p>
+<table style="width:100%;border-collapse:collapse;margin:0 0 20px">
+  <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;font-size:13px;width:40%">Carrier</td><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;color:#0f172a;font-size:13px">${opts.carrierName}</td></tr>
+  <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;color:#64748b;font-size:13px">Year</td><td style="padding:8px 12px;border:1px solid #e2e8f0;color:#0f172a;font-size:13px">${opts.certificationYear}</td></tr>
+  <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;font-size:13px">Expiry Date</td><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;color:#0f172a;font-size:13px;font-weight:600">${opts.expiryDate}</td></tr>
+</table>`);
+}
+
 // --- Compliance report ---
 
 export function complianceReportEmailHtml(opts: {
