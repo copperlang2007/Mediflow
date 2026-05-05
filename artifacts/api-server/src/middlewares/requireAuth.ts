@@ -115,13 +115,47 @@ export function requirePermission(
 }
 
 /**
- * Requires the caller to send `X-Confirm-Export: true` to acknowledge
- * that a bulk PHI export is intentional. Used on CSV/export endpoints.
+ * Step-up authentication gate — verifies the caller's Clerk JWT was issued
+ * within `maxAgeSeconds` (default 15 min). Forces token freshness rather than
+ * relying on a client-supplied header, providing cryptographic evidence for
+ * HIPAA/SOC 2 audit trails.
+ *
+ * Frontend handling: on 401 { code: "STEP_UP_REQUIRED" }, call
+ * `clerk.session.touch()` (or Clerk's re-auth flow) then retry the request.
+ */
+export function requireRecentAuth(maxAgeSeconds = 900): (req: Request, res: Response, next: NextFunction) => void {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const auth = getAuth(req);
+    const iat = typeof auth.sessionClaims?.iat === "number" ? auth.sessionClaims.iat : 0;
+    if (!iat || Math.floor(Date.now() / 1000) - iat > maxAgeSeconds) {
+      res.status(401).json({
+        error: "Step-up authentication required — please re-authenticate to perform this sensitive operation",
+        code: "STEP_UP_REQUIRED",
+      });
+      return;
+    }
+    next();
+  };
+}
+
+/**
+ * Bulk PHI export gate: requires both recent authentication (cryptographic
+ * evidence via JWT iat) AND the explicit UI confirmation header.
  */
 export function requireExportConfirm(req: Request, res: Response, next: NextFunction): void {
+  const auth = getAuth(req);
+  const iat = typeof auth.sessionClaims?.iat === "number" ? auth.sessionClaims.iat : 0;
+  if (!iat || Math.floor(Date.now() / 1000) - iat > 900) {
+    res.status(401).json({
+      error: "Step-up authentication required — re-authenticate before exporting PHI",
+      code: "STEP_UP_REQUIRED",
+    });
+    return;
+  }
   if (req.headers["x-confirm-export"] !== "true") {
     res.status(428).json({
       error: "Export confirmation required",
+      code: "EXPORT_CONFIRM_REQUIRED",
       hint: "Include header X-Confirm-Export: true to proceed with bulk data export",
     });
     return;
@@ -130,13 +164,23 @@ export function requireExportConfirm(req: Request, res: Response, next: NextFunc
 }
 
 /**
- * Requires the caller to send `X-Confirm-Destructive: true` before
- * any hard-delete or irreversible bulk operation.
+ * Hard-delete / irreversible operation gate: requires both recent
+ * authentication (JWT iat check) AND the explicit UI confirmation header.
  */
 export function requireDestructiveConfirm(req: Request, res: Response, next: NextFunction): void {
+  const auth = getAuth(req);
+  const iat = typeof auth.sessionClaims?.iat === "number" ? auth.sessionClaims.iat : 0;
+  if (!iat || Math.floor(Date.now() / 1000) - iat > 900) {
+    res.status(401).json({
+      error: "Step-up authentication required — re-authenticate before this irreversible operation",
+      code: "STEP_UP_REQUIRED",
+    });
+    return;
+  }
   if (req.headers["x-confirm-destructive"] !== "true") {
     res.status(428).json({
       error: "Destructive operation confirmation required",
+      code: "DESTRUCTIVE_CONFIRM_REQUIRED",
       hint: "Include header X-Confirm-Destructive: true to proceed",
     });
     return;

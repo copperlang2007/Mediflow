@@ -27,7 +27,7 @@ const router: IRouter = Router();
 // PHI masking — roles that may see full DOB and Medicare ID
 const PHI_PRIVILEGED_ROLES = new Set(["super_admin", "agency_admin", "compliance_manager"]);
 
-function maskContact<T extends { dob?: Date | null; medicareId?: string | null }>(
+function maskContact<T extends { dob?: Date | null; medicareId?: string | null; healthConditions?: string[] | null }>(
   contact: T,
   userRole: string,
 ): T {
@@ -36,6 +36,7 @@ function maskContact<T extends { dob?: Date | null; medicareId?: string | null }
     ...contact,
     dob: null,
     medicareId: contact.medicareId != null ? "***-**-****" : null,
+    healthConditions: contact.healthConditions != null ? [] : null,
   };
 }
 

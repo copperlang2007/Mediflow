@@ -749,7 +749,20 @@ function dateOffset(days: number) { return new Date(Date.now() - days * 24 * 60 
 
 async function downloadCsv(url: string, filename: string) {
   const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-  const res = await fetch(`${base}${url}`, { credentials: "include" });
+  const res = await fetch(`${base}${url}`, {
+    credentials: "include",
+    headers: { "X-Confirm-Export": "true" },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string; code?: string };
+    if (body.code === "STEP_UP_REQUIRED") {
+      // Signal the UI; Clerk session refresh happens on next request
+      alert("Your session needs to be refreshed. Please reload the page and try again.");
+    } else {
+      alert(body.error ?? `Export failed (${res.status})`);
+    }
+    return;
+  }
   const blob = await res.blob();
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);

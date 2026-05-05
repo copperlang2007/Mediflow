@@ -134,7 +134,15 @@ function AuditLogTab() {
     if (filterAction && filterAction !== "all") p.set("action", filterAction);
     if (filterResource && filterResource !== "all") p.set("resourceType", filterResource);
     if (filterUserId.trim()) p.set("userId", filterUserId.trim());
-    const res = await fetch(`${base}/api/admin/audit-log/export?${p.toString()}`, { credentials: "include" });
+    const res = await fetch(`${base}/api/admin/audit-log/export?${p.toString()}`, {
+      credentials: "include",
+      headers: { "X-Confirm-Export": "true" },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { error?: string; code?: string };
+      alert(body.code === "STEP_UP_REQUIRED" ? "Session expired — please reload the page and try again." : (body.error ?? `Export failed (${res.status})`));
+      return;
+    }
     const blob = await res.blob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -303,7 +311,15 @@ function AccessReviewTab() {
 
   const handleExport = async () => {
     const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-    const res = await fetch(`${base}/api/admin/access-review/export`, { credentials: "include" });
+    const res = await fetch(`${base}/api/admin/access-review/export`, {
+      credentials: "include",
+      headers: { "X-Confirm-Export": "true" },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { error?: string; code?: string };
+      alert(body.code === "STEP_UP_REQUIRED" ? "Session expired — please reload the page and try again." : (body.error ?? `Export failed (${res.status})`));
+      return;
+    }
     const blob = await res.blob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -402,7 +418,15 @@ function LoginHistoryTab() {
 
   const handleExport = async () => {
     const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-    const res = await fetch(`${base}/api/admin/login-history/export`, { credentials: "include" });
+    const res = await fetch(`${base}/api/admin/login-history/export`, {
+      credentials: "include",
+      headers: { "X-Confirm-Export": "true" },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { error?: string; code?: string };
+      alert(body.code === "STEP_UP_REQUIRED" ? "Session expired — please reload the page and try again." : (body.error ?? `Export failed (${res.status})`));
+      return;
+    }
     const blob = await res.blob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
