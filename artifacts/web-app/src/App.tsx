@@ -1,23 +1,28 @@
-import { useEffect, useRef } from "react";
+import { lazy, Suspense } from "react";
 import { ClerkProvider, SignIn, SignUp, Show, useClerk } from "@clerk/react";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
 import { Switch, Route, useLocation, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Skeleton } from "@/components/ui/skeleton";
 import AppShell from "@/components/layout/AppShell";
-import Dashboard from "@/pages/dashboard";
-import AgentsPage from "@/pages/agents";
-import LicensingPage from "@/pages/licensing";
-import CertificationsPage from "@/pages/certifications";
-import CRMPage from "@/pages/crm";
-import TasksPage from "@/pages/tasks";
-import DocumentsPage from "@/pages/documents";
-import CompliancePage from "@/pages/compliance";
-import SettingsPage from "@/pages/settings";
-import NotFound from "@/pages/not-found";
+import ErrorBoundary from "@/components/ErrorBoundary";
+
+// Route-level lazy loading
+const Dashboard = lazy(() => import("@/pages/dashboard"));
+const AgentsPage = lazy(() => import("@/pages/agents"));
+const LicensingPage = lazy(() => import("@/pages/licensing"));
+const CertificationsPage = lazy(() => import("@/pages/certifications"));
+const CRMPage = lazy(() => import("@/pages/crm"));
+const TasksPage = lazy(() => import("@/pages/tasks"));
+const DocumentsPage = lazy(() => import("@/pages/documents"));
+const CompliancePage = lazy(() => import("@/pages/compliance"));
+const SettingsPage = lazy(() => import("@/pages/settings"));
+const NotFound = lazy(() => import("@/pages/not-found"));
 
 const clerkPubKey = publishableKeyFromHost(
   window.location.hostname,
@@ -84,10 +89,24 @@ const clerkAppearance = {
     dividerLine: "bg-border",
     alert: "border border-border rounded-lg",
     otpCodeFieldInput: "border-input bg-background text-foreground",
-    formFieldRow: "gap-2",
     main: "px-8 py-6",
   },
 };
+
+function PageLoadingFallback() {
+  return (
+    <div className="p-6 space-y-4 max-w-7xl mx-auto">
+      <Skeleton className="h-8 w-48" />
+      <Skeleton className="h-4 w-64" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mt-6">
+        {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-2">
+        {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-56 rounded-xl" />)}
+      </div>
+    </div>
+  );
+}
 
 function SignInPage() {
   return (
@@ -160,7 +179,13 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <Show when="signed-in">
-        <AppShell>{children}</AppShell>
+        <AppShell>
+          <ErrorBoundary>
+            <Suspense fallback={<PageLoadingFallback />}>
+              {children}
+            </Suspense>
+          </ErrorBoundary>
+        </AppShell>
       </Show>
       <Show when="signed-out">
         <Redirect to="/" />
@@ -218,39 +243,45 @@ function ClerkProviderWithRoutes() {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <ClerkQueryClientCacheInvalidator />
-          <Switch>
-            <Route path="/" component={HomeRedirect} />
-            <Route path="/sign-in/*?" component={SignInPage} />
-            <Route path="/sign-up/*?" component={SignUpPage} />
-            <Route path="/dashboard">
-              <ProtectedLayout><Dashboard /></ProtectedLayout>
-            </Route>
-            <Route path="/agents">
-              <ProtectedLayout><AgentsPage /></ProtectedLayout>
-            </Route>
-            <Route path="/licensing">
-              <ProtectedLayout><LicensingPage /></ProtectedLayout>
-            </Route>
-            <Route path="/certifications">
-              <ProtectedLayout><CertificationsPage /></ProtectedLayout>
-            </Route>
-            <Route path="/crm">
-              <ProtectedLayout><CRMPage /></ProtectedLayout>
-            </Route>
-            <Route path="/tasks">
-              <ProtectedLayout><TasksPage /></ProtectedLayout>
-            </Route>
-            <Route path="/documents">
-              <ProtectedLayout><DocumentsPage /></ProtectedLayout>
-            </Route>
-            <Route path="/compliance">
-              <ProtectedLayout><CompliancePage /></ProtectedLayout>
-            </Route>
-            <Route path="/settings">
-              <ProtectedLayout><SettingsPage /></ProtectedLayout>
-            </Route>
-            <Route component={NotFound} />
-          </Switch>
+          <ErrorBoundary>
+            <Switch>
+              <Route path="/" component={HomeRedirect} />
+              <Route path="/sign-in/*?" component={SignInPage} />
+              <Route path="/sign-up/*?" component={SignUpPage} />
+              <Route path="/dashboard">
+                <ProtectedLayout><Dashboard /></ProtectedLayout>
+              </Route>
+              <Route path="/agents">
+                <ProtectedLayout><AgentsPage /></ProtectedLayout>
+              </Route>
+              <Route path="/licensing">
+                <ProtectedLayout><LicensingPage /></ProtectedLayout>
+              </Route>
+              <Route path="/certifications">
+                <ProtectedLayout><CertificationsPage /></ProtectedLayout>
+              </Route>
+              <Route path="/crm">
+                <ProtectedLayout><CRMPage /></ProtectedLayout>
+              </Route>
+              <Route path="/tasks">
+                <ProtectedLayout><TasksPage /></ProtectedLayout>
+              </Route>
+              <Route path="/documents">
+                <ProtectedLayout><DocumentsPage /></ProtectedLayout>
+              </Route>
+              <Route path="/compliance">
+                <ProtectedLayout><CompliancePage /></ProtectedLayout>
+              </Route>
+              <Route path="/settings">
+                <ProtectedLayout><SettingsPage /></ProtectedLayout>
+              </Route>
+              <Route>
+                <Suspense fallback={null}>
+                  <NotFound />
+                </Suspense>
+              </Route>
+            </Switch>
+          </ErrorBoundary>
           <Toaster />
         </TooltipProvider>
       </QueryClientProvider>

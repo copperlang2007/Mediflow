@@ -2,11 +2,12 @@ import { type Request, type Response, type NextFunction } from "express";
 import { getAuth } from "@clerk/express";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { type Role, type Resource, type Action, can } from "../lib/permissions";
 
 export type AuthenticatedRequest = Request & {
   userId: string;
   orgId: string;
-  userRole: string;
+  userRole: Role;
 };
 
 export const requireAuth = async (
@@ -36,24 +37,61 @@ export const requireAuth = async (
   const authReq = req as AuthenticatedRequest;
   authReq.userId = user.id;
   authReq.orgId = user.orgId;
-  authReq.userRole = user.role;
+  authReq.userRole = user.role as Role;
 
   next();
 };
 
-export const requireRole = (
-  ...roles: Array<"super_admin" | "agency_admin" | "compliance_manager" | "agent">
-) => {
-  return async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
+/**
+ * Role-based middleware. Accepts explicit roles OR a resource/action pair from
+ * the centralized permission matrix. Prefer resource/action form so the matrix
+ * stays as the single source of truth.
+ */
+export function requireRole(
+  ...roles: Array<Role>
+): (req: Request, res: Response, next: NextFunction) => Promise<void>;
+
+export function requireRole(
+  resource: Resource,
+  action: Action,
+): (req: Request, res: Response, next: NextFunction) => Promise<void>;
+
+export function requireRole(
+  ...args: Array<Role | Resource | Action>
+): (req: Request, res: Response, next: NextFunction) => Promise<void> {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    if (!authReq.userRole || !roles.includes(authReq.userRole as any)) {
+    const role = authReq.userRole;
+
+    if (!role) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
+
+    let allowed = false;
+
+    if (
+      args.length === 2 &&
+      typeof args[0] === "string" &&
+      typeof args[1] === "string" &&
+      !isRole(args[0])
+    ) {
+      allowed = can(role, args[0] as Resource, args[1] as Action);
+    } else {
+      allowed = (args as Role[]).includes(role);
+    }
+
+    if (!allowed) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
     next();
   };
-};
+}
+
+function isRole(value: string): value is Role {
+  return (
+    ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "agent"] as const
+  ).includes(value as Role);
+}

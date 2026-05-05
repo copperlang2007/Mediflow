@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, sql, ilike, or } from "drizzle-orm";
+import { eq, and, sql, ilike, or, type SQL } from "drizzle-orm";
 import {
   db,
   agentsTable,
@@ -7,13 +7,29 @@ import {
   stateLicensesTable,
   carrierCertificationsTable,
   ahipRecordsTable,
+  type Agent,
 } from "@workspace/db";
 import {
   requireAuth,
   requireRole,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { randomUUID } from "crypto";
+
+// Valid agent status values matching the DB agentStatusEnum
+type AgentStatus = "onboarding" | "active" | "suspended" | "offboarding" | "offboarded";
+const VALID_AGENT_STATUSES: AgentStatus[] = [
+  "onboarding",
+  "active",
+  "suspended",
+  "offboarding",
+  "offboarded",
+];
+
+function isAgentStatus(value: string): value is AgentStatus {
+  return (VALID_AGENT_STATUSES as string[]).includes(value);
+}
 
 const router: IRouter = Router();
 
@@ -33,36 +49,36 @@ router.get(
     const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 200);
     const offsetNum = parseInt(offset ?? "0", 10) || 0;
 
-    const conditions = [eq(agentsTable.orgId, authReq.orgId)];
+    const conditions: SQL[] = [eq(agentsTable.orgId, authReq.orgId)];
 
-    if (status) {
-      conditions.push(eq(agentsTable.status, status as any));
+    if (status && isAgentStatus(status)) {
+      conditions.push(eq(agentsTable.status, status));
     }
     if (managerId) {
       conditions.push(eq(agentsTable.managerId, managerId));
     }
     if (search) {
-      conditions.push(
-        or(
-          ilike(agentsTable.firstName, `%${search}%`),
-          ilike(agentsTable.lastName, `%${search}%`),
-          ilike(agentsTable.email, `%${search}%`)
-        ) as any
+      const searchExpr = or(
+        ilike(agentsTable.firstName, `%${search}%`),
+        ilike(agentsTable.lastName, `%${search}%`),
+        ilike(agentsTable.email, `%${search}%`),
       );
+      if (searchExpr) conditions.push(searchExpr);
     }
 
-    const allAgents = await db
-      .select()
-      .from(agentsTable)
-      .where(and(...conditions))
-      .orderBy(agentsTable.createdAt)
-      .limit(limitNum)
-      .offset(offsetNum);
-
-    const totalResult = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(agentsTable)
-      .where(and(...conditions));
+    const [allAgents, totalResult] = await Promise.all([
+      db
+        .select()
+        .from(agentsTable)
+        .where(and(...conditions))
+        .orderBy(agentsTable.createdAt)
+        .limit(limitNum)
+        .offset(offsetNum),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(agentsTable)
+        .where(and(...conditions)),
+    ]);
 
     res.json({
       agents: allAgents,
@@ -70,13 +86,14 @@ router.get(
       limit: limitNum,
       offset: offsetNum,
     });
-  }
+  },
 );
 
 router.post(
   "/agents",
   requireAuth,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
+  auditMiddleware("agent", "create"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const {
@@ -100,7 +117,9 @@ router.post(
     };
 
     if (!firstName || !lastName || !email) {
-      res.status(400).json({ error: "firstName, lastName, email are required" });
+      res
+        .status(400)
+        .json({ error: "firstName, lastName, email are required" });
       return;
     }
 
@@ -122,7 +141,7 @@ router.post(
       .returning();
 
     res.status(201).json(agent);
-  }
+  },
 );
 
 router.get(
@@ -135,9 +154,7 @@ router.get(
     const [agent] = await db
       .select()
       .from(agentsTable)
-      .where(
-        and(eq(agentsTable.id, raw), eq(agentsTable.orgId, authReq.orgId))
-      )
+      .where(and(eq(agentsTable.id, raw), eq(agentsTable.orgId, authReq.orgId)))
       .limit(1);
 
     if (!agent) {
@@ -155,15 +172,16 @@ router.get(
       manager = m ?? null;
     }
 
-    const licenses = await db
-      .select()
-      .from(stateLicensesTable)
-      .where(eq(stateLicensesTable.agentId, agent.id));
-
-    const certs = await db
-      .select()
-      .from(carrierCertificationsTable)
-      .where(eq(carrierCertificationsTable.agentId, agent.id));
+    const [licenses, certs] = await Promise.all([
+      db
+        .select()
+        .from(stateLicensesTable)
+        .where(eq(stateLicensesTable.agentId, agent.id)),
+      db
+        .select()
+        .from(carrierCertificationsTable)
+        .where(eq(carrierCertificationsTable.agentId, agent.id)),
+    ]);
 
     const currentYear = new Date().getFullYear();
     const [ahip] = await db
@@ -172,8 +190,8 @@ router.get(
       .where(
         and(
           eq(ahipRecordsTable.agentId, agent.id),
-          eq(ahipRecordsTable.certificationYear, currentYear)
-        )
+          eq(ahipRecordsTable.certificationYear, currentYear),
+        ),
       )
       .limit(1);
 
@@ -189,18 +207,21 @@ router.get(
       activeCertificationsCount: activeCerts,
       ahipCurrentYear: ahip?.status ?? null,
     });
-  }
+  },
 );
 
 router.patch(
   "/agents/:id",
   requireAuth,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
+  auditMiddleware("agent", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
-    const allowed = [
+    const body = req.body as Partial<Agent>;
+
+    const allowed: Array<keyof Agent> = [
       "firstName",
       "lastName",
       "email",
@@ -212,29 +233,29 @@ router.patch(
       "managerId",
       "notes",
       "avatarUrl",
-    ] as const;
+    ];
 
-    const updates: Record<string, unknown> = {};
-    const body = req.body as Record<string, unknown>;
+    const updates: Partial<Agent> = {};
     for (const key of allowed) {
       if (key in body) {
         if (key === "hireDate" || key === "offboardDate") {
-          updates[key === "hireDate" ? "hireDate" : "offboardDate"] = body[key]
-            ? new Date(body[key] as string)
-            : null;
+          const val = body[key];
+          (updates as Record<string, unknown>)[key] = val ? new Date(String(val)) : null;
         } else {
-          const snakeKey = key.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
-          updates[snakeKey] = body[key];
+          (updates as Record<string, unknown>)[key] = body[key];
         }
       }
     }
 
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({ error: "No valid fields to update" });
+      return;
+    }
+
     const [agent] = await db
       .update(agentsTable)
-      .set(updates as any)
-      .where(
-        and(eq(agentsTable.id, raw), eq(agentsTable.orgId, authReq.orgId))
-      )
+      .set(updates)
+      .where(and(eq(agentsTable.id, raw), eq(agentsTable.orgId, authReq.orgId)))
       .returning();
 
     if (!agent) {
@@ -243,22 +264,21 @@ router.patch(
     }
 
     res.json(agent);
-  }
+  },
 );
 
 router.delete(
   "/agents/:id",
   requireAuth,
   requireRole("super_admin", "agency_admin"),
+  auditMiddleware("agent", "delete"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
     const [agent] = await db
       .delete(agentsTable)
-      .where(
-        and(eq(agentsTable.id, raw), eq(agentsTable.orgId, authReq.orgId))
-      )
+      .where(and(eq(agentsTable.id, raw), eq(agentsTable.orgId, authReq.orgId)))
       .returning();
 
     if (!agent) {
@@ -267,7 +287,7 @@ router.delete(
     }
 
     res.sendStatus(204);
-  }
+  },
 );
 
 router.get(
@@ -280,9 +300,7 @@ router.get(
     const [agent] = await db
       .select()
       .from(agentsTable)
-      .where(
-        and(eq(agentsTable.id, raw), eq(agentsTable.orgId, authReq.orgId))
-      )
+      .where(and(eq(agentsTable.id, raw), eq(agentsTable.orgId, authReq.orgId)))
       .limit(1);
 
     if (!agent) {
@@ -306,8 +324,8 @@ router.get(
         .where(
           and(
             eq(ahipRecordsTable.agentId, agent.id),
-            eq(ahipRecordsTable.certificationYear, currentYear)
-          )
+            eq(ahipRecordsTable.certificationYear, currentYear),
+          ),
         )
         .limit(1),
     ]);
@@ -316,15 +334,17 @@ router.get(
     const activeCerts = certs.filter((c) => c.status === "passed").length;
     const ahipCompleted = ahip[0]?.status === "passed";
 
-    const licenseScore = licenses.length > 0 ? (activeLicenses / licenses.length) * 100 : 0;
-    const certScore = certs.length > 0 ? (activeCerts / certs.length) * 100 : 0;
+    const licenseScore =
+      licenses.length > 0 ? (activeLicenses / licenses.length) * 100 : 0;
+    const certScore =
+      certs.length > 0 ? (activeCerts / certs.length) * 100 : 0;
     const ahipScore = ahipCompleted ? 100 : 0;
     const onboardingScore = agent.status !== "onboarding" ? 100 : 50;
 
     const totalScore =
       licenseScore * 0.35 +
-      certScore * 0.30 +
-      ahipScore * 0.20 +
+      certScore * 0.3 +
+      ahipScore * 0.2 +
       onboardingScore * 0.15;
 
     res.json({
@@ -341,7 +361,7 @@ router.get(
       ahipCompleted,
       onboardingComplete: agent.status !== "onboarding",
     });
-  }
+  },
 );
 
 export default router;

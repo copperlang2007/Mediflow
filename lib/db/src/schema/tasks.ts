@@ -48,7 +48,13 @@ export const taskTemplatesTable = pgTable("task_templates", {
     .notNull()
     .references(() => organizationsTable.id),
   name: text("name").notNull(),
+  title: text("title").notNull().default(""),
+  description: text("description"),
   type: text("type").notNull().default("custom"),
+  priority: taskPriorityEnum("priority").notNull().default("medium"),
+  triggerEvent: text("trigger_event"),
+  dueDaysFromTrigger: integer("due_days_from_trigger"),
+  isActive: boolean("is_active").notNull().default(true),
   steps: jsonb("steps"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
@@ -74,6 +80,7 @@ export const taskInstancesTable = pgTable("task_instances", {
   title: text("title").notNull(),
   description: text("description"),
   dueDate: timestamp("due_date", { withTimezone: true }),
+  assignedTo: text("assigned_to"),
   assignedToUserId: text("assigned_to_user_id"),
   status: taskStatusEnum("status").notNull().default("open"),
   priority: taskPriorityEnum("priority").notNull().default("medium"),
