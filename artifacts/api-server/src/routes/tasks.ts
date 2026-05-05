@@ -129,6 +129,20 @@ router.post(
     }
 
     const data = parsed.data;
+
+    // Validate agentId belongs to the caller's org to prevent cross-org FK associations
+    if (data.agentId) {
+      const [agt] = await db
+        .select({ id: agentsTable.id })
+        .from(agentsTable)
+        .where(and(eq(agentsTable.id, data.agentId), eq(agentsTable.orgId, authReq.orgId)))
+        .limit(1);
+      if (!agt) {
+        res.status(400).json({ error: "agentId does not belong to this organisation" });
+        return;
+      }
+    }
+
     const [task] = await db
       .insert(taskInstancesTable)
       .values({

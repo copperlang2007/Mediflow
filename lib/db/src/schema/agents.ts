@@ -124,15 +124,21 @@ export const insertStateLicenseSchema = createInsertSchema(
 export type InsertStateLicense = z.infer<typeof insertStateLicenseSchema>;
 export type StateLicense = typeof stateLicensesTable.$inferSelect;
 
-export const licenseRenewalAlertsTable = pgTable("license_renewal_alerts", {
-  id: text("id").primaryKey(),
-  licenseId: text("license_id")
-    .notNull()
-    .references(() => stateLicensesTable.id, { onDelete: "cascade" }),
-  alertDaysBefore: integer("alert_days_before").notNull(),
-  sentAt: timestamp("sent_at", { withTimezone: true }),
-  notificationId: text("notification_id"),
-});
+export const licenseRenewalAlertsTable = pgTable(
+  "license_renewal_alerts",
+  {
+    id: text("id").primaryKey(),
+    licenseId: text("license_id")
+      .notNull()
+      .references(() => stateLicensesTable.id, { onDelete: "cascade" }),
+    alertDaysBefore: integer("alert_days_before").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    notificationId: text("notification_id"),
+  },
+  (t) => [
+    uniqueIndex("license_renewal_alerts_license_threshold_unique").on(t.licenseId, t.alertDaysBefore),
+  ],
+);
 
 export type LicenseRenewalAlert = typeof licenseRenewalAlertsTable.$inferSelect;
 
@@ -240,15 +246,21 @@ export const insertAhipRecordSchema = createInsertSchema(ahipRecordsTable).omit(
 export type InsertAhipRecord = z.infer<typeof insertAhipRecordSchema>;
 export type AhipRecord = typeof ahipRecordsTable.$inferSelect;
 
-export const certRenewalAlertsTable = pgTable("cert_renewal_alerts", {
-  id: text("id").primaryKey(),
-  certId: text("cert_id")
-    .notNull()
-    .references(() => carrierCertificationsTable.id, { onDelete: "cascade" }),
-  alertDaysBefore: integer("alert_days_before").notNull(),
-  sentAt: timestamp("sent_at", { withTimezone: true }),
-  notificationId: text("notification_id"),
-});
+export const certRenewalAlertsTable = pgTable(
+  "cert_renewal_alerts",
+  {
+    id: text("id").primaryKey(),
+    certId: text("cert_id")
+      .notNull()
+      .references(() => carrierCertificationsTable.id, { onDelete: "cascade" }),
+    alertDaysBefore: integer("alert_days_before").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    notificationId: text("notification_id"),
+  },
+  (t) => [
+    uniqueIndex("cert_renewal_alerts_cert_threshold_unique").on(t.certId, t.alertDaysBefore),
+  ],
+);
 
 export type CertRenewalAlert = typeof certRenewalAlertsTable.$inferSelect;
 

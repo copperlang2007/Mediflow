@@ -120,6 +120,13 @@ router.get(
     }
 
     const dir = sortDir === "desc" ? "DESC" : "ASC";
+    // Compliance score formula (max 100):
+    //   Licensing    40 pts — proportional: active_licenses / total_licenses
+    //   Certifications 30 pts — proportional: passed_certs / total_certs
+    //   AHIP         20 pts — binary: passed in current year = 20, else 0
+    //   Onboarding   10 pts — proportional: completed+skipped items / total items
+    // Proportional scoring chosen over binary for onboarding so partial progress
+    // is visible on the roster and agents aren't stuck at 0 until the last step.
     const complianceScoreSql = sql`(
       COALESCE((SELECT CAST(count(*) FILTER (WHERE status = 'active') AS FLOAT) / NULLIF(count(*), 0) FROM state_licenses WHERE agent_id = agents.id), 0) * 40 +
       COALESCE((SELECT CAST(count(*) FILTER (WHERE status = 'passed') AS FLOAT) / NULLIF(count(*), 0) FROM carrier_certifications WHERE agent_id = agents.id), 0) * 30 +
