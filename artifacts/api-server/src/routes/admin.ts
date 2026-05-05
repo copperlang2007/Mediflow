@@ -82,13 +82,14 @@ router.get(
   requireRole("super_admin", "agency_admin", "compliance_manager"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const { startDate, endDate, action: actionFilter, resourceType: resourceTypeFilter } = req.query as Record<string, string>;
+    const { startDate, endDate, action: actionFilter, resourceType: resourceTypeFilter, userId: userIdFilter } = req.query as Record<string, string>;
 
     const conditions = [eq(auditLogTable.orgId, authReq.orgId)];
     if (startDate) conditions.push(gte(auditLogTable.createdAt, new Date(startDate)));
     if (endDate) conditions.push(lte(auditLogTable.createdAt, new Date(endDate)));
     if (actionFilter) conditions.push(eq(auditLogTable.action, actionFilter));
     if (resourceTypeFilter) conditions.push(eq(auditLogTable.resourceType, resourceTypeFilter));
+    if (userIdFilter) conditions.push(eq(auditLogTable.userId, userIdFilter));
 
     const entries = await db.select().from(auditLogTable).where(and(...conditions))
       .orderBy(desc(auditLogTable.createdAt)).limit(10000);
@@ -105,7 +106,7 @@ router.get(
     ]);
     const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
 
-    await db.insert(dataExportLogTable).values({ id: randomUUID(), orgId: authReq.orgId, userId: authReq.userId, exportType: "audit_log_csv", filters: { startDate, endDate, action: actionFilter, resourceType: resourceTypeFilter }, recordCount: entries.length });
+    await db.insert(dataExportLogTable).values({ id: randomUUID(), orgId: authReq.orgId, userId: authReq.userId, exportType: "audit_log_csv", filters: { startDate, endDate, action: actionFilter, resourceType: resourceTypeFilter, userId: userIdFilter }, recordCount: entries.length });
 
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", `attachment; filename="audit-log-${new Date().toISOString().slice(0, 10)}.csv"`);

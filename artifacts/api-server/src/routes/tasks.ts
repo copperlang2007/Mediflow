@@ -221,12 +221,13 @@ router.delete(
     const authReq = req as AuthenticatedRequest;
     const taskId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
-    const [deleted] = await db
-      .delete(taskInstancesTable)
+    const [cancelled] = await db
+      .update(taskInstancesTable)
+      .set({ status: "cancelled", updatedAt: new Date() })
       .where(and(eq(taskInstancesTable.id, taskId), eq(taskInstancesTable.orgId, authReq.orgId)))
       .returning();
 
-    if (!deleted) {
+    if (!cancelled) {
       res.status(404).json({ error: "Task not found" });
       return;
     }

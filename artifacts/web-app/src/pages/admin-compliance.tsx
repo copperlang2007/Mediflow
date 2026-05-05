@@ -108,6 +108,7 @@ function AuditLogTab() {
   const [filterResource, setFilterResource] = useState<string>("all");
   const [filterStartDate, setFilterStartDate] = useState<string>("");
   const [filterEndDate, setFilterEndDate] = useState<string>("");
+  const [filterUserId, setFilterUserId] = useState<string>("");
   const limit = 50;
 
   const buildParams = () => {
@@ -116,11 +117,12 @@ function AuditLogTab() {
     if (filterResource && filterResource !== "all") p.set("resourceType", filterResource);
     if (filterStartDate) p.set("startDate", filterStartDate);
     if (filterEndDate) p.set("endDate", filterEndDate);
+    if (filterUserId.trim()) p.set("userId", filterUserId.trim());
     return p.toString();
   };
 
   const { data, isLoading } = useQuery({
-    queryKey: ["admin", "audit-log", page, filterAction, filterResource, filterStartDate, filterEndDate],
+    queryKey: ["admin", "audit-log", page, filterAction, filterResource, filterStartDate, filterEndDate, filterUserId],
     queryFn: () => apiFetch<AuditLogResponse>(`/api/admin/audit-log?${buildParams()}`),
   });
 
@@ -131,6 +133,7 @@ function AuditLogTab() {
     if (filterEndDate) p.set("endDate", filterEndDate);
     if (filterAction && filterAction !== "all") p.set("action", filterAction);
     if (filterResource && filterResource !== "all") p.set("resourceType", filterResource);
+    if (filterUserId.trim()) p.set("userId", filterUserId.trim());
     const res = await fetch(`${base}/api/admin/audit-log/export?${p.toString()}`, { credentials: "include" });
     const blob = await res.blob();
     const a = document.createElement("a");
@@ -144,6 +147,7 @@ function AuditLogTab() {
     setFilterResource("all");
     setFilterStartDate("");
     setFilterEndDate("");
+    setFilterUserId("");
     setPage(0);
   };
 
@@ -199,7 +203,17 @@ function AuditLogTab() {
             className="h-8 px-2 text-xs rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
-        {(filterAction !== "all" || filterResource !== "all" || filterStartDate || filterEndDate) && (
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">User ID</label>
+          <input
+            type="text"
+            placeholder="Filter by user…"
+            value={filterUserId}
+            onChange={(e) => { setFilterUserId(e.target.value); setPage(0); }}
+            className="h-8 px-2 text-xs rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring w-40"
+          />
+        </div>
+        {(filterAction !== "all" || filterResource !== "all" || filterStartDate || filterEndDate || filterUserId) && (
           <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={handleResetFilters}>
             <RefreshCcw className="h-3 w-3 mr-1" /> Clear
           </Button>

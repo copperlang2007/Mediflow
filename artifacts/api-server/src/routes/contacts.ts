@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, or, ilike, inArray, sql, desc, asc, type SQL } from "drizzle-orm";
+import { eq, and, or, ilike, inArray, sql, desc, asc, isNull, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import {
@@ -71,7 +71,7 @@ router.get(
       limit, offset, sortBy, sortDir,
     } = req.query as Record<string, string | undefined>;
 
-    const conditions: SQL[] = [eq(contactsTable.orgId, authReq.orgId)];
+    const conditions: SQL[] = [eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt)];
 
     if (search) {
       const q = `%${search}%`;
@@ -165,7 +165,7 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const [contact] = await db.select().from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId))).limit(1);
+    const [contact] = await db.select().from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
     res.json(contact);
   },
@@ -179,7 +179,7 @@ router.patch(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const [existing] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId))).limit(1);
+    const [existing] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!existing) { res.status(404).json({ error: "Contact not found" }); return; }
 
     const parsed = UpdateContactSchema.safeParse(req.body);
@@ -224,7 +224,7 @@ router.delete(
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const [existing] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId))).limit(1);
     if (!existing) { res.status(404).json({ error: "Contact not found" }); return; }
-    await db.delete(contactsTable).where(eq(contactsTable.id, id));
+    await db.update(contactsTable).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(contactsTable.id, id));
     res.status(204).send();
   },
 );

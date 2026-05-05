@@ -4,7 +4,7 @@
  * Uses multer for multipart file upload + streaming CSV parse.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, inArray, or } from "drizzle-orm";
+import { eq, and, inArray, or, desc } from "drizzle-orm";
 import {
   db,
   agentsTable,
@@ -894,10 +894,9 @@ router.get(
     const authReq = req as AuthenticatedRequest;
     const jobs = await db.select().from(importJobsTable)
       .where(eq(importJobsTable.orgId, authReq.orgId))
-      .orderBy(importJobsTable.createdAt)
+      .orderBy(desc(importJobsTable.createdAt))
       .limit(100);
-    // Return newest first
-    res.json(jobs.reverse());
+    res.json(jobs);
   },
 );
 

@@ -82,6 +82,7 @@ export const contactsTable = pgTable(
     optOutSms: boolean("opt_out_sms").notNull().default(false),
     optOutEmail: boolean("opt_out_email").notNull().default(false),
     tags: text("tags").array(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -93,6 +94,7 @@ export const contactsTable = pgTable(
   (t) => [
     index("contacts_org_id_status_idx").on(t.orgId, t.status),
     index("contacts_org_id_assigned_agent_idx").on(t.orgId, t.assignedAgentId),
+    index("contacts_org_id_deleted_at_idx").on(t.orgId, t.deletedAt),
   ],
 );
 
@@ -201,6 +203,7 @@ export const dealsTable = pgTable("deals", {
   lostAt: timestamp("lost_at", { withTimezone: true }),
   lostReason: text("lost_reason"),
   closeDateEst: timestamp("close_date_est", { withTimezone: true }),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
