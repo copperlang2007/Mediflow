@@ -73,30 +73,25 @@ export async function certExpiryCheckWorker(
       (cert.expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
     );
 
-    const nearestThreshold = ALERT_THRESHOLDS_DAYS.find((t) => daysUntilExpiry <= t);
-    if (!nearestThreshold) continue;
+    // Fire one alert per milestone threshold that has been crossed (daysUntil <= threshold)
+    // and has not yet been sent. Each milestone (90/60/30/14/7) fires independently.
+    const crossedThresholds = ALERT_THRESHOLDS_DAYS.filter((t) => daysUntilExpiry <= t);
+    if (crossedThresholds.length === 0) continue;
 
-    // Deduplicate via cert_renewal_alerts table (one alert per cert per threshold, ever)
-    const [existing] = await db
-      .select({ id: certRenewalAlertsTable.id, sentAt: certRenewalAlertsTable.sentAt })
+    // Load all existing alert records for this cert in one query
+    const existingAlerts = await db
+      .select({ id: certRenewalAlertsTable.id, alertDaysBefore: certRenewalAlertsTable.alertDaysBefore, sentAt: certRenewalAlertsTable.sentAt })
       .from(certRenewalAlertsTable)
-      .where(
-        and(
-          eq(certRenewalAlertsTable.certId, cert.certId),
-          eq(certRenewalAlertsTable.alertDaysBefore, nearestThreshold),
-        ),
-      )
-      .limit(1);
+      .where(eq(certRenewalAlertsTable.certId, cert.certId));
 
-    if (existing?.sentAt) {
-      logger.debug(
-        { certId: cert.certId, threshold: nearestThreshold },
-        "Cert alert already sent for this threshold — skipping",
-      );
-      continue;
-    }
+    const alreadySentSet = new Set(
+      existingAlerts.filter((a) => a.sentAt).map((a) => a.alertDaysBefore),
+    );
 
-    // Fetch compliance managers + admins
+    const pendingThresholds = crossedThresholds.filter((t) => !alreadySentSet.has(t));
+    if (pendingThresholds.length === 0) continue;
+
+    // Fetch compliance managers + admins once per cert
     const orgAdmins = await db
       .select({ id: usersTable.id, email: usersTable.email })
       .from(usersTable)
@@ -108,65 +103,73 @@ export async function certExpiryCheckWorker(
         ),
       );
 
-    // Create in-app notifications for managers
-    const notifInserts = orgAdmins.map((admin) => ({
-      id: randomUUID(),
-      orgId: cert.orgId,
-      userId: admin.id,
-      type: "cert_expiry_alert",
-      title: `Certification expiring in ${daysUntilExpiry} days`,
-      body: `${cert.agentFirstName} ${cert.agentLastName}: ${cert.carrierName} (${cert.certificationYear}) expires ${cert.expiryDate!.toLocaleDateString()}`,
-      resourceType: "certification",
-      resourceId: cert.certId,
-      priority: daysUntilExpiry <= 30 ? "high" : "normal",
-    }));
-
-    let firstNotifId: string | null = null;
-    if (notifInserts.length > 0) {
-      firstNotifId = notifInserts[0].id;
-      await db.insert(notificationsTable).values(notifInserts).onConflictDoNothing();
-      broadcastToUsers(
-        notifInserts.map((n) => n.userId),
-        { type: "notification", resourceType: "certification", resourceId: cert.certId },
-      );
-    }
-
-    // Send email to agent AND all compliance managers
-    const emailHtml = certExpiryEmailHtml({
-      agentName: `${cert.agentFirstName} ${cert.agentLastName}`,
-      carrierName: cert.carrierName,
-      certificationYear: cert.certificationYear,
-      daysUntilExpiry,
-      expiryDate: cert.expiryDate.toLocaleDateString(),
-    });
-
-    const emailRecipients: string[] = [];
-    if (cert.agentEmail) emailRecipients.push(cert.agentEmail);
-    orgAdmins.forEach((a) => { if (a.email) emailRecipients.push(a.email); });
-
-    if (emailRecipients.length > 0) {
-      await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
-        to: emailRecipients,
-        subject: `Certification expiring in ${daysUntilExpiry} days — ${cert.carrierName}`,
-        html: emailHtml,
-        tags: { certId: cert.certId, threshold: String(nearestThreshold) },
-      });
-    }
-
-    // Record alert in cert_renewal_alerts for dedup on next run
-    if (existing) {
-      await db
-        .update(certRenewalAlertsTable)
-        .set({ sentAt: now, notificationId: firstNotifId })
-        .where(eq(certRenewalAlertsTable.id, existing.id));
-    } else {
-      await db.insert(certRenewalAlertsTable).values({
+    for (const threshold of pendingThresholds) {
+      // Create in-app notifications for managers
+      const notifInserts = orgAdmins.map((admin) => ({
         id: randomUUID(),
-        certId: cert.certId,
-        alertDaysBefore: nearestThreshold,
-        sentAt: now,
-        notificationId: firstNotifId,
-      }).onConflictDoNothing();
+        orgId: cert.orgId,
+        userId: admin.id,
+        type: "cert_expiry_alert",
+        title: `Certification expiring in ${daysUntilExpiry} days`,
+        body: `${cert.agentFirstName} ${cert.agentLastName}: ${cert.carrierName} (${cert.certificationYear}) expires ${cert.expiryDate!.toLocaleDateString()}`,
+        resourceType: "certification",
+        resourceId: cert.certId,
+        priority: daysUntilExpiry <= 30 ? "high" : "normal",
+      }));
+
+      let firstNotifId: string | null = null;
+      if (notifInserts.length > 0) {
+        firstNotifId = notifInserts[0].id;
+        await db.insert(notificationsTable).values(notifInserts).onConflictDoNothing();
+        broadcastToUsers(
+          notifInserts.map((n) => n.userId),
+          { type: "notification", resourceType: "certification", resourceId: cert.certId },
+        );
+      }
+
+      // Send email to agent AND all compliance managers
+      const emailHtml = certExpiryEmailHtml({
+        agentName: `${cert.agentFirstName} ${cert.agentLastName}`,
+        carrierName: cert.carrierName,
+        certificationYear: cert.certificationYear,
+        daysUntilExpiry,
+        expiryDate: cert.expiryDate!.toLocaleDateString(),
+      });
+
+      const emailRecipients: string[] = [];
+      if (cert.agentEmail) emailRecipients.push(cert.agentEmail);
+      orgAdmins.forEach((a) => { if (a.email) emailRecipients.push(a.email); });
+
+      if (emailRecipients.length > 0) {
+        await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
+          to: emailRecipients,
+          subject: `Certification expiring in ${daysUntilExpiry} days — ${cert.carrierName}`,
+          html: emailHtml,
+          tags: { certId: cert.certId, threshold: String(threshold) },
+        });
+      }
+
+      // Record alert for this threshold (upsert)
+      const existingRow = existingAlerts.find((a) => a.alertDaysBefore === threshold);
+      if (existingRow) {
+        await db
+          .update(certRenewalAlertsTable)
+          .set({ sentAt: now, notificationId: firstNotifId })
+          .where(eq(certRenewalAlertsTable.id, existingRow.id));
+      } else {
+        await db.insert(certRenewalAlertsTable).values({
+          id: randomUUID(),
+          certId: cert.certId,
+          alertDaysBefore: threshold,
+          sentAt: now,
+          notificationId: firstNotifId,
+        }).onConflictDoNothing();
+      }
+
+      logger.info(
+        { certId: cert.certId, threshold, daysUntilExpiry },
+        "Cert expiry alert sent",
+      );
     }
   }
 

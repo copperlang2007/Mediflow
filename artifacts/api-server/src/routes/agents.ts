@@ -495,8 +495,8 @@ router.get(
         (i) => i.status === "completed" || i.status === "skipped",
       ).length;
       onboardingTaskScore =
-        onboardingTotalItems > 0 && onboardingCompletedItems >= onboardingTotalItems
-          ? 100
+        onboardingTotalItems > 0
+          ? (onboardingCompletedItems / onboardingTotalItems) * 100
           : 0;
     }
 
