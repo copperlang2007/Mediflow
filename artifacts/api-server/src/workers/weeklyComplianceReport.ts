@@ -26,6 +26,7 @@ import {
 } from "@workspace/db";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { ObjectStorageService } from "../lib/objectStorage";
+import { buildComplianceReportPdf } from "../lib/complianceReportPdf";
 import { logger } from "../lib/logger";
 
 const storageService = new ObjectStorageService();
@@ -104,14 +105,27 @@ async function generateReportForOrg(orgId: string): Promise<void> {
 
   if (!fullReport) return;
 
-  const filename = `weekly-compliance-report-${dateStr}.md`;
+  // Generate PDF from the markdown report content
+  let pdfBuffer: Buffer;
+  try {
+    pdfBuffer = await buildComplianceReportPdf(
+      fullReport,
+      "Weekly Compliance Intelligence Report",
+      dateStr,
+    );
+  } catch (err) {
+    logger.error({ err, orgId }, "Failed to generate compliance report PDF");
+    return;
+  }
+
+  const filename = `weekly-compliance-report-${dateStr}.pdf`;
   let storageKey: string;
   try {
-    storageKey = await storageService.uploadDocument(fullReport, filename, orgId, {
-      contentType: "text/markdown",
+    storageKey = await storageService.uploadDocument(pdfBuffer, filename, orgId, {
+      contentType: "application/pdf",
     });
   } catch (err) {
-    logger.error({ err, orgId }, "Failed to upload weekly compliance report");
+    logger.error({ err, orgId }, "Failed to upload weekly compliance report PDF");
     return;
   }
 
@@ -122,8 +136,8 @@ async function generateReportForOrg(orgId: string): Promise<void> {
     name: `Weekly Compliance Report — ${dateStr}`,
     category: "compliance_report",
     storageKey,
-    fileSizeBytes: Buffer.byteLength(fullReport, "utf-8"),
-    mimeType: "text/markdown",
+    fileSizeBytes: pdfBuffer.byteLength,
+    mimeType: "application/pdf",
     uploadedBy: "system",
   });
 

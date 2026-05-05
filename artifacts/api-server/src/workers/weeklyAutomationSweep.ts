@@ -66,7 +66,7 @@ async function scanLicenseExpiring(orgId: string): Promise<number> {
     );
     await enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
       orgId,
-      trigger: "license_expiring",
+      trigger: "license_expires",
       resourceType: "license",
       resourceId: row.licenseId,
       context: {
@@ -108,7 +108,7 @@ async function scanCertExpiring(orgId: string): Promise<number> {
     );
     await enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
       orgId,
-      trigger: "cert_expiring",
+      trigger: "certification_expiring",
       resourceType: "certification",
       resourceId: row.certId,
       context: {

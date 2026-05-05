@@ -167,12 +167,18 @@ function RuleBuilderDialog({
 
   const [name, setName] = useState(editRule?.name ?? "");
   const [triggerType, setTriggerType] = useState(editRule?.triggerType ?? "lead_created");
+  const [triggerDaysThreshold, setTriggerDaysThreshold] = useState<string>(
+    String((editRule?.triggerConfig as Record<string, unknown> | null)?.daysThreshold ?? "30"),
+  );
   const [conditions, setConditions] = useState<AutomationCondition[]>(
     (editRule?.conditions as AutomationCondition[] | null) ?? [],
   );
   const [actions, setActions] = useState<AutomationAction[]>(
     (editRule?.actions as AutomationAction[] | null) ?? [{ type: "create_task", config: { title: "" } }],
   );
+
+  const TIME_THRESHOLD_TRIGGERS = ["license_expires", "certification_expiring", "contact_no_activity", "task_overdue", "ahip_deadline"];
+  const showDaysThreshold = TIME_THRESHOLD_TRIGGERS.includes(triggerType);
 
   const isPending = creating || updating;
 
@@ -203,6 +209,7 @@ function RuleBuilderDialog({
       const body: CreateAutomationRuleBody = {
         name,
         triggerType: triggerType as CreateAutomationRuleBody["triggerType"],
+        triggerConfig: showDaysThreshold ? { daysThreshold: Number(triggerDaysThreshold) || 30 } : undefined,
         conditions,
         actions,
         isActive: true,
@@ -236,9 +243,9 @@ function RuleBuilderDialog({
           </div>
 
           {/* Trigger */}
-          <div>
+          <div className="space-y-2">
             <Label className="text-xs font-medium">Trigger</Label>
-            <Select value={triggerType} onValueChange={setTriggerType}>
+            <Select value={triggerType} onValueChange={(v) => { setTriggerType(v); setTriggerDaysThreshold("30"); }}>
               <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {TRIGGER_OPTIONS.map((t) => (
@@ -246,6 +253,20 @@ function RuleBuilderDialog({
                 ))}
               </SelectContent>
             </Select>
+            {showDaysThreshold && (
+              <div className="flex items-center gap-2 mt-1">
+                <Label className="text-xs text-muted-foreground whitespace-nowrap">Fire when within</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={triggerDaysThreshold}
+                  onChange={(e) => setTriggerDaysThreshold(e.target.value)}
+                  className="h-7 text-xs w-20"
+                />
+                <Label className="text-xs text-muted-foreground">days</Label>
+              </div>
+            )}
           </div>
 
           <Separator />
@@ -253,7 +274,7 @@ function RuleBuilderDialog({
           {/* Conditions */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <Label className="text-xs font-medium">Conditions (AND logic)</Label>
+              <Label className="text-xs font-medium">Conditions</Label>
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={addCondition}>
                 <Plus className="h-3 w-3 mr-1" />Add condition
               </Button>
@@ -263,6 +284,20 @@ function RuleBuilderDialog({
             )}
             {conditions.map((cond, i) => (
               <div key={i} className="flex items-center gap-2 mb-2">
+                {i > 0 ? (
+                  <Select
+                    value={(cond as AutomationCondition & { logic?: string }).logic ?? "and"}
+                    onValueChange={(v) => updateCondition(i, { ...(cond as object), logic: v } as Partial<AutomationCondition>)}
+                  >
+                    <SelectTrigger className="h-8 text-xs w-16 shrink-0 font-semibold"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="and" className="text-xs font-semibold">AND</SelectItem>
+                      <SelectItem value="or" className="text-xs font-semibold">OR</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <span className="text-xs text-muted-foreground w-16 shrink-0 text-center">IF</span>
+                )}
                 <Select value={cond.field} onValueChange={(v) => updateCondition(i, { field: v })}>
                   <SelectTrigger className="h-8 text-xs w-32"><SelectValue /></SelectTrigger>
                   <SelectContent>

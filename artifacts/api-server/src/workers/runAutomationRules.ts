@@ -253,7 +253,33 @@ export async function runAutomationRulesWorker(
 
   logger.info({ orgId, trigger, ruleCount: rules.length }, "Evaluating automation rules");
 
+  // Triggers that pass numeric context fields which must be checked against
+  // per-rule triggerConfig thresholds before condition evaluation.
+  const TIME_THRESHOLD_TRIGGERS: Record<string, string> = {
+    license_expires: "daysUntilExpiry",
+    certification_expiring: "daysUntilExpiry",
+    contact_no_activity: "daysSinceActivity",
+    task_overdue: "daysOverdue",
+  };
+
   for (const rule of rules) {
+    // Check triggerConfig threshold (e.g. "fire only when daysUntilExpiry <= 30")
+    const thresholdField = TIME_THRESHOLD_TRIGGERS[trigger];
+    if (thresholdField) {
+      const triggerConfig = (rule.triggerConfig as Record<string, unknown> | null) ?? {};
+      const threshold = triggerConfig.daysThreshold;
+      if (threshold !== undefined && threshold !== null) {
+        const contextValue = Number(context[thresholdField]);
+        if (contextValue > Number(threshold)) {
+          logger.debug(
+            { ruleId: rule.id, contextValue, threshold },
+            "Automation rule skipped — context value exceeds triggerConfig threshold",
+          );
+          continue;
+        }
+      }
+    }
+
     const conditions = (rule.conditions as AutomationCondition[] | null) ?? [];
     const conditionsMet =
       conditions.length === 0 || evaluateConditions(conditions, context);

@@ -33,6 +33,7 @@ import {
   buildDashboardContext,
 } from "../lib/aiContext";
 import { ObjectStorageService } from "../lib/objectStorage";
+import { buildComplianceReportPdf } from "../lib/complianceReportPdf";
 import { logger } from "../lib/logger";
 
 const storageService = new ObjectStorageService();
@@ -310,17 +311,22 @@ router.post(
         }
       }
 
-      // Persist the full report to object storage + documents table
+      // Persist the full report as PDF to object storage + documents table
       let documentId: string | null = null;
       if (fullReport.length > 0) {
         try {
           const dateStr = now.toISOString().slice(0, 10);
-          const filename = `compliance-report-${dateStr}.md`;
-          const storageKey = await storageService.uploadDocument(
+          const pdfBuffer = await buildComplianceReportPdf(
             fullReport,
+            "AI Compliance Intelligence Report",
+            dateStr,
+          );
+          const filename = `compliance-report-${dateStr}.pdf`;
+          const storageKey = await storageService.uploadDocument(
+            pdfBuffer,
             filename,
             authReq.orgId,
-            { contentType: "text/markdown" },
+            { contentType: "application/pdf" },
           );
           const docId = randomUUID();
           await db.insert(documentsTable).values({
@@ -329,13 +335,13 @@ router.post(
             name: `AI Compliance Report — ${dateStr}`,
             category: "compliance_report",
             storageKey,
-            fileSizeBytes: Buffer.byteLength(fullReport, "utf-8"),
-            mimeType: "text/markdown",
+            fileSizeBytes: pdfBuffer.byteLength,
+            mimeType: "application/pdf",
             uploadedBy: authReq.userId,
           });
           documentId = docId;
         } catch (persistErr) {
-          logger.warn({ persistErr }, "Failed to persist compliance report — streaming result still delivered");
+          logger.warn({ persistErr }, "Failed to persist compliance report PDF — streaming result still delivered");
         }
       }
 
