@@ -92,10 +92,11 @@ function useDraftWithAi(contactId: string, type: "sms" | "email") {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ contactId, type, goal: goal || undefined }),
+        body: JSON.stringify({ contactId, channel: type, goal: goal || "follow up about Medicare coverage" }),
       });
       if (!res.ok) throw new Error("Draft failed");
-      return await res.json() as { subject?: string; body: string };
+      const data = await res.json() as { draft?: string; subject?: string; body?: string };
+      return { body: data.draft ?? data.body ?? "", subject: data.subject };
     } catch {
       toast.error("AI draft failed — try again");
       return null;

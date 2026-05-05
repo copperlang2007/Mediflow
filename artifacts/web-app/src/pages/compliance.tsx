@@ -43,7 +43,8 @@ function AiComplianceReport() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      while (true) {
+      let isDone = false;
+      while (!isDone) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -52,13 +53,14 @@ function AiComplianceReport() {
         for (const line of lines) {
           if (line.startsWith("data: ")) {
             const raw = line.slice(6).trim();
-            if (raw === "[DONE]") break;
+            if (raw === "[DONE]") { isDone = true; break; }
             try {
-              const ev = JSON.parse(raw) as { type?: string; content?: string; error?: string };
-              if (ev.type === "delta" && ev.content) {
+              const ev = JSON.parse(raw) as { content?: string; done?: boolean; error?: string };
+              if (ev.done) { isDone = true; break; }
+              if (ev.content) {
                 setReport((prev) => (prev ?? "") + ev.content);
-              } else if (ev.type === "error") {
-                setError(ev.error ?? "Unknown error");
+              } else if (ev.error) {
+                setError(ev.error);
               }
             } catch {}
           }

@@ -188,6 +188,16 @@ function NavItem({
   );
 }
 
+function useAiContext() {
+  const [location] = useLocation();
+  const agentMatch = location.match(/^\/agents\/([^/]+)/);
+  const contactMatch = location.match(/^\/crm\/contacts\/([^/]+)/);
+  if (agentMatch) return { pageType: "agent" as const, agentId: agentMatch[1] };
+  if (contactMatch) return { pageType: "contact" as const, contactId: contactMatch[1] };
+  if (location === "/dashboard" || location.startsWith("/dashboard")) return { pageType: "dashboard" as const };
+  return { pageType: "other" as const };
+}
+
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -195,6 +205,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { user } = useUser();
   const { signOut } = useClerk();
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const aiContext = useAiContext();
 
   const { unreadCount } = useSSENotifications();
   const { data: me } = useGetMe();
@@ -427,7 +438,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Floating AI Assistant */}
-      <AiAssistantPanel />
+      <AiAssistantPanel context={aiContext} />
     </div>
   );
 }
