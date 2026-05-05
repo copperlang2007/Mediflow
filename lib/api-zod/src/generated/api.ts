@@ -1784,3 +1784,1462 @@ export const UpdateOrgSettingsResponse = zod.object({
     .min(1)
     .max(updateOrgSettingsResponseAhipReminderIntervalWeeksMax),
 });
+
+/**
+ * @summary List contacts
+ */
+export const getContactsQueryLimitDefault = 50;
+export const getContactsQueryOffsetDefault = 0;
+
+export const GetContactsQueryParams = zod.object({
+  search: zod.coerce.string().optional(),
+  status: zod.coerce.string().optional(),
+  assignedAgentId: zod.coerce.string().optional(),
+  planType: zod.coerce.string().optional(),
+  tag: zod.coerce.string().optional(),
+  limit: zod.coerce.number().default(getContactsQueryLimitDefault),
+  offset: zod.coerce.number().default(getContactsQueryOffsetDefault),
+  sortBy: zod.coerce.string().optional(),
+  sortDir: zod.enum(["asc", "desc"]).optional(),
+});
+
+export const GetContactsResponse = zod.object({
+  data: zod.array(
+    zod.object({
+      id: zod.string(),
+      orgId: zod.string(),
+      assignedAgentId: zod.string().nullish(),
+      firstName: zod.string(),
+      lastName: zod.string(),
+      email: zod.string().nullish(),
+      phone: zod.string().nullish(),
+      dob: zod.coerce.date().nullish(),
+      medicareId: zod.string().nullish(),
+      currentPlanType: zod
+        .enum(["MA", "PDP", "MAPD", "supp", "other"])
+        .nullish(),
+      currentCarrierId: zod.string().nullish(),
+      planYear: zod.number().nullish(),
+      county: zod.string().nullish(),
+      stateCode: zod.string().nullish(),
+      zipCode: zod.string().nullish(),
+      preferredLanguage: zod.string().nullish(),
+      pcpName: zod.string().nullish(),
+      pcpNpi: zod.string().nullish(),
+      healthConditions: zod.array(zod.string()).nullish(),
+      leadSource: zod.string().nullish(),
+      status: zod.enum([
+        "lead",
+        "prospect",
+        "enrolled",
+        "retained",
+        "lost",
+        "do_not_contact",
+      ]),
+      optOutSms: zod.boolean(),
+      optOutEmail: zod.boolean(),
+      tags: zod.array(zod.string()).nullish(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+    }),
+  ),
+  total: zod.number(),
+});
+
+/**
+ * @summary Create a contact
+ */
+export const CreateContactBody = zod.object({
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  dob: zod.string().nullish(),
+  medicareId: zod.string().nullish(),
+  currentPlanType: zod.string().nullish(),
+  currentCarrierId: zod.string().nullish(),
+  planYear: zod.number().nullish(),
+  county: zod.string().nullish(),
+  stateCode: zod.string().nullish(),
+  zipCode: zod.string().nullish(),
+  preferredLanguage: zod.string().nullish(),
+  pcpName: zod.string().nullish(),
+  pcpNpi: zod.string().nullish(),
+  healthConditions: zod.array(zod.string()).optional(),
+  leadSource: zod.string().nullish(),
+  status: zod.string().optional(),
+  tags: zod.array(zod.string()).optional(),
+  assignedAgentId: zod.string().nullish(),
+});
+
+/**
+ * @summary Bulk action on contacts
+ */
+export const BulkContactActionBody = zod.object({
+  ids: zod.array(zod.string()),
+  action: zod.enum([
+    "assign_agent",
+    "add_tag",
+    "remove_tag",
+    "set_status",
+    "export_csv",
+  ]),
+  payload: zod.record(zod.string(), zod.unknown()).optional(),
+});
+
+export const BulkContactActionResponse = zod.object({
+  affected: zod.number(),
+});
+
+/**
+ * @summary Get a contact
+ */
+export const GetContactParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetContactResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  assignedAgentId: zod.string().nullish(),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  dob: zod.coerce.date().nullish(),
+  medicareId: zod.string().nullish(),
+  currentPlanType: zod.enum(["MA", "PDP", "MAPD", "supp", "other"]).nullish(),
+  currentCarrierId: zod.string().nullish(),
+  planYear: zod.number().nullish(),
+  county: zod.string().nullish(),
+  stateCode: zod.string().nullish(),
+  zipCode: zod.string().nullish(),
+  preferredLanguage: zod.string().nullish(),
+  pcpName: zod.string().nullish(),
+  pcpNpi: zod.string().nullish(),
+  healthConditions: zod.array(zod.string()).nullish(),
+  leadSource: zod.string().nullish(),
+  status: zod.enum([
+    "lead",
+    "prospect",
+    "enrolled",
+    "retained",
+    "lost",
+    "do_not_contact",
+  ]),
+  optOutSms: zod.boolean(),
+  optOutEmail: zod.boolean(),
+  tags: zod.array(zod.string()).nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Update a contact
+ */
+export const UpdateContactParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateContactBody = zod.object({
+  firstName: zod.string().optional(),
+  lastName: zod.string().optional(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  dob: zod.string().nullish(),
+  medicareId: zod.string().nullish(),
+  currentPlanType: zod.string().nullish(),
+  currentCarrierId: zod.string().nullish(),
+  planYear: zod.number().nullish(),
+  county: zod.string().nullish(),
+  stateCode: zod.string().nullish(),
+  zipCode: zod.string().nullish(),
+  preferredLanguage: zod.string().nullish(),
+  pcpName: zod.string().nullish(),
+  pcpNpi: zod.string().nullish(),
+  healthConditions: zod.array(zod.string()).optional(),
+  leadSource: zod.string().nullish(),
+  status: zod.string().optional(),
+  tags: zod.array(zod.string()).optional(),
+  assignedAgentId: zod.string().nullish(),
+});
+
+export const UpdateContactResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  assignedAgentId: zod.string().nullish(),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  dob: zod.coerce.date().nullish(),
+  medicareId: zod.string().nullish(),
+  currentPlanType: zod.enum(["MA", "PDP", "MAPD", "supp", "other"]).nullish(),
+  currentCarrierId: zod.string().nullish(),
+  planYear: zod.number().nullish(),
+  county: zod.string().nullish(),
+  stateCode: zod.string().nullish(),
+  zipCode: zod.string().nullish(),
+  preferredLanguage: zod.string().nullish(),
+  pcpName: zod.string().nullish(),
+  pcpNpi: zod.string().nullish(),
+  healthConditions: zod.array(zod.string()).nullish(),
+  leadSource: zod.string().nullish(),
+  status: zod.enum([
+    "lead",
+    "prospect",
+    "enrolled",
+    "retained",
+    "lost",
+    "do_not_contact",
+  ]),
+  optOutSms: zod.boolean(),
+  optOutEmail: zod.boolean(),
+  tags: zod.array(zod.string()).nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete a contact
+ */
+export const DeleteContactParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary Get contact activity timeline
+ */
+export const GetContactActivitiesParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const getContactActivitiesQueryLimitDefault = 50;
+export const getContactActivitiesQueryOffsetDefault = 0;
+
+export const GetContactActivitiesQueryParams = zod.object({
+  limit: zod.coerce.number().default(getContactActivitiesQueryLimitDefault),
+  offset: zod.coerce.number().default(getContactActivitiesQueryOffsetDefault),
+});
+
+export const GetContactActivitiesResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  contactId: zod.string().nullish(),
+  agentId: zod.string().nullish(),
+  dealId: zod.string().nullish(),
+  taskId: zod.string().nullish(),
+  type: zod.enum([
+    "note",
+    "call_log",
+    "sms",
+    "email",
+    "status_change",
+    "enrollment",
+    "task_complete",
+    "document_upload",
+    "sequence_enrolled",
+    "sequence_step",
+  ]),
+  body: zod.string().nullish(),
+  metadata: zod.record(zod.string(), zod.unknown()).nullish(),
+  createdBy: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+});
+export const GetContactActivitiesResponse = zod.array(
+  GetContactActivitiesResponseItem,
+);
+
+/**
+ * @summary Log an activity on a contact
+ */
+export const LogContactActivityParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const LogContactActivityBody = zod.object({
+  type: zod.enum([
+    "note",
+    "call_log",
+    "sms",
+    "email",
+    "status_change",
+    "enrollment",
+    "task_complete",
+    "document_upload",
+    "sequence_enrolled",
+    "sequence_step",
+  ]),
+  body: zod.string().optional(),
+  metadata: zod.record(zod.string(), zod.unknown()).optional(),
+});
+
+/**
+ * @summary Send SMS to a contact
+ */
+export const SendContactSmsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const SendContactSmsBody = zod.object({
+  body: zod.string(),
+});
+
+/**
+ * @summary Send email to a contact
+ */
+export const SendContactEmailParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const SendContactEmailBody = zod.object({
+  subject: zod.string(),
+  body: zod.string(),
+  bodyText: zod.string().optional(),
+});
+
+/**
+ * @summary Get message threads for a contact
+ */
+export const GetContactThreadsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetContactThreadsResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  contactId: zod.string(),
+  channel: zod.enum(["sms", "email"]),
+  lastMessageAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+});
+export const GetContactThreadsResponse = zod.array(
+  GetContactThreadsResponseItem,
+);
+
+/**
+ * @summary Get tasks for a contact
+ */
+export const GetContactTasksParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetContactTasksResponseItem = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+export const GetContactTasksResponse = zod.array(GetContactTasksResponseItem);
+
+/**
+ * @summary Get sequence enrollments for a contact
+ */
+export const GetContactEnrollmentsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetContactEnrollmentsResponseItem = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+export const GetContactEnrollmentsResponse = zod.array(
+  GetContactEnrollmentsResponseItem,
+);
+
+/**
+ * @summary List leads
+ */
+export const getLeadsQueryLimitDefault = 50;
+export const getLeadsQueryOffsetDefault = 0;
+
+export const GetLeadsQueryParams = zod.object({
+  status: zod.coerce.string().optional(),
+  assignedAgentId: zod.coerce.string().optional(),
+  limit: zod.coerce.number().default(getLeadsQueryLimitDefault),
+  offset: zod.coerce.number().default(getLeadsQueryOffsetDefault),
+});
+
+export const GetLeadsResponse = zod.object({
+  data: zod.array(zod.record(zod.string(), zod.unknown())),
+  total: zod.number(),
+});
+
+/**
+ * @summary Create a lead
+ */
+export const CreateLeadBody = zod.object({
+  contactId: zod.string(),
+  source: zod.string().nullish(),
+  sourceDetail: zod.string().nullish(),
+  score: zod.number().optional(),
+  status: zod.string().optional(),
+  assignedAgentId: zod.string().nullish(),
+});
+
+/**
+ * @summary Lead source analytics
+ */
+export const GetLeadStatsResponse = zod.object({
+  bySource: zod.array(zod.record(zod.string(), zod.unknown())),
+  byStatus: zod.array(zod.record(zod.string(), zod.unknown())),
+});
+
+/**
+ * @summary Get a lead
+ */
+export const GetLeadParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetLeadResponse = zod.record(zod.string(), zod.unknown());
+
+/**
+ * @summary Update a lead
+ */
+export const UpdateLeadParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateLeadBody = zod.object({
+  source: zod.string().nullish(),
+  sourceDetail: zod.string().nullish(),
+  score: zod.number().optional(),
+  status: zod.string().optional(),
+  assignedAgentId: zod.string().nullish(),
+});
+
+export const UpdateLeadResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  contactId: zod.string(),
+  assignedAgentId: zod.string().nullish(),
+  source: zod.string().nullish(),
+  sourceDetail: zod.string().nullish(),
+  score: zod.number(),
+  status: zod.enum([
+    "new",
+    "contacted",
+    "qualified",
+    "disqualified",
+    "converted",
+  ]),
+  convertedAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Convert lead to contact/prospect
+ */
+export const ConvertLeadParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ConvertLeadResponse = zod.object({
+  success: zod.boolean(),
+  contactId: zod.string(),
+});
+
+/**
+ * @summary List pipelines with stages
+ */
+export const GetPipelinesResponseItem = zod
+  .object({
+    id: zod.string(),
+    orgId: zod.string(),
+    name: zod.string(),
+    description: zod.string().nullish(),
+    isDefault: zod.boolean(),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  })
+  .and(
+    zod.object({
+      stages: zod.array(
+        zod.object({
+          id: zod.string(),
+          pipelineId: zod.string(),
+          name: zod.string(),
+          orderIndex: zod.number(),
+          color: zod.string(),
+          probabilityPct: zod.number(),
+          createdAt: zod.coerce.date(),
+        }),
+      ),
+    }),
+  );
+export const GetPipelinesResponse = zod.array(GetPipelinesResponseItem);
+
+/**
+ * @summary Create a pipeline
+ */
+export const CreatePipelineBody = zod.object({
+  name: zod.string(),
+  description: zod.string().optional(),
+  isDefault: zod.boolean().optional(),
+  stages: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+});
+
+/**
+ * @summary Get pipeline with stages
+ */
+export const GetPipelineParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetPipelineResponse = zod
+  .object({
+    id: zod.string(),
+    orgId: zod.string(),
+    name: zod.string(),
+    description: zod.string().nullish(),
+    isDefault: zod.boolean(),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  })
+  .and(
+    zod.object({
+      stages: zod.array(
+        zod.object({
+          id: zod.string(),
+          pipelineId: zod.string(),
+          name: zod.string(),
+          orderIndex: zod.number(),
+          color: zod.string(),
+          probabilityPct: zod.number(),
+          createdAt: zod.coerce.date(),
+        }),
+      ),
+    }),
+  );
+
+/**
+ * @summary Update pipeline
+ */
+export const UpdatePipelineParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdatePipelineBody = zod.object({
+  name: zod.string().optional(),
+  description: zod.string().nullish(),
+  isDefault: zod.boolean().optional(),
+});
+
+export const UpdatePipelineResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  description: zod.string().nullish(),
+  isDefault: zod.boolean(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete pipeline
+ */
+export const DeletePipelineParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary Add stage to pipeline
+ */
+export const CreatePipelineStageParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const CreatePipelineStageBody = zod.object({
+  name: zod.string(),
+  color: zod.string().optional(),
+  probabilityPct: zod.number().optional(),
+  orderIndex: zod.number().optional(),
+});
+
+/**
+ * @summary Update pipeline stage
+ */
+export const UpdatePipelineStageParams = zod.object({
+  id: zod.coerce.string(),
+  sid: zod.coerce.string(),
+});
+
+export const UpdatePipelineStageBody = zod.record(zod.string(), zod.unknown());
+
+export const UpdatePipelineStageResponse = zod.object({
+  id: zod.string(),
+  pipelineId: zod.string(),
+  name: zod.string(),
+  orderIndex: zod.number(),
+  color: zod.string(),
+  probabilityPct: zod.number(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete pipeline stage
+ */
+export const DeletePipelineStageParams = zod.object({
+  id: zod.coerce.string(),
+  sid: zod.coerce.string(),
+});
+
+/**
+ * @summary Get pipeline analytics
+ */
+export const GetPipelineAnalyticsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetPipelineAnalyticsResponse = zod.object({
+  stageAnalytics: zod.array(zod.record(zod.string(), zod.unknown())),
+  totalDeals: zod.number(),
+  wonDeals: zod.number(),
+  conversionRate: zod.number(),
+});
+
+/**
+ * @summary List deals
+ */
+export const getDealsQueryLimitDefault = 100;
+export const getDealsQueryOffsetDefault = 0;
+
+export const GetDealsQueryParams = zod.object({
+  pipelineId: zod.coerce.string().optional(),
+  stageId: zod.coerce.string().optional(),
+  status: zod.coerce.string().optional(),
+  contactId: zod.coerce.string().optional(),
+  limit: zod.coerce.number().default(getDealsQueryLimitDefault),
+  offset: zod.coerce.number().default(getDealsQueryOffsetDefault),
+});
+
+export const GetDealsResponseItem = zod.record(zod.string(), zod.unknown());
+export const GetDealsResponse = zod.array(GetDealsResponseItem);
+
+/**
+ * @summary Create a deal
+ */
+export const CreateDealBody = zod.object({
+  pipelineId: zod.string(),
+  stageId: zod.string(),
+  contactId: zod.string(),
+  title: zod.string(),
+  valueEst: zod.number().nullish(),
+  closeDateEst: zod.string().nullish(),
+  assignedAgentId: zod.string().nullish(),
+});
+
+/**
+ * @summary Get deal with history
+ */
+export const GetDealParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetDealResponse = zod.record(zod.string(), zod.unknown());
+
+/**
+ * @summary Update deal (move stage, set status, etc.)
+ */
+export const UpdateDealParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateDealBody = zod.object({
+  stageId: zod.string().optional(),
+  title: zod.string().optional(),
+  valueEst: zod.number().nullish(),
+  status: zod.enum(["open", "won", "lost"]).optional(),
+  lostReason: zod.string().nullish(),
+  closeDateEst: zod.string().nullish(),
+  assignedAgentId: zod.string().nullish(),
+});
+
+export const UpdateDealResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  pipelineId: zod.string(),
+  stageId: zod.string(),
+  contactId: zod.string(),
+  assignedAgentId: zod.string().nullish(),
+  title: zod.string(),
+  valueEst: zod.number().nullish(),
+  status: zod.enum(["open", "won", "lost"]),
+  wonAt: zod.coerce.date().nullish(),
+  lostAt: zod.coerce.date().nullish(),
+  lostReason: zod.string().nullish(),
+  closeDateEst: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary List message threads
+ */
+export const getThreadsQueryLimitDefault = 50;
+export const getThreadsQueryOffsetDefault = 0;
+
+export const GetThreadsQueryParams = zod.object({
+  channel: zod.enum(["sms", "email"]).optional(),
+  limit: zod.coerce.number().default(getThreadsQueryLimitDefault),
+  offset: zod.coerce.number().default(getThreadsQueryOffsetDefault),
+});
+
+export const GetThreadsResponseItem = zod.object({
+  thread: zod.object({
+    id: zod.string(),
+    orgId: zod.string(),
+    contactId: zod.string(),
+    channel: zod.enum(["sms", "email"]),
+    lastMessageAt: zod.coerce.date().nullish(),
+    createdAt: zod.coerce.date(),
+  }),
+  contactFirstName: zod.string(),
+  contactLastName: zod.string(),
+  contactPhone: zod.string().nullish(),
+  contactEmail: zod.string().nullish(),
+  unreadCount: zod.number(),
+  lastMessage: zod.string().nullish(),
+});
+export const GetThreadsResponse = zod.array(GetThreadsResponseItem);
+
+/**
+ * @summary Get messages in thread
+ */
+export const GetThreadMessagesParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const getThreadMessagesQueryLimitDefault = 100;
+
+export const GetThreadMessagesQueryParams = zod.object({
+  limit: zod.coerce.number().default(getThreadMessagesQueryLimitDefault),
+});
+
+export const GetThreadMessagesResponseItem = zod.object({
+  id: zod.string(),
+  threadId: zod.string(),
+  direction: zod.enum(["inbound", "outbound"]),
+  body: zod.string().nullish(),
+  subject: zod.string().nullish(),
+  fromAddress: zod.string().nullish(),
+  toAddress: zod.string().nullish(),
+  status: zod.enum(["queued", "sent", "delivered", "failed", "received"]),
+  providerMessageId: zod.string().nullish(),
+  sentAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+});
+export const GetThreadMessagesResponse = zod.array(
+  GetThreadMessagesResponseItem,
+);
+
+/**
+ * @summary Reply in a thread
+ */
+export const ReplyInThreadParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ReplyInThreadBody = zod.object({
+  body: zod.string(),
+  subject: zod.string().optional(),
+});
+
+/**
+ * @summary Unified unread inbox
+ */
+export const getInboxQueryLimitDefault = 50;
+export const getInboxQueryOffsetDefault = 0;
+
+export const GetInboxQueryParams = zod.object({
+  channel: zod.enum(["sms", "email"]).optional(),
+  limit: zod.coerce.number().default(getInboxQueryLimitDefault),
+  offset: zod.coerce.number().default(getInboxQueryOffsetDefault),
+});
+
+export const GetInboxResponse = zod.object({
+  data: zod.array(zod.record(zod.string(), zod.unknown())),
+  total: zod.number(),
+});
+
+/**
+ * @summary Mark message as read
+ */
+export const MarkMessageReadParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const MarkMessageReadResponse = zod.object({
+  success: zod.boolean(),
+});
+
+/**
+ * @summary List SMS templates
+ */
+export const GetSmsTemplatesQueryParams = zod.object({
+  category: zod.coerce.string().optional(),
+  search: zod.coerce.string().optional(),
+});
+
+export const GetSmsTemplatesResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  body: zod.string(),
+  mergeFields: zod.array(zod.string()).nullish(),
+  category: zod.string(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const GetSmsTemplatesResponse = zod.array(GetSmsTemplatesResponseItem);
+
+/**
+ * @summary Create SMS template
+ */
+export const CreateSmsTemplateBody = zod.object({
+  name: zod.string(),
+  body: zod.string(),
+  category: zod.string().optional(),
+  mergeFields: zod.array(zod.string()).optional(),
+});
+
+/**
+ * @summary Get SMS template
+ */
+export const GetSmsTemplateParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetSmsTemplateResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  body: zod.string(),
+  mergeFields: zod.array(zod.string()).nullish(),
+  category: zod.string(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Update SMS template
+ */
+export const UpdateSmsTemplateParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateSmsTemplateBody = zod.object({
+  name: zod.string().optional(),
+  body: zod.string().optional(),
+  category: zod.string().optional(),
+  mergeFields: zod.array(zod.string()).optional(),
+});
+
+export const UpdateSmsTemplateResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  body: zod.string(),
+  mergeFields: zod.array(zod.string()).nullish(),
+  category: zod.string(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete SMS template
+ */
+export const DeleteSmsTemplateParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary List email templates
+ */
+export const GetEmailTemplatesQueryParams = zod.object({
+  category: zod.coerce.string().optional(),
+  search: zod.coerce.string().optional(),
+});
+
+export const GetEmailTemplatesResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  subject: zod.string(),
+  bodyHtml: zod.string(),
+  bodyText: zod.string().nullish(),
+  mergeFields: zod.array(zod.string()).nullish(),
+  category: zod.string(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const GetEmailTemplatesResponse = zod.array(
+  GetEmailTemplatesResponseItem,
+);
+
+/**
+ * @summary Create email template
+ */
+export const CreateEmailTemplateBody = zod.object({
+  name: zod.string(),
+  subject: zod.string(),
+  bodyHtml: zod.string(),
+  bodyText: zod.string().optional(),
+  category: zod.string().optional(),
+  mergeFields: zod.array(zod.string()).optional(),
+});
+
+/**
+ * @summary Get email template
+ */
+export const GetEmailTemplateParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetEmailTemplateResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  subject: zod.string(),
+  bodyHtml: zod.string(),
+  bodyText: zod.string().nullish(),
+  mergeFields: zod.array(zod.string()).nullish(),
+  category: zod.string(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Update email template
+ */
+export const UpdateEmailTemplateParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateEmailTemplateBody = zod.object({
+  name: zod.string().optional(),
+  subject: zod.string().optional(),
+  bodyHtml: zod.string().optional(),
+  bodyText: zod.string().nullish(),
+  category: zod.string().optional(),
+  mergeFields: zod.array(zod.string()).optional(),
+});
+
+export const UpdateEmailTemplateResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  subject: zod.string(),
+  bodyHtml: zod.string(),
+  bodyText: zod.string().nullish(),
+  mergeFields: zod.array(zod.string()).nullish(),
+  category: zod.string(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete email template
+ */
+export const DeleteEmailTemplateParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary Preview template with merge field substitution
+ */
+export const PreviewTemplateBody = zod.object({
+  body: zod.string(),
+  sampleData: zod.record(zod.string(), zod.string()).optional(),
+});
+
+export const PreviewTemplateResponse = zod.object({
+  preview: zod.string(),
+});
+
+/**
+ * @summary List sequences
+ */
+export const GetSequencesResponseItem = zod.object({
+  sequence: zod.object({
+    id: zod.string(),
+    orgId: zod.string(),
+    name: zod.string(),
+    description: zod.string().nullish(),
+    triggerType: zod.enum([
+      "manual",
+      "lead_created",
+      "enrolled",
+      "birthday",
+      "plan_anniversary",
+      "aep_start",
+      "oep_start",
+      "custom_date",
+    ]),
+    triggerConfig: zod.record(zod.string(), zod.unknown()).nullish(),
+    status: zod.enum(["active", "paused", "draft"]),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  }),
+  stepCount: zod.number(),
+  activeEnrollments: zod.number(),
+});
+export const GetSequencesResponse = zod.array(GetSequencesResponseItem);
+
+/**
+ * @summary Create a sequence
+ */
+export const CreateSequenceBody = zod.object({
+  name: zod.string(),
+  description: zod.string().optional(),
+  triggerType: zod.string().optional(),
+  triggerConfig: zod.record(zod.string(), zod.unknown()).optional(),
+  status: zod.string().optional(),
+});
+
+/**
+ * @summary Get sequence with steps
+ */
+export const GetSequenceParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetSequenceResponse = zod
+  .object({
+    id: zod.string(),
+    orgId: zod.string(),
+    name: zod.string(),
+    description: zod.string().nullish(),
+    triggerType: zod.enum([
+      "manual",
+      "lead_created",
+      "enrolled",
+      "birthday",
+      "plan_anniversary",
+      "aep_start",
+      "oep_start",
+      "custom_date",
+    ]),
+    triggerConfig: zod.record(zod.string(), zod.unknown()).nullish(),
+    status: zod.enum(["active", "paused", "draft"]),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  })
+  .and(
+    zod.object({
+      steps: zod.array(
+        zod.object({
+          id: zod.string(),
+          sequenceId: zod.string(),
+          orderIndex: zod.number(),
+          stepType: zod.enum(["sms", "email", "task", "wait"]),
+          delayValue: zod.number(),
+          delayUnit: zod.string(),
+          config: zod.record(zod.string(), zod.unknown()).nullish(),
+          createdAt: zod.coerce.date(),
+        }),
+      ),
+    }),
+  );
+
+/**
+ * @summary Update sequence
+ */
+export const UpdateSequenceParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateSequenceBody = zod.object({
+  name: zod.string().optional(),
+  description: zod.string().nullish(),
+  triggerType: zod.string().optional(),
+  triggerConfig: zod.record(zod.string(), zod.unknown()).nullish(),
+  status: zod.string().optional(),
+});
+
+export const UpdateSequenceResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  description: zod.string().nullish(),
+  triggerType: zod.enum([
+    "manual",
+    "lead_created",
+    "enrolled",
+    "birthday",
+    "plan_anniversary",
+    "aep_start",
+    "oep_start",
+    "custom_date",
+  ]),
+  triggerConfig: zod.record(zod.string(), zod.unknown()).nullish(),
+  status: zod.enum(["active", "paused", "draft"]),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete sequence
+ */
+export const DeleteSequenceParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary Get sequence steps
+ */
+export const GetSequenceStepsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetSequenceStepsResponseItem = zod.object({
+  id: zod.string(),
+  sequenceId: zod.string(),
+  orderIndex: zod.number(),
+  stepType: zod.enum(["sms", "email", "task", "wait"]),
+  delayValue: zod.number(),
+  delayUnit: zod.string(),
+  config: zod.record(zod.string(), zod.unknown()).nullish(),
+  createdAt: zod.coerce.date(),
+});
+export const GetSequenceStepsResponse = zod.array(GetSequenceStepsResponseItem);
+
+/**
+ * @summary Add step to sequence
+ */
+export const CreateSequenceStepParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const CreateSequenceStepBody = zod.object({
+  stepType: zod.enum(["sms", "email", "task", "wait"]),
+  orderIndex: zod.number().optional(),
+  delayValue: zod.number().optional(),
+  delayUnit: zod.string().optional(),
+  config: zod.record(zod.string(), zod.unknown()).optional(),
+});
+
+/**
+ * @summary Update sequence step
+ */
+export const UpdateSequenceStepParams = zod.object({
+  id: zod.coerce.string(),
+  sid: zod.coerce.string(),
+});
+
+export const UpdateSequenceStepBody = zod.record(zod.string(), zod.unknown());
+
+export const UpdateSequenceStepResponse = zod.object({
+  id: zod.string(),
+  sequenceId: zod.string(),
+  orderIndex: zod.number(),
+  stepType: zod.enum(["sms", "email", "task", "wait"]),
+  delayValue: zod.number(),
+  delayUnit: zod.string(),
+  config: zod.record(zod.string(), zod.unknown()).nullish(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete sequence step
+ */
+export const DeleteSequenceStepParams = zod.object({
+  id: zod.coerce.string(),
+  sid: zod.coerce.string(),
+});
+
+/**
+ * @summary Enroll contacts in sequence
+ */
+export const EnrollInSequenceParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const EnrollInSequenceBody = zod.object({
+  contactIds: zod.array(zod.string()),
+});
+
+export const EnrollInSequenceResponse = zod.object({
+  enrolled: zod.number(),
+  skipped: zod.number(),
+});
+
+/**
+ * @summary List enrollments for a sequence
+ */
+export const GetSequenceEnrollmentsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetSequenceEnrollmentsResponseItem = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+export const GetSequenceEnrollmentsResponse = zod.array(
+  GetSequenceEnrollmentsResponseItem,
+);
+
+/**
+ * @summary Pause or cancel enrollment
+ */
+export const UpdateSequenceEnrollmentParams = zod.object({
+  id: zod.coerce.string(),
+  eid: zod.coerce.string(),
+});
+
+export const UpdateSequenceEnrollmentBody = zod.object({
+  status: zod.enum(["active", "paused", "cancelled"]),
+});
+
+export const UpdateSequenceEnrollmentResponse = zod.object({
+  id: zod.string(),
+  sequenceId: zod.string(),
+  contactId: zod.string(),
+  status: zod.enum(["active", "completed", "cancelled", "paused"]),
+  enrolledAt: zod.coerce.date(),
+  completedAt: zod.coerce.date().nullish(),
+  nextStepIndex: zod.number(),
+  nextStepAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Contacts with birthday in next N days
+ */
+export const getRetentionBirthdaysQueryDaysDefault = 30;
+
+export const GetRetentionBirthdaysQueryParams = zod.object({
+  days: zod.coerce.number().default(getRetentionBirthdaysQueryDaysDefault),
+});
+
+export const GetRetentionBirthdaysResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  assignedAgentId: zod.string().nullish(),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  dob: zod.coerce.date().nullish(),
+  medicareId: zod.string().nullish(),
+  currentPlanType: zod.enum(["MA", "PDP", "MAPD", "supp", "other"]).nullish(),
+  currentCarrierId: zod.string().nullish(),
+  planYear: zod.number().nullish(),
+  county: zod.string().nullish(),
+  stateCode: zod.string().nullish(),
+  zipCode: zod.string().nullish(),
+  preferredLanguage: zod.string().nullish(),
+  pcpName: zod.string().nullish(),
+  pcpNpi: zod.string().nullish(),
+  healthConditions: zod.array(zod.string()).nullish(),
+  leadSource: zod.string().nullish(),
+  status: zod.enum([
+    "lead",
+    "prospect",
+    "enrolled",
+    "retained",
+    "lost",
+    "do_not_contact",
+  ]),
+  optOutSms: zod.boolean(),
+  optOutEmail: zod.boolean(),
+  tags: zod.array(zod.string()).nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const GetRetentionBirthdaysResponse = zod.array(
+  GetRetentionBirthdaysResponseItem,
+);
+
+/**
+ * @summary Contacts approaching plan anniversary
+ */
+export const getRetentionAnniversariesQueryDaysDefault = 30;
+
+export const GetRetentionAnniversariesQueryParams = zod.object({
+  days: zod.coerce.number().default(getRetentionAnniversariesQueryDaysDefault),
+});
+
+export const GetRetentionAnniversariesResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  assignedAgentId: zod.string().nullish(),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  dob: zod.coerce.date().nullish(),
+  medicareId: zod.string().nullish(),
+  currentPlanType: zod.enum(["MA", "PDP", "MAPD", "supp", "other"]).nullish(),
+  currentCarrierId: zod.string().nullish(),
+  planYear: zod.number().nullish(),
+  county: zod.string().nullish(),
+  stateCode: zod.string().nullish(),
+  zipCode: zod.string().nullish(),
+  preferredLanguage: zod.string().nullish(),
+  pcpName: zod.string().nullish(),
+  pcpNpi: zod.string().nullish(),
+  healthConditions: zod.array(zod.string()).nullish(),
+  leadSource: zod.string().nullish(),
+  status: zod.enum([
+    "lead",
+    "prospect",
+    "enrolled",
+    "retained",
+    "lost",
+    "do_not_contact",
+  ]),
+  optOutSms: zod.boolean(),
+  optOutEmail: zod.boolean(),
+  tags: zod.array(zod.string()).nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const GetRetentionAnniversariesResponse = zod.array(
+  GetRetentionAnniversariesResponseItem,
+);
+
+/**
+ * @summary AEP-eligible contacts
+ */
+export const GetRetentionAepQueryParams = zod.object({
+  stateCode: zod.coerce.string().optional(),
+  planType: zod.coerce.string().optional(),
+  county: zod.coerce.string().optional(),
+});
+
+export const GetRetentionAepResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  assignedAgentId: zod.string().nullish(),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  dob: zod.coerce.date().nullish(),
+  medicareId: zod.string().nullish(),
+  currentPlanType: zod.enum(["MA", "PDP", "MAPD", "supp", "other"]).nullish(),
+  currentCarrierId: zod.string().nullish(),
+  planYear: zod.number().nullish(),
+  county: zod.string().nullish(),
+  stateCode: zod.string().nullish(),
+  zipCode: zod.string().nullish(),
+  preferredLanguage: zod.string().nullish(),
+  pcpName: zod.string().nullish(),
+  pcpNpi: zod.string().nullish(),
+  healthConditions: zod.array(zod.string()).nullish(),
+  leadSource: zod.string().nullish(),
+  status: zod.enum([
+    "lead",
+    "prospect",
+    "enrolled",
+    "retained",
+    "lost",
+    "do_not_contact",
+  ]),
+  optOutSms: zod.boolean(),
+  optOutEmail: zod.boolean(),
+  tags: zod.array(zod.string()).nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const GetRetentionAepResponse = zod.array(GetRetentionAepResponseItem);
+
+/**
+ * @summary At-risk contacts with no recent activity
+ */
+export const getRetentionAtRiskQueryDaysDefault = 60;
+
+export const GetRetentionAtRiskQueryParams = zod.object({
+  days: zod.coerce.number().default(getRetentionAtRiskQueryDaysDefault),
+});
+
+export const GetRetentionAtRiskResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  assignedAgentId: zod.string().nullish(),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  dob: zod.coerce.date().nullish(),
+  medicareId: zod.string().nullish(),
+  currentPlanType: zod.enum(["MA", "PDP", "MAPD", "supp", "other"]).nullish(),
+  currentCarrierId: zod.string().nullish(),
+  planYear: zod.number().nullish(),
+  county: zod.string().nullish(),
+  stateCode: zod.string().nullish(),
+  zipCode: zod.string().nullish(),
+  preferredLanguage: zod.string().nullish(),
+  pcpName: zod.string().nullish(),
+  pcpNpi: zod.string().nullish(),
+  healthConditions: zod.array(zod.string()).nullish(),
+  leadSource: zod.string().nullish(),
+  status: zod.enum([
+    "lead",
+    "prospect",
+    "enrolled",
+    "retained",
+    "lost",
+    "do_not_contact",
+  ]),
+  optOutSms: zod.boolean(),
+  optOutEmail: zod.boolean(),
+  tags: zod.array(zod.string()).nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const GetRetentionAtRiskResponse = zod.array(
+  GetRetentionAtRiskResponseItem,
+);
+
+/**
+ * @summary List retention flags
+ */
+export const GetRetentionFlagsQueryParams = zod.object({
+  flagType: zod.coerce.string().optional(),
+  resolved: zod.enum(["true", "false"]).optional(),
+});
+
+export const GetRetentionFlagsResponseItem = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+export const GetRetentionFlagsResponse = zod.array(
+  GetRetentionFlagsResponseItem,
+);
+
+/**
+ * @summary Create a retention flag
+ */
+export const CreateRetentionFlagBody = zod.object({
+  contactId: zod.string(),
+  flagType: zod.enum([
+    "at_risk",
+    "anniversary_due",
+    "birthday_soon",
+    "aep_eligible",
+    "oep_eligible",
+  ]),
+  dueDate: zod.string().nullish(),
+});
+
+/**
+ * @summary Resolve a retention flag
+ */
+export const ResolveRetentionFlagParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ResolveRetentionFlagResponse = zod.object({
+  success: zod.boolean(),
+});
+
+/**
+ * @summary Retention counts for nav badges
+ */
+export const GetRetentionSummaryResponse = zod.object({
+  birthdaysInNext30Days: zod.number(),
+  atRiskContacts: zod.number(),
+  openFlags: zod.number(),
+});

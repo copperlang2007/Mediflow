@@ -43,6 +43,20 @@ tags:
     description: Object storage uploads
   - name: settings
     description: Organization settings
+  - name: contacts
+    description: CRM contact management
+  - name: leads
+    description: Lead management and conversion
+  - name: pipelines
+    description: Sales pipeline and deal management
+  - name: communications
+    description: Two-way SMS and email threads
+  - name: templates
+    description: SMS and email template library
+  - name: sequences
+    description: Drip sequence builder and enrollment
+  - name: retention
+    description: Medicare-specific retention tools
 
 paths:
   /healthz:
@@ -1659,6 +1673,1251 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OrgSettings"
+
+  # ---- Contacts ----
+
+  /contacts:
+    get:
+      operationId: getContacts
+      tags: [contacts]
+      summary: List contacts
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: assignedAgentId, in: query, schema: { type: string } }
+        - { name: planType, in: query, schema: { type: string } }
+        - { name: tag, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: sortBy, in: query, schema: { type: string } }
+        - { name: sortDir, in: query, schema: { type: string, enum: [asc, desc] } }
+      responses:
+        "200":
+          description: Paginated contact list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactListResponse"
+    post:
+      operationId: createContact
+      tags: [contacts]
+      summary: Create a contact
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateContactBody"
+      responses:
+        "201":
+          description: Created contact
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contact"
+
+  /contacts/bulk:
+    post:
+      operationId: bulkContactAction
+      tags: [contacts]
+      summary: Bulk action on contacts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkContactActionBody"
+      responses:
+        "200":
+          description: Bulk action result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  affected:
+                    type: integer
+                required: [affected]
+
+  /contacts/{id}:
+    get:
+      operationId: getContact
+      tags: [contacts]
+      summary: Get a contact
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Contact record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contact"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    patch:
+      operationId: updateContact
+      tags: [contacts]
+      summary: Update a contact
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateContactBody"
+      responses:
+        "200":
+          description: Updated contact
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contact"
+    delete:
+      operationId: deleteContact
+      tags: [contacts]
+      summary: Delete a contact
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: Deleted
+
+  /contacts/{id}/activities:
+    get:
+      operationId: getContactActivities
+      tags: [contacts]
+      summary: Get contact activity timeline
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: Activity list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Activity"
+    post:
+      operationId: logContactActivity
+      tags: [contacts]
+      summary: Log an activity on a contact
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogActivityBody"
+      responses:
+        "201":
+          description: Created activity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+
+  /contacts/{id}/send-sms:
+    post:
+      operationId: sendContactSms
+      tags: [contacts]
+      summary: Send SMS to a contact
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                body:
+                  type: string
+              required: [body]
+      responses:
+        "201":
+          description: SMS queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messageId: { type: string }
+                  threadId: { type: string }
+                required: [messageId, threadId]
+
+  /contacts/{id}/send-email:
+    post:
+      operationId: sendContactEmail
+      tags: [contacts]
+      summary: Send email to a contact
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subject: { type: string }
+                body: { type: string }
+                bodyText: { type: string }
+              required: [subject, body]
+      responses:
+        "201":
+          description: Email queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messageId: { type: string }
+                  threadId: { type: string }
+                required: [messageId, threadId]
+
+  /contacts/{id}/threads:
+    get:
+      operationId: getContactThreads
+      tags: [contacts]
+      summary: Get message threads for a contact
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Thread list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MessageThread"
+
+  /contacts/{id}/tasks:
+    get:
+      operationId: getContactTasks
+      tags: [contacts]
+      summary: Get tasks for a contact
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Task list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+
+  /contacts/{id}/enrollments:
+    get:
+      operationId: getContactEnrollments
+      tags: [contacts]
+      summary: Get sequence enrollments for a contact
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Enrollment list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+
+  # ---- Leads ----
+
+  /leads:
+    get:
+      operationId: getLeads
+      tags: [leads]
+      summary: List leads
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+        - { name: assignedAgentId, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: Paginated lead list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeadListResponse"
+    post:
+      operationId: createLead
+      tags: [leads]
+      summary: Create a lead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLeadBody"
+      responses:
+        "201":
+          description: Created lead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lead"
+
+  /leads/stats:
+    get:
+      operationId: getLeadStats
+      tags: [leads]
+      summary: Lead source analytics
+      responses:
+        "200":
+          description: Lead stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeadStats"
+
+  /leads/{id}:
+    get:
+      operationId: getLead
+      tags: [leads]
+      summary: Get a lead
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Lead with contact
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+    patch:
+      operationId: updateLead
+      tags: [leads]
+      summary: Update a lead
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLeadBody"
+      responses:
+        "200":
+          description: Updated lead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lead"
+
+  /leads/{id}/convert:
+    post:
+      operationId: convertLead
+      tags: [leads]
+      summary: Convert lead to contact/prospect
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Conversion result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  contactId: { type: string }
+                required: [success, contactId]
+
+  # ---- Pipelines ----
+
+  /pipelines:
+    get:
+      operationId: getPipelines
+      tags: [pipelines]
+      summary: List pipelines with stages
+      responses:
+        "200":
+          description: Pipeline list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PipelineWithStages"
+    post:
+      operationId: createPipeline
+      tags: [pipelines]
+      summary: Create a pipeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePipelineBody"
+      responses:
+        "201":
+          description: Created pipeline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineWithStages"
+
+  /pipelines/{id}:
+    get:
+      operationId: getPipeline
+      tags: [pipelines]
+      summary: Get pipeline with stages
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Pipeline with stages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineWithStages"
+    patch:
+      operationId: updatePipeline
+      tags: [pipelines]
+      summary: Update pipeline
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string, nullable: true }
+                isDefault: { type: boolean }
+      responses:
+        "200":
+          description: Updated pipeline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pipeline"
+    delete:
+      operationId: deletePipeline
+      tags: [pipelines]
+      summary: Delete pipeline
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: Deleted
+
+  /pipelines/{id}/stages:
+    post:
+      operationId: createPipelineStage
+      tags: [pipelines]
+      summary: Add stage to pipeline
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePipelineStageBody"
+      responses:
+        "201":
+          description: Created stage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineStage"
+
+  /pipelines/{id}/stages/{sid}:
+    patch:
+      operationId: updatePipelineStage
+      tags: [pipelines]
+      summary: Update pipeline stage
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: sid, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Updated stage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineStage"
+    delete:
+      operationId: deletePipelineStage
+      tags: [pipelines]
+      summary: Delete pipeline stage
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: sid, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: Deleted
+
+  /pipelines/{id}/analytics:
+    get:
+      operationId: getPipelineAnalytics
+      tags: [pipelines]
+      summary: Get pipeline analytics
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Pipeline analytics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineAnalytics"
+
+  # ---- Deals ----
+
+  /deals:
+    get:
+      operationId: getDeals
+      tags: [pipelines]
+      summary: List deals
+      parameters:
+        - { name: pipelineId, in: query, schema: { type: string } }
+        - { name: stageId, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: contactId, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 100 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: Deal list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+    post:
+      operationId: createDeal
+      tags: [pipelines]
+      summary: Create a deal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDealBody"
+      responses:
+        "201":
+          description: Created deal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deal"
+
+  /deals/{id}:
+    get:
+      operationId: getDeal
+      tags: [pipelines]
+      summary: Get deal with history
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Deal with stage history
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+    patch:
+      operationId: updateDeal
+      tags: [pipelines]
+      summary: Update deal (move stage, set status, etc.)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDealBody"
+      responses:
+        "200":
+          description: Updated deal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deal"
+
+  # ---- Communications ----
+
+  /threads:
+    get:
+      operationId: getThreads
+      tags: [communications]
+      summary: List message threads
+      parameters:
+        - { name: channel, in: query, schema: { type: string, enum: [sms, email] } }
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: Thread list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ThreadWithContact"
+
+  /threads/{id}/messages:
+    get:
+      operationId: getThreadMessages
+      tags: [communications]
+      summary: Get messages in thread
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 100 } }
+      responses:
+        "200":
+          description: Message list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+
+  /threads/{id}/reply:
+    post:
+      operationId: replyInThread
+      tags: [communications]
+      summary: Reply in a thread
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                body: { type: string }
+                subject: { type: string }
+              required: [body]
+      responses:
+        "201":
+          description: Sent message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+
+  /inbox:
+    get:
+      operationId: getInbox
+      tags: [communications]
+      summary: Unified unread inbox
+      parameters:
+        - { name: channel, in: query, schema: { type: string, enum: [sms, email] } }
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: Inbox messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboxResponse"
+
+  /messages/{id}/read:
+    patch:
+      operationId: markMessageRead
+      tags: [communications]
+      summary: Mark message as read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                required: [success]
+
+  # ---- SMS Templates ----
+
+  /sms-templates:
+    get:
+      operationId: getSmsTemplates
+      tags: [templates]
+      summary: List SMS templates
+      parameters:
+        - { name: category, in: query, schema: { type: string } }
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: SMS template list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SmsTemplate"
+    post:
+      operationId: createSmsTemplate
+      tags: [templates]
+      summary: Create SMS template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSmsTemplateBody"
+      responses:
+        "201":
+          description: Created template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsTemplate"
+
+  /sms-templates/{id}:
+    get:
+      operationId: getSmsTemplate
+      tags: [templates]
+      summary: Get SMS template
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: SMS template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsTemplate"
+    patch:
+      operationId: updateSmsTemplate
+      tags: [templates]
+      summary: Update SMS template
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSmsTemplateBody"
+      responses:
+        "200":
+          description: Updated template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsTemplate"
+    delete:
+      operationId: deleteSmsTemplate
+      tags: [templates]
+      summary: Delete SMS template
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: Deleted
+
+  # ---- Email Templates ----
+
+  /email-templates:
+    get:
+      operationId: getEmailTemplates
+      tags: [templates]
+      summary: List email templates
+      parameters:
+        - { name: category, in: query, schema: { type: string } }
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Email template list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EmailTemplate"
+    post:
+      operationId: createEmailTemplate
+      tags: [templates]
+      summary: Create email template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEmailTemplateBody"
+      responses:
+        "201":
+          description: Created template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailTemplate"
+
+  /email-templates/{id}:
+    get:
+      operationId: getEmailTemplate
+      tags: [templates]
+      summary: Get email template
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Email template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailTemplate"
+    patch:
+      operationId: updateEmailTemplate
+      tags: [templates]
+      summary: Update email template
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEmailTemplateBody"
+      responses:
+        "200":
+          description: Updated template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailTemplate"
+    delete:
+      operationId: deleteEmailTemplate
+      tags: [templates]
+      summary: Delete email template
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: Deleted
+
+  /templates/preview:
+    post:
+      operationId: previewTemplate
+      tags: [templates]
+      summary: Preview template with merge field substitution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                body: { type: string }
+                sampleData:
+                  type: object
+                  additionalProperties:
+                    type: string
+              required: [body]
+      responses:
+        "200":
+          description: Rendered preview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preview: { type: string }
+                required: [preview]
+
+  # ---- Sequences ----
+
+  /sequences:
+    get:
+      operationId: getSequences
+      tags: [sequences]
+      summary: List sequences
+      responses:
+        "200":
+          description: Sequence list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SequenceWithStats"
+    post:
+      operationId: createSequence
+      tags: [sequences]
+      summary: Create a sequence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSequenceBody"
+      responses:
+        "201":
+          description: Created sequence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sequence"
+
+  /sequences/{id}:
+    get:
+      operationId: getSequence
+      tags: [sequences]
+      summary: Get sequence with steps
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Sequence with steps
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SequenceWithSteps"
+    patch:
+      operationId: updateSequence
+      tags: [sequences]
+      summary: Update sequence
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSequenceBody"
+      responses:
+        "200":
+          description: Updated sequence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sequence"
+    delete:
+      operationId: deleteSequence
+      tags: [sequences]
+      summary: Delete sequence
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: Deleted
+
+  /sequences/{id}/steps:
+    get:
+      operationId: getSequenceSteps
+      tags: [sequences]
+      summary: Get sequence steps
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Step list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SequenceStep"
+    post:
+      operationId: createSequenceStep
+      tags: [sequences]
+      summary: Add step to sequence
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSequenceStepBody"
+      responses:
+        "201":
+          description: Created step
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SequenceStep"
+
+  /sequences/{id}/steps/{sid}:
+    patch:
+      operationId: updateSequenceStep
+      tags: [sequences]
+      summary: Update sequence step
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: sid, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Updated step
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SequenceStep"
+    delete:
+      operationId: deleteSequenceStep
+      tags: [sequences]
+      summary: Delete sequence step
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: sid, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: Deleted
+
+  /sequences/{id}/enroll:
+    post:
+      operationId: enrollInSequence
+      tags: [sequences]
+      summary: Enroll contacts in sequence
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                contactIds:
+                  type: array
+                  items:
+                    type: string
+              required: [contactIds]
+      responses:
+        "200":
+          description: Enrollment result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enrolled: { type: integer }
+                  skipped: { type: integer }
+                required: [enrolled, skipped]
+
+  /sequences/{id}/enrollments:
+    get:
+      operationId: getSequenceEnrollments
+      tags: [sequences]
+      summary: List enrollments for a sequence
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Enrollment list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+
+  /sequences/{id}/enrollments/{eid}:
+    patch:
+      operationId: updateSequenceEnrollment
+      tags: [sequences]
+      summary: Pause or cancel enrollment
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: eid, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [active, paused, cancelled]
+              required: [status]
+      responses:
+        "200":
+          description: Updated enrollment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SequenceEnrollment"
+
+  # ---- Retention ----
+
+  /retention/birthdays:
+    get:
+      operationId: getRetentionBirthdays
+      tags: [retention]
+      summary: Contacts with birthday in next N days
+      parameters:
+        - { name: days, in: query, schema: { type: integer, default: 30 } }
+      responses:
+        "200":
+          description: Contact list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Contact"
+
+  /retention/anniversaries:
+    get:
+      operationId: getRetentionAnniversaries
+      tags: [retention]
+      summary: Contacts approaching plan anniversary
+      parameters:
+        - { name: days, in: query, schema: { type: integer, default: 30 } }
+      responses:
+        "200":
+          description: Contact list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Contact"
+
+  /retention/aep:
+    get:
+      operationId: getRetentionAep
+      tags: [retention]
+      summary: AEP-eligible contacts
+      parameters:
+        - { name: stateCode, in: query, schema: { type: string } }
+        - { name: planType, in: query, schema: { type: string } }
+        - { name: county, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Contact list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Contact"
+
+  /retention/at-risk:
+    get:
+      operationId: getRetentionAtRisk
+      tags: [retention]
+      summary: At-risk contacts with no recent activity
+      parameters:
+        - { name: days, in: query, schema: { type: integer, default: 60 } }
+      responses:
+        "200":
+          description: Contact list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Contact"
+
+  /retention/flags:
+    get:
+      operationId: getRetentionFlags
+      tags: [retention]
+      summary: List retention flags
+      parameters:
+        - { name: flagType, in: query, schema: { type: string } }
+        - { name: resolved, in: query, schema: { type: string, enum: ["true", "false"] } }
+      responses:
+        "200":
+          description: Flag list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+    post:
+      operationId: createRetentionFlag
+      tags: [retention]
+      summary: Create a retention flag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRetentionFlagBody"
+      responses:
+        "201":
+          description: Created flag
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /retention/flags/{id}/resolve:
+    patch:
+      operationId: resolveRetentionFlag
+      tags: [retention]
+      summary: Resolve a retention flag
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                required: [success]
+
+  /retention/summary:
+    get:
+      operationId: getRetentionSummary
+      tags: [retention]
+      summary: Retention counts for nav badges
+      responses:
+        "200":
+          description: Retention summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionSummary"
 
 components:
   schemas:
@@ -3297,3 +4556,655 @@ components:
       required:
         - uploadURL
         - objectPath
+
+    # ---- CRM Schemas ----
+
+    Contact:
+      type: object
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        assignedAgentId:
+          type: string
+          nullable: true
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        dob:
+          type: string
+          format: date-time
+          nullable: true
+        medicareId:
+          type: string
+          nullable: true
+        currentPlanType:
+          type: string
+          enum: [MA, PDP, MAPD, supp, other]
+          nullable: true
+        currentCarrierId:
+          type: string
+          nullable: true
+        planYear:
+          type: integer
+          nullable: true
+        county:
+          type: string
+          nullable: true
+        stateCode:
+          type: string
+          nullable: true
+        zipCode:
+          type: string
+          nullable: true
+        preferredLanguage:
+          type: string
+          nullable: true
+        pcpName:
+          type: string
+          nullable: true
+        pcpNpi:
+          type: string
+          nullable: true
+        healthConditions:
+          type: array
+          items:
+            type: string
+          nullable: true
+        leadSource:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [lead, prospect, enrolled, retained, lost, do_not_contact]
+        optOutSms:
+          type: boolean
+        optOutEmail:
+          type: boolean
+        tags:
+          type: array
+          items:
+            type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - orgId
+        - firstName
+        - lastName
+        - status
+        - optOutSms
+        - optOutEmail
+        - createdAt
+        - updatedAt
+
+    CreateContactBody:
+      type: object
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        dob: { type: string, nullable: true }
+        medicareId: { type: string, nullable: true }
+        currentPlanType: { type: string, nullable: true }
+        currentCarrierId: { type: string, nullable: true }
+        planYear: { type: integer, nullable: true }
+        county: { type: string, nullable: true }
+        stateCode: { type: string, nullable: true }
+        zipCode: { type: string, nullable: true }
+        preferredLanguage: { type: string, nullable: true }
+        pcpName: { type: string, nullable: true }
+        pcpNpi: { type: string, nullable: true }
+        healthConditions:
+          type: array
+          items: { type: string }
+        leadSource: { type: string, nullable: true }
+        status: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        assignedAgentId: { type: string, nullable: true }
+      required: [firstName, lastName]
+
+    UpdateContactBody:
+      type: object
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        dob: { type: string, nullable: true }
+        medicareId: { type: string, nullable: true }
+        currentPlanType: { type: string, nullable: true }
+        currentCarrierId: { type: string, nullable: true }
+        planYear: { type: integer, nullable: true }
+        county: { type: string, nullable: true }
+        stateCode: { type: string, nullable: true }
+        zipCode: { type: string, nullable: true }
+        preferredLanguage: { type: string, nullable: true }
+        pcpName: { type: string, nullable: true }
+        pcpNpi: { type: string, nullable: true }
+        healthConditions:
+          type: array
+          items: { type: string }
+        leadSource: { type: string, nullable: true }
+        status: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        assignedAgentId: { type: string, nullable: true }
+
+    ContactListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Contact"
+        total:
+          type: integer
+      required: [data, total]
+
+    BulkContactActionBody:
+      type: object
+      properties:
+        ids:
+          type: array
+          items: { type: string }
+        action:
+          type: string
+          enum: [assign_agent, add_tag, remove_tag, set_status, export_csv]
+        payload:
+          type: object
+          additionalProperties: true
+      required: [ids, action]
+
+    Activity:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        contactId: { type: string, nullable: true }
+        agentId: { type: string, nullable: true }
+        dealId: { type: string, nullable: true }
+        taskId: { type: string, nullable: true }
+        type:
+          type: string
+          enum: [note, call_log, sms, email, status_change, enrollment, task_complete, document_upload, sequence_enrolled, sequence_step]
+        body: { type: string, nullable: true }
+        metadata:
+          type: object
+          additionalProperties: true
+          nullable: true
+        createdBy: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+      required: [id, orgId, type, createdAt]
+
+    LogActivityBody:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [note, call_log, sms, email, status_change, enrollment, task_complete, document_upload, sequence_enrolled, sequence_step]
+        body: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+      required: [type]
+
+    Lead:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        contactId: { type: string }
+        assignedAgentId: { type: string, nullable: true }
+        source: { type: string, nullable: true }
+        sourceDetail: { type: string, nullable: true }
+        score: { type: integer }
+        status:
+          type: string
+          enum: [new, contacted, qualified, disqualified, converted]
+        convertedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, orgId, contactId, score, status, createdAt, updatedAt]
+
+    CreateLeadBody:
+      type: object
+      properties:
+        contactId: { type: string }
+        source: { type: string, nullable: true }
+        sourceDetail: { type: string, nullable: true }
+        score: { type: integer }
+        status: { type: string }
+        assignedAgentId: { type: string, nullable: true }
+      required: [contactId]
+
+    UpdateLeadBody:
+      type: object
+      properties:
+        source: { type: string, nullable: true }
+        sourceDetail: { type: string, nullable: true }
+        score: { type: integer }
+        status: { type: string }
+        assignedAgentId: { type: string, nullable: true }
+
+    LeadListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        total:
+          type: integer
+      required: [data, total]
+
+    LeadStats:
+      type: object
+      properties:
+        bySource:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        byStatus:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required: [bySource, byStatus]
+
+    Pipeline:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        isDefault: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, orgId, name, isDefault, createdAt, updatedAt]
+
+    PipelineStage:
+      type: object
+      properties:
+        id: { type: string }
+        pipelineId: { type: string }
+        name: { type: string }
+        orderIndex: { type: integer }
+        color: { type: string }
+        probabilityPct: { type: integer }
+        createdAt: { type: string, format: date-time }
+      required: [id, pipelineId, name, orderIndex, color, probabilityPct, createdAt]
+
+    PipelineWithStages:
+      allOf:
+        - $ref: "#/components/schemas/Pipeline"
+        - type: object
+          properties:
+            stages:
+              type: array
+              items:
+                $ref: "#/components/schemas/PipelineStage"
+          required: [stages]
+
+    CreatePipelineBody:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        isDefault: { type: boolean }
+        stages:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required: [name]
+
+    CreatePipelineStageBody:
+      type: object
+      properties:
+        name: { type: string }
+        color: { type: string }
+        probabilityPct: { type: integer }
+        orderIndex: { type: integer }
+      required: [name]
+
+    Deal:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        pipelineId: { type: string }
+        stageId: { type: string }
+        contactId: { type: string }
+        assignedAgentId: { type: string, nullable: true }
+        title: { type: string }
+        valueEst: { type: number, nullable: true }
+        status: { type: string, enum: [open, won, lost] }
+        wonAt: { type: string, format: date-time, nullable: true }
+        lostAt: { type: string, format: date-time, nullable: true }
+        lostReason: { type: string, nullable: true }
+        closeDateEst: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, orgId, pipelineId, stageId, contactId, title, status, createdAt, updatedAt]
+
+    CreateDealBody:
+      type: object
+      properties:
+        pipelineId: { type: string }
+        stageId: { type: string }
+        contactId: { type: string }
+        title: { type: string }
+        valueEst: { type: number, nullable: true }
+        closeDateEst: { type: string, nullable: true }
+        assignedAgentId: { type: string, nullable: true }
+      required: [pipelineId, stageId, contactId, title]
+
+    UpdateDealBody:
+      type: object
+      properties:
+        stageId: { type: string }
+        title: { type: string }
+        valueEst: { type: number, nullable: true }
+        status: { type: string, enum: [open, won, lost] }
+        lostReason: { type: string, nullable: true }
+        closeDateEst: { type: string, nullable: true }
+        assignedAgentId: { type: string, nullable: true }
+
+    PipelineAnalytics:
+      type: object
+      properties:
+        stageAnalytics:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        totalDeals: { type: integer }
+        wonDeals: { type: integer }
+        conversionRate: { type: integer }
+      required: [stageAnalytics, totalDeals, wonDeals, conversionRate]
+
+    MessageThread:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        contactId: { type: string }
+        channel: { type: string, enum: [sms, email] }
+        lastMessageAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+      required: [id, orgId, contactId, channel, createdAt]
+
+    ThreadWithContact:
+      type: object
+      properties:
+        thread:
+          $ref: "#/components/schemas/MessageThread"
+        contactFirstName: { type: string }
+        contactLastName: { type: string }
+        contactPhone: { type: string, nullable: true }
+        contactEmail: { type: string, nullable: true }
+        unreadCount: { type: integer }
+        lastMessage: { type: string, nullable: true }
+      required: [thread, contactFirstName, contactLastName, unreadCount]
+
+    Message:
+      type: object
+      properties:
+        id: { type: string }
+        threadId: { type: string }
+        direction: { type: string, enum: [inbound, outbound] }
+        body: { type: string, nullable: true }
+        subject: { type: string, nullable: true }
+        fromAddress: { type: string, nullable: true }
+        toAddress: { type: string, nullable: true }
+        status:
+          type: string
+          enum: [queued, sent, delivered, failed, received]
+        providerMessageId: { type: string, nullable: true }
+        sentAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+      required: [id, threadId, direction, status, createdAt]
+
+    InboxResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        total:
+          type: integer
+      required: [data, total]
+
+    SmsTemplate:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        name: { type: string }
+        body: { type: string }
+        mergeFields:
+          type: array
+          items: { type: string }
+          nullable: true
+        category: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, orgId, name, body, category, createdAt, updatedAt]
+
+    CreateSmsTemplateBody:
+      type: object
+      properties:
+        name: { type: string }
+        body: { type: string }
+        category: { type: string }
+        mergeFields:
+          type: array
+          items: { type: string }
+      required: [name, body]
+
+    UpdateSmsTemplateBody:
+      type: object
+      properties:
+        name: { type: string }
+        body: { type: string }
+        category: { type: string }
+        mergeFields:
+          type: array
+          items: { type: string }
+
+    EmailTemplate:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        name: { type: string }
+        subject: { type: string }
+        bodyHtml: { type: string }
+        bodyText: { type: string, nullable: true }
+        mergeFields:
+          type: array
+          items: { type: string }
+          nullable: true
+        category: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, orgId, name, subject, bodyHtml, category, createdAt, updatedAt]
+
+    CreateEmailTemplateBody:
+      type: object
+      properties:
+        name: { type: string }
+        subject: { type: string }
+        bodyHtml: { type: string }
+        bodyText: { type: string }
+        category: { type: string }
+        mergeFields:
+          type: array
+          items: { type: string }
+      required: [name, subject, bodyHtml]
+
+    UpdateEmailTemplateBody:
+      type: object
+      properties:
+        name: { type: string }
+        subject: { type: string }
+        bodyHtml: { type: string }
+        bodyText: { type: string, nullable: true }
+        category: { type: string }
+        mergeFields:
+          type: array
+          items: { type: string }
+
+    Sequence:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        triggerType:
+          type: string
+          enum: [manual, lead_created, enrolled, birthday, plan_anniversary, aep_start, oep_start, custom_date]
+        triggerConfig:
+          type: object
+          additionalProperties: true
+          nullable: true
+        status:
+          type: string
+          enum: [active, paused, draft]
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, orgId, name, triggerType, status, createdAt, updatedAt]
+
+    SequenceWithStats:
+      type: object
+      properties:
+        sequence:
+          $ref: "#/components/schemas/Sequence"
+        stepCount: { type: integer }
+        activeEnrollments: { type: integer }
+      required: [sequence, stepCount, activeEnrollments]
+
+    SequenceStep:
+      type: object
+      properties:
+        id: { type: string }
+        sequenceId: { type: string }
+        orderIndex: { type: integer }
+        stepType:
+          type: string
+          enum: [sms, email, task, wait]
+        delayValue: { type: integer }
+        delayUnit: { type: string }
+        config:
+          type: object
+          additionalProperties: true
+          nullable: true
+        createdAt: { type: string, format: date-time }
+      required: [id, sequenceId, orderIndex, stepType, delayValue, delayUnit, createdAt]
+
+    SequenceWithSteps:
+      allOf:
+        - $ref: "#/components/schemas/Sequence"
+        - type: object
+          properties:
+            steps:
+              type: array
+              items:
+                $ref: "#/components/schemas/SequenceStep"
+          required: [steps]
+
+    CreateSequenceBody:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        triggerType: { type: string }
+        triggerConfig:
+          type: object
+          additionalProperties: true
+        status: { type: string }
+      required: [name]
+
+    UpdateSequenceBody:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string, nullable: true }
+        triggerType: { type: string }
+        triggerConfig:
+          type: object
+          additionalProperties: true
+          nullable: true
+        status: { type: string }
+
+    CreateSequenceStepBody:
+      type: object
+      properties:
+        stepType:
+          type: string
+          enum: [sms, email, task, wait]
+        orderIndex: { type: integer }
+        delayValue: { type: integer }
+        delayUnit: { type: string }
+        config:
+          type: object
+          additionalProperties: true
+      required: [stepType]
+
+    SequenceEnrollment:
+      type: object
+      properties:
+        id: { type: string }
+        sequenceId: { type: string }
+        contactId: { type: string }
+        status:
+          type: string
+          enum: [active, completed, cancelled, paused]
+        enrolledAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+        nextStepIndex: { type: integer }
+        nextStepAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+      required: [id, sequenceId, contactId, status, enrolledAt, nextStepIndex, createdAt]
+
+    CreateRetentionFlagBody:
+      type: object
+      properties:
+        contactId: { type: string }
+        flagType:
+          type: string
+          enum: [at_risk, anniversary_due, birthday_soon, aep_eligible, oep_eligible]
+        dueDate: { type: string, nullable: true }
+      required: [contactId, flagType]
+
+    RetentionSummary:
+      type: object
+      properties:
+        birthdaysInNext30Days: { type: integer }
+        atRiskContacts: { type: integer }
+        openFlags: { type: integer }
+      required: [birthdaysInNext30Days, atRiskContacts, openFlags]

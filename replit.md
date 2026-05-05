@@ -76,11 +76,11 @@ lib/
 - `agents.ts` — agents (status: onboarding, active, suspended, offboarding, offboarded), state_licenses, carrier_certifications, ahip_records, agent_documents
 - `tasks.ts` — task_templates (with triggerEvent, dueDaysFromTrigger, isActive), task_instances, checklist_runs, checklist_items
 - `documents.ts` — documents
-- `crm.ts` — contacts, leads, deals, activities
-- `communications.ts` — conversations, messages
-- `automations.ts` — automation_rules, automation_executions
+- `crm.ts` — contacts, leads, pipelines, pipeline_stages, deals, deal_stage_history, activities
+- `communications.ts` — message_threads, messages, email_templates, sms_templates, opt_outs
+- `automations.ts` — sequences, sequence_steps, sequence_enrollments
 - `notifications.ts` — notifications (with priority, resourceType, resourceId)
-- `retention.ts` — retention_alerts
+- `retention.ts` — retention_flags
 
 ## API Routes (all prefixed /api)
 
@@ -119,6 +119,50 @@ lib/
 - `POST /carriers` — create carrier (agency_admin+)
 - `PATCH /carriers/:id` — update carrier
 - `POST /carriers/seed` — seed default Medicare carriers
+- `GET/POST /contacts` — contact list + create; supports search, status/plan/tag filters, pagination
+- `POST /contacts/bulk` — bulk assign agent, add/remove tag, set status, export CSV
+- `GET/PATCH/DELETE /contacts/:id` — contact detail CRUD
+- `GET /contacts/:id/activities` — activity timeline
+- `POST /contacts/:id/activities` — log note/call/enrollment
+- `POST /contacts/:id/sms` — send SMS (Twilio)
+- `POST /contacts/:id/email` — send email (Resend)
+- `GET /contacts/:id/threads` — message threads for contact
+- `GET /contacts/:id/tasks` — tasks linked to contact
+- `GET /contacts/:id/enrollments` — sequence enrollments for contact
+- `GET/POST /leads` — leads list + create
+- `GET/PATCH /leads/:id` — lead detail + update status
+- `POST /leads/:id/convert` — convert lead to prospect
+- `GET /leads/stats` — lead counts by status + source
+- `GET/POST /pipelines` — pipeline list + create (with default stages)
+- `GET/PATCH/DELETE /pipelines/:id` — pipeline detail CRUD
+- `POST /pipelines/:id/stages` — add stage; PATCH/DELETE /pipelines/:id/stages/:sid
+- `GET /pipelines/:id/analytics` — conversion rate, win rate, total/won deals
+- `GET/POST /deals` — deals by pipeline/stage/contact; create deal
+- `GET/PATCH /deals/:id` — deal detail + move stage
+- `GET /threads` — message thread list (SMS + email)
+- `GET /threads/:id/messages` — thread message history
+- `POST /threads/:id/reply` — reply in thread
+- `GET /inbox` — unread messages across all channels
+- `PATCH /messages/:id/read` — mark message read
+- `GET/POST /templates/sms` — SMS template library
+- `GET/PATCH/DELETE /templates/sms/:id`
+- `GET/POST /templates/email` — email template library
+- `GET/PATCH/DELETE /templates/email/:id`
+- `GET/POST /sequences` — automation sequences
+- `GET/PATCH/DELETE /sequences/:id`
+- `GET/POST /sequences/:id/steps` — sequence steps
+- `PATCH/DELETE /sequences/:id/steps/:sid`
+- `POST /sequences/:id/enroll` — enroll a contact in sequence
+- `GET /sequences/:id/enrollments` — list enrollments
+- `PATCH /sequences/:id/enrollments/:eid` — pause/resume/cancel enrollment
+- `GET /retention/birthdays` — contacts with upcoming birthdays (?days=30)
+- `GET /retention/anniversaries` — plan anniversary contacts (?days=30)
+- `GET /retention/aep` — AEP-eligible enrolled contacts (Oct 15 – Dec 7 window)
+- `GET /retention/at-risk` — contacts with no activity in N days (?days=60)
+- `GET /retention/flags` — open retention flags
+- `POST /retention/flags` — create retention flag
+- `PATCH /retention/flags/:id/resolve` — resolve flag
+- `GET /retention/summary` — summary counts (birthdays in 30d, at-risk count, open flags)
 - `GET /renewals` — upcoming license/cert renewals (?days=90)
 - `GET /ahip/dashboard` — AHIP completion stats by year
 - `GET /certifications/matrix` — carrier cert matrix by year

@@ -18,6 +18,13 @@ import tasksRouter from "./tasks";
 import agentDocumentsRouter from "./agentDocuments";
 import renewalsRouter from "./renewals";
 import orgSettingsRouter from "./orgSettings";
+import contactsRouter from "./contacts";
+import leadsRouter from "./leads";
+import pipelinesRouter from "./pipelines";
+import communicationsRouter from "./communications";
+import templatesRouter from "./templates";
+import sequencesRouter from "./sequences";
+import retentionCrmRouter from "./retentionCrm";
 
 const router: IRouter = Router();
 
@@ -40,5 +47,12 @@ router.use(tasksRouter);
 router.use(agentDocumentsRouter);
 router.use(renewalsRouter);
 router.use(orgSettingsRouter);
+router.use(contactsRouter);
+router.use(leadsRouter);
+router.use(pipelinesRouter);
+router.use(communicationsRouter);
+router.use(templatesRouter);
+router.use(sequencesRouter);
+router.use(retentionCrmRouter);
 
 export default router;

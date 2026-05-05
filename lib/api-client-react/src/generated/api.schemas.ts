@@ -1147,6 +1147,621 @@ export interface RequestUploadUrlResponse {
   objectPath: string;
 }
 
+export type ContactCurrentPlanType =
+  | (typeof ContactCurrentPlanType)[keyof typeof ContactCurrentPlanType]
+  | null;
+
+export const ContactCurrentPlanType = {
+  MA: "MA",
+  PDP: "PDP",
+  MAPD: "MAPD",
+  supp: "supp",
+  other: "other",
+} as const;
+
+export type ContactStatus = (typeof ContactStatus)[keyof typeof ContactStatus];
+
+export const ContactStatus = {
+  lead: "lead",
+  prospect: "prospect",
+  enrolled: "enrolled",
+  retained: "retained",
+  lost: "lost",
+  do_not_contact: "do_not_contact",
+} as const;
+
+export interface Contact {
+  id: string;
+  orgId: string;
+  assignedAgentId?: string | null;
+  firstName: string;
+  lastName: string;
+  email?: string | null;
+  phone?: string | null;
+  dob?: string | null;
+  medicareId?: string | null;
+  currentPlanType?: ContactCurrentPlanType;
+  currentCarrierId?: string | null;
+  planYear?: number | null;
+  county?: string | null;
+  stateCode?: string | null;
+  zipCode?: string | null;
+  preferredLanguage?: string | null;
+  pcpName?: string | null;
+  pcpNpi?: string | null;
+  healthConditions?: string[] | null;
+  leadSource?: string | null;
+  status: ContactStatus;
+  optOutSms: boolean;
+  optOutEmail: boolean;
+  tags?: string[] | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateContactBody {
+  firstName: string;
+  lastName: string;
+  email?: string | null;
+  phone?: string | null;
+  dob?: string | null;
+  medicareId?: string | null;
+  currentPlanType?: string | null;
+  currentCarrierId?: string | null;
+  planYear?: number | null;
+  county?: string | null;
+  stateCode?: string | null;
+  zipCode?: string | null;
+  preferredLanguage?: string | null;
+  pcpName?: string | null;
+  pcpNpi?: string | null;
+  healthConditions?: string[];
+  leadSource?: string | null;
+  status?: string;
+  tags?: string[];
+  assignedAgentId?: string | null;
+}
+
+export interface UpdateContactBody {
+  firstName?: string;
+  lastName?: string;
+  email?: string | null;
+  phone?: string | null;
+  dob?: string | null;
+  medicareId?: string | null;
+  currentPlanType?: string | null;
+  currentCarrierId?: string | null;
+  planYear?: number | null;
+  county?: string | null;
+  stateCode?: string | null;
+  zipCode?: string | null;
+  preferredLanguage?: string | null;
+  pcpName?: string | null;
+  pcpNpi?: string | null;
+  healthConditions?: string[];
+  leadSource?: string | null;
+  status?: string;
+  tags?: string[];
+  assignedAgentId?: string | null;
+}
+
+export interface ContactListResponse {
+  data: Contact[];
+  total: number;
+}
+
+export type BulkContactActionBodyAction =
+  (typeof BulkContactActionBodyAction)[keyof typeof BulkContactActionBodyAction];
+
+export const BulkContactActionBodyAction = {
+  assign_agent: "assign_agent",
+  add_tag: "add_tag",
+  remove_tag: "remove_tag",
+  set_status: "set_status",
+  export_csv: "export_csv",
+} as const;
+
+export type BulkContactActionBodyPayload = { [key: string]: unknown };
+
+export interface BulkContactActionBody {
+  ids: string[];
+  action: BulkContactActionBodyAction;
+  payload?: BulkContactActionBodyPayload;
+}
+
+export type ActivityType = (typeof ActivityType)[keyof typeof ActivityType];
+
+export const ActivityType = {
+  note: "note",
+  call_log: "call_log",
+  sms: "sms",
+  email: "email",
+  status_change: "status_change",
+  enrollment: "enrollment",
+  task_complete: "task_complete",
+  document_upload: "document_upload",
+  sequence_enrolled: "sequence_enrolled",
+  sequence_step: "sequence_step",
+} as const;
+
+export type ActivityMetadata = { [key: string]: unknown } | null;
+
+export interface Activity {
+  id: string;
+  orgId: string;
+  contactId?: string | null;
+  agentId?: string | null;
+  dealId?: string | null;
+  taskId?: string | null;
+  type: ActivityType;
+  body?: string | null;
+  metadata?: ActivityMetadata;
+  createdBy?: string | null;
+  createdAt: string;
+}
+
+export type LogActivityBodyType =
+  (typeof LogActivityBodyType)[keyof typeof LogActivityBodyType];
+
+export const LogActivityBodyType = {
+  note: "note",
+  call_log: "call_log",
+  sms: "sms",
+  email: "email",
+  status_change: "status_change",
+  enrollment: "enrollment",
+  task_complete: "task_complete",
+  document_upload: "document_upload",
+  sequence_enrolled: "sequence_enrolled",
+  sequence_step: "sequence_step",
+} as const;
+
+export type LogActivityBodyMetadata = { [key: string]: unknown };
+
+export interface LogActivityBody {
+  type: LogActivityBodyType;
+  body?: string;
+  metadata?: LogActivityBodyMetadata;
+}
+
+export type LeadStatus = (typeof LeadStatus)[keyof typeof LeadStatus];
+
+export const LeadStatus = {
+  new: "new",
+  contacted: "contacted",
+  qualified: "qualified",
+  disqualified: "disqualified",
+  converted: "converted",
+} as const;
+
+export interface Lead {
+  id: string;
+  orgId: string;
+  contactId: string;
+  assignedAgentId?: string | null;
+  source?: string | null;
+  sourceDetail?: string | null;
+  score: number;
+  status: LeadStatus;
+  convertedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateLeadBody {
+  contactId: string;
+  source?: string | null;
+  sourceDetail?: string | null;
+  score?: number;
+  status?: string;
+  assignedAgentId?: string | null;
+}
+
+export interface UpdateLeadBody {
+  source?: string | null;
+  sourceDetail?: string | null;
+  score?: number;
+  status?: string;
+  assignedAgentId?: string | null;
+}
+
+export type LeadListResponseDataItem = { [key: string]: unknown };
+
+export interface LeadListResponse {
+  data: LeadListResponseDataItem[];
+  total: number;
+}
+
+export type LeadStatsBySourceItem = { [key: string]: unknown };
+
+export type LeadStatsByStatusItem = { [key: string]: unknown };
+
+export interface LeadStats {
+  bySource: LeadStatsBySourceItem[];
+  byStatus: LeadStatsByStatusItem[];
+}
+
+export interface Pipeline {
+  id: string;
+  orgId: string;
+  name: string;
+  description?: string | null;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PipelineStage {
+  id: string;
+  pipelineId: string;
+  name: string;
+  orderIndex: number;
+  color: string;
+  probabilityPct: number;
+  createdAt: string;
+}
+
+export type PipelineWithStages = Pipeline & {
+  stages: PipelineStage[];
+};
+
+export type CreatePipelineBodyStagesItem = { [key: string]: unknown };
+
+export interface CreatePipelineBody {
+  name: string;
+  description?: string;
+  isDefault?: boolean;
+  stages?: CreatePipelineBodyStagesItem[];
+}
+
+export interface CreatePipelineStageBody {
+  name: string;
+  color?: string;
+  probabilityPct?: number;
+  orderIndex?: number;
+}
+
+export type DealStatus = (typeof DealStatus)[keyof typeof DealStatus];
+
+export const DealStatus = {
+  open: "open",
+  won: "won",
+  lost: "lost",
+} as const;
+
+export interface Deal {
+  id: string;
+  orgId: string;
+  pipelineId: string;
+  stageId: string;
+  contactId: string;
+  assignedAgentId?: string | null;
+  title: string;
+  valueEst?: number | null;
+  status: DealStatus;
+  wonAt?: string | null;
+  lostAt?: string | null;
+  lostReason?: string | null;
+  closeDateEst?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDealBody {
+  pipelineId: string;
+  stageId: string;
+  contactId: string;
+  title: string;
+  valueEst?: number | null;
+  closeDateEst?: string | null;
+  assignedAgentId?: string | null;
+}
+
+export type UpdateDealBodyStatus =
+  (typeof UpdateDealBodyStatus)[keyof typeof UpdateDealBodyStatus];
+
+export const UpdateDealBodyStatus = {
+  open: "open",
+  won: "won",
+  lost: "lost",
+} as const;
+
+export interface UpdateDealBody {
+  stageId?: string;
+  title?: string;
+  valueEst?: number | null;
+  status?: UpdateDealBodyStatus;
+  lostReason?: string | null;
+  closeDateEst?: string | null;
+  assignedAgentId?: string | null;
+}
+
+export type PipelineAnalyticsStageAnalyticsItem = { [key: string]: unknown };
+
+export interface PipelineAnalytics {
+  stageAnalytics: PipelineAnalyticsStageAnalyticsItem[];
+  totalDeals: number;
+  wonDeals: number;
+  conversionRate: number;
+}
+
+export type MessageThreadChannel =
+  (typeof MessageThreadChannel)[keyof typeof MessageThreadChannel];
+
+export const MessageThreadChannel = {
+  sms: "sms",
+  email: "email",
+} as const;
+
+export interface MessageThread {
+  id: string;
+  orgId: string;
+  contactId: string;
+  channel: MessageThreadChannel;
+  lastMessageAt?: string | null;
+  createdAt: string;
+}
+
+export interface ThreadWithContact {
+  thread: MessageThread;
+  contactFirstName: string;
+  contactLastName: string;
+  contactPhone?: string | null;
+  contactEmail?: string | null;
+  unreadCount: number;
+  lastMessage?: string | null;
+}
+
+export type MessageDirection =
+  (typeof MessageDirection)[keyof typeof MessageDirection];
+
+export const MessageDirection = {
+  inbound: "inbound",
+  outbound: "outbound",
+} as const;
+
+export type MessageStatus = (typeof MessageStatus)[keyof typeof MessageStatus];
+
+export const MessageStatus = {
+  queued: "queued",
+  sent: "sent",
+  delivered: "delivered",
+  failed: "failed",
+  received: "received",
+} as const;
+
+export interface Message {
+  id: string;
+  threadId: string;
+  direction: MessageDirection;
+  body?: string | null;
+  subject?: string | null;
+  fromAddress?: string | null;
+  toAddress?: string | null;
+  status: MessageStatus;
+  providerMessageId?: string | null;
+  sentAt?: string | null;
+  createdAt: string;
+}
+
+export type InboxResponseDataItem = { [key: string]: unknown };
+
+export interface InboxResponse {
+  data: InboxResponseDataItem[];
+  total: number;
+}
+
+export interface SmsTemplate {
+  id: string;
+  orgId: string;
+  name: string;
+  body: string;
+  mergeFields?: string[] | null;
+  category: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSmsTemplateBody {
+  name: string;
+  body: string;
+  category?: string;
+  mergeFields?: string[];
+}
+
+export interface UpdateSmsTemplateBody {
+  name?: string;
+  body?: string;
+  category?: string;
+  mergeFields?: string[];
+}
+
+export interface EmailTemplate {
+  id: string;
+  orgId: string;
+  name: string;
+  subject: string;
+  bodyHtml: string;
+  bodyText?: string | null;
+  mergeFields?: string[] | null;
+  category: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateEmailTemplateBody {
+  name: string;
+  subject: string;
+  bodyHtml: string;
+  bodyText?: string;
+  category?: string;
+  mergeFields?: string[];
+}
+
+export interface UpdateEmailTemplateBody {
+  name?: string;
+  subject?: string;
+  bodyHtml?: string;
+  bodyText?: string | null;
+  category?: string;
+  mergeFields?: string[];
+}
+
+export type SequenceTriggerType =
+  (typeof SequenceTriggerType)[keyof typeof SequenceTriggerType];
+
+export const SequenceTriggerType = {
+  manual: "manual",
+  lead_created: "lead_created",
+  enrolled: "enrolled",
+  birthday: "birthday",
+  plan_anniversary: "plan_anniversary",
+  aep_start: "aep_start",
+  oep_start: "oep_start",
+  custom_date: "custom_date",
+} as const;
+
+export type SequenceTriggerConfig = { [key: string]: unknown } | null;
+
+export type SequenceStatus =
+  (typeof SequenceStatus)[keyof typeof SequenceStatus];
+
+export const SequenceStatus = {
+  active: "active",
+  paused: "paused",
+  draft: "draft",
+} as const;
+
+export interface Sequence {
+  id: string;
+  orgId: string;
+  name: string;
+  description?: string | null;
+  triggerType: SequenceTriggerType;
+  triggerConfig?: SequenceTriggerConfig;
+  status: SequenceStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SequenceWithStats {
+  sequence: Sequence;
+  stepCount: number;
+  activeEnrollments: number;
+}
+
+export type SequenceStepStepType =
+  (typeof SequenceStepStepType)[keyof typeof SequenceStepStepType];
+
+export const SequenceStepStepType = {
+  sms: "sms",
+  email: "email",
+  task: "task",
+  wait: "wait",
+} as const;
+
+export type SequenceStepConfig = { [key: string]: unknown } | null;
+
+export interface SequenceStep {
+  id: string;
+  sequenceId: string;
+  orderIndex: number;
+  stepType: SequenceStepStepType;
+  delayValue: number;
+  delayUnit: string;
+  config?: SequenceStepConfig;
+  createdAt: string;
+}
+
+export type SequenceWithSteps = Sequence & {
+  steps: SequenceStep[];
+};
+
+export type CreateSequenceBodyTriggerConfig = { [key: string]: unknown };
+
+export interface CreateSequenceBody {
+  name: string;
+  description?: string;
+  triggerType?: string;
+  triggerConfig?: CreateSequenceBodyTriggerConfig;
+  status?: string;
+}
+
+export type UpdateSequenceBodyTriggerConfig = { [key: string]: unknown } | null;
+
+export interface UpdateSequenceBody {
+  name?: string;
+  description?: string | null;
+  triggerType?: string;
+  triggerConfig?: UpdateSequenceBodyTriggerConfig;
+  status?: string;
+}
+
+export type CreateSequenceStepBodyStepType =
+  (typeof CreateSequenceStepBodyStepType)[keyof typeof CreateSequenceStepBodyStepType];
+
+export const CreateSequenceStepBodyStepType = {
+  sms: "sms",
+  email: "email",
+  task: "task",
+  wait: "wait",
+} as const;
+
+export type CreateSequenceStepBodyConfig = { [key: string]: unknown };
+
+export interface CreateSequenceStepBody {
+  stepType: CreateSequenceStepBodyStepType;
+  orderIndex?: number;
+  delayValue?: number;
+  delayUnit?: string;
+  config?: CreateSequenceStepBodyConfig;
+}
+
+export type SequenceEnrollmentStatus =
+  (typeof SequenceEnrollmentStatus)[keyof typeof SequenceEnrollmentStatus];
+
+export const SequenceEnrollmentStatus = {
+  active: "active",
+  completed: "completed",
+  cancelled: "cancelled",
+  paused: "paused",
+} as const;
+
+export interface SequenceEnrollment {
+  id: string;
+  sequenceId: string;
+  contactId: string;
+  status: SequenceEnrollmentStatus;
+  enrolledAt: string;
+  completedAt?: string | null;
+  nextStepIndex: number;
+  nextStepAt?: string | null;
+  createdAt: string;
+}
+
+export type CreateRetentionFlagBodyFlagType =
+  (typeof CreateRetentionFlagBodyFlagType)[keyof typeof CreateRetentionFlagBodyFlagType];
+
+export const CreateRetentionFlagBodyFlagType = {
+  at_risk: "at_risk",
+  anniversary_due: "anniversary_due",
+  birthday_soon: "birthday_soon",
+  aep_eligible: "aep_eligible",
+  oep_eligible: "oep_eligible",
+} as const;
+
+export interface CreateRetentionFlagBody {
+  contactId: string;
+  flagType: CreateRetentionFlagBodyFlagType;
+  dueDate?: string | null;
+}
+
+export interface RetentionSummary {
+  birthdaysInNext30Days: number;
+  atRiskContacts: number;
+  openFlags: number;
+}
+
 export type GetUsersParams = {
   role?: string;
   isActive?: boolean;
@@ -1237,4 +1852,219 @@ export type GetAuditLogParams = {
   endDate?: string;
   limit?: number;
   offset?: number;
+};
+
+export type GetContactsParams = {
+  search?: string;
+  status?: string;
+  assignedAgentId?: string;
+  planType?: string;
+  tag?: string;
+  limit?: number;
+  offset?: number;
+  sortBy?: string;
+  sortDir?: GetContactsSortDir;
+};
+
+export type GetContactsSortDir =
+  (typeof GetContactsSortDir)[keyof typeof GetContactsSortDir];
+
+export const GetContactsSortDir = {
+  asc: "asc",
+  desc: "desc",
+} as const;
+
+export type BulkContactAction200 = {
+  affected: number;
+};
+
+export type GetContactActivitiesParams = {
+  limit?: number;
+  offset?: number;
+};
+
+export type SendContactSmsBody = {
+  body: string;
+};
+
+export type SendContactSms201 = {
+  messageId: string;
+  threadId: string;
+};
+
+export type SendContactEmailBody = {
+  subject: string;
+  body: string;
+  bodyText?: string;
+};
+
+export type SendContactEmail201 = {
+  messageId: string;
+  threadId: string;
+};
+
+export type GetContactTasks200Item = { [key: string]: unknown };
+
+export type GetContactEnrollments200Item = { [key: string]: unknown };
+
+export type GetLeadsParams = {
+  status?: string;
+  assignedAgentId?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type GetLead200 = { [key: string]: unknown };
+
+export type ConvertLead200 = {
+  success: boolean;
+  contactId: string;
+};
+
+export type UpdatePipelineBody = {
+  name?: string;
+  description?: string | null;
+  isDefault?: boolean;
+};
+
+export type UpdatePipelineStageBody = { [key: string]: unknown };
+
+export type GetDealsParams = {
+  pipelineId?: string;
+  stageId?: string;
+  status?: string;
+  contactId?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type GetDeals200Item = { [key: string]: unknown };
+
+export type GetDeal200 = { [key: string]: unknown };
+
+export type GetThreadsParams = {
+  channel?: GetThreadsChannel;
+  limit?: number;
+  offset?: number;
+};
+
+export type GetThreadsChannel =
+  (typeof GetThreadsChannel)[keyof typeof GetThreadsChannel];
+
+export const GetThreadsChannel = {
+  sms: "sms",
+  email: "email",
+} as const;
+
+export type GetThreadMessagesParams = {
+  limit?: number;
+};
+
+export type ReplyInThreadBody = {
+  body: string;
+  subject?: string;
+};
+
+export type GetInboxParams = {
+  channel?: GetInboxChannel;
+  limit?: number;
+  offset?: number;
+};
+
+export type GetInboxChannel =
+  (typeof GetInboxChannel)[keyof typeof GetInboxChannel];
+
+export const GetInboxChannel = {
+  sms: "sms",
+  email: "email",
+} as const;
+
+export type MarkMessageRead200 = {
+  success: boolean;
+};
+
+export type GetSmsTemplatesParams = {
+  category?: string;
+  search?: string;
+};
+
+export type GetEmailTemplatesParams = {
+  category?: string;
+  search?: string;
+};
+
+export type PreviewTemplateBodySampleData = { [key: string]: string };
+
+export type PreviewTemplateBody = {
+  body: string;
+  sampleData?: PreviewTemplateBodySampleData;
+};
+
+export type PreviewTemplate200 = {
+  preview: string;
+};
+
+export type UpdateSequenceStepBody = { [key: string]: unknown };
+
+export type EnrollInSequenceBody = {
+  contactIds: string[];
+};
+
+export type EnrollInSequence200 = {
+  enrolled: number;
+  skipped: number;
+};
+
+export type GetSequenceEnrollments200Item = { [key: string]: unknown };
+
+export type UpdateSequenceEnrollmentBodyStatus =
+  (typeof UpdateSequenceEnrollmentBodyStatus)[keyof typeof UpdateSequenceEnrollmentBodyStatus];
+
+export const UpdateSequenceEnrollmentBodyStatus = {
+  active: "active",
+  paused: "paused",
+  cancelled: "cancelled",
+} as const;
+
+export type UpdateSequenceEnrollmentBody = {
+  status: UpdateSequenceEnrollmentBodyStatus;
+};
+
+export type GetRetentionBirthdaysParams = {
+  days?: number;
+};
+
+export type GetRetentionAnniversariesParams = {
+  days?: number;
+};
+
+export type GetRetentionAepParams = {
+  stateCode?: string;
+  planType?: string;
+  county?: string;
+};
+
+export type GetRetentionAtRiskParams = {
+  days?: number;
+};
+
+export type GetRetentionFlagsParams = {
+  flagType?: string;
+  resolved?: GetRetentionFlagsResolved;
+};
+
+export type GetRetentionFlagsResolved =
+  (typeof GetRetentionFlagsResolved)[keyof typeof GetRetentionFlagsResolved];
+
+export const GetRetentionFlagsResolved = {
+  true: "true",
+  false: "false",
+} as const;
+
+export type GetRetentionFlags200Item = { [key: string]: unknown };
+
+export type CreateRetentionFlag201 = { [key: string]: unknown };
+
+export type ResolveRetentionFlag200 = {
+  success: boolean;
 };
