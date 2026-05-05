@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
-import { useGetMe } from "@workspace/api-client-react";
+import { useGetMe, useGetAgent, useGetContact } from "@workspace/api-client-react";
+import type { AiContext } from "@/components/ai-assistant";
 import { cn } from "@/lib/utils";
 
 type Role =
@@ -213,14 +214,33 @@ function NavItem({
   );
 }
 
-function useAiContext() {
+function useAiContext(): AiContext {
   const [location] = useLocation();
   const agentMatch = location.match(/^\/agents\/([^/]+)/);
   const contactMatch = location.match(/^\/crm\/contacts\/([^/]+)/);
-  if (agentMatch) return { pageType: "agent" as const, agentId: agentMatch[1] };
-  if (contactMatch) return { pageType: "contact" as const, contactId: contactMatch[1] };
-  if (location === "/dashboard" || location.startsWith("/dashboard")) return { pageType: "dashboard" as const };
-  return { pageType: "other" as const };
+
+  const agentId = agentMatch?.[1];
+  const contactId = contactMatch?.[1];
+
+  const { data: agent } = useGetAgent(agentId ?? "");
+  const { data: contact } = useGetContact(contactId ?? "");
+
+  if (agentId) {
+    const label = agent
+      ? `Agent: ${agent.firstName} ${agent.lastName}`
+      : "Agent";
+    return { pageType: "agent", agentId, label };
+  }
+  if (contactId) {
+    const label = contact
+      ? `Contact: ${contact.firstName} ${contact.lastName}`
+      : "Contact";
+    return { pageType: "contact", contactId, label };
+  }
+  if (location === "/dashboard" || location.startsWith("/dashboard")) {
+    return { pageType: "dashboard", label: "Dashboard" };
+  }
+  return { pageType: "other" };
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
