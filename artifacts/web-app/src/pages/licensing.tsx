@@ -1,7 +1,8 @@
-import { useState } from "react";
-import { useGetAgents, useGetAgentLicenses, useGetRenewals } from "@workspace/api-client-react";
+import { useState, useRef } from "react";
+import { useGetAgents, useGetAgentLicenses, useGetRenewals, useBulkImportLicenses } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -11,10 +12,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FileText, AlertTriangle, Clock, CheckCircle, Search } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { FileText, AlertTriangle, Clock, CheckCircle, Search, Upload, CheckCircle2, XCircle } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useLocation } from "wouter";
+import { toast } from "sonner";
 
 const LICENSE_STATUS_STYLES: Record<string, string> = {
   active: "bg-green-100 text-green-800",
@@ -30,9 +39,125 @@ const URGENCY_STYLES: Record<string, { badge: string; icon: React.ComponentType<
   notice: { badge: "bg-blue-100 text-blue-800 border-blue-200", icon: Clock, label: "61–90 days" },
 };
 
+// CSV Import Dialog
+function CsvImportDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [result, setResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const { mutateAsync: bulkImport, isPending } = useBulkImportLicenses();
+
+  const handleClose = () => {
+    setFile(null);
+    setResult(null);
+    onClose();
+  };
+
+  const parseCsv = (text: string): Record<string, string>[] => {
+    const lines = text.trim().split("\n");
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, "").trim());
+    return lines.slice(1).map((line) => {
+      const vals = line.split(",").map((v) => v.trim().replace(/^"|"$/g, "").trim());
+      return Object.fromEntries(headers.map((h, i) => [h, vals[i] ?? ""]));
+    });
+  };
+
+  const handleImport = async () => {
+    if (!file) return;
+    setParsing(true);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text).filter((r) => r.agentId && r.stateCode && r.licenseType);
+      if (rows.length === 0) {
+        toast.error("No valid rows found in CSV");
+        setParsing(false);
+        return;
+      }
+      const res = await bulkImport({ data: { rows: rows as Parameters<typeof bulkImport>[0]["data"]["rows"] } });
+      setResult(res);
+      if (res.imported > 0) toast.success(`Imported ${res.imported} license${res.imported !== 1 ? "s" : ""}`);
+      else toast.error("No licenses imported");
+    } catch {
+      toast.error("Import failed");
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Import Licenses from CSV</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          {!result ? (
+            <>
+              <div className="rounded-lg border-2 border-dashed border-border p-6 text-center">
+                <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
+                <p className="text-sm font-medium mb-1">Upload a CSV file</p>
+                <p className="text-xs text-muted-foreground mb-3">Required columns: agentId, stateCode, licenseType</p>
+                <p className="text-xs text-muted-foreground mb-3">Optional: licenseNumber, issueDate, expiryDate, status</p>
+                {file ? (
+                  <div className="flex items-center justify-center gap-2 text-sm">
+                    <FileText className="h-4 w-4 text-primary" />
+                    <span className="font-medium text-primary">{file.name}</span>
+                    <button className="text-muted-foreground hover:text-destructive text-xs underline" onClick={() => setFile(null)}>Remove</button>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}>
+                    Choose File
+                  </Button>
+                )}
+                <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              </div>
+            </>
+          ) : (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border p-3 flex items-center gap-2">
+                  <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+                  <div>
+                    <p className="text-xl font-bold text-green-700">{result.imported}</p>
+                    <p className="text-xs text-muted-foreground">Imported</p>
+                  </div>
+                </div>
+                <div className="rounded-lg border p-3 flex items-center gap-2">
+                  <XCircle className="h-5 w-5 text-amber-500 shrink-0" />
+                  <div>
+                    <p className="text-xl font-bold text-amber-600">{result.skipped}</p>
+                    <p className="text-xs text-muted-foreground">Skipped</p>
+                  </div>
+                </div>
+              </div>
+              {result.errors.length > 0 && (
+                <div className="rounded-lg bg-destructive/5 border border-destructive/20 p-3 max-h-32 overflow-y-auto space-y-1">
+                  {result.errors.map((e, i) => (
+                    <p key={i} className="text-xs text-destructive">{e}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={handleClose}>{result ? "Close" : "Cancel"}</Button>
+          {!result && (
+            <Button disabled={!file || isPending || parsing} onClick={handleImport}>
+              {isPending || parsing ? "Importing…" : "Import"}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function LicensingPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [importOpen, setImportOpen] = useState(false);
   const [, navigate] = useLocation();
 
   const { data: renewals, isLoading: renewalsLoading } = useGetRenewals({ days: 90 });
@@ -56,10 +181,17 @@ export default function LicensingPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold">Licensing</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Track and manage state licenses across all agents</p>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Licensing</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Track and manage state licenses across all agents</p>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
+          <Upload className="h-3.5 w-3.5 mr-1.5" />
+          Import CSV
+        </Button>
       </div>
+      <CsvImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
 
       <div className="grid grid-cols-3 gap-4">
         {renewalsLoading ? (

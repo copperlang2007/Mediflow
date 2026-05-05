@@ -2,11 +2,12 @@
  * Carrier Certification Expiry Check Worker.
  *
  * Runs daily via pg-boss at 08:05 UTC. Finds passed certifications expiring
- * within 90 days, creates in-app notifications (deduplicated within 24h),
- * and enqueues reminder emails for certs expiring within 30 days.
+ * within 90 days, deduplicates via cert_renewal_alerts table (one alert per
+ * cert per threshold, never repeats), creates in-app notifications, and
+ * enqueues reminder emails to BOTH the agent AND all compliance managers.
  */
 
-import { and, eq, sql, gt } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -15,13 +16,15 @@ import {
   agentsTable,
   usersTable,
   notificationsTable,
+  certRenewalAlertsTable,
 } from "@workspace/db";
 import { type CertExpiryCheckPayload, enqueue, JOB_NAMES } from "../lib/jobs";
 import { certExpiryEmailHtml } from "../lib/email";
 import { broadcastToUsers } from "../lib/sseManager";
 import { logger } from "../lib/logger";
 
-const ALERT_THRESHOLDS_DAYS = [90, 60, 30, 14, 7];
+// Sorted ascending so .find() returns the smallest bucket that covers daysUntilExpiry.
+const ALERT_THRESHOLDS_DAYS = [7, 14, 30, 60, 90];
 
 export async function certExpiryCheckWorker(
   data: CertExpiryCheckPayload,
@@ -73,6 +76,27 @@ export async function certExpiryCheckWorker(
     const nearestThreshold = ALERT_THRESHOLDS_DAYS.find((t) => daysUntilExpiry <= t);
     if (!nearestThreshold) continue;
 
+    // Deduplicate via cert_renewal_alerts table (one alert per cert per threshold, ever)
+    const [existing] = await db
+      .select({ id: certRenewalAlertsTable.id, sentAt: certRenewalAlertsTable.sentAt })
+      .from(certRenewalAlertsTable)
+      .where(
+        and(
+          eq(certRenewalAlertsTable.certId, cert.certId),
+          eq(certRenewalAlertsTable.alertDaysBefore, nearestThreshold),
+        ),
+      )
+      .limit(1);
+
+    if (existing?.sentAt) {
+      logger.debug(
+        { certId: cert.certId, threshold: nearestThreshold },
+        "Cert alert already sent for this threshold — skipping",
+      );
+      continue;
+    }
+
+    // Fetch compliance managers + admins
     const orgAdmins = await db
       .select({ id: usersTable.id, email: usersTable.email })
       .from(usersTable)
@@ -84,34 +108,22 @@ export async function certExpiryCheckWorker(
         ),
       );
 
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const existingNotifs = await db
-      .select({ userId: notificationsTable.userId })
-      .from(notificationsTable)
-      .where(
-        and(
-          eq(notificationsTable.type, "cert_expiry_alert"),
-          eq(notificationsTable.resourceId, cert.certId),
-          gt(notificationsTable.createdAt, yesterday),
-        ),
-      );
-    const alreadyNotified = new Set(existingNotifs.map((n) => n.userId));
+    // Create in-app notifications for managers
+    const notifInserts = orgAdmins.map((admin) => ({
+      id: randomUUID(),
+      orgId: cert.orgId,
+      userId: admin.id,
+      type: "cert_expiry_alert",
+      title: `Certification expiring in ${daysUntilExpiry} days`,
+      body: `${cert.agentFirstName} ${cert.agentLastName}: ${cert.carrierName} (${cert.certificationYear}) expires ${cert.expiryDate!.toLocaleDateString()}`,
+      resourceType: "certification",
+      resourceId: cert.certId,
+      priority: daysUntilExpiry <= 30 ? "high" : "normal",
+    }));
 
-    const notifInserts = orgAdmins
-      .filter((admin) => !alreadyNotified.has(admin.id))
-      .map((admin) => ({
-        id: randomUUID(),
-        orgId: cert.orgId,
-        userId: admin.id,
-        type: "cert_expiry_alert",
-        title: `Certification expiring in ${daysUntilExpiry} days`,
-        body: `${cert.agentFirstName} ${cert.agentLastName}: ${cert.carrierName} (${cert.certificationYear}) expires ${cert.expiryDate!.toLocaleDateString()}`,
-        resourceType: "certification",
-        resourceId: cert.certId,
-        priority: daysUntilExpiry <= 30 ? "high" : "normal",
-      }));
-
+    let firstNotifId: string | null = null;
     if (notifInserts.length > 0) {
+      firstNotifId = notifInserts[0].id;
       await db.insert(notificationsTable).values(notifInserts).onConflictDoNothing();
       broadcastToUsers(
         notifInserts.map((n) => n.userId),
@@ -139,6 +151,22 @@ export async function certExpiryCheckWorker(
         html: emailHtml,
         tags: { certId: cert.certId, threshold: String(nearestThreshold) },
       });
+    }
+
+    // Record alert in cert_renewal_alerts for dedup on next run
+    if (existing) {
+      await db
+        .update(certRenewalAlertsTable)
+        .set({ sentAt: now, notificationId: firstNotifId })
+        .where(eq(certRenewalAlertsTable.id, existing.id));
+    } else {
+      await db.insert(certRenewalAlertsTable).values({
+        id: randomUUID(),
+        certId: cert.certId,
+        alertDaysBefore: nearestThreshold,
+        sentAt: now,
+        notificationId: firstNotifId,
+      }).onConflictDoNothing();
     }
   }
 

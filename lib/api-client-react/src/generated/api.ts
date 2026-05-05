@@ -25,6 +25,8 @@ import type {
   AhipDashboard,
   AhipRecord,
   AuditLogResponse,
+  BulkImportLicensesBody,
+  BulkImportResult,
   Carrier,
   CarrierCertification,
   CertificationMatrix,
@@ -55,6 +57,7 @@ import type {
   GetTasksParams,
   GetUsersParams,
   HealthStatus,
+  LicenseRenewalAlert,
   Notification,
   NotificationCount,
   OffboardResponse,
@@ -1713,6 +1716,187 @@ export const useCreateAgentLicense = <
   TContext
 > => {
   return useMutation(getCreateAgentLicenseMutationOptions(options));
+};
+
+/**
+ * @summary Get renewal alert history for a specific license
+ */
+export const getGetLicenseRenewalAlertsUrl = (id: string, lid: string) => {
+  return `/api/agents/${id}/licenses/${lid}/alerts`;
+};
+
+export const getLicenseRenewalAlerts = async (
+  id: string,
+  lid: string,
+  options?: RequestInit,
+): Promise<LicenseRenewalAlert[]> => {
+  return customFetch<LicenseRenewalAlert[]>(
+    getGetLicenseRenewalAlertsUrl(id, lid),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetLicenseRenewalAlertsQueryKey = (id: string, lid: string) => {
+  return [`/api/agents/${id}/licenses/${lid}/alerts`] as const;
+};
+
+export const getGetLicenseRenewalAlertsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getLicenseRenewalAlerts>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  lid: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getLicenseRenewalAlerts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetLicenseRenewalAlertsQueryKey(id, lid);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getLicenseRenewalAlerts>>
+  > = ({ signal }) =>
+    getLicenseRenewalAlerts(id, lid, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(id && lid),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getLicenseRenewalAlerts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetLicenseRenewalAlertsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getLicenseRenewalAlerts>>
+>;
+export type GetLicenseRenewalAlertsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get renewal alert history for a specific license
+ */
+
+export function useGetLicenseRenewalAlerts<
+  TData = Awaited<ReturnType<typeof getLicenseRenewalAlerts>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  lid: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getLicenseRenewalAlerts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetLicenseRenewalAlertsQueryOptions(id, lid, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Bulk import licenses from CSV rows
+ */
+export const getBulkImportLicensesUrl = () => {
+  return `/api/licenses/bulk-import`;
+};
+
+export const bulkImportLicenses = async (
+  bulkImportLicensesBody: BulkImportLicensesBody,
+  options?: RequestInit,
+): Promise<BulkImportResult> => {
+  return customFetch<BulkImportResult>(getBulkImportLicensesUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(bulkImportLicensesBody),
+  });
+};
+
+export const getBulkImportLicensesMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof bulkImportLicenses>>,
+    TError,
+    { data: BodyType<BulkImportLicensesBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof bulkImportLicenses>>,
+  TError,
+  { data: BodyType<BulkImportLicensesBody> },
+  TContext
+> => {
+  const mutationKey = ["bulkImportLicenses"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof bulkImportLicenses>>,
+    { data: BodyType<BulkImportLicensesBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return bulkImportLicenses(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type BulkImportLicensesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof bulkImportLicenses>>
+>;
+export type BulkImportLicensesMutationBody = BodyType<BulkImportLicensesBody>;
+export type BulkImportLicensesMutationError = ErrorType<void>;
+
+/**
+ * @summary Bulk import licenses from CSV rows
+ */
+export const useBulkImportLicenses = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof bulkImportLicenses>>,
+    TError,
+    { data: BodyType<BulkImportLicensesBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof bulkImportLicenses>>,
+  TError,
+  { data: BodyType<BulkImportLicensesBody> },
+  TContext
+> => {
+  return useMutation(getBulkImportLicensesMutationOptions(options));
 };
 
 /**

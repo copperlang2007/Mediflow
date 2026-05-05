@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
-import { db, agentsTable, stateLicensesTable } from "@workspace/db";
+import { db, agentsTable, stateLicensesTable, licenseRenewalAlertsTable } from "@workspace/db";
 import {
   requireAuth,
   requirePermission,
@@ -185,6 +185,104 @@ router.delete(
     }
 
     res.sendStatus(204);
+  },
+);
+
+// GET /agents/:id/licenses/:lid/alerts — renewal alert history for one license
+router.get(
+  "/agents/:id/licenses/:lid/alerts",
+  requireAuth,
+  requirePermission("agent", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const licenseId = Array.isArray(req.params.lid) ? req.params.lid[0] : req.params.lid;
+
+    if (!(await getAgentOrFail(agentId, authReq.orgId, res))) return;
+
+    const alerts = await db
+      .select()
+      .from(licenseRenewalAlertsTable)
+      .where(eq(licenseRenewalAlertsTable.licenseId, licenseId))
+      .orderBy(licenseRenewalAlertsTable.alertDaysBefore);
+
+    res.json(alerts);
+  },
+);
+
+// POST /licenses/bulk-import — parse CSV body and upsert licenses for existing agents
+const CsvLicenseRowSchema = z.object({
+  agentId: z.string().min(1),
+  stateCode: z.string().length(2).toUpperCase(),
+  licenseType: z.string().min(1).max(100),
+  licenseNumber: z.string().max(50).optional(),
+  issueDate: z.string().optional(),
+  expiryDate: z.string().optional(),
+  status: z.enum(["active", "pending", "expired", "suspended", "not_appointed"]).default("pending"),
+});
+
+router.post(
+  "/licenses/bulk-import",
+  requireAuth,
+  requirePermission("agent", "update"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const { rows } = req.body as { rows?: unknown[] };
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      res.status(400).json({ error: "rows must be a non-empty array" });
+      return;
+    }
+
+    if (rows.length > 500) {
+      res.status(400).json({ error: "Maximum 500 rows per import" });
+      return;
+    }
+
+    const results: { imported: number; skipped: number; errors: string[] } = {
+      imported: 0,
+      skipped: 0,
+      errors: [],
+    };
+
+    // Validate all org agents upfront
+    const agentIds = [...new Set(rows.map((r: unknown) => (r as Record<string, unknown>).agentId as string))];
+    const validAgents = await db
+      .select({ id: agentsTable.id })
+      .from(agentsTable)
+      .where(and(eq(agentsTable.orgId, authReq.orgId)));
+    const validAgentIdSet = new Set(validAgents.map((a) => a.id));
+
+    for (let i = 0; i < rows.length; i++) {
+      const parsed = CsvLicenseRowSchema.safeParse(rows[i]);
+      if (!parsed.success) {
+        results.errors.push(`Row ${i + 1}: ${parsed.error.issues.map((e) => e.message).join(", ")}`);
+        results.skipped++;
+        continue;
+      }
+      const row = parsed.data;
+      if (!validAgentIdSet.has(row.agentId)) {
+        results.errors.push(`Row ${i + 1}: agentId ${row.agentId} not found in org`);
+        results.skipped++;
+        continue;
+      }
+
+      await db.insert(stateLicensesTable).values({
+        id: randomUUID(),
+        agentId: row.agentId,
+        stateCode: row.stateCode,
+        licenseType: row.licenseType,
+        licenseNumber: row.licenseNumber ?? null,
+        issueDate: row.issueDate ? new Date(row.issueDate) : null,
+        expiryDate: row.expiryDate ? new Date(row.expiryDate) : null,
+        status: row.status,
+      }).onConflictDoNothing();
+
+      results.imported++;
+    }
+
+    res.status(200).json(results);
+    return;
   },
 );
 

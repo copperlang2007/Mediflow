@@ -526,6 +526,50 @@ export const CreateAgentLicenseBody = zod.object({
 });
 
 /**
+ * @summary Get renewal alert history for a specific license
+ */
+export const GetLicenseRenewalAlertsParams = zod.object({
+  id: zod.coerce.string(),
+  lid: zod.coerce.string(),
+});
+
+export const GetLicenseRenewalAlertsResponseItem = zod.object({
+  id: zod.string(),
+  licenseId: zod.string(),
+  alertDaysBefore: zod.number(),
+  sentAt: zod.coerce.date().nullish(),
+  notificationId: zod.string().nullish(),
+});
+export const GetLicenseRenewalAlertsResponse = zod.array(
+  GetLicenseRenewalAlertsResponseItem,
+);
+
+/**
+ * @summary Bulk import licenses from CSV rows
+ */
+export const BulkImportLicensesBody = zod.object({
+  rows: zod.array(
+    zod.object({
+      agentId: zod.string(),
+      stateCode: zod.string(),
+      licenseType: zod.string(),
+      licenseNumber: zod.string().optional(),
+      issueDate: zod.string().optional(),
+      expiryDate: zod.string().optional(),
+      status: zod
+        .enum(["active", "pending", "expired", "suspended", "not_appointed"])
+        .optional(),
+    }),
+  ),
+});
+
+export const BulkImportLicensesResponse = zod.object({
+  imported: zod.number(),
+  skipped: zod.number(),
+  errors: zod.array(zod.string()),
+});
+
+/**
  * @summary Update a state license
  */
 export const UpdateAgentLicenseParams = zod.object({

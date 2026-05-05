@@ -577,8 +577,9 @@ router.get(
 
       res.setHeader("Content-Type", contentType);
       res.setHeader("Content-Disposition", `attachment; filename="${safeName}"`);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (file as any).createReadStream().pipe(res);
+      const dlResponse = await objectStorage.downloadObject(file);
+      const buffer = Buffer.from(await dlResponse.arrayBuffer());
+      res.send(buffer);
     } catch {
       res.status(500).json({ error: "Failed to retrieve offboarding report file" });
     }

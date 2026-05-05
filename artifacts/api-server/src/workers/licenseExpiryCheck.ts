@@ -21,7 +21,9 @@ import { licenseExpiryEmailHtml } from "../lib/email";
 import { broadcastToUsers } from "../lib/sseManager";
 import { logger } from "../lib/logger";
 
-const ALERT_THRESHOLDS_DAYS = [90, 60, 30, 14, 7];
+// Sorted ascending so .find() returns the smallest bucket that covers daysUntilExpiry.
+// e.g. 45 days → 60-day threshold (not 90).
+const ALERT_THRESHOLDS_DAYS = [7, 14, 30, 60, 90];
 
 export async function licenseExpiryCheckWorker(
   data: LicenseExpiryCheckPayload,

@@ -242,6 +242,18 @@ export const insertAhipRecordSchema = createInsertSchema(ahipRecordsTable).omit(
 export type InsertAhipRecord = z.infer<typeof insertAhipRecordSchema>;
 export type AhipRecord = typeof ahipRecordsTable.$inferSelect;
 
+export const certRenewalAlertsTable = pgTable("cert_renewal_alerts", {
+  id: text("id").primaryKey(),
+  certId: text("cert_id")
+    .notNull()
+    .references(() => carrierCertificationsTable.id, { onDelete: "cascade" }),
+  alertDaysBefore: integer("alert_days_before").notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  notificationId: text("notification_id"),
+});
+
+export type CertRenewalAlert = typeof certRenewalAlertsTable.$inferSelect;
+
 export const techStackAccountsTable = pgTable("tech_stack_accounts", {
   id: text("id").primaryKey(),
   agentId: text("agent_id")

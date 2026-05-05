@@ -1,9 +1,11 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import {
   useGetAgents,
   useCreateAgent,
   useGetAgentComplianceScore,
   useGetUsers,
+  useCreateTask,
+  useGetTaskTemplates,
   getGetAgentsQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -81,7 +83,7 @@ function SortIcon({ field, sortBy, sortDir }: { field: SortField; sortBy: SortFi
 }
 
 // Multi-step Add Agent Wizard
-type WizardStep = 1 | 2 | 3;
+type WizardStep = 1 | 2 | 3 | 4;
 
 function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
@@ -96,6 +98,7 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
     npn: "",
     hireDate: "",
     managerId: "",
+    checklistTemplateId: "",
   });
 
   const { data: usersData } = useGetUsers();
@@ -110,7 +113,7 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
 
   const handleClose = () => {
     setStep(1);
-    setForm({ firstName: "", lastName: "", email: "", phone: "", npn: "", hireDate: "", managerId: "" });
+    setForm({ firstName: "", lastName: "", email: "", phone: "", npn: "", hireDate: "", managerId: "", checklistTemplateId: "" });
     onClose();
   };
 
@@ -136,11 +139,20 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
     }
   };
 
-  const stepTitle = step === 1 ? "Basic Information" : step === 2 ? "Contact & Assignment" : "Confirm Agent";
-  const stepDesc = step === 1
-    ? "Enter the agent's name and email address."
-    : step === 2
-    ? "Optional contact info, NPN, and manager assignment."
+  const { data: taskTemplates } = useGetTaskTemplates();
+  const onboardingTemplates = (taskTemplates ?? []).filter(
+    (t) => t.type === "onboarding" || t.type === "agent_onboarding",
+  );
+
+  const stepTitle =
+    step === 1 ? "Basic Information"
+    : step === 2 ? "Contact & Assignment"
+    : step === 3 ? "Onboarding Checklist"
+    : "Confirm Agent";
+  const stepDesc =
+    step === 1 ? "Enter the agent's name and email address."
+    : step === 2 ? "Optional contact info, NPN, and manager assignment."
+    : step === 3 ? "Choose which onboarding checklist to start for this agent."
     : "Review the details before creating the agent.";
 
   return (
@@ -149,7 +161,7 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
         <DialogHeader>
           <DialogTitle>Add New Agent</DialogTitle>
           <div className="flex items-center gap-2 mt-2">
-            {([1, 2, 3] as const).map((s) => (
+            {([1, 2, 3, 4] as const).map((s) => (
               <div key={s} className="flex items-center gap-1.5">
                 <div
                   className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors
@@ -157,7 +169,7 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
                 >
                   {step > s ? "✓" : s}
                 </div>
-                {s < 3 && <div className={`w-8 h-0.5 ${step > s ? "bg-green-500" : "bg-muted"}`} />}
+                {s < 4 && <div className={`w-8 h-0.5 ${step > s ? "bg-green-500" : "bg-muted"}`} />}
               </div>
             ))}
           </div>
@@ -226,6 +238,35 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
           )}
 
           {step === 3 && (
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => setForm((p) => ({ ...p, checklistTemplateId: "" }))}
+                className={`w-full text-left rounded-lg border p-3 transition-all hover:border-primary/50
+                  ${form.checklistTemplateId === "" ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border"}`}
+              >
+                <div className="font-medium text-sm">Default Onboarding Checklist</div>
+                <div className="text-xs text-muted-foreground mt-0.5">Standard NPN, licensing, AHIP, and e&o tasks</div>
+              </button>
+              {onboardingTemplates.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setForm((p) => ({ ...p, checklistTemplateId: t.id }))}
+                  className={`w-full text-left rounded-lg border p-3 transition-all hover:border-primary/50
+                    ${form.checklistTemplateId === t.id ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border"}`}
+                >
+                  <div className="font-medium text-sm">{t.name}</div>
+                  {t.description && (
+                    <div className="text-xs text-muted-foreground mt-0.5 truncate">{t.description}</div>
+                  )}
+                </button>
+              ))}
+              <p className="text-xs text-muted-foreground">The selected checklist will be started automatically on agent creation.</p>
+            </div>
+          )}
+
+          {step === 4 && (
             <div className="rounded-lg border bg-muted/30 p-4 space-y-2.5">
               <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                 <span className="text-muted-foreground">Name</span>
@@ -250,10 +291,16 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
                     {managerOptions.find((u) => u.id === form.managerId)?.fullName ?? "—"}
                   </span>
                 </>}
+                <span className="text-muted-foreground">Checklist</span>
+                <span className="font-medium">
+                  {form.checklistTemplateId
+                    ? (onboardingTemplates.find((t) => t.id === form.checklistTemplateId)?.name ?? "Custom")
+                    : "Default Onboarding"}
+                </span>
               </div>
               <div className="border-t pt-2 mt-2">
                 <p className="text-xs text-muted-foreground">
-                  An onboarding checklist will be automatically created for this agent.
+                  Agent will be created and their onboarding checklist started immediately.
                 </p>
               </div>
             </div>
@@ -267,7 +314,7 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
             </Button>
           )}
           <Button type="button" variant="outline" onClick={handleClose}>Cancel</Button>
-          {step < 3 ? (
+          {step < 4 ? (
             <Button
               type="button"
               disabled={step === 1 && !step1Valid}
@@ -283,6 +330,95 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Bulk Actions Bar — assign task to selected agents
+function BulkActionsBar({
+  selected,
+  onExport,
+  onClear,
+}: {
+  selected: Set<string>;
+  onExport: () => void;
+  onClear: () => void;
+}) {
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [templateId, setTemplateId] = useState("");
+  const [assigning, setAssigning] = useState(false);
+  const { data: taskTemplates } = useGetTaskTemplates();
+  const { mutateAsync: createTask } = useCreateTask();
+
+  const handleAssign = async () => {
+    if (!templateId) return;
+    setAssigning(true);
+    let success = 0;
+    let fail = 0;
+    for (const agentId of Array.from(selected)) {
+      try {
+        const tpl = (taskTemplates ?? []).find((t) => t.id === templateId);
+        await createTask({ data: { agentId, templateId, title: tpl?.name ?? "Assigned Task" } });
+        success++;
+      } catch {
+        fail++;
+      }
+    }
+    setAssigning(false);
+    setAssignOpen(false);
+    setTemplateId("");
+    if (success > 0) toast.success(`Task assigned to ${success} agent${success !== 1 ? "s" : ""}${fail > 0 ? ` (${fail} failed)` : ""}`);
+    else toast.error("Failed to assign task to any agent");
+  };
+
+  return (
+    <div className="flex items-center gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+      <span className="text-sm font-medium text-primary">{selected.size} agent{selected.size !== 1 ? "s" : ""} selected</span>
+      <Button size="sm" variant="outline" onClick={onExport}>
+        <Download className="h-3.5 w-3.5 mr-1.5" />
+        Export Selected
+      </Button>
+      <Button size="sm" variant="outline" onClick={() => setAssignOpen(true)}>
+        <CheckSquare className="h-3.5 w-3.5 mr-1.5" />
+        Assign Task
+      </Button>
+      <Button size="sm" variant="ghost" className="text-muted-foreground ml-auto" onClick={onClear}>
+        Clear
+      </Button>
+
+      <Dialog open={assignOpen} onOpenChange={(v) => { if (!v) { setAssignOpen(false); setTemplateId(""); } }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Assign Task to {selected.size} Agent{selected.size !== 1 ? "s" : ""}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label>Task Template</Label>
+              <Select value={templateId} onValueChange={setTemplateId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a template…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(taskTemplates ?? []).map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              This task will be created for each selected agent using the chosen template.
+            </p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setAssignOpen(false); setTemplateId(""); }}>Cancel</Button>
+            <Button disabled={!templateId || assigning} onClick={handleAssign}>
+              {assigning ? "Assigning…" : "Assign Task"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 
@@ -402,16 +538,11 @@ export default function AgentsPage() {
       </div>
 
       {selected.size > 0 && (
-        <div className="flex items-center gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
-          <span className="text-sm font-medium text-primary">{selected.size} agent{selected.size !== 1 ? "s" : ""} selected</span>
-          <Button size="sm" variant="outline" onClick={exportCSV}>
-            <Download className="h-3.5 w-3.5 mr-1.5" />
-            Export Selected
-          </Button>
-          <Button size="sm" variant="ghost" className="text-muted-foreground ml-auto" onClick={() => setSelected(new Set())}>
-            Clear
-          </Button>
-        </div>
+        <BulkActionsBar
+          selected={selected}
+          onExport={exportCSV}
+          onClear={() => setSelected(new Set())}
+        />
       )}
 
       <Card>

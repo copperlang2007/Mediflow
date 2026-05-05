@@ -438,6 +438,53 @@ paths:
               schema:
                 $ref: "#/components/schemas/StateLicense"
 
+  /agents/{id}/licenses/{lid}/alerts:
+    get:
+      operationId: getLicenseRenewalAlerts
+      tags: [licenses]
+      summary: Get renewal alert history for a specific license
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: lid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of sent renewal alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LicenseRenewalAlert"
+
+  /licenses/bulk-import:
+    post:
+      operationId: bulkImportLicenses
+      tags: [licenses]
+      summary: Bulk import licenses from CSV rows
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkImportLicensesBody"
+      responses:
+        "200":
+          description: Import results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkImportResult"
+        "400":
+          description: Invalid request
+
   /agents/{id}/licenses/{lid}:
     patch:
       operationId: updateAgentLicense
@@ -1954,6 +2001,71 @@ components:
         - totalCertifications
         - ahipCompleted
         - onboardingComplete
+
+    LicenseRenewalAlert:
+      type: object
+      properties:
+        id:
+          type: string
+        licenseId:
+          type: string
+        alertDaysBefore:
+          type: integer
+        sentAt:
+          type: ["string", "null"]
+          format: date-time
+        notificationId:
+          type: ["string", "null"]
+      required:
+        - id
+        - licenseId
+        - alertDaysBefore
+
+    BulkImportLicensesBody:
+      type: object
+      properties:
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              agentId:
+                type: string
+              stateCode:
+                type: string
+              licenseType:
+                type: string
+              licenseNumber:
+                type: string
+              issueDate:
+                type: string
+              expiryDate:
+                type: string
+              status:
+                type: string
+                enum: [active, pending, expired, suspended, not_appointed]
+            required:
+              - agentId
+              - stateCode
+              - licenseType
+      required:
+        - rows
+
+    BulkImportResult:
+      type: object
+      properties:
+        imported:
+          type: integer
+        skipped:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: string
+      required:
+        - imported
+        - skipped
+        - errors
 
     StateLicense:
       type: object

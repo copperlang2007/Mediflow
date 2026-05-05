@@ -278,6 +278,47 @@ export interface ComplianceScore {
   onboardingComplete: boolean;
 }
 
+export interface LicenseRenewalAlert {
+  id: string;
+  licenseId: string;
+  alertDaysBefore: number;
+  /** @nullable */
+  sentAt?: string | null;
+  /** @nullable */
+  notificationId?: string | null;
+}
+
+export type BulkImportLicensesBodyRowsItemStatus =
+  (typeof BulkImportLicensesBodyRowsItemStatus)[keyof typeof BulkImportLicensesBodyRowsItemStatus];
+
+export const BulkImportLicensesBodyRowsItemStatus = {
+  active: "active",
+  pending: "pending",
+  expired: "expired",
+  suspended: "suspended",
+  not_appointed: "not_appointed",
+} as const;
+
+export type BulkImportLicensesBodyRowsItem = {
+  agentId: string;
+  stateCode: string;
+  licenseType: string;
+  licenseNumber?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  status?: BulkImportLicensesBodyRowsItemStatus;
+};
+
+export interface BulkImportLicensesBody {
+  rows: BulkImportLicensesBodyRowsItem[];
+}
+
+export interface BulkImportResult {
+  imported: number;
+  skipped: number;
+  errors: string[];
+}
+
 export type StateLicenseStatus =
   (typeof StateLicenseStatus)[keyof typeof StateLicenseStatus];
 
