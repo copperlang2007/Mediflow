@@ -31,16 +31,16 @@ export const ONBOARDING_ITEMS = [
 ];
 
 export const OFFBOARDING_ITEMS = [
-  { title: "Submit final production report", description: "Generate and file final sales and enrollment report", required: true, orderIndex: 1 },
-  { title: "Transfer or reassign open leads", description: "Reassign all active CRM leads to other agents", required: true, orderIndex: 2 },
-  { title: "Deprovision CRM access", description: "Remove agent login from CRM platform", required: true, orderIndex: 3 },
-  { title: "Deprovision quoting tool access", description: "Remove agent login from quoting and enrollment platform", required: true, orderIndex: 4 },
-  { title: "Deprovision email and communication accounts", description: "Disable agency email and communication tool access", required: true, orderIndex: 5 },
-  { title: "Notify carriers of termination", description: "Send carrier termination notices per contract requirements", required: true, orderIndex: 6 },
-  { title: "Collect agency property", description: "Retrieve any agency-issued equipment or materials", required: false, orderIndex: 7 },
-  { title: "Complete COBRA / benefits paperwork", description: "Process benefits continuation paperwork if applicable", required: false, orderIndex: 8 },
-  { title: "File state termination notices", description: "Submit license appointment terminations with state DOI", required: true, orderIndex: 9 },
-  { title: "Archive agent records", description: "Move agent records to long-term compliance archive", required: true, orderIndex: 10 },
+  { title: "Revoke CRM access", description: "Remove agent login and reassign all active CRM leads to other agents", required: true, orderIndex: 1 },
+  { title: "Deprovision quoting & enrollment tool access", description: "Remove agent credentials from quoting, enrollment, and comparison platforms", required: true, orderIndex: 2 },
+  { title: "Deprovision email and communication accounts", description: "Disable agency email, messaging, and communication tool access", required: true, orderIndex: 3 },
+  { title: "Deprovision all remaining tech stack accounts", description: "Revoke access to all remaining platforms listed in the agent's tech stack", required: true, orderIndex: 4 },
+  { title: "Notify carriers of termination", description: "Send carrier appointment termination notices per contract requirements", required: true, orderIndex: 5 },
+  { title: "File state license appointment terminations", description: "Submit termination of appointment forms with applicable state DOIs", required: true, orderIndex: 6 },
+  { title: "Collect signed release documents", description: "Obtain signed non-solicitation, data-return, and release agreements from agent", required: true, orderIndex: 7 },
+  { title: "Retrieve agency-issued property", description: "Collect any agency-issued equipment, materials, or credentials", required: false, orderIndex: 8 },
+  { title: "Archive agent records", description: "Move agent records to long-term compliance archive per retention policy", required: true, orderIndex: 9 },
+  { title: "Set final agent status to Offboarded", description: "Confirm all steps complete and mark agent status as Offboarded in the platform", required: true, orderIndex: 10 },
 ];
 
 export async function createChecklistRun(

@@ -295,7 +295,7 @@ async function buildPdf(data: {
         offboardingSteps.map((s) => [
           String(s.title ?? "").substring(0, 50),
           String(s.status ?? ""),
-          String(s.completedBy ?? "—").substring(0, 30),
+          String(s.completedByUserId ?? "—").substring(0, 30),
           s.completedAt ? fmt(s.completedAt as Date) : "—",
         ]),
         [215, 75, 130, 100],
