@@ -108,17 +108,45 @@ router.post(
   requireRole("super_admin", "agency_admin"),
   upload.single("file"),
   async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
     if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
     const mapping = req.body.mapping ? JSON.parse(req.body.mapping as string) as Record<string, string> : {};
 
     const { rows } = parseCSV(req.file.buffer);
     const validationErrors: { row: number; field: string; message: string; value?: string }[] = [];
 
+    // Pre-compute column lookups
+    const firstNameCol = Object.keys(mapping).find((k) => mapping[k] === "firstName");
+    const lastNameCol = Object.keys(mapping).find((k) => mapping[k] === "lastName");
+    const fullNameCol = Object.keys(mapping).find((k) => mapping[k] === "fullName");
+    const stateCol = Object.keys(mapping).find((k) => mapping[k] === "licenseState");
+    const npnCol = Object.keys(mapping).find((k) => mapping[k] === "npn");
+
+    // Collect all non-empty NPNs for duplicate checks
+    const csvNpns = npnCol
+      ? rows.map((r) => r[npnCol]?.trim()).filter((n): n is string => !!n)
+      : [];
+
+    // Detect intra-CSV NPN duplicates
+    const csvNpnSeen = new Set<string>();
+    const csvNpnDuplicates = new Set<string>();
+    for (const n of csvNpns) {
+      if (csvNpnSeen.has(n)) csvNpnDuplicates.add(n);
+      else csvNpnSeen.add(n);
+    }
+
+    // Detect NPNs already in DB for this org
+    let dbNpnSet = new Set<string>();
+    if (csvNpns.length > 0) {
+      const existing = await db
+        .select({ npn: agentsTable.npn })
+        .from(agentsTable)
+        .where(and(eq(agentsTable.orgId, authReq.orgId), inArray(agentsTable.npn, csvNpns)));
+      dbNpnSet = new Set(existing.map((a) => a.npn).filter((n): n is string => !!n));
+    }
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const firstNameCol = Object.keys(mapping).find((k) => mapping[k] === "firstName");
-      const lastNameCol = Object.keys(mapping).find((k) => mapping[k] === "lastName");
-      const fullNameCol = Object.keys(mapping).find((k) => mapping[k] === "fullName");
 
       const firstName = firstNameCol ? row[firstNameCol]?.trim() : fullNameCol ? row[fullNameCol]?.split(" ")[0] : "";
       const lastName = lastNameCol ? row[lastNameCol]?.trim() : fullNameCol ? row[fullNameCol]?.split(" ").slice(1).join(" ") : "";
@@ -126,10 +154,21 @@ router.post(
       if (!firstName) validationErrors.push({ row: i + 2, field: "firstName", message: "First name is required" });
       if (!lastName) validationErrors.push({ row: i + 2, field: "lastName", message: "Last name is required" });
 
-      const stateCol = Object.keys(mapping).find((k) => mapping[k] === "licenseState");
       if (stateCol && row[stateCol]) {
         const state = row[stateCol].toUpperCase().trim();
         if (!US_STATES.has(state)) validationErrors.push({ row: i + 2, field: "licenseState", message: `Invalid state code: ${state}`, value: state });
+      }
+
+      // NPN duplicate validation
+      if (npnCol) {
+        const npn = row[npnCol]?.trim();
+        if (npn) {
+          if (csvNpnDuplicates.has(npn)) {
+            validationErrors.push({ row: i + 2, field: "npn", message: `Duplicate NPN within file: ${npn}`, value: npn });
+          } else if (dbNpnSet.has(npn)) {
+            validationErrors.push({ row: i + 2, field: "npn", message: `NPN already exists in system: ${npn}`, value: npn });
+          }
+        }
       }
     }
 
@@ -138,6 +177,7 @@ router.post(
       errorCount: validationErrors.length,
       validRows: rows.length - new Set(validationErrors.map((e) => e.row)).size,
       errors: validationErrors.slice(0, 200),
+      duplicateNpns: csvNpnDuplicates.size + dbNpnSet.size,
     });
   },
 );

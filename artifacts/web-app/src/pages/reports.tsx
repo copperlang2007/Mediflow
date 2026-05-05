@@ -398,15 +398,44 @@ function CommunicationsTab() {
   if (isLoading) return <LoadingSkeleton />;
   if (!data) return <EmptyState message="No communications data." />;
 
+  const deliveryRate = data.totalSms > 0 ? Math.round(((data.totalSms - (data.optOutSmsContacts ?? 0)) / data.totalSms) * 100) : 100;
+
   return (
-    <div className="space-y-6">
-      <DateRangePicker value={range} onChange={setRange} />
+    <div className="space-y-6 print:space-y-4">
+      <div className="flex items-center justify-between print:hidden">
+        <DateRangePicker value={range} onChange={setRange} />
+        <Button variant="outline" size="sm" onClick={() => window.print()}>
+          <Download className="h-4 w-4 mr-1.5" /> Print
+        </Button>
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard title="SMS Sent" value={data.totalSms.toLocaleString()} icon={<MessageSquare className="h-5 w-5 text-blue-500" />} />
         <StatCard title="Emails Sent" value={data.totalEmail.toLocaleString()} icon={<MessageSquare className="h-5 w-5 text-purple-500" />} />
         <StatCard title="AI-Assisted SMS" value={data.aiAssistedSms.toLocaleString()} subtitle={data.totalSms > 0 ? `${Math.round((data.aiAssistedSms / data.totalSms) * 100)}% AI-written` : undefined} icon={<TrendingUp className="h-5 w-5 text-green-500" />} />
         <StatCard title="AI-Assisted Email" value={data.aiAssistedEmail.toLocaleString()} subtitle={data.totalEmail > 0 ? `${Math.round((data.aiAssistedEmail / data.totalEmail) * 100)}% AI-written` : undefined} icon={<TrendingUp className="h-5 w-5 text-orange-500" />} />
+      </div>
+
+      {/* Delivery & opt-out metrics */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <StatCard
+          title="SMS Opt-outs"
+          value={(data.optOutSmsContacts ?? 0).toLocaleString()}
+          subtitle="Contacts opted out of SMS"
+          icon={<XCircle className="h-5 w-5 text-red-500" />}
+        />
+        <StatCard
+          title="Email Opt-outs"
+          value={(data.optOutEmailContacts ?? 0).toLocaleString()}
+          subtitle="Contacts opted out of email"
+          icon={<XCircle className="h-5 w-5 text-red-400" />}
+        />
+        <StatCard
+          title="Effective Delivery Rate"
+          value={`${deliveryRate}%`}
+          subtitle="SMS recipients not opted out"
+          icon={<CheckCircle2 className="h-5 w-5 text-green-500" />}
+        />
       </div>
 
       <Card>
@@ -425,6 +454,40 @@ function CommunicationsTab() {
           </ResponsiveContainer>
         </CardContent>
       </Card>
+
+      {/* Per-agent leaderboard */}
+      {data.byAgent && data.byAgent.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Agent Outreach Leaderboard</CardTitle>
+            <CardDescription>SMS and email volume per agent in the selected period</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground">Agent</th>
+                    <th className="text-right py-2 px-4 font-medium text-muted-foreground">SMS</th>
+                    <th className="text-right py-2 px-4 font-medium text-muted-foreground">Email</th>
+                    <th className="text-right py-2 pl-4 font-medium text-muted-foreground">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.byAgent.slice(0, 15).map((row) => (
+                    <tr key={row.agentId} className="border-b last:border-0 hover:bg-muted/30">
+                      <td className="py-2 pr-4 font-medium">{row.agentName}</td>
+                      <td className="text-right py-2 px-4">{row.smsSent.toLocaleString()}</td>
+                      <td className="text-right py-2 px-4">{row.emailSent.toLocaleString()}</td>
+                      <td className="text-right py-2 pl-4 font-semibold">{(row.smsSent + row.emailSent).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
@@ -440,12 +503,47 @@ function RetentionTab() {
   if (!data) return <EmptyState message="No retention data." />;
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+    <div className="space-y-6 print:space-y-4">
+      <div className="flex justify-end print:hidden">
+        <Button variant="outline" size="sm" onClick={() => window.print()}>
+          <Download className="h-4 w-4 mr-1.5" /> Print
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard title="Enrolled Members" value={data.enrolledContacts.toLocaleString()} icon={<CheckCircle2 className="h-5 w-5 text-green-500" />} />
         <StatCard title="At-Risk Members" value={data.atRiskContacts.toLocaleString()} subtitle="No activity 60+ days" icon={<AlertTriangle className="h-5 w-5 text-yellow-500" />} />
         <StatCard title="Lost Members" value={data.lostContacts.toLocaleString()} icon={<XCircle className="h-5 w-5 text-red-500" />} />
+        <StatCard
+          title="Re-enrollment Opportunities"
+          value={(data.reEnrollmentOpportunity ?? 0).toLocaleString()}
+          subtitle="AEP-eligible lost members"
+          icon={<TrendingUp className="h-5 w-5 text-blue-500" />}
+        />
       </div>
+
+      {/* AEP / OEP window banners */}
+      {data.aepWindow?.isActive && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-medium text-blue-800">Annual Enrollment Period (AEP) is active</p>
+            <p className="text-sm text-blue-700 mt-0.5">
+              {data.reEnrollmentOpportunity ?? 0} lost members are re-enrollment candidates. Consider outreach sequences now.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {data.upcomingBirthdays != null && data.upcomingBirthdays > 0 && (
+        <div className="rounded-lg border border-purple-200 bg-purple-50 p-4 flex items-start gap-3">
+          <CheckCircle2 className="h-5 w-5 text-purple-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-medium text-purple-800">{data.upcomingBirthdays} member(s) turning 65 in the next 90 days</p>
+            <p className="text-sm text-purple-700 mt-0.5">These contacts qualify for Medicare Part B enrollment — consider a targeted outreach campaign.</p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card>
@@ -480,6 +578,29 @@ function RetentionTab() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Monthly enrollment / loss trend */}
+      {data.monthlyTrend && data.monthlyTrend.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Monthly Enrollment Trend</CardTitle>
+            <CardDescription>New enrollments vs. members lost over the past 12 months</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={data.monthlyTrend}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="enrolled" fill="#10b981" radius={[4, 4, 0, 0]} name="Enrolled" />
+                <Bar dataKey="lost" fill="#ef4444" radius={[4, 4, 0, 0]} name="Lost" />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
 
       {data.atRiskRate > 10 && (
         <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 flex items-start gap-3">
@@ -542,13 +663,33 @@ function EmptyState({ message }: { message: string }) {
 }
 
 // Types
-type AgentPerfRow = { agentId: string; agentName: string; email: string; status: string; contactsWorked: number; callsLogged: number; dealsWon: number; dealValueWon: number; enrolledContacts: number; complianceScore: number; licensesActive: number; licensesExpiring: number; certificationsPassed: number; ahipStatus: string };
-type PipelineReportRow = { pipelineId: string; pipelineName: string; totalDeals: number; wonDeals: number; lostDeals: number; winRate: number; totalWonValue: number; funnel: { stageId: string; stageName: string; orderIndex: number; dealCount: number; totalValue: number; wonCount: number; lostCount: number }[] };
+type AgentPerfRow = { agentId: string; agentName: string; email: string; status: string; contactsWorked: number; callsLogged: number; dealsWon: number; dealValueWon: number; enrolledContacts: number; complianceScore: number; licensesActive: number; licensesExpiring: number; certificationsPassed: number; ahipStatus: string; smsSent?: number; emailSent?: number };
+type PipelineReportRow = { pipelineId: string; pipelineName: string; totalDeals: number; wonDeals: number; lostDeals: number; winRate: number; totalWonValue: number; funnel: { stageId: string; stageName: string; orderIndex: number; dealCount: number; totalValue: number; wonCount: number; lostCount: number; avgTimeInStageHours?: number; conversionRate?: number }[] };
 type LeadsReport = { sourceBreakdown: { source: string; total: number; converted: number; enrolled: number; conversionRate: number; enrollmentRate: number }[]; trend: { date: string; count: number }[]; totalLeads: number; convertedLeads: number };
 type ComplianceMatrixReport = { licenseMatrix: AgentLicenseRow[]; expiryByMonth: { month: string; count: number }[]; carrierCertCompletion: { carrierId: string; carrierName: string; byYear: { year: number; total: number; passed: number; completionRate: number }[] }[]; ahipTrend: { year: number; total: number; passed: number; completionRate: number }[] };
 type AgentLicenseRow = { agentId: string; agentName: string; licenses: { stateCode: string; licenseType: string; status: string; expiryDate: string | null; expiringIn90Days: boolean }[] };
-type CommunicationsReport = { totalSms: number; totalEmail: number; aiAssistedSms: number; aiAssistedEmail: number; trend: { date: string; sms: number; email: number }[] };
-type RetentionReport = { enrolledContacts: number; lostContacts: number; atRiskContacts: number; retentionRate: number; atRiskRate: number };
+type CommunicationsReport = {
+  totalSms: number;
+  totalEmail: number;
+  aiAssistedSms: number;
+  aiAssistedEmail: number;
+  trend: { date: string; sms: number; email: number }[];
+  optOutSmsContacts?: number;
+  optOutEmailContacts?: number;
+  byAgent?: { agentId: string; agentName: string; smsSent: number; emailSent: number }[];
+};
+type RetentionReport = {
+  enrolledContacts: number;
+  lostContacts: number;
+  atRiskContacts: number;
+  retentionRate: number;
+  atRiskRate: number;
+  monthlyTrend?: { month: string; enrolled: number; lost: number }[];
+  aepWindow?: { isActive: boolean; start: string; end: string };
+  oepWindow?: { isActive: boolean; start: string; end: string };
+  upcomingBirthdays?: number;
+  reEnrollmentOpportunity?: number;
+};
 
 // ─── Main Reports Page ────────────────────────────────────────────────────────
 export default function ReportsPage() {

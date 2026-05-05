@@ -427,9 +427,17 @@ router.delete(
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
+    // Soft-delete: set status to offboarded. Retains record for HIPAA audit trail.
     const [agent] = await db
-      .delete(agentsTable)
-      .where(and(eq(agentsTable.id, raw), eq(agentsTable.orgId, authReq.orgId)))
+      .update(agentsTable)
+      .set({ status: "offboarded", offboardDate: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(agentsTable.id, raw),
+          eq(agentsTable.orgId, authReq.orgId),
+          sql`${agentsTable.status} != 'offboarded'`,
+        ),
+      )
       .returning();
 
     if (!agent) {

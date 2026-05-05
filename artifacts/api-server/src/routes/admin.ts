@@ -22,6 +22,7 @@ import {
 import { randomUUID } from "crypto";
 import PDFDocument from "pdfkit";
 import { ObjectStorageService } from "../lib/objectStorage";
+import { clerkClient } from "@clerk/express";
 
 const objectStorage = new ObjectStorageService();
 
@@ -297,6 +298,96 @@ router.put(
     }
 
     res.json({ sessionTimeoutMinutes: timeout });
+  },
+);
+
+// ─── Session Management (Clerk-backed) ───────────────────────────────────────
+// List active Clerk sessions for a user in this org
+router.get(
+  "/admin/users/:userId/sessions",
+  requireAuth,
+  requireRole("super_admin", "agency_admin"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const userId = param(req.params.userId);
+
+    const [user] = await db
+      .select({ id: usersTable.id, fullName: usersTable.fullName })
+      .from(usersTable)
+      .where(and(eq(usersTable.id, userId), eq(usersTable.orgId, authReq.orgId)))
+      .limit(1);
+    if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+    const result = await clerkClient.sessions.getSessionList({ userId, status: "active" });
+    res.json(
+      result.data.map((s) => ({
+        sessionId: s.id,
+        createdAt: new Date(s.createdAt).toISOString(),
+        lastActiveAt: new Date(s.lastActiveAt).toISOString(),
+        expireAt: new Date(s.expireAt).toISOString(),
+        status: s.status,
+      })),
+    );
+  },
+);
+
+// Revoke a specific Clerk session
+router.delete(
+  "/admin/sessions/:sessionId",
+  requireAuth,
+  requireRole("super_admin", "agency_admin"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const sessionId = param(req.params.sessionId);
+
+    await clerkClient.sessions.revokeSession(sessionId);
+    await db.insert(auditLogTable).values({
+      id: randomUUID(),
+      orgId: authReq.orgId,
+      userId: authReq.userId,
+      userRole: authReq.userRole,
+      action: "revoke_session",
+      resourceType: "session",
+      resourceId: sessionId,
+      ipAddress: req.ip ?? null,
+    });
+
+    res.json({ success: true });
+  },
+);
+
+// Force-logout: revoke ALL active sessions for a user
+router.post(
+  "/admin/users/:userId/force-logout",
+  requireAuth,
+  requireRole("super_admin", "agency_admin"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const userId = param(req.params.userId);
+
+    const [user] = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(and(eq(usersTable.id, userId), eq(usersTable.orgId, authReq.orgId)))
+      .limit(1);
+    if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+    const sessions = await clerkClient.sessions.getSessionList({ userId, status: "active" });
+    await Promise.all(sessions.data.map((s) => clerkClient.sessions.revokeSession(s.id)));
+
+    await db.insert(auditLogTable).values({
+      id: randomUUID(),
+      orgId: authReq.orgId,
+      userId: authReq.userId,
+      userRole: authReq.userRole,
+      action: "force_logout",
+      resourceType: "user",
+      resourceId: userId,
+      changes: { revokedSessionCount: sessions.data.length },
+      ipAddress: req.ip ?? null,
+    });
+
+    res.json({ success: true, revokedCount: sessions.data.length });
   },
 );
 

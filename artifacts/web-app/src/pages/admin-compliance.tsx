@@ -34,17 +34,76 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import {
   ShieldCheck, Download, LogIn, FileDown, Lock, Database,
   CheckCircle2, AlertTriangle, Clock, ChevronRight, Users,
-  RefreshCcw, FileText,
+  RefreshCcw, FileText, MonitorSmartphone, LogOut,
 } from "lucide-react";
 
 // ─── Audit Log Tab ────────────────────────────────────────────────────────────
+function AuditDiffDialog({ entry, onClose }: { entry: AuditEntry; onClose: () => void }) {
+  const changes = entry.changes as { from?: Record<string, unknown>; to?: Record<string, unknown> } | null;
+  const hasChanges = changes && (changes.from || changes.to);
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Badge variant={entry.action === "delete" ? "destructive" : "outline"} className="text-xs">{entry.action}</Badge>
+            <span className="text-sm font-normal text-muted-foreground">{entry.resourceType}{entry.resourceId ? ` · ${entry.resourceId}` : ""}</span>
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 text-sm">
+          <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground border-b pb-3">
+            <span>User: <span className="text-foreground font-medium">{entry.userFullName ?? entry.userId ?? "—"}</span></span>
+            <span>Role: <span className="text-foreground font-medium">{entry.userRole ?? "—"}</span></span>
+            <span>Time: <span className="text-foreground font-medium">{new Date(entry.createdAt).toLocaleString()}</span></span>
+            <span>IP: <span className="text-foreground font-medium">{entry.ipAddress ?? "—"}</span></span>
+          </div>
+
+          {hasChanges ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs font-semibold text-red-600 mb-1.5">Before</p>
+                <pre className="bg-red-50 border border-red-100 rounded p-3 text-xs overflow-auto max-h-64 whitespace-pre-wrap break-all">
+                  {JSON.stringify(changes.from ?? {}, null, 2)}
+                </pre>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-green-600 mb-1.5">After</p>
+                <pre className="bg-green-50 border border-green-100 rounded p-3 text-xs overflow-auto max-h-64 whitespace-pre-wrap break-all">
+                  {JSON.stringify(changes.to ?? {}, null, 2)}
+                </pre>
+              </div>
+            </div>
+          ) : entry.changes ? (
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-1.5">Change Data</p>
+              <pre className="bg-muted rounded p-3 text-xs overflow-auto max-h-64 whitespace-pre-wrap break-all">
+                {JSON.stringify(entry.changes, null, 2)}
+              </pre>
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-xs">No change data recorded for this event.</p>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function AuditLogTab() {
   const [page, setPage] = useState(0);
+  const [selectedEntry, setSelectedEntry] = useState<AuditEntry | null>(null);
   const limit = 50;
 
   const { data, isLoading } = useQuery({
@@ -65,11 +124,13 @@ function AuditLogTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Complete audit trail of all data access and modifications.</p>
+        <p className="text-sm text-muted-foreground">Complete immutable audit trail of all data access and modifications. Click any row to view before/after diff.</p>
         <Button variant="outline" size="sm" onClick={handleExport}>
           <Download className="h-4 w-4 mr-1.5" /> Export CSV
         </Button>
       </div>
+
+      {selectedEntry && <AuditDiffDialog entry={selectedEntry} onClose={() => setSelectedEntry(null)} />}
 
       {isLoading ? (
         <div className="space-y-2">{[...Array(8)].map((_, i) => <Skeleton key={i} className="h-12 rounded" />)}</div>
@@ -84,23 +145,30 @@ function AuditLogTab() {
                 <TableHead>Action</TableHead>
                 <TableHead>Resource</TableHead>
                 <TableHead>IP</TableHead>
+                <TableHead>Diff</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {data?.entries.map((entry: AuditEntry) => (
-                <TableRow key={entry.id}>
+                <TableRow key={entry.id} className="cursor-pointer hover:bg-muted/40" onClick={() => setSelectedEntry(entry)}>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                     {new Date(entry.createdAt).toLocaleString()}
                   </TableCell>
                   <TableCell className="text-sm">{entry.userFullName ?? entry.userId ?? "—"}</TableCell>
                   <TableCell><Badge variant="secondary" className="text-xs">{entry.userRole ?? "—"}</Badge></TableCell>
-                  <TableCell><Badge variant={entry.action === "delete" ? "destructive" : "outline"} className="text-xs">{entry.action}</Badge></TableCell>
+                  <TableCell><Badge variant={entry.action === "delete" || entry.action === "force_logout" ? "destructive" : "outline"} className="text-xs">{entry.action}</Badge></TableCell>
                   <TableCell className="text-sm text-muted-foreground">{entry.resourceType}{entry.resourceId ? ` · ${entry.resourceId.slice(0, 8)}…` : ""}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{entry.ipAddress ?? "—"}</TableCell>
+                  <TableCell>
+                    {entry.changes
+                      ? <Badge variant="secondary" className="text-xs cursor-pointer">View</Badge>
+                      : <span className="text-xs text-muted-foreground">—</span>
+                    }
+                  </TableCell>
                 </TableRow>
               ))}
               {data?.entries.length === 0 && (
-                <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">No audit log entries found.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">No audit log entries found.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
@@ -513,6 +581,158 @@ function BaaSoc2Tab() {
   );
 }
 
+// ─── Sessions Tab ─────────────────────────────────────────────────────────────
+function SessionsTab() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+
+  const { data: users, isLoading } = useQuery({
+    queryKey: ["admin", "access-review"],
+    queryFn: () => apiFetch<UserRow[]>("/api/admin/access-review"),
+  });
+
+  const { data: sessions, isLoading: sessionsLoading } = useQuery({
+    queryKey: ["admin", "sessions", expandedUserId],
+    queryFn: () =>
+      expandedUserId
+        ? apiFetch<ClerkSession[]>(`/api/admin/users/${expandedUserId}/sessions`)
+        : Promise.resolve<ClerkSession[]>([]),
+    enabled: !!expandedUserId,
+  });
+
+  const forceLogoutMut = useMutation({
+    mutationFn: (userId: string) =>
+      apiFetch<{ success: boolean; revokedCount: number }>(
+        `/api/admin/users/${userId}/force-logout`,
+        { method: "POST" },
+      ),
+    onSuccess: (data) => {
+      toast({ title: `Force logout complete — ${data.revokedCount} session(s) revoked` });
+      qc.invalidateQueries({ queryKey: ["admin", "sessions"] });
+    },
+    onError: () => toast({ title: "Failed to force logout", variant: "destructive" }),
+  });
+
+  const revokeSessionMut = useMutation({
+    mutationFn: (sessionId: string) =>
+      apiFetch(`/api/admin/sessions/${sessionId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast({ title: "Session revoked" });
+      qc.invalidateQueries({ queryKey: ["admin", "sessions", expandedUserId] });
+    },
+    onError: () => toast({ title: "Failed to revoke session", variant: "destructive" }),
+  });
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        View and manage active user sessions. Force logout terminates all active sessions for a user immediately.
+      </p>
+
+      {isLoading ? (
+        <div className="space-y-2">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-14 rounded" />)}</div>
+      ) : (
+        <div className="space-y-2">
+          {users?.filter((u) => u.isActive).map((user) => (
+            <Card key={user.id} className={expandedUserId === user.id ? "border-blue-200" : ""}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
+                      {user.fullName.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">{user.fullName}</p>
+                      <p className="text-xs text-muted-foreground">{user.email} · <Badge variant="secondary" className="text-xs">{user.role}</Badge></p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => setExpandedUserId(expandedUserId === user.id ? null : user.id)}
+                    >
+                      <MonitorSmartphone className="h-3.5 w-3.5 mr-1.5" />
+                      {expandedUserId === user.id ? "Hide" : "View"} Sessions
+                    </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-xs text-destructive hover:text-destructive"
+                          disabled={forceLogoutMut.isPending}
+                        >
+                          <LogOut className="h-3.5 w-3.5 mr-1.5" />
+                          Force Logout
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Force logout {user.fullName}?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will immediately revoke all active sessions for this user. They will need to sign in again.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => forceLogoutMut.mutate(user.id)}
+                            className="bg-destructive text-destructive-foreground"
+                          >
+                            Force Logout
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
+
+                {expandedUserId === user.id && (
+                  <div className="mt-4 border-t pt-4">
+                    {sessionsLoading ? (
+                      <div className="space-y-2">
+                        {[...Array(2)].map((_, i) => <Skeleton key={i} className="h-10 rounded" />)}
+                      </div>
+                    ) : !sessions?.length ? (
+                      <p className="text-sm text-muted-foreground text-center py-3">No active sessions found.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {sessions.map((session) => (
+                          <div key={session.sessionId} className="flex items-center justify-between p-3 bg-muted/40 rounded-lg text-xs">
+                            <div className="space-y-0.5">
+                              <p className="font-medium">Session <span className="font-mono text-muted-foreground">{session.sessionId.slice(-8)}</span></p>
+                              <p className="text-muted-foreground">
+                                Active: {new Date(session.lastActiveAt).toLocaleString()} ·
+                                Expires: {new Date(session.expireAt).toLocaleString()}
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs text-destructive hover:text-destructive"
+                              onClick={() => revokeSessionMut.mutate(session.sessionId)}
+                              disabled={revokeSessionMut.isPending}
+                            >
+                              Revoke
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Export Log Tab ───────────────────────────────────────────────────────────
 function ExportLogTab() {
   const { data, isLoading } = useQuery({
@@ -557,7 +777,7 @@ function ExportLogTab() {
 }
 
 // Types
-type AuditEntry = { id: string; createdAt: string; userId: string | null; userFullName: string | null; userRole: string | null; action: string; resourceType: string; resourceId: string | null; ipAddress: string | null };
+type AuditEntry = { id: string; createdAt: string; userId: string | null; userFullName: string | null; userRole: string | null; action: string; resourceType: string; resourceId: string | null; ipAddress: string | null; changes?: unknown };
 type AuditLogResponse = { entries: AuditEntry[]; total: number; limit: number; offset: number };
 type UserRow = { id: string; email: string; fullName: string; role: string; isActive: boolean; lastLoginAt: string | null; createdAt: string };
 type LoginEvent = { id: string; email: string | null; userId: string | null; success: boolean; ipAddress: string | null; failureReason: string | null; createdAt: string };
@@ -566,6 +786,7 @@ type RetentionPolicy = { id: string | null; orgId: string; recordType: string; r
 type BaaControl = { id: string; category: string; control: string; status: string; notes?: string };
 type ExportEntry = { id: string; userId: string | null; userFullName: string | null; exportType: string; recordCount: number | null; createdAt: string };
 type ExportLogResponse = { exports: ExportEntry[]; total: number };
+type ClerkSession = { sessionId: string; createdAt: string; lastActiveAt: string; expireAt: string; status: string };
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function AdminCompliancePage() {
@@ -593,6 +814,9 @@ export default function AdminCompliancePage() {
           <TabsTrigger value="audit-log" className="flex items-center gap-1.5">
             <FileDown className="h-3.5 w-3.5" /> Audit Log
           </TabsTrigger>
+          <TabsTrigger value="sessions" className="flex items-center gap-1.5">
+            <MonitorSmartphone className="h-3.5 w-3.5" /> Sessions
+          </TabsTrigger>
           <TabsTrigger value="access-review" className="flex items-center gap-1.5">
             <Users className="h-3.5 w-3.5" /> Access Review
           </TabsTrigger>
@@ -610,6 +834,7 @@ export default function AdminCompliancePage() {
         <div className="mt-6">
           <TabsContent value="baa-soc2"><BaaSoc2Tab /></TabsContent>
           <TabsContent value="audit-log"><AuditLogTab /></TabsContent>
+          <TabsContent value="sessions"><SessionsTab /></TabsContent>
           <TabsContent value="access-review"><AccessReviewTab /></TabsContent>
           <TabsContent value="login-history"><LoginHistoryTab /></TabsContent>
           <TabsContent value="export-log"><ExportLogTab /></TabsContent>
