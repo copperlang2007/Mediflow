@@ -51,9 +51,9 @@ const MATRIX: PermissionMatrix = {
     admin: ["super_admin"],
   },
   user: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "agent"],
     create: ["super_admin", "agency_admin"],
-    update: ["super_admin", "agency_admin"],
+    update: ["super_admin", "agency_admin", "viewer", "agent"],
     delete: ["super_admin"],
     admin: ["super_admin"],
   },
@@ -138,8 +138,8 @@ const MATRIX: PermissionMatrix = {
     admin: ["super_admin"],
   },
   notification: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
-    update: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "agent"],
+    update: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "agent"],
     delete: ["super_admin"],
   },
   audit_log: {

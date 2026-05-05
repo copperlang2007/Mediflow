@@ -14,8 +14,6 @@ export function validate<T extends ZodTypeAny>(
       });
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (req as any)[source] = result.data;
     next();
   };
 }

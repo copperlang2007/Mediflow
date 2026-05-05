@@ -1,7 +1,11 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, and, isNull } from "drizzle-orm";
 import { db, notificationsTable } from "@workspace/db";
-import { requireAuth, type AuthenticatedRequest } from "../middlewares/requireAuth";
+import {
+  requireAuth,
+  requirePermission,
+  type AuthenticatedRequest,
+} from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import {
   addSseSubscriber,
@@ -11,7 +15,6 @@ import {
 
 const router: IRouter = Router();
 
-// Group-level audit: notification reads and mutations are logged.
 router.use(
   auditMiddleware("notification", undefined, {
     includeReads: true,
@@ -22,13 +25,10 @@ router.use(
   }),
 );
 
-/**
- * GET /notifications/stream
- * Server-Sent Events endpoint for real-time notification push.
- */
 router.get(
   "/notifications/stream",
   requireAuth,
+  requirePermission("notification", "read"),
   (req: Request, res: Response): void => {
     const authReq = req as AuthenticatedRequest;
     const { userId } = authReq;
@@ -39,7 +39,6 @@ router.get(
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
 
-    // Heartbeat every 25 s to keep the connection alive through proxies
     res.write(": connected\n\n");
     const heartbeat = setInterval(() => {
       try {
@@ -61,6 +60,7 @@ router.get(
 router.get(
   "/notifications",
   requireAuth,
+  requirePermission("notification", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { unreadOnly, limit } = req.query as { unreadOnly?: string; limit?: string };
@@ -87,6 +87,7 @@ router.get(
 router.get(
   "/notifications/count",
   requireAuth,
+  requirePermission("notification", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
 
@@ -107,6 +108,7 @@ router.get(
 router.post(
   "/notifications/read-all",
   requireAuth,
+  requirePermission("notification", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
 
@@ -120,7 +122,6 @@ router.post(
         ),
       );
 
-    // Broadcast updated count (0) to this user's SSE connections
     broadcastToUser(authReq.userId, { type: "unread_count", unread: 0 });
 
     res.json({ success: true });
@@ -130,6 +131,7 @@ router.post(
 router.patch(
   "/notifications/:id/read",
   requireAuth,
+  requirePermission("notification", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

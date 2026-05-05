@@ -54,6 +54,7 @@ router.use(
 router.get(
   "/users/me",
   requireAuth,
+  requirePermission("user", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const [user] = await db
@@ -74,6 +75,7 @@ router.get(
 router.patch(
   "/users/me",
   requireAuth,
+  requirePermission("user", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
 
