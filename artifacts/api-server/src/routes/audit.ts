@@ -6,8 +6,12 @@ import {
   requireRole,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { auditMiddleware } from "../middlewares/auditMiddleware";
 
 const router: IRouter = Router();
+
+// Audit log reads are themselves audited — full access traceability.
+router.use(auditMiddleware("audit_log", undefined, { includeReads: true }));
 
 router.get(
   "/audit-log",

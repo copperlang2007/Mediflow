@@ -1,13 +1,14 @@
 -- ============================================================================
 -- DOWN MIGRATION: 0000_broken_red_hulk_down.sql
 --
--- Reverses 0000_broken_red_hulk.sql.  Run this to roll back the entire schema
--- to a blank slate.  CASCADE handles FK dependency order automatically.
+-- Exactly reverses 0000_broken_red_hulk.sql.  All 37 tables and 26 custom
+-- enum types are dropped.  CASCADE handles FK dependency ordering.
 --
--- WARNING: This is destructive and irreversible.  Take a full database backup
--- before executing this in any environment.
+-- WARNING: Irreversible — take a full backup before running in any
+-- non-local environment.
 -- ============================================================================
 
+-- Drop tables (CASCADE propagates through FK constraints automatically)
 DROP TABLE IF EXISTS "retention_flags"           CASCADE;
 DROP TABLE IF EXISTS "import_jobs"               CASCADE;
 DROP TABLE IF EXISTS "notifications"             CASCADE;
@@ -46,7 +47,7 @@ DROP TABLE IF EXISTS "sessions"                  CASCADE;
 DROP TABLE IF EXISTS "organizations"             CASCADE;
 DROP TABLE IF EXISTS "audit_log"                 CASCADE;
 
--- Drop custom enum types
+-- Drop all 26 custom enum types (exact mirror of CREATE TYPE in the up migration)
 DROP TYPE IF EXISTS "public"."user_role";
 DROP TYPE IF EXISTS "public"."agent_status";
 DROP TYPE IF EXISTS "public"."cert_status";
@@ -57,16 +58,22 @@ DROP TYPE IF EXISTS "public"."checklist_run_status";
 DROP TYPE IF EXISTS "public"."checklist_run_type";
 DROP TYPE IF EXISTS "public"."task_priority";
 DROP TYPE IF EXISTS "public"."task_status";
-DROP TYPE IF EXISTS "public"."plan_type";
+DROP TYPE IF EXISTS "public"."activity_type";
 DROP TYPE IF EXISTS "public"."contact_status";
-DROP TYPE IF EXISTS "public"."notification_type";
-DROP TYPE IF EXISTS "public"."notification_priority";
-DROP TYPE IF EXISTS "public"."audit_action";
+DROP TYPE IF EXISTS "public"."deal_status";
+DROP TYPE IF EXISTS "public"."lead_status";
+DROP TYPE IF EXISTS "public"."plan_type";
+DROP TYPE IF EXISTS "public"."channel";
 DROP TYPE IF EXISTS "public"."message_direction";
 DROP TYPE IF EXISTS "public"."message_status";
-DROP TYPE IF EXISTS "public"."message_channel";
-DROP TYPE IF EXISTS "public"."automation_trigger_type";
-DROP TYPE IF EXISTS "public"."automation_action_type";
-DROP TYPE IF EXISTS "public"."plan_tier";
+DROP TYPE IF EXISTS "public"."automation_result";
+DROP TYPE IF EXISTS "public"."sequence_enrollment_status";
+DROP TYPE IF EXISTS "public"."sequence_status";
+DROP TYPE IF EXISTS "public"."sequence_step_type";
+DROP TYPE IF EXISTS "public"."sequence_trigger_type";
+DROP TYPE IF EXISTS "public"."import_source";
+DROP TYPE IF EXISTS "public"."import_status";
+DROP TYPE IF EXISTS "public"."retention_flag_type";
 
+-- Remove pg-boss migration tracking table
 DROP TABLE IF EXISTS "__drizzle_migrations";

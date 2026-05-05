@@ -16,7 +16,12 @@ import {
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { ObjectPermission, ObjectAccessGroupType } from "../lib/objectAcl";
-import { requireAuth, type AuthenticatedRequest } from "../middlewares/requireAuth";
+import {
+  requireAuth,
+  requirePermission,
+  type AuthenticatedRequest,
+} from "../middlewares/requireAuth";
+import { auditMiddleware } from "../middlewares/auditMiddleware";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -39,6 +44,8 @@ const ConfirmUploadSchema = z.object({
 router.post(
   "/storage/uploads/request-url",
   requireAuth,
+  requirePermission("storage", "create"),
+  auditMiddleware("storage", "create"),
   async (req: Request, res: Response): Promise<void> => {
     const parsed = RequestUploadUrlBody.safeParse(req.body);
     if (!parsed.success) {
@@ -76,6 +83,8 @@ router.post(
 router.post(
   "/storage/uploads/confirm",
   requireAuth,
+  requirePermission("storage", "create"),
+  auditMiddleware("storage", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
 
@@ -159,6 +168,8 @@ router.get(
 router.get(
   "/storage/objects/*path",
   requireAuth,
+  requirePermission("storage", "read"),
+  auditMiddleware("storage", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
 

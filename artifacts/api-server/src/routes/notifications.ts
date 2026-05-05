@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, and, isNull } from "drizzle-orm";
 import { db, notificationsTable } from "@workspace/db";
 import { requireAuth, type AuthenticatedRequest } from "../middlewares/requireAuth";
+import { auditMiddleware } from "../middlewares/auditMiddleware";
 import {
   addSseSubscriber,
   removeSseSubscriber,
@@ -9,6 +10,17 @@ import {
 } from "../lib/sseManager";
 
 const router: IRouter = Router();
+
+// Group-level audit: notification reads and mutations are logged.
+router.use(
+  auditMiddleware("notification", undefined, {
+    includeReads: true,
+    getResourceId: (req) => {
+      const raw = req.params.id;
+      return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
+    },
+  }),
+);
 
 /**
  * GET /notifications/stream

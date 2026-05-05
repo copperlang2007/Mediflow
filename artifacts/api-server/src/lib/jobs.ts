@@ -54,7 +54,8 @@ export const JOB_NAMES = {
   // Scheduled
   LICENSE_EXPIRY_CHECK: "license-expiry-check",
   CERT_EXPIRY_CHECK: "cert-expiry-check",
-  AHIP_DEADLINE_CHECK: "ahip-deadline-check",
+  AHIP_REMINDER_CHECK: "ahip-reminder-check",
+  AUTOMATION_WEEKLY_SWEEP: "automation-weekly-sweep",
   // Ad-hoc
   TASK_AUTO_ASSIGN: "task-auto-assign",
   RUN_AUTOMATION_RULES: "run-automation-rules",
@@ -156,8 +157,10 @@ export async function startWorkers(): Promise<void> {
   await boss.schedule(JOB_NAMES.LICENSE_EXPIRY_CHECK, "0 8 * * *", {}, { tz: "UTC" });
   // Daily carrier cert expiry check at 08:05 UTC
   await boss.schedule(JOB_NAMES.CERT_EXPIRY_CHECK, "5 8 * * *", {}, { tz: "UTC" });
-  // Monthly AHIP deadline check on 1st of month at 09:00 UTC
-  await boss.schedule(JOB_NAMES.AHIP_DEADLINE_CHECK, "0 9 1 * *", {}, { tz: "UTC" });
+  // Weekly AHIP reminder check — every Monday at 08:10 UTC
+  await boss.schedule(JOB_NAMES.AHIP_REMINDER_CHECK, "10 8 * * 1", {}, { tz: "UTC" });
+  // Weekly automation sweep — every Monday at 09:00 UTC (time-based rules)
+  await boss.schedule(JOB_NAMES.AUTOMATION_WEEKLY_SWEEP, "0 9 * * 1", {}, { tz: "UTC" });
 
   // ---- Workers ----
 
@@ -183,7 +186,18 @@ export async function startWorkers(): Promise<void> {
     const { ahipReminderCheckWorker } = await import("../workers/ahipReminderCheck");
     for (const job of jobs) await ahipReminderCheckWorker(job.data);
   };
-  await boss.work<AhipDeadlineCheckPayload>(JOB_NAMES.AHIP_DEADLINE_CHECK, ahipHandler);
+  await boss.work<AhipDeadlineCheckPayload>(JOB_NAMES.AHIP_REMINDER_CHECK, ahipHandler);
+
+  const weeklyAutomationSweepHandler: WorkHandler<Record<string, never>> = async () => {
+    const { weeklyAutomationSweepWorker } = await import(
+      "../workers/weeklyAutomationSweep"
+    );
+    await weeklyAutomationSweepWorker();
+  };
+  await boss.work<Record<string, never>>(
+    JOB_NAMES.AUTOMATION_WEEKLY_SWEEP,
+    weeklyAutomationSweepHandler,
+  );
 
   const taskHandler: WorkHandler<TaskAutoAssignPayload> = async (
     jobs: Job<TaskAutoAssignPayload>[],
@@ -196,21 +210,26 @@ export async function startWorkers(): Promise<void> {
   const automationHandler: WorkHandler<RunAutomationRulesPayload> = async (
     jobs: Job<RunAutomationRulesPayload>[],
   ) => {
-    logger.info({ count: jobs.length }, "Automation rules eval — handler placeholder");
+    const { runAutomationRulesWorker } = await import("../workers/runAutomationRules");
+    for (const job of jobs) await runAutomationRulesWorker(job.data);
   };
   await boss.work<RunAutomationRulesPayload>(JOB_NAMES.RUN_AUTOMATION_RULES, automationHandler);
 
   const sequenceHandler: WorkHandler<SendSequenceStepPayload> = async (
     jobs: Job<SendSequenceStepPayload>[],
   ) => {
-    logger.info({ count: jobs.length }, "Sequence step send — handler placeholder");
+    const { sendSequenceStepWorker } = await import("../workers/sendSequenceStep");
+    for (const job of jobs) await sendSequenceStepWorker(job.data);
   };
   await boss.work<SendSequenceStepPayload>(JOB_NAMES.SEND_SEQUENCE_STEP, sequenceHandler);
 
   const offboardingPdfHandler: WorkHandler<GenerateOffboardingPdfPayload> = async (
     jobs: Job<GenerateOffboardingPdfPayload>[],
   ) => {
-    logger.info({ count: jobs.length }, "Offboarding PDF generation — handler placeholder");
+    const { generateOffboardingPdfWorker } = await import(
+      "../workers/generateOffboardingPdf"
+    );
+    for (const job of jobs) await generateOffboardingPdfWorker(job.data);
   };
   await boss.work<GenerateOffboardingPdfPayload>(
     JOB_NAMES.GENERATE_OFFBOARDING_PDF,

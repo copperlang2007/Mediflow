@@ -3,7 +3,7 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-import { clerkMiddleware } from "@clerk/express";
+import { clerkMiddleware, getAuth } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import {
   CLERK_PROXY_PATH,
@@ -89,16 +89,6 @@ const authLimiter = rateLimit({
 });
 app.use("/api/auth", authLimiter);
 
-// Authenticated users: 100 requests / minute per IP
-const userLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: (req) => !req.headers.authorization && !req.cookies?.["__session"],
-  message: { error: "Request rate limit exceeded." },
-});
-app.use("/api", userLimiter);
 
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
@@ -113,6 +103,24 @@ app.use(
     ),
   })),
 );
+
+// Per-user rate limit: 100 requests / minute, keyed by Clerk userId.
+// Applied AFTER clerkMiddleware so getAuth(req) is populated.
+// Falls back to IP for unauthenticated requests.
+const userLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const { userId } = getAuth(req);
+    if (userId) return `user:${userId}`;
+    return req.ip ?? "unknown";
+  },
+  skip: (req) => !req.headers.authorization && !req.cookies?.["__session"],
+  message: { error: "Request rate limit exceeded." },
+});
+app.use("/api", userLimiter);
 
 // Twilio inbound webhooks — mounted at root (not under /api) so Twilio can
 // reach them without API auth middleware. Signature validation is enforced

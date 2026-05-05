@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import {
   ObjectAclPolicy,
   ObjectPermission,
+  ObjectAccessGroupType,
   canAccessObject,
   getObjectAclPolicy,
   setObjectAclPolicy,
@@ -203,6 +204,83 @@ export class ObjectStorageService {
       objectFile,
       requestedPermission: requestedPermission ?? ObjectPermission.READ,
     });
+  }
+
+  /**
+   * Upload raw content (Buffer or string) to private document storage.
+   *
+   * Returns a normalized `/objects/...` path suitable for passing back to
+   * `getDocumentSignedUrl` or `deleteDocument`.
+   */
+  async uploadDocument(
+    content: Buffer | string,
+    filename: string,
+    orgId: string,
+    options?: {
+      contentType?: string;
+      aclRules?: Array<{
+        group: { type: ObjectAccessGroupType; id: string };
+        permission: ObjectPermission;
+      }>;
+    },
+  ): Promise<string> {
+    const privateObjectDir = this.getPrivateObjectDir();
+    const docId = randomUUID();
+    const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const fullPath = `${privateObjectDir}/documents/${orgId}/${docId}/${sanitized}`;
+    const { bucketName, objectName } = parseObjectPath(fullPath);
+    const bucket = objectStorageClient.bucket(bucketName);
+    const file = bucket.file(objectName);
+
+    const buffer =
+      typeof content === "string" ? Buffer.from(content, "utf-8") : content;
+
+    await file.save(buffer, {
+      contentType: options?.contentType ?? "application/octet-stream",
+      resumable: false,
+    });
+
+    await setObjectAclPolicy(file, {
+      owner: orgId,
+      visibility: "private",
+      aclRules: options?.aclRules ?? [
+        {
+          group: { type: ObjectAccessGroupType.ORG_MEMBER, id: orgId },
+          permission: ObjectPermission.READ,
+        },
+      ],
+    });
+
+    return `/objects/documents/${orgId}/${docId}/${sanitized}`;
+  }
+
+  /**
+   * Return a presigned GET URL for a previously uploaded document.
+   *
+   * @param objectPath — normalized `/objects/...` path returned by `uploadDocument`
+   * @param ttlSec     — URL validity window in seconds (default: 1 hour)
+   */
+  async getDocumentSignedUrl(
+    objectPath: string,
+    ttlSec = 3600,
+  ): Promise<string> {
+    const file = await this.getObjectEntityFile(objectPath);
+    return signObjectURL({
+      bucketName: file.bucket.name,
+      objectName: file.name,
+      method: "GET",
+      ttlSec,
+    });
+  }
+
+  /**
+   * Permanently delete a document from object storage.
+   *
+   * @param objectPath — normalized `/objects/...` path returned by `uploadDocument`
+   */
+  async deleteDocument(objectPath: string): Promise<void> {
+    const file = await this.getObjectEntityFile(objectPath);
+    await file.delete();
   }
 }
 
