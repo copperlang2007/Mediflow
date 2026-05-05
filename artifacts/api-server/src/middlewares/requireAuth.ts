@@ -1,7 +1,7 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { getAuth } from "@clerk/express";
-import { db, usersTable, orgSettingsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, usersTable, orgSettingsTable, sessionActivityTable } from "@workspace/db";
+import { eq, lt } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
 
 // TTL cache for org session timeout settings (refresh every 60 s)
@@ -20,15 +20,94 @@ async function getOrgSessionTimeout(orgId: string): Promise<number> {
   return timeoutMinutes;
 }
 
-// Per-session inactivity tracking: sessionId → last-activity epoch ms
-// True idle timeout — NOT token-age based. Cleaned up every 15 min.
-const sessionLastActivity = new Map<string, number>();
-setInterval(() => {
-  const cutoff = Date.now() - 2 * 60 * 60 * 1000; // discard entries >2 h old regardless
-  for (const [sid, ts] of sessionLastActivity) {
-    if (ts < cutoff) sessionLastActivity.delete(sid);
+/**
+ * Per-session inactivity tracking — durable DB-backed store.
+ *
+ * HIPAA/SOC 2 requirement: session timeout enforcement must survive process
+ * restarts and be consistent across multiple instances. An in-memory Map is
+ * process-local and resets on restart, creating a bypass risk.
+ *
+ * Implementation:
+ * - Source of truth: `session_activity` table in PostgreSQL.
+ * - Local write-through cache (60 s TTL) avoids a DB round-trip on every
+ *   request while still flushing updated timestamps promptly.
+ * - On startup the DB provides authoritative last-active timestamps.
+ */
+const sessionLocalCache = new Map<string, { lastActiveAt: number; syncedAt: number }>();
+const SESSION_CACHE_SYNC_MS = 60_000; // re-read from DB after 60 s
+
+async function checkAndUpdateSessionActivity(
+  sessionId: string,
+  orgId: string,
+  timeoutMs: number,
+): Promise<"ok" | "expired"> {
+  const now = Date.now();
+  const cached = sessionLocalCache.get(sessionId);
+  const needsDbRead = !cached || now - cached.syncedAt > SESSION_CACHE_SYNC_MS;
+
+  let lastActiveAt: number;
+
+  if (needsDbRead) {
+    const [row] = await db
+      .select({ lastActiveAt: sessionActivityTable.lastActiveAt, expiresAt: sessionActivityTable.expiresAt })
+      .from(sessionActivityTable)
+      .where(eq(sessionActivityTable.sessionId, sessionId))
+      .limit(1);
+
+    if (row) {
+      lastActiveAt = row.lastActiveAt.getTime();
+      if (now > row.expiresAt.getTime()) {
+        // Already expired in DB — clean up and reject
+        await db.delete(sessionActivityTable).where(eq(sessionActivityTable.sessionId, sessionId));
+        sessionLocalCache.delete(sessionId);
+        return "expired";
+      }
+    } else {
+      // First time seeing this session — treat as fresh
+      lastActiveAt = now;
+    }
+    sessionLocalCache.set(sessionId, { lastActiveAt, syncedAt: now });
+  } else {
+    lastActiveAt = cached!.lastActiveAt;
   }
-}, 15 * 60 * 1000).unref();
+
+  if (now - lastActiveAt > timeoutMs) {
+    // Timed out — remove from both stores
+    await db.delete(sessionActivityTable).where(eq(sessionActivityTable.sessionId, sessionId));
+    sessionLocalCache.delete(sessionId);
+    return "expired";
+  }
+
+  // Active — upsert new last-active timestamp into DB
+  const expiresAt = new Date(now + timeoutMs);
+  await db
+    .insert(sessionActivityTable)
+    .values({ sessionId, orgId, lastActiveAt: new Date(now), expiresAt })
+    .onConflictDoUpdate({
+      target: sessionActivityTable.sessionId,
+      set: { lastActiveAt: new Date(now), expiresAt },
+    });
+  sessionLocalCache.set(sessionId, { lastActiveAt: now, syncedAt: now });
+
+  return "ok";
+}
+
+// Periodic cleanup of expired session rows and stale local cache entries.
+// Runs every 15 minutes; won't block process exit.
+setInterval(
+  async () => {
+    try {
+      await db.delete(sessionActivityTable).where(lt(sessionActivityTable.expiresAt, new Date()));
+    } catch {
+      // non-fatal
+    }
+    const cutoff = Date.now() - 2 * 60 * 60 * 1000;
+    for (const [sid, entry] of sessionLocalCache) {
+      if (entry.lastActiveAt < cutoff) sessionLocalCache.delete(sid);
+    }
+  },
+  15 * 60 * 1000,
+).unref();
 
 export type AuthenticatedRequest = Request & {
   userId: string;
@@ -60,18 +139,16 @@ export const requireAuth = async (
     return;
   }
 
-  // Session inactivity enforcement — true idle timeout (not token-age)
+  // Session inactivity enforcement — true idle timeout backed by durable DB store
   const sessionId = auth.sessionId;
   if (sessionId) {
     const sessionTimeoutMinutes = await getOrgSessionTimeout(user.orgId);
-    const now = Date.now();
-    const lastActivity = sessionLastActivity.get(sessionId);
-    if (lastActivity !== undefined && now - lastActivity > sessionTimeoutMinutes * 60 * 1000) {
-      sessionLastActivity.delete(sessionId);
+    const timeoutMs = sessionTimeoutMinutes * 60 * 1000;
+    const result = await checkAndUpdateSessionActivity(sessionId, user.orgId, timeoutMs);
+    if (result === "expired") {
       res.status(401).json({ error: "Session expired due to inactivity", code: "SESSION_TIMEOUT" });
       return;
     }
-    sessionLastActivity.set(sessionId, now);
   }
 
   const authReq = req as AuthenticatedRequest;

@@ -28,6 +28,30 @@ import { randomUUID } from "crypto";
 
 const router: IRouter = Router();
 
+// ─── Short-TTL Report Cache ────────────────────────────────────────────────────
+// Heavy aggregation endpoints (executive KPI, agent-performance) are cached for
+// 5 minutes per org to avoid repeated full-table scans on frequent refreshes.
+// Keys are scoped per-org so one org never sees another's data.
+const REPORT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+interface CacheEntry<T> { data: T; expiresAt: number }
+const reportCache = new Map<string, CacheEntry<unknown>>();
+
+function getCachedReport<T>(key: string): T | null {
+  const entry = reportCache.get(key);
+  if (!entry || Date.now() > entry.expiresAt) { reportCache.delete(key); return null; }
+  return entry.data as T;
+}
+
+function setCachedReport(key: string, data: unknown): void {
+  reportCache.set(key, { data, expiresAt: Date.now() + REPORT_CACHE_TTL_MS });
+}
+
+// Purge stale entries every 10 minutes — non-blocking
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of reportCache) { if (now > v.expiresAt) reportCache.delete(k); }
+}, 10 * 60 * 1000).unref();
+
 function parseRange(req: Request) {
   const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
   const end = endDate ? new Date(endDate) : new Date();
@@ -1150,6 +1174,12 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { start, end } = parseRange(req);
+
+    // Cache key includes org + date range so different ranges don't collide
+    const execCacheKey = `executive:${authReq.orgId}:${start.toISOString()}:${end.toISOString()}`;
+    const cached = getCachedReport<object>(execCacheKey);
+    if (cached) { res.json(cached); return; }
+
     const periodMs = end.getTime() - start.getTime();
     const priorStart = new Date(start.getTime() - periodMs);
     const priorEnd = new Date(start.getTime() - 1);
@@ -1178,7 +1208,9 @@ router.get(
       commsVolume,
       ahipStats,
       licensesExpiringThisMonth,
-      agentComplianceScores,
+      agentLicenseScores,
+      agentCertScores,
+      agentAhipScores,
     ] = await Promise.all([
       db.select({ cnt: count() }).from(agentsTable)
         .where(and(eq(agentsTable.orgId, authReq.orgId), eq(agentsTable.status, "active"))),
@@ -1222,14 +1254,34 @@ router.get(
           lte(stateLicensesTable.expiryDate, monthEnd),
         )),
 
-      // Per-agent compliance scores for agency aggregate
+      // Per-agent 4-pillar compliance scores for agency aggregate
+      // Pillars (25 pts each): active license, active cert, passed AHIP, no expiring license (<30 days)
       db.select({
-        hasActiveLicense: sql<number>`SUM(CASE WHEN ${stateLicensesTable.status} = 'active' THEN 1 ELSE 0 END)`,
         agentId: agentsTable.id,
+        hasActiveLicense: sql<number>`SUM(CASE WHEN ${stateLicensesTable.status} = 'active' THEN 1 ELSE 0 END)`,
+        expiringLicenses: sql<number>`SUM(CASE WHEN ${stateLicensesTable.status} = 'active' AND ${stateLicensesTable.expiryDate} <= NOW() + INTERVAL '30 days' THEN 1 ELSE 0 END)`,
       }).from(agentsTable)
         .leftJoin(stateLicensesTable, eq(stateLicensesTable.agentId, agentsTable.id))
         .where(eq(agentsTable.orgId, authReq.orgId))
         .groupBy(agentsTable.id),
+
+      // Per-agent: has at least one passed/active certification
+      db.select({
+        agentId: carrierCertificationsTable.agentId,
+        activeCerts: sql<number>`COUNT(*)`,
+      }).from(carrierCertificationsTable)
+        .innerJoin(agentsTable, eq(carrierCertificationsTable.agentId, agentsTable.id))
+        .where(and(eq(agentsTable.orgId, authReq.orgId), eq(carrierCertificationsTable.status, "passed")))
+        .groupBy(carrierCertificationsTable.agentId),
+
+      // Per-agent: has at least one passed AHIP record
+      db.select({
+        agentId: ahipRecordsTable.agentId,
+        passedAhip: sql<number>`COUNT(*)`,
+      }).from(ahipRecordsTable)
+        .innerJoin(agentsTable, eq(ahipRecordsTable.agentId, agentsTable.id))
+        .where(and(eq(agentsTable.orgId, authReq.orgId), eq(ahipRecordsTable.status, "passed")))
+        .groupBy(ahipRecordsTable.agentId),
     ]);
 
     const leadsTotal = Number(totalLeads[0]?.cnt ?? 0);
@@ -1244,18 +1296,27 @@ router.get(
     const ahipPassed = Number(ahipStats[0]?.passed ?? 0);
     const ahipRate = ahipTotal > 0 ? Math.round((ahipPassed / ahipTotal) * 100) : 0;
 
-    // Agency compliance score: average of per-agent compliance score (25 pts per pillar)
-    // Pillars: hasActiveLicense, hasCert (queried below), hasAhip — we have license data per agent
-    const agencyComplianceScore = agentComplianceScores.length > 0
+    // Agency compliance score: 4-pillar average (25 pts each)
+    // Pillar 1: hasActiveLicense  — at least 1 active state license
+    // Pillar 2: hasCert           — at least 1 active carrier certification
+    // Pillar 3: hasAhip           — at least 1 passed AHIP record
+    // Pillar 4: noExpiringLicense — no active licenses expiring within 30 days
+    const certByAgent = new Map(agentCertScores.map((r) => [r.agentId, Number(r.activeCerts)]));
+    const ahipByAgent = new Map(agentAhipScores.map((r) => [r.agentId, Number(r.passedAhip)]));
+
+    const agencyComplianceScore = agentLicenseScores.length > 0
       ? Math.round(
-          agentComplianceScores.reduce((sum, a) => {
-            const hasLic = Number(a.hasActiveLicense) > 0 ? 50 : 0;
-            return sum + hasLic;
-          }, 0) / agentComplianceScores.length
+          agentLicenseScores.reduce((acc, a) => {
+            const hasLic  = Number(a.hasActiveLicense) > 0 ? 25 : 0;
+            const hasCert = (certByAgent.get(a.agentId) ?? 0) > 0 ? 25 : 0;
+            const hasAhip = (ahipByAgent.get(a.agentId) ?? 0) > 0 ? 25 : 0;
+            const noExp   = Number(a.expiringLicenses) === 0 ? 25 : 0;
+            return acc + hasLic + hasCert + hasAhip + noExp;
+          }, 0) / agentLicenseScores.length
         )
       : 0;
 
-    res.json({
+    const result = {
       periodStart: start.toISOString(),
       periodEnd: end.toISOString(),
       agents: {
@@ -1289,7 +1350,9 @@ router.get(
         oepEligibleContacts: inOep ? Number(enrolledMembers[0]?.cnt ?? 0) : 0,
         agencyComplianceScore,
       },
-    });
+    };
+    setCachedReport(execCacheKey, result);
+    res.json(result);
   },
 );
 
