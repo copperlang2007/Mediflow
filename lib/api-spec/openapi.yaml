@@ -1258,7 +1258,7 @@ paths:
     get:
       operationId: getRenewals
       tags: [renewals]
-      summary: Get upcoming license and certification renewals
+      summary: Get upcoming license and certification renewals (excludes snoozed items)
       parameters:
         - name: days
           in: query
@@ -1272,6 +1272,101 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RenewalsResponse"
+
+  /renewals/{resourceType}/{id}/snooze:
+    post:
+      operationId: snoozeRenewal
+      tags: [renewals]
+      summary: Snooze a renewal alert for N days
+      parameters:
+        - name: resourceType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [license, certification]
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                days:
+                  type: integer
+                  default: 30
+                  minimum: 1
+                  maximum: 365
+      responses:
+        "200":
+          description: Snoozed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenewalSnoozeResponse"
+        "400":
+          description: Invalid resource type
+
+  /renewals/{resourceType}/{id}/resolve:
+    post:
+      operationId: resolveRenewal
+      tags: [renewals]
+      summary: Mark a renewal as resolved (dismiss for one year)
+      parameters:
+        - name: resourceType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [license, certification]
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Resolved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resolved:
+                    type: boolean
+                  resourceType:
+                    type: string
+                  resourceId:
+                    type: string
+        "400":
+          description: Invalid resource type
+
+  /agents/{id}/offboarding-report/download:
+    get:
+      operationId: downloadAgentOffboardingReport
+      tags: [agents]
+      summary: Download the generated offboarding report file
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Offboarding report file stream
+          content:
+            text/html:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Not found
 
   /notifications:
     get:
@@ -2747,6 +2842,24 @@ components:
         - renewals
         - total
         - daysAhead
+
+    RenewalSnoozeResponse:
+      type: object
+      properties:
+        snoozedUntil:
+          type: string
+          format: date-time
+        days:
+          type: integer
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+      required:
+        - snoozedUntil
+        - days
+        - resourceType
+        - resourceId
 
     Notification:
       type: object

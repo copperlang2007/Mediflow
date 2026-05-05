@@ -1342,7 +1342,7 @@ export const DeleteDocumentParams = zod.object({
 });
 
 /**
- * @summary Get upcoming license and certification renewals
+ * @summary Get upcoming license and certification renewals (excludes snoozed items)
  */
 export const getRenewalsQueryDaysDefault = 90;
 
@@ -1366,6 +1366,53 @@ export const GetRenewalsResponse = zod.object({
   ),
   total: zod.number(),
   daysAhead: zod.number(),
+});
+
+/**
+ * @summary Snooze a renewal alert for N days
+ */
+export const SnoozeRenewalParams = zod.object({
+  resourceType: zod.enum(["license", "certification"]),
+  id: zod.coerce.string(),
+});
+
+export const snoozeRenewalBodyDaysDefault = 30;
+export const snoozeRenewalBodyDaysMax = 365;
+
+export const SnoozeRenewalBody = zod.object({
+  days: zod
+    .number()
+    .min(1)
+    .max(snoozeRenewalBodyDaysMax)
+    .default(snoozeRenewalBodyDaysDefault),
+});
+
+export const SnoozeRenewalResponse = zod.object({
+  snoozedUntil: zod.coerce.date(),
+  days: zod.number(),
+  resourceType: zod.string(),
+  resourceId: zod.string(),
+});
+
+/**
+ * @summary Mark a renewal as resolved (dismiss for one year)
+ */
+export const ResolveRenewalParams = zod.object({
+  resourceType: zod.enum(["license", "certification"]),
+  id: zod.coerce.string(),
+});
+
+export const ResolveRenewalResponse = zod.object({
+  resolved: zod.boolean().optional(),
+  resourceType: zod.string().optional(),
+  resourceId: zod.string().optional(),
+});
+
+/**
+ * @summary Download the generated offboarding report file
+ */
+export const DownloadAgentOffboardingReportParams = zod.object({
+  id: zod.coerce.string(),
 });
 
 /**

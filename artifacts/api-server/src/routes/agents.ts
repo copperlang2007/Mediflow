@@ -255,6 +255,29 @@ router.patch(
     }
 
     const data = parsed.data;
+
+    // Enforce offboarded status lock — agents that have been offboarded
+    // cannot have their status reverted via PATCH
+    if (data.status !== undefined) {
+      const [currentAgent] = await db
+        .select({ status: agentsTable.status })
+        .from(agentsTable)
+        .where(and(eq(agentsTable.id, raw), eq(agentsTable.orgId, authReq.orgId)))
+        .limit(1);
+
+      if (!currentAgent) {
+        res.status(404).json({ error: "Agent not found" });
+        return;
+      }
+
+      if (currentAgent.status === "offboarded" && data.status !== "offboarded") {
+        res.status(409).json({
+          error: "Status of offboarded agents cannot be changed",
+        });
+        return;
+      }
+    }
+
     const updates: Partial<Agent> = {};
 
     if (data.firstName !== undefined) updates.firstName = data.firstName;
@@ -505,6 +528,60 @@ router.get(
       fileSizeBytes: doc.fileSizeBytes,
       createdAt: doc.createdAt,
     });
+  },
+);
+
+router.get(
+  "/agents/:id/offboarding-report/download",
+  requireAuth,
+  requirePermission("agent", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+    const [agent] = await db
+      .select({ id: agentsTable.id })
+      .from(agentsTable)
+      .where(and(eq(agentsTable.id, agentId), eq(agentsTable.orgId, authReq.orgId)))
+      .limit(1);
+
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    const [doc] = await db
+      .select()
+      .from(documentsTable)
+      .where(
+        and(
+          eq(documentsTable.agentId, agentId),
+          eq(documentsTable.orgId, authReq.orgId),
+          eq(documentsTable.category, "offboarding"),
+        ),
+      )
+      .orderBy(desc(documentsTable.createdAt))
+      .limit(1);
+
+    if (!doc) {
+      res.status(404).json({ error: "No offboarding report found. It may still be generating." });
+      return;
+    }
+
+    try {
+      const { ObjectStorageService } = await import("../lib/objectStorage");
+      const objectStorage = new ObjectStorageService();
+      const file = await objectStorage.getObjectEntityFile(doc.storageKey);
+      const contentType = doc.mimeType ?? "text/html";
+      const safeName = encodeURIComponent(doc.name.replace(/[^\w\s.-]/g, "_"));
+
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Disposition", `attachment; filename="${safeName}"`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (file as any).createReadStream().pipe(res);
+    } catch {
+      res.status(500).json({ error: "Failed to retrieve offboarding report file" });
+    }
   },
 );
 

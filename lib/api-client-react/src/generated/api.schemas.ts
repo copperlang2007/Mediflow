@@ -927,6 +927,13 @@ export interface RenewalsResponse {
   daysAhead: number;
 }
 
+export interface RenewalSnoozeResponse {
+  snoozedUntil: string;
+  days: number;
+  resourceType: string;
+  resourceId: string;
+}
+
 export type NotificationMetadata = { [key: string]: unknown };
 
 export interface Notification {
@@ -1025,6 +1032,20 @@ export type GetTasksParams = {
 
 export type GetRenewalsParams = {
   days?: number;
+};
+
+export type SnoozeRenewalBody = {
+  /**
+   * @minimum 1
+   * @maximum 365
+   */
+  days?: number;
+};
+
+export type ResolveRenewal200 = {
+  resolved?: boolean;
+  resourceType?: string;
+  resourceId?: string;
 };
 
 export type GetNotificationsParams = {

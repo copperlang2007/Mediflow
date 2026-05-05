@@ -61,10 +61,13 @@ import type {
   OffboardingReportDocument,
   Organization,
   PlatformRequirement,
+  RenewalSnoozeResponse,
   RenewalsResponse,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
+  ResolveRenewal200,
   SeedCarriersResponse,
+  SnoozeRenewalBody,
   StateLicense,
   SuccessResponse,
   Task,
@@ -5098,7 +5101,7 @@ export const useDeleteDocument = <
 };
 
 /**
- * @summary Get upcoming license and certification renewals
+ * @summary Get upcoming license and certification renewals (excludes snoozed items)
  */
 export const getGetRenewalsUrl = (params?: GetRenewalsParams) => {
   const normalizedParams = new URLSearchParams();
@@ -5165,7 +5168,7 @@ export type GetRenewalsQueryResult = NonNullable<
 export type GetRenewalsQueryError = ErrorType<unknown>;
 
 /**
- * @summary Get upcoming license and certification renewals
+ * @summary Get upcoming license and certification renewals (excludes snoozed items)
  */
 
 export function useGetRenewals<
@@ -5183,6 +5186,303 @@ export function useGetRenewals<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetRenewalsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Snooze a renewal alert for N days
+ */
+export const getSnoozeRenewalUrl = (
+  resourceType: "license" | "certification",
+  id: string,
+) => {
+  return `/api/renewals/${resourceType}/${id}/snooze`;
+};
+
+export const snoozeRenewal = async (
+  resourceType: "license" | "certification",
+  id: string,
+  snoozeRenewalBody?: SnoozeRenewalBody,
+  options?: RequestInit,
+): Promise<RenewalSnoozeResponse> => {
+  return customFetch<RenewalSnoozeResponse>(
+    getSnoozeRenewalUrl(resourceType, id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(snoozeRenewalBody),
+    },
+  );
+};
+
+export const getSnoozeRenewalMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof snoozeRenewal>>,
+    TError,
+    {
+      resourceType: "license" | "certification";
+      id: string;
+      data: BodyType<SnoozeRenewalBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof snoozeRenewal>>,
+  TError,
+  {
+    resourceType: "license" | "certification";
+    id: string;
+    data: BodyType<SnoozeRenewalBody>;
+  },
+  TContext
+> => {
+  const mutationKey = ["snoozeRenewal"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof snoozeRenewal>>,
+    {
+      resourceType: "license" | "certification";
+      id: string;
+      data: BodyType<SnoozeRenewalBody>;
+    }
+  > = (props) => {
+    const { resourceType, id, data } = props ?? {};
+
+    return snoozeRenewal(resourceType, id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SnoozeRenewalMutationResult = NonNullable<
+  Awaited<ReturnType<typeof snoozeRenewal>>
+>;
+export type SnoozeRenewalMutationBody = BodyType<SnoozeRenewalBody>;
+export type SnoozeRenewalMutationError = ErrorType<void>;
+
+/**
+ * @summary Snooze a renewal alert for N days
+ */
+export const useSnoozeRenewal = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof snoozeRenewal>>,
+    TError,
+    {
+      resourceType: "license" | "certification";
+      id: string;
+      data: BodyType<SnoozeRenewalBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof snoozeRenewal>>,
+  TError,
+  {
+    resourceType: "license" | "certification";
+    id: string;
+    data: BodyType<SnoozeRenewalBody>;
+  },
+  TContext
+> => {
+  return useMutation(getSnoozeRenewalMutationOptions(options));
+};
+
+/**
+ * @summary Mark a renewal as resolved (dismiss for one year)
+ */
+export const getResolveRenewalUrl = (
+  resourceType: "license" | "certification",
+  id: string,
+) => {
+  return `/api/renewals/${resourceType}/${id}/resolve`;
+};
+
+export const resolveRenewal = async (
+  resourceType: "license" | "certification",
+  id: string,
+  options?: RequestInit,
+): Promise<ResolveRenewal200> => {
+  return customFetch<ResolveRenewal200>(
+    getResolveRenewalUrl(resourceType, id),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getResolveRenewalMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resolveRenewal>>,
+    TError,
+    { resourceType: "license" | "certification"; id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resolveRenewal>>,
+  TError,
+  { resourceType: "license" | "certification"; id: string },
+  TContext
+> => {
+  const mutationKey = ["resolveRenewal"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resolveRenewal>>,
+    { resourceType: "license" | "certification"; id: string }
+  > = (props) => {
+    const { resourceType, id } = props ?? {};
+
+    return resolveRenewal(resourceType, id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResolveRenewalMutationResult = NonNullable<
+  Awaited<ReturnType<typeof resolveRenewal>>
+>;
+
+export type ResolveRenewalMutationError = ErrorType<void>;
+
+/**
+ * @summary Mark a renewal as resolved (dismiss for one year)
+ */
+export const useResolveRenewal = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resolveRenewal>>,
+    TError,
+    { resourceType: "license" | "certification"; id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof resolveRenewal>>,
+  TError,
+  { resourceType: "license" | "certification"; id: string },
+  TContext
+> => {
+  return useMutation(getResolveRenewalMutationOptions(options));
+};
+
+/**
+ * @summary Download the generated offboarding report file
+ */
+export const getDownloadAgentOffboardingReportUrl = (id: string) => {
+  return `/api/agents/${id}/offboarding-report/download`;
+};
+
+export const downloadAgentOffboardingReport = async (
+  id: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getDownloadAgentOffboardingReportUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getDownloadAgentOffboardingReportQueryKey = (id: string) => {
+  return [`/api/agents/${id}/offboarding-report/download`] as const;
+};
+
+export const getDownloadAgentOffboardingReportQueryOptions = <
+  TData = Awaited<ReturnType<typeof downloadAgentOffboardingReport>>,
+  TError = ErrorType<void>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof downloadAgentOffboardingReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getDownloadAgentOffboardingReportQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof downloadAgentOffboardingReport>>
+  > = ({ signal }) =>
+    downloadAgentOffboardingReport(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof downloadAgentOffboardingReport>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type DownloadAgentOffboardingReportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof downloadAgentOffboardingReport>>
+>;
+export type DownloadAgentOffboardingReportQueryError = ErrorType<void>;
+
+/**
+ * @summary Download the generated offboarding report file
+ */
+
+export function useDownloadAgentOffboardingReport<
+  TData = Awaited<ReturnType<typeof downloadAgentOffboardingReport>>,
+  TError = ErrorType<void>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof downloadAgentOffboardingReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getDownloadAgentOffboardingReportQueryOptions(
+    id,
+    options,
+  );
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

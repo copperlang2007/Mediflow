@@ -68,6 +68,7 @@ import {
   User,
   Building2,
   ChevronLeft,
+  RefreshCcw,
 } from "lucide-react";
 import NotificationPanel from "@/components/notifications/NotificationPanel";
 import { useSSENotifications } from "@/hooks/useSSENotifications";
@@ -97,6 +98,10 @@ const navItems: NavGroup[] = [
     items: [
       { href: "/licensing", label: "Licensing", icon: FileText, roles: ALL_ROLES },
       { href: "/certifications", label: "Certifications", icon: Award, roles: ALL_ROLES },
+      {
+        href: "/renewals", label: "Renewals", icon: RefreshCcw,
+        roles: ["super_admin", "agency_admin", "compliance_manager"],
+      },
     ],
   },
   {

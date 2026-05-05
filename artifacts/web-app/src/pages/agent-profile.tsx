@@ -923,7 +923,7 @@ export default function AgentProfilePage() {
                 asChild
               >
                 <a
-                  href={`${import.meta.env.BASE_URL?.replace(/\/$/, "")}/api/agents/${agentId}/offboarding-report`}
+                  href={`${import.meta.env.BASE_URL?.replace(/\/$/, "")}/api/agents/${agentId}/offboarding-report/download`}
                   target="_blank"
                   rel="noreferrer"
                 >

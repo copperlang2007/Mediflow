@@ -135,6 +135,22 @@ export const licenseRenewalAlertsTable = pgTable("license_renewal_alerts", {
 
 export type LicenseRenewalAlert = typeof licenseRenewalAlertsTable.$inferSelect;
 
+export const renewalSnoozesTable = pgTable("renewal_snoozes", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id")
+    .notNull()
+    .references(() => organizationsTable.id),
+  resourceType: text("resource_type").notNull(),
+  resourceId: text("resource_id").notNull(),
+  snoozedUntil: timestamp("snoozed_until", { withTimezone: true }).notNull(),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type RenewalSnooze = typeof renewalSnoozesTable.$inferSelect;
+
 export const carriersTable = pgTable("carriers", {
   id: text("id").primaryKey(),
   orgId: text("org_id")

@@ -3,6 +3,7 @@ import {
   useGetAgents,
   useCreateAgent,
   useGetAgentComplianceScore,
+  useGetUsers,
   getGetAgentsQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -94,7 +95,13 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
     phone: "",
     npn: "",
     hireDate: "",
+    managerId: "",
   });
+
+  const { data: usersData } = useGetUsers();
+  const managerOptions = (usersData ?? []).filter(
+    (u) => u.role !== "viewer" && u.role !== "agent",
+  );
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((p) => ({ ...p, [k]: e.target.value }));
@@ -103,7 +110,7 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
 
   const handleClose = () => {
     setStep(1);
-    setForm({ firstName: "", lastName: "", email: "", phone: "", npn: "", hireDate: "" });
+    setForm({ firstName: "", lastName: "", email: "", phone: "", npn: "", hireDate: "", managerId: "" });
     onClose();
   };
 
@@ -117,6 +124,7 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
           phone: form.phone || undefined,
           npn: form.npn || undefined,
           hireDate: form.hireDate || undefined,
+          managerId: form.managerId || undefined,
         },
       });
       toast.success(`Agent ${agent.firstName} ${agent.lastName} created — onboarding checklist started`);
@@ -128,11 +136,11 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
     }
   };
 
-  const stepTitle = step === 1 ? "Basic Information" : step === 2 ? "Contact & Details" : "Confirm Agent";
+  const stepTitle = step === 1 ? "Basic Information" : step === 2 ? "Contact & Assignment" : "Confirm Agent";
   const stepDesc = step === 1
     ? "Enter the agent's name and email address."
     : step === 2
-    ? "Optional contact info and identification."
+    ? "Optional contact info, NPN, and manager assignment."
     : "Review the details before creating the agent.";
 
   return (
@@ -193,6 +201,26 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
                 <Label htmlFor="wiz-hire">Hire Date</Label>
                 <Input id="wiz-hire" type="date" value={form.hireDate} onChange={set("hireDate")} />
               </div>
+              <div className="space-y-1.5">
+                <Label>Assign Manager</Label>
+                <Select
+                  value={form.managerId || "__none__"}
+                  onValueChange={(v) => setForm((p) => ({ ...p, managerId: v === "__none__" ? "" : v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="No manager assigned" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No manager assigned</SelectItem>
+                    {managerOptions.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.fullName}
+                        <span className="ml-2 text-xs text-muted-foreground capitalize">({u.role.replace(/_/g, " ")})</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <p className="text-xs text-muted-foreground">All fields on this step are optional.</p>
             </div>
           )}
@@ -215,6 +243,12 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
                 {form.hireDate && <>
                   <span className="text-muted-foreground">Hire Date</span>
                   <span className="font-medium">{new Date(form.hireDate).toLocaleDateString()}</span>
+                </>}
+                {form.managerId && <>
+                  <span className="text-muted-foreground">Manager</span>
+                  <span className="font-medium">
+                    {managerOptions.find((u) => u.id === form.managerId)?.fullName ?? "—"}
+                  </span>
                 </>}
               </div>
               <div className="border-t pt-2 mt-2">
