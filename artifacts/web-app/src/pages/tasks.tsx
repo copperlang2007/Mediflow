@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   useGetTasks,
   useCreateTask,
@@ -81,15 +81,21 @@ function TemplateFormDialog({
   const { mutateAsync: createTemplate, isPending: creating } = useCreateTaskTemplate();
   const { mutateAsync: updateTemplate, isPending: updating } = useUpdateTaskTemplate();
 
-  const [form, setForm] = useState({
-    name: template?.name ?? "",
-    title: template?.title ?? "",
-    description: template?.description ?? "",
-    type: template?.type ?? "custom",
-    priority: template?.priority ?? "medium",
-    triggerEvent: template?.triggerEvent ?? "",
-    dueDaysFromTrigger: template?.dueDaysFromTrigger != null ? String(template.dueDaysFromTrigger) : "",
+  const buildFormState = (t?: TaskTemplate | null) => ({
+    name: t?.name ?? "",
+    title: t?.title ?? "",
+    description: t?.description ?? "",
+    type: t?.type ?? "custom",
+    priority: t?.priority ?? "medium",
+    triggerEvent: t?.triggerEvent ?? "",
+    dueDaysFromTrigger: t?.dueDaysFromTrigger != null ? String(t.dueDaysFromTrigger) : "",
   });
+
+  const [form, setForm] = useState(() => buildFormState(template));
+
+  useEffect(() => {
+    if (open) setForm(buildFormState(template));
+  }, [open, template?.id]);
 
   const isEditing = !!template;
 
@@ -247,6 +253,22 @@ function CreateTaskFromTemplateDialog({
 
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
 
+  useEffect(() => {
+    if (!open) {
+      setSelectedTemplateId("");
+      setDueDate("");
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (selectedTemplate?.dueDaysFromTrigger != null) {
+      const d = new Date(Date.now() + selectedTemplate.dueDaysFromTrigger * 86400000);
+      setDueDate(d.toISOString().slice(0, 10));
+    } else {
+      setDueDate("");
+    }
+  }, [selectedTemplateId]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTemplate) return;
@@ -308,12 +330,11 @@ function CreateTaskFromTemplateDialog({
 
           <div className="space-y-1.5">
             <Label>Due Date</Label>
-            {selectedTemplate?.dueDaysFromTrigger ? (
+            {selectedTemplate?.dueDaysFromTrigger != null && (
               <p className="text-xs text-muted-foreground">
-                Default: {selectedTemplate.dueDaysFromTrigger} days from today —{" "}
-                {format(new Date(Date.now() + selectedTemplate.dueDaysFromTrigger * 86400000), "MMM d, yyyy")}
+                Auto-set to {selectedTemplate.dueDaysFromTrigger}d from today — override below if needed
               </p>
-            ) : null}
+            )}
             <Input
               type="date"
               value={dueDate}
