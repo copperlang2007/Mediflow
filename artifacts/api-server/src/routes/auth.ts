@@ -1,0 +1,78 @@
+import { Router, type IRouter, type Request, type Response } from "express";
+import { eq } from "drizzle-orm";
+import { getAuth } from "@clerk/express";
+import { db, usersTable, organizationsTable } from "@workspace/db";
+import { randomUUID } from "crypto";
+import { logger } from "../lib/logger";
+
+const router: IRouter = Router();
+
+router.post("/auth/provision", async (req: Request, res: Response): Promise<void> => {
+  const auth = getAuth(req);
+  if (!auth?.userId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const clerkUserId = auth.userId;
+
+  const existing = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.id, clerkUserId))
+    .limit(1);
+
+  if (existing[0]) {
+    await db
+      .update(usersTable)
+      .set({ lastLoginAt: new Date() })
+      .where(eq(usersTable.id, clerkUserId));
+
+    res.json({ user: existing[0], isNew: false });
+    return;
+  }
+
+  const { email, fullName, orgName, orgSlug } = req.body as {
+    email?: string;
+    fullName?: string;
+    orgName?: string;
+    orgSlug?: string;
+  };
+
+  if (!email || !fullName) {
+    res.status(400).json({ error: "email and fullName are required for provisioning" });
+    return;
+  }
+
+  const orgId = randomUUID();
+  const slug = orgSlug ?? orgName?.toLowerCase().replace(/[^a-z0-9]/g, "-") ?? orgId;
+
+  const [org] = await db
+    .insert(organizationsTable)
+    .values({
+      id: orgId,
+      name: orgName ?? `${fullName}'s Agency`,
+      slug: `${slug}-${orgId.slice(0, 8)}`,
+      planTier: "starter",
+    })
+    .returning();
+
+  const [user] = await db
+    .insert(usersTable)
+    .values({
+      id: clerkUserId,
+      orgId: org.id,
+      email,
+      fullName,
+      role: "agency_admin",
+      isActive: true,
+      lastLoginAt: new Date(),
+    })
+    .returning();
+
+  logger.info({ userId: user.id, orgId: org.id }, "New user provisioned");
+
+  res.status(201).json({ user, org, isNew: true });
+});
+
+export default router;

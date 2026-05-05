@@ -1,15 +1,29 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Medicare Agency Platform API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: users
+    description: User profile and management
+  - name: organizations
+    description: Organization settings
+  - name: dashboard
+    description: Dashboard metrics and activity
+  - name: agents
+    description: Agent lifecycle management
+  - name: notifications
+    description: Notification management
+  - name: audit
+    description: Audit log and compliance
+  - name: storage
+    description: Object storage uploads
+
 paths:
   /healthz:
     get:
@@ -24,6 +38,439 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /users/me:
+    get:
+      operationId: getMe
+      tags: [users]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    patch:
+      operationId: updateMe
+      tags: [users]
+      summary: Update current user profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserBody"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /users:
+    get:
+      operationId: getUsers
+      tags: [users]
+      summary: List all users (admin only)
+      parameters:
+        - name: role
+          in: query
+          schema:
+            type: string
+        - name: isActive
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+
+  /users/{userId}/role:
+    patch:
+      operationId: updateUserRole
+      tags: [users]
+      summary: Update a user's role (admin only)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRoleBody"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /organizations/me:
+    get:
+      operationId: getMyOrganization
+      tags: [organizations]
+      summary: Get current organization
+      responses:
+        "200":
+          description: Organization details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Organization"
+    patch:
+      operationId: updateMyOrganization
+      tags: [organizations]
+      summary: Update organization settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrganizationBody"
+      responses:
+        "200":
+          description: Updated organization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Organization"
+
+  /dashboard/stats:
+    get:
+      operationId: getDashboardStats
+      tags: [dashboard]
+      summary: Get dashboard aggregate statistics
+      responses:
+        "200":
+          description: Dashboard stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
+  /dashboard/activity:
+    get:
+      operationId: getDashboardActivity
+      tags: [dashboard]
+      summary: Get recent activity feed
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Recent activity items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityItem"
+
+  /agents:
+    get:
+      operationId: getAgents
+      tags: [agents]
+      summary: List agents
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: managerId
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of agents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentListResponse"
+    post:
+      operationId: createAgent
+      tags: [agents]
+      summary: Create a new agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentBody"
+      responses:
+        "201":
+          description: Created agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+
+  /agents/{id}:
+    get:
+      operationId: getAgent
+      tags: [agents]
+      summary: Get agent by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Agent details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    patch:
+      operationId: updateAgent
+      tags: [agents]
+      summary: Update agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAgentBody"
+      responses:
+        "200":
+          description: Updated agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+    delete:
+      operationId: deleteAgent
+      tags: [agents]
+      summary: Delete agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /agents/{id}/compliance-score:
+    get:
+      operationId: getAgentComplianceScore
+      tags: [agents]
+      summary: Get agent compliance score
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Compliance score breakdown
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplianceScore"
+
+  /notifications:
+    get:
+      operationId: getNotifications
+      tags: [notifications]
+      summary: Get user notifications
+      parameters:
+        - name: unreadOnly
+          in: query
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: List of notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Notification"
+
+  /notifications/count:
+    get:
+      operationId: getNotificationCount
+      tags: [notifications]
+      summary: Get unread notification count
+      responses:
+        "200":
+          description: Unread count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationCount"
+
+  /notifications/read-all:
+    post:
+      operationId: markAllNotificationsRead
+      tags: [notifications]
+      summary: Mark all notifications as read
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /notifications/{id}/read:
+    patch:
+      operationId: markNotificationRead
+      tags: [notifications]
+      summary: Mark a notification as read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated notification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Notification"
+
+  /audit-log:
+    get:
+      operationId: getAuditLog
+      tags: [audit]
+      summary: Get audit log entries (admin only)
+      parameters:
+        - name: userId
+          in: query
+          schema:
+            type: string
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: resourceType
+          in: query
+          schema:
+            type: string
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogResponse"
+
+  /storage/uploads/request-url:
+    post:
+      operationId: requestUploadUrl
+      tags: [storage]
+      summary: Request a presigned upload URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestUploadUrlBody"
+      responses:
+        "200":
+          description: Presigned upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestUploadUrlResponse"
+
+  /storage/objects/{objectPath}:
+    get:
+      operationId: getStorageObject
+      tags: [storage]
+      summary: Get a stored object
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Object file
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +481,519 @@ components:
       required:
         - status
 
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+      required:
+        - success
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        email:
+          type: string
+        fullName:
+          type: string
+        role:
+          type: string
+          enum: [super_admin, agency_admin, compliance_manager, agent]
+        avatarUrl:
+          type: ["string", "null"]
+        isActive:
+          type: boolean
+        lastLoginAt:
+          type: ["string", "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - orgId
+        - email
+        - fullName
+        - role
+        - isActive
+        - createdAt
+        - updatedAt
+
+    UpdateUserBody:
+      type: object
+      properties:
+        fullName:
+          type: string
+        avatarUrl:
+          type: string
+
+    UpdateUserRoleBody:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [super_admin, agency_admin, compliance_manager, agent]
+      required:
+        - role
+
+    Organization:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        planTier:
+          type: string
+        logoUrl:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - slug
+        - planTier
+        - createdAt
+
+    UpdateOrganizationBody:
+      type: object
+      properties:
+        name:
+          type: string
+        logoUrl:
+          type: string
+
+    DashboardStats:
+      type: object
+      properties:
+        totalAgents:
+          type: integer
+        agentsByStatus:
+          type: object
+          properties:
+            onboarding:
+              type: integer
+            active:
+              type: integer
+            suspended:
+              type: integer
+            offboarding:
+              type: integer
+            offboarded:
+              type: integer
+          required:
+            - onboarding
+            - active
+            - suspended
+            - offboarding
+            - offboarded
+        licensesExpiringIn30Days:
+          type: integer
+        licensesExpiringIn60Days:
+          type: integer
+        licensesExpiringIn90Days:
+          type: integer
+        openTasksCount:
+          type: integer
+        overdueTasks:
+          type: integer
+        openLeadsCount:
+          type: integer
+        unreadNotificationsCount:
+          type: integer
+        ahipCompletionRateCurrent:
+          type: number
+        totalContacts:
+          type: integer
+        agentsWithExpiringLicenses:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentLicenseAlert"
+      required:
+        - totalAgents
+        - agentsByStatus
+        - licensesExpiringIn30Days
+        - licensesExpiringIn60Days
+        - licensesExpiringIn90Days
+        - openTasksCount
+        - overdueTasks
+        - openLeadsCount
+        - unreadNotificationsCount
+        - ahipCompletionRateCurrent
+        - totalContacts
+        - agentsWithExpiringLicenses
+
+    AgentLicenseAlert:
+      type: object
+      properties:
+        agentId:
+          type: string
+        agentName:
+          type: string
+        stateCode:
+          type: string
+        licenseType:
+          type: string
+        expiryDate:
+          type: string
+          format: date-time
+        daysUntilExpiry:
+          type: integer
+      required:
+        - agentId
+        - agentName
+        - stateCode
+        - licenseType
+        - expiryDate
+        - daysUntilExpiry
+
+    ActivityItem:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        userId:
+          type: ["string", "null"]
+        userFullName:
+          type: ["string", "null"]
+        resourceType:
+          type: ["string", "null"]
+        resourceId:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - type
+        - title
+        - createdAt
+
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        userId:
+          type: ["string", "null"]
+        npn:
+          type: ["string", "null"]
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: ["string", "null"]
+        avatarUrl:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [onboarding, active, suspended, offboarding, offboarded]
+        hireDate:
+          type: ["string", "null"]
+          format: date-time
+        offboardDate:
+          type: ["string", "null"]
+          format: date-time
+        managerId:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        complianceScore:
+          type: ["number", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - orgId
+        - firstName
+        - lastName
+        - email
+        - status
+        - createdAt
+        - updatedAt
+
+    AgentDetail:
+      allOf:
+        - $ref: "#/components/schemas/Agent"
+        - type: object
+          properties:
+            manager:
+              $ref: "#/components/schemas/User"
+            licensesCount:
+              type: integer
+            activeLicensesCount:
+              type: integer
+            certificationsCount:
+              type: integer
+            activeCertificationsCount:
+              type: integer
+            ahipCurrentYear:
+              type: ["string", "null"]
+              description: "AHIP status for current year"
+
+    AgentListResponse:
+      type: object
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required:
+        - agents
+        - total
+        - limit
+        - offset
+
+    CreateAgentBody:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        npn:
+          type: string
+        hireDate:
+          type: string
+          format: date-time
+        managerId:
+          type: string
+        notes:
+          type: string
+      required:
+        - firstName
+        - lastName
+        - email
+
+    UpdateAgentBody:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        npn:
+          type: string
+        status:
+          type: string
+          enum: [onboarding, active, suspended, offboarding, offboarded]
+        hireDate:
+          type: string
+          format: date-time
+        offboardDate:
+          type: string
+          format: date-time
+        managerId:
+          type: string
+        notes:
+          type: string
+        avatarUrl:
+          type: string
+
+    ComplianceScore:
+      type: object
+      properties:
+        agentId:
+          type: string
+        totalScore:
+          type: number
+        licenseScore:
+          type: number
+        certificationScore:
+          type: number
+        ahipScore:
+          type: number
+        onboardingScore:
+          type: number
+        activeLicenses:
+          type: integer
+        totalLicenses:
+          type: integer
+        activeCertifications:
+          type: integer
+        totalCertifications:
+          type: integer
+        ahipCompleted:
+          type: boolean
+        onboardingComplete:
+          type: boolean
+      required:
+        - agentId
+        - totalScore
+        - licenseScore
+        - certificationScore
+        - ahipScore
+        - onboardingScore
+        - activeLicenses
+        - totalLicenses
+        - activeCertifications
+        - totalCertifications
+        - ahipCompleted
+        - onboardingComplete
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        userId:
+          type: string
+        type:
+          type: string
+        title:
+          type: string
+        body:
+          type: ["string", "null"]
+        readAt:
+          type: ["string", "null"]
+          format: date-time
+        actionUrl:
+          type: ["string", "null"]
+        metadata:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - orgId
+        - userId
+        - type
+        - title
+        - createdAt
+
+    NotificationCount:
+      type: object
+      properties:
+        unread:
+          type: integer
+      required:
+        - unread
+
+    AuditLogEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        orgId:
+          type: string
+        userId:
+          type: ["string", "null"]
+        userFullName:
+          type: ["string", "null"]
+        userRole:
+          type: ["string", "null"]
+        action:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: ["string", "null"]
+        changes:
+          type: object
+        ipAddress:
+          type: ["string", "null"]
+        userAgent:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - orgId
+        - action
+        - resourceType
+        - createdAt
+
+    AuditLogResponse:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditLogEntry"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required:
+        - entries
+        - total
+        - limit
+        - offset
+
+    RequestUploadUrlBody:
+      type: object
+      properties:
+        name:
+          type: string
+        size:
+          type: integer
+        contentType:
+          type: string
+      required:
+        - name
+        - contentType
+
+    RequestUploadUrlResponse:
+      type: object
+      properties:
+        uploadURL:
+          type: string
+        objectPath:
+          type: string
+      required:
+        - uploadURL
+        - objectPath

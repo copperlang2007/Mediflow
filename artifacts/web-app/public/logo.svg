@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <rect width="48" height="48" rx="12" fill="hsl(221,83%,43%)"/>
+  <!-- Shield shape -->
+  <path d="M24 8L10 14v10c0 8.84 5.97 17.12 14 19.6C32.03 41.12 38 32.84 38 24V14L24 8z" fill="white" opacity="0.15"/>
+  <path d="M24 10L12 15.5v8.5c0 7.36 4.97 14.27 12 16.67C31.03 38.27 36 31.36 36 24v-8.5L24 10z" fill="white" opacity="0.9"/>
+  <!-- Pulse / heartbeat line suggesting healthcare -->
+  <path d="M15 24h4l2-5 4 10 2-5h6" stroke="hsl(221,83%,43%)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
