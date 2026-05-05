@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@clerk/react";
@@ -115,6 +115,15 @@ function SendSmsModal({ contactId, contactName, open, onClose }: { contactId: st
   const { mutateAsync: sendSms, isPending } = useSendContactSms();
   const { draft, drafting } = useDraftWithAi(contactId, "sms");
 
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { content, draftType } = (e as CustomEvent<{ content: string; draftType: string }>).detail;
+      if (draftType === "sms") { setBody(content); setAiDrafted(true); }
+    };
+    window.addEventListener("mediflow:insert-draft", handler);
+    return () => window.removeEventListener("mediflow:insert-draft", handler);
+  }, []);
+
   const handleDraft = async () => {
     const result = await draft(`Follow up with ${contactName} about Medicare coverage`);
     if (result) { setBody(result.body); setAiDrafted(true); }
@@ -162,6 +171,15 @@ function SendEmailModal({ contactId, contactName, open, onClose }: { contactId: 
   const [aiDrafted, setAiDrafted] = useState(false);
   const { mutateAsync: sendEmail, isPending } = useSendContactEmail();
   const { draft, drafting } = useDraftWithAi(contactId, "email");
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { content, draftType } = (e as CustomEvent<{ content: string; draftType: string }>).detail;
+      if (draftType === "email") { setForm((f) => ({ ...f, body: content })); setAiDrafted(true); }
+    };
+    window.addEventListener("mediflow:insert-draft", handler);
+    return () => window.removeEventListener("mediflow:insert-draft", handler);
+  }, []);
 
   const handleDraft = async () => {
     const result = await draft(`Follow up with ${contactName} about Medicare coverage options`);

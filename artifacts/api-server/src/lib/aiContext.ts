@@ -83,7 +83,7 @@ export async function buildContactContext(contactId: string, orgId: string): Pro
   const month = now.getMonth() + 1;
   const day = now.getDate();
   const isAepWindow = (month === 10 && day >= 15) || month === 11 || (month === 12 && day <= 7);
-  const isOepWindow = month === 1 || (month === 3 && day <= 31);
+  const isOepWindow = month === 1 || month === 2 || (month === 3 && day <= 31);
   const enrollmentPeriod = isAepWindow
     ? "Annual Enrollment Period (AEP) is currently open (Oct 15 – Dec 7)"
     : isOepWindow

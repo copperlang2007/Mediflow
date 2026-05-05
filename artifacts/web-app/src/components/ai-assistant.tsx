@@ -5,7 +5,7 @@
  */
 
 import { useState, useRef, useEffect } from "react";
-import { Bot, X, Send, Loader2, Copy, Check, ChevronDown, Sparkles } from "lucide-react";
+import { Bot, X, Send, Loader2, Copy, Check, ChevronDown, Sparkles, ClipboardPaste } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -23,6 +23,7 @@ interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   isStreaming?: boolean;
+  draftType?: "sms" | "email";
 }
 
 const SLASH_COMMANDS = [
@@ -95,6 +96,11 @@ export function AiAssistantPanel({ context }: { context?: AiContext }) {
     const msg = input.trim();
     if (!msg || streaming) return;
 
+    const draftType: "sms" | "email" | undefined =
+      msg.startsWith("/draft-sms") ? "sms" :
+      msg.startsWith("/draft-email") ? "email" :
+      undefined;
+
     setInput("");
     setShowCommands(false);
 
@@ -102,7 +108,7 @@ export function AiAssistantPanel({ context }: { context?: AiContext }) {
       ...messages,
       { role: "user", content: msg },
     ];
-    setMessages([...newHistory, { role: "assistant", content: "", isStreaming: true }]);
+    setMessages([...newHistory, { role: "assistant", content: "", isStreaming: true, draftType }]);
     setStreaming(true);
 
     abortRef.current = new AbortController();
@@ -267,21 +273,38 @@ export function AiAssistantPanel({ context }: { context?: AiContext }) {
                     <Bot className="h-3.5 w-3.5 text-primary" />
                   </div>
                 )}
-                <div
-                  className={cn(
-                    "rounded-2xl px-3 py-2 max-w-[85%] text-sm",
-                    msg.role === "user"
-                      ? "bg-primary text-primary-foreground rounded-br-sm"
-                      : "bg-muted rounded-bl-sm",
-                  )}
-                >
-                  {msg.role === "assistant" ? (
-                    <MessageContent content={msg.content || (msg.isStreaming ? "…" : "")} />
-                  ) : (
-                    <p>{msg.content}</p>
-                  )}
-                  {msg.isStreaming && (
-                    <span className="inline-block h-3 w-1 bg-current opacity-70 animate-pulse ml-0.5" />
+                <div className="flex flex-col gap-1 max-w-[85%]">
+                  <div
+                    className={cn(
+                      "rounded-2xl px-3 py-2 text-sm",
+                      msg.role === "user"
+                        ? "bg-primary text-primary-foreground rounded-br-sm"
+                        : "bg-muted rounded-bl-sm",
+                    )}
+                  >
+                    {msg.role === "assistant" ? (
+                      <MessageContent content={msg.content || (msg.isStreaming ? "…" : "")} />
+                    ) : (
+                      <p>{msg.content}</p>
+                    )}
+                    {msg.isStreaming && (
+                      <span className="inline-block h-3 w-1 bg-current opacity-70 animate-pulse ml-0.5" />
+                    )}
+                  </div>
+                  {msg.role === "assistant" && msg.draftType && !msg.isStreaming && msg.content && (
+                    <button
+                      onClick={() => {
+                        window.dispatchEvent(
+                          new CustomEvent("mediflow:insert-draft", {
+                            detail: { content: msg.content, draftType: msg.draftType },
+                          })
+                        );
+                      }}
+                      className="self-start flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 transition-colors font-medium"
+                    >
+                      <ClipboardPaste className="h-3 w-3" />
+                      Use this in {msg.draftType === "sms" ? "SMS" : "Email"} compose
+                    </button>
                   )}
                 </div>
               </div>

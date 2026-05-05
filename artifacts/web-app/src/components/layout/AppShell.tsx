@@ -124,6 +124,11 @@ const navItems: NavGroup[] = [
         href: "/compliance", label: "Audit & Compliance", icon: ShieldCheck,
         roles: ["super_admin", "agency_admin", "compliance_manager"],
       },
+    ],
+  },
+  {
+    group: "Settings",
+    items: [
       {
         href: "/automations", label: "Automations", icon: Zap,
         roles: ["super_admin", "agency_admin"],
