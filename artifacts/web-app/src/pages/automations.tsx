@@ -51,12 +51,17 @@ const TRIGGER_OPTIONS = [
 
 const CONDITION_FIELDS = [
   { value: "status", label: "Status" },
-  { value: "role", label: "Role" },
-  { value: "state", label: "State" },
-  { value: "carrier", label: "Carrier" },
-  { value: "tag", label: "Tag" },
-  { value: "assignedAgentId", label: "Assigned agent" },
+  { value: "contactStatus", label: "Contact status" },
   { value: "source", label: "Lead source" },
+  { value: "assignedAgentId", label: "Assigned agent ID" },
+  { value: "stateCode", label: "State code" },
+  { value: "carrierId", label: "Carrier ID" },
+  { value: "daysUntilExpiry", label: "Days until expiry" },
+  { value: "daysSinceActivity", label: "Days since activity" },
+  { value: "daysOverdue", label: "Days overdue" },
+  { value: "currentStatus", label: "Current status" },
+  { value: "newStatus", label: "New status" },
+  { value: "oldStatus", label: "Old status" },
 ];
 
 const CONDITION_OPERATORS = [

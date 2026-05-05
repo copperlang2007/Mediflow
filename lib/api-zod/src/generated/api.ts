@@ -3238,7 +3238,11 @@ export const ResolveRetentionFlagResponse = zod.object({
 /**
  * @summary Retention counts for nav badges
  */
-export const GetRetentionSummaryResponse = zod.object({}).passthrough();
+export const GetRetentionSummaryResponse = zod.object({
+  birthdaysInNext30Days: zod.number(),
+  atRiskContacts: zod.number(),
+  openFlags: zod.number(),
+});
 
 /**
  * @summary List automation rules

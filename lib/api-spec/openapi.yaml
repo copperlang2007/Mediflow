@@ -5460,6 +5460,10 @@ components:
     RetentionSummary:
       type: object
       properties:
+        birthdaysInNext30Days: { type: integer }
+        atRiskContacts: { type: integer }
+        openFlags: { type: integer }
+      required: [birthdaysInNext30Days, atRiskContacts, openFlags]
 
     AutomationCondition:
       type: object

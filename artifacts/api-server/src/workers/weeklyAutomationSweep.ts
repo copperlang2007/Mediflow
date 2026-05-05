@@ -252,6 +252,36 @@ async function scanScheduled(orgId: string): Promise<void> {
   });
 }
 
+/**
+ * Fire `enrollment_period_opens` once on the first day of AEP (Oct 15) and
+ * OEP (Jan 1) so that rules keyed to that trigger execute.
+ */
+async function scanEnrollmentPeriodOpens(orgId: string): Promise<number> {
+  const now = new Date();
+  const month = now.getMonth() + 1; // 1-based
+  const day = now.getDate();
+
+  const isAepOpen = month === 10 && day === 15; // Annual Enrollment Period
+  const isOepOpen = month === 1 && day === 1;   // Open Enrollment Period
+
+  if (!isAepOpen && !isOepOpen) return 0;
+
+  const periodType = isAepOpen ? "AEP" : "OEP";
+
+  await enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+    orgId,
+    trigger: "enrollment_period_opens",
+    resourceType: "org",
+    resourceId: orgId,
+    context: {
+      periodType,
+      sweepDate: now.toISOString(),
+    },
+  });
+
+  return 1;
+}
+
 // ---- main worker ----
 
 export async function dailyAutomationSweepWorker(): Promise<void> {
@@ -265,20 +295,21 @@ export async function dailyAutomationSweepWorker(): Promise<void> {
 
   for (const org of orgs) {
     try {
-      const [licenses, certs, ahip, inactive, overdue] = await Promise.all([
+      const [licenses, certs, ahip, inactive, overdue, enrollment] = await Promise.all([
         scanLicenseExpiring(org.id),
         scanCertExpiring(org.id),
         scanAhipDeadlines(org.id),
         scanContactNoActivity(org.id),
         scanTaskOverdue(org.id),
+        scanEnrollmentPeriodOpens(org.id),
       ]);
       await scanScheduled(org.id);
 
-      const orgTotal = licenses + certs + ahip + inactive + overdue + 1;
+      const orgTotal = licenses + certs + ahip + inactive + overdue + enrollment + 1;
       totalEnqueued += orgTotal;
 
       logger.info(
-        { orgId: org.id, licenses, certs, ahip, inactive, overdue },
+        { orgId: org.id, licenses, certs, ahip, inactive, overdue, enrollment },
         "Automation sweep completed for org",
       );
     } catch (err) {

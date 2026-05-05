@@ -1757,7 +1757,9 @@ export interface CreateRetentionFlagBody {
 }
 
 export interface RetentionSummary {
-  [key: string]: unknown;
+  birthdaysInNext30Days: number;
+  atRiskContacts: number;
+  openFlags: number;
 }
 
 export type AutomationConditionOperator =

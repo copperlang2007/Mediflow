@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { ShieldCheck, Activity, Clock, Sparkles, Loader2, ChevronDown } from "lucide-react";
+import { ShieldCheck, Activity, Clock, Sparkles, Loader2, ChevronDown, Download } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useAuth } from "@clerk/react";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,7 @@ function AiComplianceReport() {
   const [streaming, setStreaming] = useState(false);
   const [report, setReport] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [documentId, setDocumentId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 
@@ -27,6 +28,7 @@ function AiComplianceReport() {
   const generate = async () => {
     setReport("");
     setError(null);
+    setDocumentId(null);
     setStreaming(true);
     setOpen(true);
     try {
@@ -55,8 +57,12 @@ function AiComplianceReport() {
             const raw = line.slice(6).trim();
             if (raw === "[DONE]") { isDone = true; break; }
             try {
-              const ev = JSON.parse(raw) as { content?: string; done?: boolean; error?: string };
-              if (ev.done) { isDone = true; break; }
+              const ev = JSON.parse(raw) as { content?: string; done?: boolean; documentId?: string; error?: string };
+              if (ev.done) {
+                if (ev.documentId) setDocumentId(ev.documentId);
+                isDone = true;
+                break;
+              }
               if (ev.content) {
                 setReport((prev) => (prev ?? "") + ev.content);
               } else if (ev.error) {
@@ -71,6 +77,24 @@ function AiComplianceReport() {
     } finally {
       setStreaming(false);
     }
+  };
+
+  const downloadReport = async () => {
+    if (!documentId) return;
+    const token = await getToken();
+    const url = `${base}/api/ai/compliance-report/${documentId}`;
+    const res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      redirect: "follow",
+    });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = `compliance-report-${documentId}.pdf`;
+    a.click();
+    URL.revokeObjectURL(href);
   };
 
   return (
@@ -106,13 +130,21 @@ function AiComplianceReport() {
               {streaming && <span className="animate-pulse">▌</span>}
             </div>
           )}
-          <button
-            className="mt-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            onClick={() => setOpen(false)}
-          >
-            <ChevronDown className="h-3 w-3" />
-            Collapse
-          </button>
+          <div className="mt-2 flex items-center gap-3">
+            {documentId && !streaming && (
+              <Button size="sm" variant="outline" onClick={downloadReport} className="h-7 text-xs gap-1.5">
+                <Download className="h-3 w-3" />
+                Download PDF
+              </Button>
+            )}
+            <button
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              onClick={() => setOpen(false)}
+            >
+              <ChevronDown className="h-3 w-3" />
+              Collapse
+            </button>
+          </div>
         </CardContent>
       )}
     </Card>

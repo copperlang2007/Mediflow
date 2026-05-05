@@ -17,9 +17,13 @@ import {
   automationRuleLogsTable,
   contactsTable,
   dealsTable,
+  leadsTable,
   notificationsTable,
+  stateLicensesTable,
+  carrierCertificationsTable,
   taskInstancesTable,
   usersTable,
+  agentsTable,
   type Contact,
 } from "@workspace/db";
 import { type RunAutomationRulesPayload, enqueue, JOB_NAMES } from "../lib/jobs";
@@ -253,6 +257,105 @@ export async function runAutomationRulesWorker(
 
   logger.info({ orgId, trigger, ruleCount: rules.length }, "Evaluating automation rules");
 
+  // Load the actual entity record and merge its attributes into the context so
+  // condition fields (status, source, stateCode, carrierId, assignedAgentId,
+  // contactStatus, etc.) resolve against real DB values.
+  const enrichedContext: Record<string, unknown> = { ...context };
+
+  if (resourceId) {
+    try {
+      if (resourceType === "contact") {
+        const [row] = await db
+          .select()
+          .from(contactsTable)
+          .where(and(eq(contactsTable.id, resourceId), eq(contactsTable.orgId, orgId)));
+        if (row) {
+          Object.assign(enrichedContext, {
+            status: row.status,
+            contactStatus: row.status,
+            stateCode: row.stateCode,
+            source: (row as Record<string, unknown>).source,
+            assignedAgentId: row.assignedAgentId,
+            currentPlanType: row.currentPlanType,
+          });
+        }
+      } else if (resourceType === "lead") {
+        const [row] = await db
+          .select()
+          .from(leadsTable)
+          .where(and(eq(leadsTable.id, resourceId), eq(leadsTable.orgId, orgId)));
+        if (row) {
+          Object.assign(enrichedContext, {
+            status: row.status,
+            source: row.source,
+            assignedAgentId: row.assignedAgentId,
+            stateCode: (row as Record<string, unknown>).stateCode,
+          });
+        }
+      } else if (resourceType === "license") {
+        const [row] = await db
+          .select()
+          .from(stateLicensesTable)
+          .where(eq(stateLicensesTable.id, resourceId));
+        if (row) {
+          Object.assign(enrichedContext, {
+            stateCode: row.stateCode,
+            agentId: row.agentId,
+            status: row.status,
+          });
+        }
+      } else if (resourceType === "certification") {
+        const [row] = await db
+          .select()
+          .from(carrierCertificationsTable)
+          .where(eq(carrierCertificationsTable.id, resourceId));
+        if (row) {
+          Object.assign(enrichedContext, {
+            carrierId: row.carrierId,
+            agentId: row.agentId,
+            status: row.status,
+          });
+        }
+      } else if (resourceType === "deal") {
+        const [row] = await db
+          .select()
+          .from(dealsTable)
+          .where(and(eq(dealsTable.id, resourceId), eq(dealsTable.orgId, orgId)));
+        if (row) {
+          Object.assign(enrichedContext, {
+            status: (row as Record<string, unknown>).status,
+            stageId: row.stageId,
+            assignedAgentId: row.assignedAgentId,
+          });
+        }
+      } else if (resourceType === "task") {
+        const [row] = await db
+          .select()
+          .from(taskInstancesTable)
+          .where(and(eq(taskInstancesTable.id, resourceId), eq(taskInstancesTable.orgId, orgId)));
+        if (row) {
+          Object.assign(enrichedContext, {
+            status: row.status,
+            assignedAgentId: row.agentId,
+          });
+        }
+      } else if (resourceType === "agent") {
+        const [row] = await db
+          .select()
+          .from(agentsTable)
+          .where(and(eq(agentsTable.id, resourceId), eq(agentsTable.orgId, orgId)));
+        if (row) {
+          Object.assign(enrichedContext, {
+            status: row.status,
+            stateCode: (row as Record<string, unknown>).stateCode,
+          });
+        }
+      }
+    } catch (err) {
+      logger.warn({ err, resourceType, resourceId }, "Failed to enrich automation context — using raw context");
+    }
+  }
+
   // Triggers that pass numeric context fields which must be checked against
   // per-rule triggerConfig thresholds before condition evaluation.
   const TIME_THRESHOLD_TRIGGERS: Record<string, string> = {
@@ -269,7 +372,7 @@ export async function runAutomationRulesWorker(
       const triggerConfig = (rule.triggerConfig as Record<string, unknown> | null) ?? {};
       const threshold = triggerConfig.daysThreshold;
       if (threshold !== undefined && threshold !== null) {
-        const contextValue = Number(context[thresholdField]);
+        const contextValue = Number(enrichedContext[thresholdField]);
         if (contextValue > Number(threshold)) {
           logger.debug(
             { ruleId: rule.id, contextValue, threshold },
@@ -282,7 +385,7 @@ export async function runAutomationRulesWorker(
 
     const conditions = (rule.conditions as AutomationCondition[] | null) ?? [];
     const conditionsMet =
-      conditions.length === 0 || evaluateConditions(conditions, context);
+      conditions.length === 0 || evaluateConditions(conditions, enrichedContext);
 
     if (!conditionsMet) {
       logger.debug({ ruleId: rule.id }, "Automation rule conditions not met — skipping");
