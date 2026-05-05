@@ -143,11 +143,16 @@ function PipelineTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between print:hidden">
         <DateRangePicker value={range} onChange={setRange} />
-        <Button variant="outline" size="sm" className="print:hidden" onClick={() => window.print()}>
-          <Printer className="h-4 w-4 mr-1.5" /> Print
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => downloadCsv(`/api/reports/pipeline/export?startDate=${range.start}&endDate=${range.end}`, "pipeline-report.csv")}>
+            <Download className="h-4 w-4 mr-1.5" /> Export CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => window.print()}>
+            <Printer className="h-4 w-4 mr-1.5" /> Print
+          </Button>
+        </div>
       </div>
 
       {data.map((pipeline) => (
@@ -203,12 +208,12 @@ function LeadsTab() {
       <div className="flex items-center justify-between">
         <DateRangePicker value={range} onChange={setRange} />
         <div className="flex gap-2 print:hidden">
-          <Button variant="outline" size="sm" onClick={() => {
-            const rows = [["Source", "Total", "Converted", "Conv%", "Enrolled"], ...data.sourceBreakdown.map((r) => [r.source, r.total, r.converted, r.conversionRate + "%", r.enrolled])];
-            const csv = rows.map((r) => r.join(",")).join("\n");
-            const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "leads-report.csv"; a.click();
-          }}><Download className="h-4 w-4 mr-1.5" /> Export CSV</Button>
-          <Button variant="outline" size="sm" onClick={() => window.print()}><Printer className="h-4 w-4 mr-1.5" /> Print</Button>
+          <Button variant="outline" size="sm" onClick={() => downloadCsv(`/api/reports/leads/export?startDate=${range.start}&endDate=${range.end}`, "leads-report.csv")}>
+            <Download className="h-4 w-4 mr-1.5" /> Export CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => window.print()}>
+            <Printer className="h-4 w-4 mr-1.5" /> Print
+          </Button>
         </div>
       </div>
 
@@ -295,7 +300,10 @@ function ComplianceMatrixTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-end print:hidden">
+      <div className="flex justify-end gap-2 print:hidden">
+        <Button variant="outline" size="sm" onClick={() => downloadCsv("/api/reports/compliance-matrix/export", "compliance-matrix.csv")}>
+          <Download className="h-4 w-4 mr-1.5" /> Export CSV
+        </Button>
         <Button variant="outline" size="sm" onClick={() => window.print()}>
           <Printer className="h-4 w-4 mr-1.5" /> Print
         </Button>
@@ -425,9 +433,14 @@ function CommunicationsTab() {
     <div className="space-y-6 print:space-y-4">
       <div className="flex items-center justify-between print:hidden">
         <DateRangePicker value={range} onChange={setRange} />
-        <Button variant="outline" size="sm" onClick={() => window.print()}>
-          <Download className="h-4 w-4 mr-1.5" /> Print
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => downloadCsv(`/api/reports/communications/export?startDate=${range.start}&endDate=${range.end}`, "communications-report.csv")}>
+            <Download className="h-4 w-4 mr-1.5" /> Export CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => window.print()}>
+            <Printer className="h-4 w-4 mr-1.5" /> Print
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -525,9 +538,12 @@ function RetentionTab() {
 
   return (
     <div className="space-y-6 print:space-y-4">
-      <div className="flex justify-end print:hidden">
+      <div className="flex justify-end gap-2 print:hidden">
+        <Button variant="outline" size="sm" onClick={() => downloadCsv("/api/reports/retention/export", "retention-report.csv")}>
+          <Download className="h-4 w-4 mr-1.5" /> Export CSV
+        </Button>
         <Button variant="outline" size="sm" onClick={() => window.print()}>
-          <Download className="h-4 w-4 mr-1.5" /> Print
+          <Printer className="h-4 w-4 mr-1.5" /> Print
         </Button>
       </div>
 
@@ -655,26 +671,9 @@ function ExecutiveTab() {
       <div className="flex items-center justify-between print:hidden">
         <DateRangePicker value={range} onChange={setRange} />
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => {
-            const rows = [
-              ["Metric", "Value"],
-              ["Active Agents", data.agents.active],
-              ["Onboarding Agents", data.agents.onboarding],
-              ["New Leads", data.leads.total],
-              ["Prior Period Leads", data.leads.priorPeriod],
-              ["Lead Change %", data.leads.changePercent != null ? data.leads.changePercent + "%" : "N/A"],
-              ["Deals Won", data.deals.won],
-              ["Deals Lost", data.deals.lost],
-              ["Win Rate", data.deals.winRate + "%"],
-              ["Won Value", data.deals.wonValue],
-              ["Active Pipeline Value", data.deals.activePipelineValue],
-              ["Enrolled Members", data.members.enrolled],
-              ["Outbound Messages", data.communications.outbound],
-              ["AHIP Pass Rate", data.compliance.ahipRate + "%"],
-            ];
-            const csv = rows.map((r) => r.join(",")).join("\n");
-            const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "executive-report.csv"; a.click();
-          }}><Download className="h-4 w-4 mr-1.5" /> Export CSV</Button>
+          <Button variant="outline" size="sm" onClick={() => downloadCsv(`/api/reports/executive/export?startDate=${range.start}&endDate=${range.end}`, "executive-report.csv")}>
+            <Download className="h-4 w-4 mr-1.5" /> Export CSV
+          </Button>
           <Button variant="outline" size="sm" onClick={() => window.print()}><Printer className="h-4 w-4 mr-1.5" /> Print</Button>
         </div>
       </div>

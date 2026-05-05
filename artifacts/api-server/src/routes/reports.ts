@@ -807,6 +807,332 @@ router.get(
   },
 );
 
+// ─── Pipeline CSV Export ──────────────────────────────────────────────────────
+router.get(
+  "/reports/pipeline/export",
+  requireAuth,
+  requireRole("super_admin", "agency_admin", "compliance_manager"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const { start, end } = parseRange(req);
+
+    const pipelines = await db.select({ id: pipelinesTable.id, name: pipelinesTable.name })
+      .from(pipelinesTable).where(eq(pipelinesTable.orgId, authReq.orgId));
+
+    const allDeals = await db.select({
+      pipelineId: dealsTable.pipelineId,
+      stageId: dealsTable.stageId,
+      status: dealsTable.status,
+      value: dealsTable.valueEst,
+    }).from(dealsTable)
+      .where(and(eq(dealsTable.orgId, authReq.orgId), gte(dealsTable.createdAt, start), lte(dealsTable.createdAt, end)));
+
+    const stages = await db.select({ id: pipelineStagesTable.id, pipelineId: pipelineStagesTable.pipelineId, name: pipelineStagesTable.name })
+      .from(pipelineStagesTable)
+      .where(inArray(pipelineStagesTable.pipelineId, pipelines.map((p) => p.id)));
+
+    const stageMap: Record<string, string> = {};
+    for (const s of stages) stageMap[s.id] = s.name;
+    const pipelineMap: Record<string, string> = {};
+    for (const p of pipelines) pipelineMap[p.id] = p.name;
+
+    type StageRow = { pipeline: string; stage: string; active: number; won: number; lost: number; wonValue: number };
+    const rowMap: Record<string, StageRow> = {};
+    for (const d of allDeals) {
+      const key = `${d.pipelineId}::${d.stageId}`;
+      if (!rowMap[key]) rowMap[key] = { pipeline: pipelineMap[d.pipelineId ?? ""] ?? "", stage: stageMap[d.stageId ?? ""] ?? "", active: 0, won: 0, lost: 0, wonValue: 0 };
+      if (d.status === "won") { rowMap[key].won++; rowMap[key].wonValue += Number(d.value ?? 0); }
+      else if (d.status === "lost") rowMap[key].lost++;
+      else rowMap[key].active++;
+    }
+
+    const header = ["Pipeline", "Stage", "Active Deals", "Won", "Lost", "Won Value ($)"];
+    const rows = Object.values(rowMap).map((r) => [r.pipeline, r.stage, r.active, r.won, r.lost, r.wonValue.toFixed(2)]);
+    const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+
+    await logExport(authReq.orgId, authReq.userId, "pipeline_csv", { startDate: start, endDate: end }, rows.length);
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="pipeline-report-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(csv);
+  },
+);
+
+// ─── Leads CSV Export ─────────────────────────────────────────────────────────
+router.get(
+  "/reports/leads/export",
+  requireAuth,
+  requireRole("super_admin", "agency_admin", "compliance_manager"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const { start, end } = parseRange(req);
+
+    const allLeads = await db
+      .select({ source: leadsTable.source, status: leadsTable.status })
+      .from(leadsTable)
+      .where(and(eq(leadsTable.orgId, authReq.orgId), gte(leadsTable.createdAt, start), lte(leadsTable.createdAt, end)));
+
+    type SourceRow = { source: string; total: number; converted: number; enrolled: number };
+    const sourceMap: Record<string, SourceRow> = {};
+    for (const l of allLeads) {
+      const src = l.source ?? "unknown";
+      if (!sourceMap[src]) sourceMap[src] = { source: src, total: 0, converted: 0, enrolled: 0 };
+      sourceMap[src].total++;
+      if (l.status === "converted") { sourceMap[src].converted++; sourceMap[src].enrolled++; }
+    }
+
+    const rows = Object.values(sourceMap).map((r) => [
+      r.source,
+      r.total,
+      r.converted,
+      r.total > 0 ? Math.round((r.converted / r.total) * 100) + "%" : "0%",
+      r.enrolled,
+    ]);
+
+    const header = ["Source", "Total Leads", "Converted", "Conversion Rate", "Enrolled"];
+    const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+
+    await logExport(authReq.orgId, authReq.userId, "leads_csv", { startDate: start, endDate: end }, rows.length);
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="leads-report-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(csv);
+  },
+);
+
+// ─── Compliance Matrix CSV Export ─────────────────────────────────────────────
+router.get(
+  "/reports/compliance-matrix/export",
+  requireAuth,
+  requireRole("super_admin", "agency_admin", "compliance_manager"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+
+    const agents = await db.select({ id: agentsTable.id, firstName: agentsTable.firstName, lastName: agentsTable.lastName })
+      .from(agentsTable).where(eq(agentsTable.orgId, authReq.orgId));
+
+    const agentIds = agents.map((a) => a.id);
+    if (!agentIds.length) { res.setHeader("Content-Type", "text/csv"); res.send(""); return; }
+
+    const agentNameMap: Record<string, string> = {};
+    for (const a of agents) agentNameMap[a.id] = `${a.firstName} ${a.lastName}`;
+
+    const [licenses, ahipRecords] = await Promise.all([
+      db.select({
+        agentId: stateLicensesTable.agentId,
+        stateCode: stateLicensesTable.stateCode,
+        licenseType: stateLicensesTable.licenseType,
+        status: stateLicensesTable.status,
+        expiryDate: stateLicensesTable.expiryDate,
+      }).from(stateLicensesTable).where(inArray(stateLicensesTable.agentId, agentIds)),
+
+      db.select({ agentId: ahipRecordsTable.agentId, year: ahipRecordsTable.certificationYear, status: ahipRecordsTable.status })
+        .from(ahipRecordsTable).where(inArray(ahipRecordsTable.agentId, agentIds)),
+    ]);
+
+    const now = new Date();
+    const in90 = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+
+    const licenseRows = licenses.map((l) => [
+      agentNameMap[l.agentId] ?? l.agentId,
+      l.stateCode,
+      l.licenseType,
+      l.status,
+      l.expiryDate ? new Date(l.expiryDate).toISOString().slice(0, 10) : "",
+      l.expiryDate && new Date(l.expiryDate) <= in90 && new Date(l.expiryDate) >= now ? "YES" : "no",
+    ]);
+
+    const ahipRows = ahipRecords.map((r) => [
+      agentNameMap[r.agentId] ?? r.agentId,
+      "AHIP",
+      "certification",
+      r.status,
+      String(r.year),
+      "",
+    ]);
+
+    const header = ["Agent", "State/Code", "Type", "Status", "Expiry Date", "Expiring in 90 Days"];
+    const csv = [header, ...licenseRows, ...ahipRows].map((r) => r.map((v) => `"${v.replace(/"/g, '""')}"`).join(",")).join("\n");
+
+    await logExport(authReq.orgId, authReq.userId, "compliance_matrix_csv", {}, licenseRows.length + ahipRows.length);
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="compliance-matrix-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(csv);
+  },
+);
+
+// ─── Communications CSV Export ────────────────────────────────────────────────
+router.get(
+  "/reports/communications/export",
+  requireAuth,
+  requireRole("super_admin", "agency_admin", "compliance_manager"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const { start, end } = parseRange(req);
+
+    const [smsPerAgent, emailPerAgent] = await Promise.all([
+      db.select({ agentId: contactsTable.assignedAgentId, cnt: count() })
+        .from(messagesTable)
+        .innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id))
+        .innerJoin(contactsTable, eq(messageThreadsTable.contactId, contactsTable.id))
+        .where(and(eq(messageThreadsTable.orgId, authReq.orgId), eq(messageThreadsTable.channel, "sms"), eq(messagesTable.direction, "outbound"), gte(messagesTable.createdAt, start), lte(messagesTable.createdAt, end)))
+        .groupBy(contactsTable.assignedAgentId),
+
+      db.select({ agentId: contactsTable.assignedAgentId, cnt: count() })
+        .from(messagesTable)
+        .innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id))
+        .innerJoin(contactsTable, eq(messageThreadsTable.contactId, contactsTable.id))
+        .where(and(eq(messageThreadsTable.orgId, authReq.orgId), eq(messageThreadsTable.channel, "email"), eq(messagesTable.direction, "outbound"), gte(messagesTable.createdAt, start), lte(messagesTable.createdAt, end)))
+        .groupBy(contactsTable.assignedAgentId),
+    ]);
+
+    const map: Record<string, { agentId: string; sms: number; email: number }> = {};
+    for (const s of smsPerAgent) { if (s.agentId) { map[s.agentId] ??= { agentId: s.agentId, sms: 0, email: 0 }; map[s.agentId].sms = Number(s.cnt); } }
+    for (const e of emailPerAgent) { if (e.agentId) { map[e.agentId] ??= { agentId: e.agentId, sms: 0, email: 0 }; map[e.agentId].email = Number(e.cnt); } }
+
+    const agentIds = Object.keys(map);
+    const agentNames = agentIds.length > 0
+      ? await db.select({ id: agentsTable.id, firstName: agentsTable.firstName, lastName: agentsTable.lastName })
+          .from(agentsTable).where(inArray(agentsTable.id, agentIds))
+      : [];
+    const nameMap: Record<string, string> = {};
+    for (const a of agentNames) nameMap[a.id] = `${a.firstName} ${a.lastName}`;
+
+    const rows = Object.values(map)
+      .sort((a, b) => (b.sms + b.email) - (a.sms + a.email))
+      .map((r) => [nameMap[r.agentId] ?? r.agentId, r.sms, r.email, r.sms + r.email]);
+
+    const header = ["Agent", "SMS Sent", "Email Sent", "Total"];
+    const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+
+    await logExport(authReq.orgId, authReq.userId, "communications_csv", { startDate: start, endDate: end }, rows.length);
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="communications-report-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(csv);
+  },
+);
+
+// ─── Retention CSV Export ─────────────────────────────────────────────────────
+router.get(
+  "/reports/retention/export",
+  requireAuth,
+  requireRole("super_admin", "agency_admin", "compliance_manager"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const now = new Date();
+
+    const atRiskCutoff = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+    const [enrolled, lost, atRisk, monthlyEnrolled, monthlyLost] = await Promise.all([
+      db.select({ cnt: count() }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"))),
+      db.select({ cnt: count() }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "lost"))),
+      db.select({ cnt: count() }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"), lte(contactsTable.updatedAt, atRiskCutoff))),
+      db.select({ ym: sql<string>`TO_CHAR(${contactsTable.createdAt}, 'YYYY-MM')`, cnt: count() })
+        .from(contactsTable)
+        .where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"), gte(contactsTable.createdAt, new Date(now.getFullYear() - 1, now.getMonth(), 1))))
+        .groupBy(sql`TO_CHAR(${contactsTable.createdAt}, 'YYYY-MM')`),
+      db.select({ ym: sql<string>`TO_CHAR(${contactsTable.updatedAt}, 'YYYY-MM')`, cnt: count() })
+        .from(contactsTable)
+        .where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "lost"), gte(contactsTable.updatedAt, new Date(now.getFullYear() - 1, now.getMonth(), 1))))
+        .groupBy(sql`TO_CHAR(${contactsTable.updatedAt}, 'YYYY-MM')`),
+    ]);
+
+    const enrolledN = Number(enrolled[0]?.cnt ?? 0);
+    const lostN = Number(lost[0]?.cnt ?? 0);
+    const atRiskN = Number(atRisk[0]?.cnt ?? 0);
+    const retentionRate = (enrolledN + lostN) > 0 ? Math.round((enrolledN / (enrolledN + lostN)) * 1000) / 10 : 0;
+
+    const trendMap: Record<string, { enrolled: number; lost: number }> = {};
+    for (const r of monthlyEnrolled) { trendMap[r.ym] ??= { enrolled: 0, lost: 0 }; trendMap[r.ym].enrolled = Number(r.cnt); }
+    for (const r of monthlyLost) { trendMap[r.ym] ??= { enrolled: 0, lost: 0 }; trendMap[r.ym].lost = Number(r.cnt); }
+
+    const summarySection = [
+      ["Metric", "Value"],
+      ["Enrolled Members", enrolledN],
+      ["Lost Members", lostN],
+      ["At-Risk Members", atRiskN],
+      ["Retention Rate", retentionRate + "%"],
+      [],
+      ["Month", "Enrolled", "Lost"],
+      ...Object.entries(trendMap).sort(([a], [b]) => a.localeCompare(b)).map(([m, v]) => [m, v.enrolled, v.lost]),
+    ];
+
+    const csv = summarySection.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+
+    await logExport(authReq.orgId, authReq.userId, "retention_csv", {}, Object.keys(trendMap).length + 4);
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="retention-report-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(csv);
+  },
+);
+
+// ─── Executive CSV Export ─────────────────────────────────────────────────────
+router.get(
+  "/reports/executive/export",
+  requireAuth,
+  requireRole("super_admin", "agency_admin"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const { start, end } = parseRange(req);
+    const periodMs = end.getTime() - start.getTime();
+    const priorStart = new Date(start.getTime() - periodMs);
+    const priorEnd = new Date(start.getTime() - 1);
+
+    const [activeAgents, onboardingAgents, totalLeads, priorLeads, dealsWon, dealsLost, activePipeline, enrolledMembers, commsVolume, ahipStats] = await Promise.all([
+      db.select({ cnt: count() }).from(agentsTable).where(and(eq(agentsTable.orgId, authReq.orgId), eq(agentsTable.status, "active"))),
+      db.select({ cnt: count() }).from(agentsTable).where(and(eq(agentsTable.orgId, authReq.orgId), eq(agentsTable.status, "onboarding"))),
+      db.select({ cnt: count() }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), gte(contactsTable.createdAt, start), lte(contactsTable.createdAt, end))),
+      db.select({ cnt: count() }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), gte(contactsTable.createdAt, priorStart), lte(contactsTable.createdAt, priorEnd))),
+      db.select({ cnt: count(), val: sum(dealsTable.valueEst) }).from(dealsTable).where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "won"), gte(dealsTable.wonAt, start), lte(dealsTable.wonAt, end))),
+      db.select({ cnt: count() }).from(dealsTable).where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "lost"), gte(dealsTable.updatedAt, start), lte(dealsTable.updatedAt, end))),
+      db.select({ val: sum(dealsTable.valueEst) }).from(dealsTable).where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "open"))),
+      db.select({ cnt: count() }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"))),
+      db.select({ cnt: count() }).from(messagesTable).innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id)).where(and(eq(messageThreadsTable.orgId, authReq.orgId), eq(messagesTable.direction, "outbound"), gte(messagesTable.createdAt, start), lte(messagesTable.createdAt, end))),
+      db.select({ total: count(), passed: sum(sql<number>`CASE WHEN ${ahipRecordsTable.status} = 'passed' THEN 1 ELSE 0 END`) }).from(ahipRecordsTable).innerJoin(agentsTable, eq(ahipRecordsTable.agentId, agentsTable.id)).where(eq(agentsTable.orgId, authReq.orgId)),
+    ]);
+
+    const wonCount = Number(dealsWon[0]?.cnt ?? 0);
+    const lostCount = Number(dealsLost[0]?.cnt ?? 0);
+    const winRate = (wonCount + lostCount) > 0 ? Math.round((wonCount / (wonCount + lostCount)) * 100) : 0;
+    const leadsTotal = Number(totalLeads[0]?.cnt ?? 0);
+    const leadsPrior = Number(priorLeads[0]?.cnt ?? 0);
+    const leadsChangePct = leadsPrior > 0 ? Math.round(((leadsTotal - leadsPrior) / leadsPrior) * 100) : null;
+    const ahipTotal = Number(ahipStats[0]?.total ?? 0);
+    const ahipPassed = Number(ahipStats[0]?.passed ?? 0);
+
+    const rows: (string | number | null)[][] = [
+      ["Metric", "Value"],
+      ["Period Start", start.toISOString().slice(0, 10)],
+      ["Period End", end.toISOString().slice(0, 10)],
+      ["Active Agents", Number(activeAgents[0]?.cnt ?? 0)],
+      ["Onboarding Agents", Number(onboardingAgents[0]?.cnt ?? 0)],
+      ["New Leads (Period)", leadsTotal],
+      ["Prior Period Leads", leadsPrior],
+      ["Lead Change %", leadsChangePct != null ? leadsChangePct + "%" : "N/A"],
+      ["Deals Won", wonCount],
+      ["Deals Lost", lostCount],
+      ["Win Rate", winRate + "%"],
+      ["Won Value ($)", Number(dealsWon[0]?.val ?? 0)],
+      ["Active Pipeline Value ($)", Number(activePipeline[0]?.val ?? 0)],
+      ["Enrolled Members", Number(enrolledMembers[0]?.cnt ?? 0)],
+      ["Outbound Messages", Number(commsVolume[0]?.cnt ?? 0)],
+      ["AHIP Passed", ahipPassed],
+      ["AHIP Total", ahipTotal],
+      ["AHIP Pass Rate", ahipTotal > 0 ? Math.round((ahipPassed / ahipTotal) * 100) + "%" : "N/A"],
+    ];
+
+    const csv = rows.map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+
+    await logExport(authReq.orgId, authReq.userId, "executive_csv", { startDate: start, endDate: end }, rows.length - 1);
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="executive-report-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(csv);
+  },
+);
+
 // ─── Executive KPI Report ──────────────────────────────────────────────────────
 router.get(
   "/reports/executive",
