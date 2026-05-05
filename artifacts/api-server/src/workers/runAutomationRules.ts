@@ -9,7 +9,7 @@
  *   change_contact_status | enroll_sequence | change_deal_stage
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -19,6 +19,7 @@ import {
   dealsTable,
   notificationsTable,
   taskInstancesTable,
+  usersTable,
   type Contact,
 } from "@workspace/db";
 import { type RunAutomationRulesPayload, enqueue, JOB_NAMES } from "../lib/jobs";
@@ -73,7 +74,21 @@ function evaluateConditions(
   conditions: AutomationCondition[],
   ctx: Record<string, unknown>,
 ): boolean {
-  return conditions.every((c) => evaluateCondition(c, ctx));
+  if (conditions.length === 0) return true;
+  // Process conditions respecting AND/OR logic.
+  // Default logic is "and" for the first condition; each subsequent condition
+  // uses its own `logic` to combine with the running result.
+  let result = evaluateCondition(conditions[0]!, ctx);
+  for (let i = 1; i < conditions.length; i++) {
+    const cond = conditions[i]!;
+    const logic = (cond as AutomationCondition & { logic?: string }).logic ?? "and";
+    if (logic === "or") {
+      result = result || evaluateCondition(cond, ctx);
+    } else {
+      result = result && evaluateCondition(cond, ctx);
+    }
+  }
+  return result;
 }
 
 // ---- Action execution ----
@@ -88,9 +103,10 @@ async function executeAction(
 ): Promise<void> {
   switch (action.type) {
     case "create_task": {
-      const { title, agentId: taskAgentId } = action.config as {
+      const { title, agentId: taskAgentId, dueDate: taskDueDate } = action.config as {
         title: string;
         agentId?: string;
+        dueDate?: string;
       };
       if (title) {
         await db.insert(taskInstancesTable).values({
@@ -102,7 +118,7 @@ async function executeAction(
           description: `Auto-created by automation rule (${resourceType}: ${resourceId})`,
           status: "open",
           priority: "medium",
-          dueDate: null,
+          dueDate: taskDueDate ? new Date(taskDueDate) : null,
         });
       }
       break;
@@ -113,11 +129,32 @@ async function executeAction(
         userId?: string;
         message: string;
       };
-      if (message && userId) {
+      if (!message) break;
+
+      // If a specific userId is supplied, notify only that user.
+      // Otherwise, broadcast to all agency_admin users in the org.
+      const targetUserIds: string[] = [];
+      if (userId) {
+        targetUserIds.push(userId);
+      } else {
+        const admins = await db
+          .select({ id: usersTable.id })
+          .from(usersTable)
+          .where(
+            and(
+              eq(usersTable.orgId, orgId),
+              inArray(usersTable.role, ["agency_admin", "super_admin"]),
+              eq(usersTable.isActive, true),
+            ),
+          );
+        for (const a of admins) targetUserIds.push(a.id);
+      }
+
+      for (const uid of targetUserIds) {
         await db.insert(notificationsTable).values({
           id: randomUUID(),
           orgId,
-          userId,
+          userId: uid,
           type: "automation",
           title: "Automation Rule Fired",
           body: message,

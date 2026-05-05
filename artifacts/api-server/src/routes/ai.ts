@@ -24,6 +24,7 @@ import {
 import { openai } from "@workspace/integrations-openai-ai-server";
 import {
   requireAuth,
+  requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import {
@@ -72,6 +73,7 @@ const ChatRequestSchema = z.object({
 router.post(
   "/ai/chat",
   requireAuth,
+  requirePermission("agent", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const parsed = ChatRequestSchema.safeParse(req.body);
@@ -153,6 +155,7 @@ const DraftRequestSchema = z.object({
 router.post(
   "/ai/draft",
   requireAuth,
+  requirePermission("contact", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const parsed = DraftRequestSchema.safeParse(req.body);
@@ -225,6 +228,7 @@ router.post(
 router.post(
   "/ai/compliance-report",
   requireAuth,
+  requirePermission("compliance_report", "create"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
 
@@ -341,6 +345,45 @@ router.post(
       res.write(`data: ${JSON.stringify({ error: "AI service unavailable" })}\n\n`);
     } finally {
       res.end();
+    }
+  },
+);
+
+// ---- GET /ai/compliance-report/:documentId — download stored report ----
+
+router.get(
+  "/ai/compliance-report/:documentId",
+  requireAuth,
+  requirePermission("compliance_report", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const documentId = Array.isArray(req.params.documentId)
+      ? req.params.documentId[0]
+      : req.params.documentId;
+
+    const [doc] = await db
+      .select()
+      .from(documentsTable)
+      .where(
+        and(
+          eq(documentsTable.id, documentId),
+          eq(documentsTable.orgId, authReq.orgId),
+        ),
+      )
+      .limit(1);
+
+    if (!doc) {
+      res.status(404).json({ error: "Compliance report not found" });
+      return;
+    }
+
+    try {
+      const signedUrl = await storageService.getDocumentSignedUrl(doc.storageKey, 900);
+      // Redirect to a time-limited signed URL so the client can download
+      res.redirect(302, signedUrl);
+    } catch (err) {
+      logger.error({ err, documentId }, "Failed to retrieve compliance report from storage");
+      res.status(500).json({ error: "Failed to retrieve report" });
     }
   },
 );

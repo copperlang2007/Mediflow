@@ -95,6 +95,7 @@ function ActionConfigEditor({ action, onChange }: { action: AutomationAction; on
         <div className="space-y-2 mt-2">
           <Input placeholder="Task title" value={(action.config.title as string) ?? ""} onChange={(e) => update("title", e.target.value)} className="text-xs h-7" />
           <Input placeholder="Assign to agent ID (optional)" value={(action.config.agentId as string) ?? ""} onChange={(e) => update("agentId", e.target.value)} className="text-xs h-7" />
+          <Input type="date" placeholder="Due date (optional)" value={(action.config.dueDate as string) ?? ""} onChange={(e) => update("dueDate", e.target.value)} className="text-xs h-7" />
         </div>
       );
     case "send_email":
@@ -131,10 +132,17 @@ function ActionConfigEditor({ action, onChange }: { action: AutomationAction; on
           <Input placeholder="Sequence ID" value={(action.config.sequenceId as string) ?? ""} onChange={(e) => update("sequenceId", e.target.value)} className="text-xs h-7" />
         </div>
       );
-    case "send_notification":
+    case "change_deal_stage":
       return (
         <div className="mt-2">
+          <Input placeholder="Pipeline Stage ID" value={(action.config.stageId as string) ?? ""} onChange={(e) => update("stageId", e.target.value)} className="text-xs h-7" />
+        </div>
+      );
+    case "send_notification":
+      return (
+        <div className="space-y-2 mt-2">
           <Input placeholder="Notification message" value={(action.config.message as string) ?? ""} onChange={(e) => update("message", e.target.value)} className="text-xs h-7" />
+          <Input placeholder="User ID (leave blank to notify all admins)" value={(action.config.userId as string) ?? ""} onChange={(e) => update("userId", e.target.value)} className="text-xs h-7" />
         </div>
       );
     default:

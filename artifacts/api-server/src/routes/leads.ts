@@ -182,7 +182,20 @@ router.patch(
     if (d.assignedAgentId !== undefined) updates.assignedAgentId = d.assignedAgentId;
     if (Object.keys(updates).length === 0) { res.status(400).json({ error: "No fields to update" }); return; }
 
+    const [existing2] = await db.select({ status: leadsTable.status }).from(leadsTable).where(eq(leadsTable.id, id)).limit(1);
     const [updated] = await db.update(leadsTable).set(updates).where(eq(leadsTable.id, id)).returning();
+
+    // Fire lead_status_changed automation hook when status changes
+    if (d.status !== undefined && existing2 && d.status !== existing2.status) {
+      void enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+        orgId: authReq.orgId,
+        trigger: "lead_status_changed",
+        resourceType: "lead",
+        resourceId: id,
+        context: { oldStatus: existing2.status, newStatus: d.status },
+      });
+    }
+
     res.json(updated);
   },
 );

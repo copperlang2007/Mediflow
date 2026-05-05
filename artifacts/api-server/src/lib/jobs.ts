@@ -57,6 +57,7 @@ export const JOB_NAMES = {
   CERT_EXPIRY_CHECK: "cert-expiry-check",
   AHIP_DEADLINE_CHECK: "check-ahip-deadlines",
   AUTOMATION_DAILY_SWEEP: "automation-daily-sweep",
+  WEEKLY_COMPLIANCE_REPORT: "weekly-compliance-report",
   // Ad-hoc
   TASK_AUTO_ASSIGN: "task-auto-assign",
   RUN_AUTOMATION_RULES: "run-automation-rules",
@@ -163,6 +164,8 @@ export async function startWorkers(): Promise<void> {
   await boss.schedule(JOB_NAMES.AHIP_DEADLINE_CHECK, "10 8 * * 1", {}, { tz: "UTC" });
   // Nightly automation sweep — every day at 01:00 UTC (time-based rules)
   await boss.schedule(JOB_NAMES.AUTOMATION_DAILY_SWEEP, "0 1 * * *", {}, { tz: "UTC" });
+  // Weekly compliance report — every Monday at 06:00 UTC
+  await boss.schedule(JOB_NAMES.WEEKLY_COMPLIANCE_REPORT, "0 6 * * 1", {}, { tz: "UTC" });
 
   // ---- Workers ----
 
@@ -199,6 +202,17 @@ export async function startWorkers(): Promise<void> {
   await boss.work<Record<string, never>>(
     JOB_NAMES.AUTOMATION_DAILY_SWEEP,
     dailyAutomationSweepHandler,
+  );
+
+  const weeklyComplianceReportHandler: WorkHandler<Record<string, never>> = async () => {
+    const { weeklyComplianceReportWorker } = await import(
+      "../workers/weeklyComplianceReport"
+    );
+    await weeklyComplianceReportWorker();
+  };
+  await boss.work<Record<string, never>>(
+    JOB_NAMES.WEEKLY_COMPLIANCE_REPORT,
+    weeklyComplianceReportHandler,
   );
 
   const taskHandler: WorkHandler<TaskAutoAssignPayload> = async (
