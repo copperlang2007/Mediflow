@@ -111,20 +111,22 @@ function useDraftWithAi(contactId: string, type: "sms" | "email") {
 function SendSmsModal({ contactId, contactName, open, onClose }: { contactId: string; contactName: string; open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const [body, setBody] = useState("");
+  const [aiDrafted, setAiDrafted] = useState(false);
   const { mutateAsync: sendSms, isPending } = useSendContactSms();
   const { draft, drafting } = useDraftWithAi(contactId, "sms");
 
   const handleDraft = async () => {
     const result = await draft(`Follow up with ${contactName} about Medicare coverage`);
-    if (result) setBody(result.body);
+    if (result) { setBody(result.body); setAiDrafted(true); }
   };
 
   const send = async () => {
     if (!body.trim()) return;
     try {
-      await sendSms({ id: contactId, data: { body } satisfies SendContactSmsBody });
+      await sendSms({ id: contactId, data: { body, aiAssisted: aiDrafted } as SendContactSmsBody });
       toast.success("SMS sent");
       setBody("");
+      setAiDrafted(false);
       onClose();
       void qc.invalidateQueries({ queryKey: getGetContactActivitiesQueryKey(contactId) });
     } catch (e) {
@@ -157,20 +159,22 @@ function SendSmsModal({ contactId, contactName, open, onClose }: { contactId: st
 function SendEmailModal({ contactId, contactName, open, onClose }: { contactId: string; contactName: string; open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const [form, setForm] = useState<SendContactEmailBody>({ subject: "", body: "" });
+  const [aiDrafted, setAiDrafted] = useState(false);
   const { mutateAsync: sendEmail, isPending } = useSendContactEmail();
   const { draft, drafting } = useDraftWithAi(contactId, "email");
 
   const handleDraft = async () => {
     const result = await draft(`Follow up with ${contactName} about Medicare coverage options`);
-    if (result) setForm({ subject: result.subject ?? "", body: result.body });
+    if (result) { setForm({ subject: result.subject ?? "", body: result.body }); setAiDrafted(true); }
   };
 
   const send = async () => {
     if (!form.subject || !form.body) return;
     try {
-      await sendEmail({ id: contactId, data: form });
+      await sendEmail({ id: contactId, data: { ...form, aiAssisted: aiDrafted } as SendContactEmailBody });
       toast.success("Email sent");
       setForm({ subject: "", body: "" });
+      setAiDrafted(false);
       onClose();
       void qc.invalidateQueries({ queryKey: getGetContactActivitiesQueryKey(contactId) });
     } catch (e) {

@@ -6,6 +6,7 @@
  *    license-expiry-check        daily 08:00 UTC
  *    cert-expiry-check           daily 08:05 UTC
  *    check-ahip-deadlines        weekly Monday 08:10 UTC
+ *    automation-daily-sweep      nightly 01:00 UTC
  *
  *  Ad-hoc (enqueue via `enqueue(JOB_NAMES.X, data)`):
  *    task-auto-assign            on agent creation / status change
@@ -55,7 +56,7 @@ export const JOB_NAMES = {
   LICENSE_EXPIRY_CHECK: "license-expiry-check",
   CERT_EXPIRY_CHECK: "cert-expiry-check",
   AHIP_DEADLINE_CHECK: "check-ahip-deadlines",
-  AUTOMATION_WEEKLY_SWEEP: "automation-weekly-sweep",
+  AUTOMATION_DAILY_SWEEP: "automation-daily-sweep",
   // Ad-hoc
   TASK_AUTO_ASSIGN: "task-auto-assign",
   RUN_AUTOMATION_RULES: "run-automation-rules",
@@ -160,8 +161,8 @@ export async function startWorkers(): Promise<void> {
   await boss.schedule(JOB_NAMES.CERT_EXPIRY_CHECK, "5 8 * * *", {}, { tz: "UTC" });
   // Weekly AHIP deadline check — every Monday at 08:10 UTC
   await boss.schedule(JOB_NAMES.AHIP_DEADLINE_CHECK, "10 8 * * 1", {}, { tz: "UTC" });
-  // Weekly automation sweep — every Monday at 09:00 UTC (time-based rules)
-  await boss.schedule(JOB_NAMES.AUTOMATION_WEEKLY_SWEEP, "0 9 * * 1", {}, { tz: "UTC" });
+  // Nightly automation sweep — every day at 01:00 UTC (time-based rules)
+  await boss.schedule(JOB_NAMES.AUTOMATION_DAILY_SWEEP, "0 1 * * *", {}, { tz: "UTC" });
 
   // ---- Workers ----
 
@@ -189,15 +190,15 @@ export async function startWorkers(): Promise<void> {
   };
   await boss.work<AhipDeadlineCheckPayload>(JOB_NAMES.AHIP_DEADLINE_CHECK, ahipHandler);
 
-  const weeklyAutomationSweepHandler: WorkHandler<Record<string, never>> = async () => {
-    const { weeklyAutomationSweepWorker } = await import(
+  const dailyAutomationSweepHandler: WorkHandler<Record<string, never>> = async () => {
+    const { dailyAutomationSweepWorker } = await import(
       "../workers/weeklyAutomationSweep"
     );
-    await weeklyAutomationSweepWorker();
+    await dailyAutomationSweepWorker();
   };
   await boss.work<Record<string, never>>(
-    JOB_NAMES.AUTOMATION_WEEKLY_SWEEP,
-    weeklyAutomationSweepHandler,
+    JOB_NAMES.AUTOMATION_DAILY_SWEEP,
+    dailyAutomationSweepHandler,
   );
 
   const taskHandler: WorkHandler<TaskAutoAssignPayload> = async (

@@ -2,11 +2,11 @@
  * Run Automation Rules Worker.
  *
  * Evaluates active automation rules matching a trigger event for an org.
- * Executes matching actions (send email/SMS, update contact, add tag, etc.)
- * and writes a log entry for each rule run.
+ * Executes matching actions and writes a log entry for each rule run.
  *
- * Also used by the weekly automation sweep (run without a specific resourceId
- * to evaluate time-based "scheduled" trigger rules across all orgs).
+ * Action types must match ACTION_TYPES in routes/automations.ts:
+ *   create_task | send_notification | send_email | send_sms |
+ *   change_contact_status | enroll_sequence | change_deal_stage
  */
 
 import { and, eq, sql } from "drizzle-orm";
@@ -16,6 +16,8 @@ import {
   automationRulesTable,
   automationRuleLogsTable,
   contactsTable,
+  dealsTable,
+  notificationsTable,
   taskInstancesTable,
   type Contact,
 } from "@workspace/db";
@@ -32,12 +34,13 @@ interface AutomationCondition {
 
 interface AutomationAction {
   type:
+    | "create_task"
+    | "send_notification"
     | "send_email"
     | "send_sms"
-    | "update_contact_status"
-    | "add_contact_tag"
+    | "change_contact_status"
     | "enroll_sequence"
-    | "create_task";
+    | "change_deal_stage";
   config: Record<string, unknown>;
 }
 
@@ -84,6 +87,48 @@ async function executeAction(
   }: { orgId: string; resourceType: string; resourceId: string },
 ): Promise<void> {
   switch (action.type) {
+    case "create_task": {
+      const { title, agentId: taskAgentId } = action.config as {
+        title: string;
+        agentId?: string;
+      };
+      if (title) {
+        await db.insert(taskInstancesTable).values({
+          id: randomUUID(),
+          orgId,
+          templateId: null,
+          agentId: (taskAgentId as string) ?? null,
+          title,
+          description: `Auto-created by automation rule (${resourceType}: ${resourceId})`,
+          status: "open",
+          priority: "medium",
+          dueDate: null,
+        });
+      }
+      break;
+    }
+
+    case "send_notification": {
+      const { userId, message } = action.config as {
+        userId?: string;
+        message: string;
+      };
+      if (message && userId) {
+        await db.insert(notificationsTable).values({
+          id: randomUUID(),
+          orgId,
+          userId,
+          type: "automation",
+          title: "Automation Rule Fired",
+          body: message,
+          priority: "normal",
+          resourceType,
+          resourceId,
+        });
+      }
+      break;
+    }
+
     case "send_email": {
       const { to, subject, html } = action.config as {
         to: string;
@@ -104,7 +149,7 @@ async function executeAction(
       break;
     }
 
-    case "update_contact_status": {
+    case "change_contact_status": {
       const { status } = action.config as { status: Contact["status"] };
       if (resourceType === "contact" && resourceId && status) {
         await db
@@ -113,27 +158,6 @@ async function executeAction(
           .where(
             and(eq(contactsTable.id, resourceId), eq(contactsTable.orgId, orgId)),
           );
-      }
-      break;
-    }
-
-    case "add_contact_tag": {
-      const { tag } = action.config as { tag: string };
-      if (resourceType === "contact" && resourceId && tag) {
-        const [contact] = await db
-          .select({ tags: contactsTable.tags })
-          .from(contactsTable)
-          .where(eq(contactsTable.id, resourceId))
-          .limit(1);
-        if (contact) {
-          const existing = contact.tags ?? [];
-          if (!existing.includes(tag)) {
-            await db
-              .update(contactsTable)
-              .set({ tags: [...existing, tag] })
-              .where(eq(contactsTable.id, resourceId));
-          }
-        }
       }
       break;
     }
@@ -151,24 +175,22 @@ async function executeAction(
       break;
     }
 
-    case "create_task": {
-      const { title, agentId: taskAgentId } = action.config as {
-        title: string;
-        agentId?: string;
-      };
-      if (title) {
-        await db.insert(taskInstancesTable).values({
-          id: randomUUID(),
-          orgId,
-          templateId: null,
-          agentId: (taskAgentId as string) ?? null,
-          title,
-          description: `Auto-created by automation rule (${resourceType}: ${resourceId})`,
-          status: "open",
-          priority: "medium",
-          dueDate: null,
-        });
+    case "change_deal_stage": {
+      const { stageId } = action.config as { stageId: string };
+      if (resourceType === "deal" && resourceId && stageId) {
+        await db
+          .update(dealsTable)
+          .set({ stageId })
+          .where(
+            and(eq(dealsTable.id, resourceId), eq(dealsTable.orgId, orgId)),
+          );
       }
+      break;
+    }
+
+    default: {
+      const unhandled = (action as { type: string }).type;
+      logger.warn({ actionType: unhandled }, "Unknown automation action type — skipped");
       break;
     }
   }

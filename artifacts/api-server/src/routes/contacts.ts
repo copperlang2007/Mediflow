@@ -291,7 +291,7 @@ router.post(
     if (!contact.phone) { res.status(400).json({ error: "Contact has no phone number" }); return; }
     if (contact.optOutSms) { res.status(400).json({ error: "Contact has opted out of SMS" }); return; }
 
-    const SendSmsSchema = z.object({ body: z.string().min(1).max(1600) });
+    const SendSmsSchema = z.object({ body: z.string().min(1).max(1600), aiAssisted: z.boolean().optional().default(false) });
     const parsed = SendSmsSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
 
@@ -309,6 +309,7 @@ router.post(
       direction: "outbound",
       body: parsed.data.body,
       status: "queued",
+      aiAssisted: parsed.data.aiAssisted ?? false,
       toAddress: contact.phone,
     });
 
@@ -337,7 +338,7 @@ router.post(
     if (!contact.email) { res.status(400).json({ error: "Contact has no email address" }); return; }
     if (contact.optOutEmail) { res.status(400).json({ error: "Contact has opted out of email" }); return; }
 
-    const SendEmailSchema = z.object({ subject: z.string().min(1).max(500), body: z.string().min(1), bodyText: z.string().optional() });
+    const SendEmailSchema = z.object({ subject: z.string().min(1).max(500), body: z.string().min(1), bodyText: z.string().optional(), aiAssisted: z.boolean().optional().default(false) });
     const parsed = SendEmailSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
 
@@ -356,6 +357,7 @@ router.post(
       subject: parsed.data.subject,
       body: parsed.data.body,
       status: "queued",
+      aiAssisted: parsed.data.aiAssisted ?? false,
       toAddress: contact.email,
     });
 

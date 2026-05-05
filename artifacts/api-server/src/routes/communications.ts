@@ -106,6 +106,7 @@ router.post(
     const ReplySchema = z.object({
       body: z.string().min(1).max(5000),
       subject: z.string().optional(),
+      aiAssisted: z.boolean().optional().default(false),
     });
     const parsed = ReplySchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
@@ -128,6 +129,7 @@ router.post(
       body: parsed.data.body,
       subject: parsed.data.subject ?? null,
       status: "queued",
+      aiAssisted: parsed.data.aiAssisted ?? false,
       toAddress: thread.channel === "sms" ? (contact.phone ?? undefined) : (contact.email ?? undefined),
     }).returning();
 

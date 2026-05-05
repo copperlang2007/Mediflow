@@ -9,7 +9,8 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, ilike } from "drizzle-orm";
+import { randomUUID } from "crypto";
 import {
   db,
   agentsTable,
@@ -18,6 +19,7 @@ import {
   ahipRecordsTable,
   taskInstancesTable,
   contactsTable,
+  documentsTable,
 } from "@workspace/db";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import {
@@ -29,7 +31,10 @@ import {
   buildContactContext,
   buildDashboardContext,
 } from "../lib/aiContext";
+import { ObjectStorageService } from "../lib/objectStorage";
 import { logger } from "../lib/logger";
+
+const storageService = new ObjectStorageService();
 
 const router: IRouter = Router();
 
@@ -98,8 +103,8 @@ router.post(
       pageContext ? `\n--- CURRENT PAGE CONTEXT ---\n${pageContext}\n--- END CONTEXT ---` : "",
     ].filter(Boolean).join("\n");
 
-    // Parse slash commands to structured prompts
-    const processedMessage = parseSlashCommand(message);
+    // Parse slash commands to structured prompts with entity resolution
+    const processedMessage = await resolveSlashCommand(message, authReq.orgId);
 
     const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
       { role: "system", content: systemPrompt },
@@ -301,7 +306,36 @@ router.post(
         }
       }
 
-      res.write(`data: ${JSON.stringify({ done: true, reportLength: fullReport.length })}\n\n`);
+      // Persist the full report to object storage + documents table
+      let documentId: string | null = null;
+      if (fullReport.length > 0) {
+        try {
+          const dateStr = now.toISOString().slice(0, 10);
+          const filename = `compliance-report-${dateStr}.md`;
+          const storageKey = await storageService.uploadDocument(
+            fullReport,
+            filename,
+            authReq.orgId,
+            { contentType: "text/markdown" },
+          );
+          const docId = randomUUID();
+          await db.insert(documentsTable).values({
+            id: docId,
+            orgId: authReq.orgId,
+            name: `AI Compliance Report — ${dateStr}`,
+            category: "compliance_report",
+            storageKey,
+            fileSizeBytes: Buffer.byteLength(fullReport, "utf-8"),
+            mimeType: "text/markdown",
+            uploadedBy: authReq.userId,
+          });
+          documentId = docId;
+        } catch (persistErr) {
+          logger.warn({ persistErr }, "Failed to persist compliance report — streaming result still delivered");
+        }
+      }
+
+      res.write(`data: ${JSON.stringify({ done: true, reportLength: fullReport.length, documentId })}\n\n`);
     } catch (err) {
       logger.error({ err }, "AI compliance report stream failed");
       res.write(`data: ${JSON.stringify({ error: "AI service unavailable" })}\n\n`);
@@ -311,29 +345,87 @@ router.post(
   },
 );
 
-// ---- Slash command parser ----
+// ---- Slash command resolver (async — resolves named entities from DB) ----
 
-function parseSlashCommand(message: string): string {
+async function resolveSlashCommand(message: string, orgId: string): Promise<string> {
   const trimmed = message.trim();
 
   const complianceMatch = trimmed.match(/^\/compliance-check\s+(.+)/i);
   if (complianceMatch) {
-    return `Perform a full compliance gap report for the agent named "${complianceMatch[1]}". Include: (1) License status and expiry risks, (2) Carrier certification gaps, (3) AHIP status, (4) Overdue tasks, (5) Priority action items ranked by urgency. Format as structured Markdown.`;
+    const name = complianceMatch[1].trim();
+    const nameParts = name.split(/\s+/);
+    const agents = await db.select().from(agentsTable).where(
+      and(
+        eq(agentsTable.orgId, orgId),
+        nameParts.length > 1
+          ? and(ilike(agentsTable.firstName, `%${nameParts[0]}%`), ilike(agentsTable.lastName, `%${nameParts[nameParts.length - 1]}%`))
+          : ilike(agentsTable.firstName, `%${name}%`),
+      ),
+    ).limit(1);
+    if (agents[0]) {
+      const ctx = await buildAgentContext(agents[0].id, orgId);
+      return `Perform a full compliance gap report for ${agents[0].firstName} ${agents[0].lastName}. Include: (1) License status and expiry risks, (2) Carrier certification gaps, (3) AHIP status, (4) Overdue tasks, (5) Priority action items ranked by urgency. Format as structured Markdown.\n\nAGENT DATA:\n${ctx}`;
+    }
+    return `Perform a full compliance gap report for the agent named "${name}". No matching agent was found in the system — ask the user to verify the name. Include: (1) License status and expiry risks, (2) Carrier certification gaps, (3) AHIP status, (4) Overdue tasks, (5) Priority action items ranked by urgency. Format as structured Markdown.`;
   }
 
-  const draftSmsMatch = trimmed.match(/^\/draft-sms\s+(\S+)\s+(.+)/i);
+  const draftSmsMatch = trimmed.match(/^\/draft-sms\s+(\S+(?:\s+\S+)?)\s+(.+)/i);
   if (draftSmsMatch) {
-    return `Draft a professional SMS for the contact named "${draftSmsMatch[1]}". Goal: ${draftSmsMatch[2]}. Use the Medicare context in the system prompt. Keep it under 160 characters.`;
+    const contactName = draftSmsMatch[1].trim();
+    const goal = draftSmsMatch[2].trim();
+    const nameParts = contactName.split(/\s+/);
+    const contacts = await db.select().from(contactsTable).where(
+      and(
+        eq(contactsTable.orgId, orgId),
+        nameParts.length > 1
+          ? and(ilike(contactsTable.firstName, `%${nameParts[0]}%`), ilike(contactsTable.lastName, `%${nameParts[nameParts.length - 1]}%`))
+          : ilike(contactsTable.firstName, `%${contactName}%`),
+      ),
+    ).limit(1);
+    if (contacts[0]) {
+      const ctx = await buildContactContext(contacts[0].id, orgId);
+      return `Draft a professional SMS (max 160 chars) for ${contacts[0].firstName} ${contacts[0].lastName}. Goal: ${goal}. Return ONLY the message text.\n\nCONTACT DATA:\n${ctx}`;
+    }
+    return `Draft a professional SMS (max 160 chars) for the contact named "${contactName}". Goal: ${goal}. Return ONLY the message text. Note: no matching contact found — draft a generic outreach.`;
   }
 
-  const draftEmailMatch = trimmed.match(/^\/draft-email\s+(\S+)\s+(.+)/i);
+  const draftEmailMatch = trimmed.match(/^\/draft-email\s+(\S+(?:\s+\S+)?)\s+(.+)/i);
   if (draftEmailMatch) {
-    return `Draft a professional email for the contact named "${draftEmailMatch[1]}". Goal: ${draftEmailMatch[2]}. Use the Medicare context. Provide subject and body separately.`;
+    const contactName = draftEmailMatch[1].trim();
+    const goal = draftEmailMatch[2].trim();
+    const nameParts = contactName.split(/\s+/);
+    const contacts = await db.select().from(contactsTable).where(
+      and(
+        eq(contactsTable.orgId, orgId),
+        nameParts.length > 1
+          ? and(ilike(contactsTable.firstName, `%${nameParts[0]}%`), ilike(contactsTable.lastName, `%${nameParts[nameParts.length - 1]}%`))
+          : ilike(contactsTable.firstName, `%${contactName}%`),
+      ),
+    ).limit(1);
+    if (contacts[0]) {
+      const ctx = await buildContactContext(contacts[0].id, orgId);
+      return `Draft a professional email for ${contacts[0].firstName} ${contacts[0].lastName}. Goal: ${goal}. Return JSON with keys "subject" (string) and "body" (plain text with paragraphs).\n\nCONTACT DATA:\n${ctx}`;
+    }
+    return `Draft a professional email for the contact named "${contactName}". Goal: ${goal}. Return JSON with keys "subject" (string) and "body" (plain text with paragraphs). Note: no matching contact found — draft generic outreach.`;
   }
 
   const summarizeMatch = trimmed.match(/^\/summarize\s+(.+)/i);
   if (summarizeMatch) {
-    return `Provide a brief summary for the contact named "${summarizeMatch[1]}": (1) enrollment status overview, (2) last interaction and outcome, (3) current sequence status, (4) recommended next action. Be concise (under 200 words).`;
+    const name = summarizeMatch[1].trim();
+    const nameParts = name.split(/\s+/);
+    const contacts = await db.select().from(contactsTable).where(
+      and(
+        eq(contactsTable.orgId, orgId),
+        nameParts.length > 1
+          ? and(ilike(contactsTable.firstName, `%${nameParts[0]}%`), ilike(contactsTable.lastName, `%${nameParts[nameParts.length - 1]}%`))
+          : ilike(contactsTable.firstName, `%${name}%`),
+      ),
+    ).limit(1);
+    if (contacts[0]) {
+      const ctx = await buildContactContext(contacts[0].id, orgId);
+      return `Provide a brief summary for ${contacts[0].firstName} ${contacts[0].lastName}: (1) enrollment status overview, (2) last interaction and outcome, (3) current sequence status, (4) recommended next action. Be concise (under 200 words).\n\nCONTACT DATA:\n${ctx}`;
+    }
+    return `Provide a brief summary for the contact named "${name}": (1) enrollment status overview, (2) last interaction and outcome, (3) current sequence status, (4) recommended next action. Be concise (under 200 words). Note: no matching contact found.`;
   }
 
   const renewalMatch = trimmed.match(/^\/renewal-report/i);
@@ -343,7 +435,21 @@ function parseSlashCommand(message: string): string {
 
   const offboardingMatch = trimmed.match(/^\/offboarding-check\s+(.+)/i);
   if (offboardingMatch) {
-    return `List all offboarding steps remaining for the agent named "${offboardingMatch[1]}". Include: (1) open tasks to complete or transfer, (2) active licenses to surrender or transfer, (3) carrier certifications to update, (4) contact reassignments needed, (5) documentation requirements. Format as a checklist.`;
+    const name = offboardingMatch[1].trim();
+    const nameParts = name.split(/\s+/);
+    const agents = await db.select().from(agentsTable).where(
+      and(
+        eq(agentsTable.orgId, orgId),
+        nameParts.length > 1
+          ? and(ilike(agentsTable.firstName, `%${nameParts[0]}%`), ilike(agentsTable.lastName, `%${nameParts[nameParts.length - 1]}%`))
+          : ilike(agentsTable.firstName, `%${name}%`),
+      ),
+    ).limit(1);
+    if (agents[0]) {
+      const ctx = await buildAgentContext(agents[0].id, orgId);
+      return `List all offboarding steps remaining for ${agents[0].firstName} ${agents[0].lastName}. Include: (1) open tasks to complete or transfer, (2) active licenses to surrender or transfer, (3) carrier certifications to update, (4) contact reassignments needed, (5) documentation requirements. Format as a checklist.\n\nAGENT DATA:\n${ctx}`;
+    }
+    return `List all offboarding steps remaining for the agent named "${name}". Include: (1) open tasks to complete or transfer, (2) active licenses to surrender or transfer, (3) carrier certifications to update, (4) contact reassignments needed, (5) documentation requirements. Format as a checklist. Note: no matching agent found.`;
   }
 
   return message;

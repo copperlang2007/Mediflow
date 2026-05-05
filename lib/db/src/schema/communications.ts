@@ -2,6 +2,7 @@ import {
   pgTable,
   text,
   timestamp,
+  boolean,
   pgEnum,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
@@ -52,6 +53,7 @@ export const messagesTable = pgTable("messages", {
   status: messageStatusEnum("status").notNull().default("queued"),
   providerMessageId: text("provider_message_id"),
   sentAt: timestamp("sent_at", { withTimezone: true }),
+  aiAssisted: boolean("ai_assisted").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
