@@ -122,6 +122,29 @@ function ContactsTab() {
   const handleBulk = async () => {
     if (selected.length === 0) { toast.error("No contacts selected"); return; }
     try {
+      // CSV export returns a binary/text response — must be handled as a direct fetch + file download,
+      // NOT via the JSON-parsing React Query mutation hook.
+      if (bulkAction === "export_csv") {
+        const resp = await fetch(`${import.meta.env.BASE_URL}api/contacts/bulk`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: selected, action: "export_csv" }),
+        });
+        if (!resp.ok) { toast.error("Export failed"); return; }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `contacts-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success(`Exported ${selected.length} contacts as CSV`);
+        setBulkOpen(false);
+        setSelected([]);
+        return;
+      }
+
       const payload: BulkContactActionBody["payload"] = {};
       if (bulkAction === "assign_agent") payload!.agentId = bulkPayload;
       if (bulkAction === "add_tag" || bulkAction === "remove_tag") payload!.tag = bulkPayload;

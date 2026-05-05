@@ -24,6 +24,10 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const days = Math.min(parseInt((req.query.days as string) ?? "30", 10) || 30, 90);
+    // Birthday year-wrap-aware query:
+    // Convert birthday and window boundaries to day-of-year (1..366).
+    // If endDoy >= startDoy the window is a normal range; if endDoy < startDoy the window
+    // wraps around Dec→Jan, so we use OR (>= start OR <= end).
     const contacts = await db
       .select()
       .from(contactsTable)
@@ -31,13 +35,19 @@ router.get(
         and(
           eq(contactsTable.orgId, authReq.orgId),
           sql`${contactsTable.dob} IS NOT NULL`,
-          // Birthday falls within next N days (using month/day comparison)
           sql`(
-            (EXTRACT(MONTH FROM ${contactsTable.dob}) * 100 + EXTRACT(DAY FROM ${contactsTable.dob}))
-            BETWEEN
-            (EXTRACT(MONTH FROM NOW()) * 100 + EXTRACT(DAY FROM NOW()))
-            AND
-            (EXTRACT(MONTH FROM (NOW() + INTERVAL '1 day' * ${days})) * 100 + EXTRACT(DAY FROM (NOW() + INTERVAL '1 day' * ${days})))
+            CASE
+              WHEN EXTRACT(DOY FROM (NOW() + INTERVAL '1 day' * ${days})) >= EXTRACT(DOY FROM NOW())
+              THEN
+                EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day')
+                BETWEEN EXTRACT(DOY FROM NOW()) AND EXTRACT(DOY FROM (NOW() + INTERVAL '1 day' * ${days}))
+              ELSE
+                EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day')
+                >= EXTRACT(DOY FROM NOW())
+                OR
+                EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day')
+                <= EXTRACT(DOY FROM (NOW() + INTERVAL '1 day' * ${days}))
+            END
           )`,
         ),
       )
@@ -210,7 +220,7 @@ router.get(
     const cutoff60 = new Date(now.getTime() - 60 * 86400000);
 
     const [birthdayCount, atRiskCount, openFlagsCount] = await Promise.all([
-      db.select({ count: sql<number>`count(*)` }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), sql`${contactsTable.dob} IS NOT NULL`, sql`(EXTRACT(MONTH FROM ${contactsTable.dob}) * 100 + EXTRACT(DAY FROM ${contactsTable.dob})) BETWEEN (EXTRACT(MONTH FROM NOW()) * 100 + EXTRACT(DAY FROM NOW())) AND (EXTRACT(MONTH FROM ${in30}) * 100 + EXTRACT(DAY FROM ${in30}))`)),
+      db.select({ count: sql<number>`count(*)` }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), sql`${contactsTable.dob} IS NOT NULL`, sql`(CASE WHEN EXTRACT(DOY FROM ${in30}) >= EXTRACT(DOY FROM NOW()) THEN EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day') BETWEEN EXTRACT(DOY FROM NOW()) AND EXTRACT(DOY FROM ${in30}) ELSE EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day') >= EXTRACT(DOY FROM NOW()) OR EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day') <= EXTRACT(DOY FROM ${in30}) END)`)),
       db.select({ count: sql<number>`count(*)` }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), sql`${contactsTable.status} IN ('enrolled', 'retained')`, sql`NOT EXISTS (SELECT 1 FROM activities a WHERE a.contact_id = ${contactsTable.id} AND a.created_at >= ${cutoff60})`)),
       db.select({ count: sql<number>`count(*)` }).from(retentionFlagsTable).where(and(eq(retentionFlagsTable.orgId, authReq.orgId), isNull(retentionFlagsTable.resolvedAt))),
     ]);

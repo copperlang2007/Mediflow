@@ -236,9 +236,10 @@ router.post(
       await db.insert(sequenceEnrollmentsTable).values({ id: enrollmentId, sequenceId: seqId, contactId, status: "active", nextStepIndex: 0, nextStepAt: new Date() });
       await db.insert(activitiesTable).values({ id: randomUUID(), orgId: authReq.orgId, contactId, type: "sequence_enrolled", body: `Enrolled in sequence: ${seq.name}`, createdBy: authReq.userId });
 
-      // Kick off first step immediately (if steps exist)
-      if (steps.length > 0) {
-        await enqueue(JOB_NAMES.SEND_SEQUENCE_STEP, { sequenceId: seqId, contactId, stepIndex: 0, channel: steps[0].stepType === "sms" ? "sms" : "email" });
+      // Kick off first step immediately only for actionable step types (sms/email).
+      // wait and task steps are handled by the scheduler on their delay schedule, not immediately.
+      if (steps.length > 0 && (steps[0].stepType === "sms" || steps[0].stepType === "email")) {
+        await enqueue(JOB_NAMES.SEND_SEQUENCE_STEP, { sequenceId: seqId, contactId, stepIndex: 0, channel: steps[0].stepType });
       }
       enrolled.push(contactId);
     }
