@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@clerk/react";
 import type {
   Contact, Activity, GetContactTasks200Item, GetContactEnrollments200Item,
   GetDeals200Item, PipelineWithStages, UpdateContactBody,
@@ -32,7 +33,7 @@ import {
   ArrowLeft, Mail, MessageSquare, Plus, Send,
   StickyNote, PhoneCall, Activity as ActivityIcon, CheckSquare, FolderOpen,
   Workflow, Heart, Calendar,
-  Shield, DollarSign, Clock, Edit, User, MapPin,
+  Shield, DollarSign, Clock, Edit, User, MapPin, Sparkles, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
@@ -76,10 +77,47 @@ function initials(first: string, last: string) {
 // Modals
 // ──────────────────────────────────────────────
 
+function useDraftWithAi(contactId: string, type: "sms" | "email") {
+  const { getToken } = useAuth();
+  const [drafting, setDrafting] = useState(false);
+  const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+
+  const draft = useCallback(async (goal?: string): Promise<{ subject?: string; body: string } | null> => {
+    setDrafting(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${base}/api/ai/draft`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ contactId, type, goal: goal || undefined }),
+      });
+      if (!res.ok) throw new Error("Draft failed");
+      return await res.json() as { subject?: string; body: string };
+    } catch {
+      toast.error("AI draft failed — try again");
+      return null;
+    } finally {
+      setDrafting(false);
+    }
+  }, [contactId, type, getToken, base]);
+
+  return { draft, drafting };
+}
+
 function SendSmsModal({ contactId, contactName, open, onClose }: { contactId: string; contactName: string; open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const [body, setBody] = useState("");
   const { mutateAsync: sendSms, isPending } = useSendContactSms();
+  const { draft, drafting } = useDraftWithAi(contactId, "sms");
+
+  const handleDraft = async () => {
+    const result = await draft(`Follow up with ${contactName} about Medicare coverage`);
+    if (result) setBody(result.body);
+  };
+
   const send = async () => {
     if (!body.trim()) return;
     try {
@@ -97,7 +135,13 @@ function SendSmsModal({ contactId, contactName, open, onClose }: { contactId: st
       <DialogContent className="max-w-md">
         <DialogHeader><DialogTitle>Send SMS to {contactName}</DialogTitle></DialogHeader>
         <Textarea placeholder="Type your message…" rows={4} value={body} onChange={(e) => setBody(e.target.value)} maxLength={1600} />
-        <p className="text-xs text-muted-foreground text-right">{body.length}/1600</p>
+        <div className="flex items-center justify-between">
+          <Button variant="ghost" size="sm" onClick={handleDraft} disabled={drafting} className="text-xs text-muted-foreground hover:text-foreground">
+            {drafting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+            {drafting ? "Drafting…" : "Draft with AI"}
+          </Button>
+          <p className="text-xs text-muted-foreground">{body.length}/1600</p>
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={send} disabled={isPending || !body.trim()}>
@@ -113,6 +157,13 @@ function SendEmailModal({ contactId, contactName, open, onClose }: { contactId: 
   const qc = useQueryClient();
   const [form, setForm] = useState<SendContactEmailBody>({ subject: "", body: "" });
   const { mutateAsync: sendEmail, isPending } = useSendContactEmail();
+  const { draft, drafting } = useDraftWithAi(contactId, "email");
+
+  const handleDraft = async () => {
+    const result = await draft(`Follow up with ${contactName} about Medicare coverage options`);
+    if (result) setForm({ subject: result.subject ?? "", body: result.body });
+  };
+
   const send = async () => {
     if (!form.subject || !form.body) return;
     try {
@@ -128,7 +179,15 @@ function SendEmailModal({ contactId, contactName, open, onClose }: { contactId: 
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>Send Email to {contactName}</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <div className="flex items-center justify-between">
+            <DialogTitle>Send Email to {contactName}</DialogTitle>
+            <Button variant="ghost" size="sm" onClick={handleDraft} disabled={drafting} className="text-xs text-muted-foreground hover:text-foreground -mr-1">
+              {drafting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+              {drafting ? "Drafting…" : "Draft with AI"}
+            </Button>
+          </div>
+        </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5"><Label>Subject</Label><Input value={form.subject} onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))} /></div>
           <div className="space-y-1.5"><Label>Message</Label><Textarea rows={6} value={form.body} onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))} /></div>

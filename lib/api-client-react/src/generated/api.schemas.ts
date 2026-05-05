@@ -1757,9 +1757,188 @@ export interface CreateRetentionFlagBody {
 }
 
 export interface RetentionSummary {
-  birthdaysInNext30Days: number;
-  atRiskContacts: number;
-  openFlags: number;
+  [key: string]: unknown;
+}
+
+export type AutomationConditionOperator =
+  (typeof AutomationConditionOperator)[keyof typeof AutomationConditionOperator];
+
+export const AutomationConditionOperator = {
+  eq: "eq",
+  neq: "neq",
+  contains: "contains",
+  gt: "gt",
+  lt: "lt",
+  exists: "exists",
+} as const;
+
+export type AutomationConditionLogic =
+  (typeof AutomationConditionLogic)[keyof typeof AutomationConditionLogic];
+
+export const AutomationConditionLogic = {
+  and: "and",
+  or: "or",
+} as const;
+
+export interface AutomationCondition {
+  field: string;
+  operator: AutomationConditionOperator;
+  value: unknown;
+  logic?: AutomationConditionLogic;
+}
+
+export type AutomationActionType =
+  (typeof AutomationActionType)[keyof typeof AutomationActionType];
+
+export const AutomationActionType = {
+  create_task: "create_task",
+  send_notification: "send_notification",
+  send_email: "send_email",
+  send_sms: "send_sms",
+  change_contact_status: "change_contact_status",
+  enroll_sequence: "enroll_sequence",
+  change_deal_stage: "change_deal_stage",
+} as const;
+
+export type AutomationActionConfig = { [key: string]: unknown };
+
+export interface AutomationAction {
+  type: AutomationActionType;
+  config: AutomationActionConfig;
+}
+
+export type AutomationRuleTriggerConfig = { [key: string]: unknown } | null;
+
+export interface AutomationRule {
+  id: string;
+  orgId: string;
+  name: string;
+  triggerType: string;
+  triggerConfig?: AutomationRuleTriggerConfig;
+  conditions?: AutomationCondition[] | null;
+  actions?: AutomationAction[] | null;
+  isActive: boolean;
+  lastRunAt?: string | null;
+  runCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AutomationRuleListResponse {
+  rules: AutomationRule[];
+  total: number;
+}
+
+export type CreateAutomationRuleBodyTriggerConfig = {
+  [key: string]: unknown;
+} | null;
+
+export interface CreateAutomationRuleBody {
+  name: string;
+  triggerType: string;
+  triggerConfig?: CreateAutomationRuleBodyTriggerConfig;
+  conditions?: AutomationCondition[];
+  actions: AutomationAction[];
+  isActive?: boolean;
+}
+
+export type UpdateAutomationRuleBodyTriggerConfig = {
+  [key: string]: unknown;
+} | null;
+
+export interface UpdateAutomationRuleBody {
+  name?: string;
+  triggerType?: string;
+  triggerConfig?: UpdateAutomationRuleBodyTriggerConfig;
+  conditions?: AutomationCondition[];
+  actions?: AutomationAction[];
+  isActive?: boolean;
+}
+
+export type AutomationRuleLogResult =
+  (typeof AutomationRuleLogResult)[keyof typeof AutomationRuleLogResult];
+
+export const AutomationRuleLogResult = {
+  success: "success",
+  partial: "partial",
+  failed: "failed",
+} as const;
+
+export interface AutomationRuleLog {
+  id: string;
+  ruleId: string;
+  triggerEvent?: string | null;
+  matchedRecordType?: string | null;
+  matchedRecordId?: string | null;
+  actionsExecuted?: string[] | null;
+  result: AutomationRuleLogResult;
+  errorMessage?: string | null;
+  executedAt: string;
+}
+
+export interface RunAutomationRuleBody {
+  resourceType?: string;
+  resourceId?: string;
+}
+
+export interface RunAutomationRuleResponse {
+  queued: boolean;
+  ruleId: string;
+}
+
+export type AiChatMessageRole =
+  (typeof AiChatMessageRole)[keyof typeof AiChatMessageRole];
+
+export const AiChatMessageRole = {
+  user: "user",
+  assistant: "assistant",
+} as const;
+
+export interface AiChatMessage {
+  role: AiChatMessageRole;
+  content: string;
+}
+
+export type AiChatContextPageType =
+  (typeof AiChatContextPageType)[keyof typeof AiChatContextPageType];
+
+export const AiChatContextPageType = {
+  dashboard: "dashboard",
+  agent: "agent",
+  contact: "contact",
+  other: "other",
+} as const;
+
+export interface AiChatContext {
+  pageType?: AiChatContextPageType;
+  agentId?: string;
+  contactId?: string;
+}
+
+export interface AiChatBody {
+  message: string;
+  history?: AiChatMessage[];
+  context?: AiChatContext;
+}
+
+export type AiDraftBodyChannel =
+  (typeof AiDraftBodyChannel)[keyof typeof AiDraftBodyChannel];
+
+export const AiDraftBodyChannel = {
+  sms: "sms",
+  email: "email",
+} as const;
+
+export interface AiDraftBody {
+  channel: AiDraftBodyChannel;
+  contactId: string;
+  goal: string;
+}
+
+export interface AiDraftResponse {
+  draft: string;
+  subject?: string;
+  aiAssisted: boolean;
 }
 
 export type GetUsersParams = {
@@ -2068,3 +2247,25 @@ export type CreateRetentionFlag201 = { [key: string]: unknown };
 export type ResolveRetentionFlag200 = {
   success: boolean;
 };
+
+export type GetAutomationRulesParams = {
+  triggerType?: string;
+  isActive?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
+export type GetAutomationRuleLogsParams = {
+  result?: GetAutomationRuleLogsResult;
+  limit?: number;
+  offset?: number;
+};
+
+export type GetAutomationRuleLogsResult =
+  (typeof GetAutomationRuleLogsResult)[keyof typeof GetAutomationRuleLogsResult];
+
+export const GetAutomationRuleLogsResult = {
+  success: "success",
+  partial: "partial",
+  failed: "failed",
+} as const;

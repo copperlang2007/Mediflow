@@ -3238,8 +3238,358 @@ export const ResolveRetentionFlagResponse = zod.object({
 /**
  * @summary Retention counts for nav badges
  */
-export const GetRetentionSummaryResponse = zod.object({
-  birthdaysInNext30Days: zod.number(),
-  atRiskContacts: zod.number(),
-  openFlags: zod.number(),
+export const GetRetentionSummaryResponse = zod.object({}).passthrough();
+
+/**
+ * @summary List automation rules
+ */
+export const getAutomationRulesQueryLimitDefault = 50;
+export const getAutomationRulesQueryOffsetDefault = 0;
+
+export const GetAutomationRulesQueryParams = zod.object({
+  triggerType: zod.coerce.string().optional(),
+  isActive: zod.coerce.boolean().optional(),
+  limit: zod.coerce.number().default(getAutomationRulesQueryLimitDefault),
+  offset: zod.coerce.number().default(getAutomationRulesQueryOffsetDefault),
+});
+
+export const GetAutomationRulesResponse = zod.object({
+  rules: zod.array(
+    zod.object({
+      id: zod.string(),
+      orgId: zod.string(),
+      name: zod.string(),
+      triggerType: zod.string(),
+      triggerConfig: zod.record(zod.string(), zod.unknown()).nullish(),
+      conditions: zod
+        .array(
+          zod.object({
+            field: zod.string(),
+            operator: zod.enum(["eq", "neq", "contains", "gt", "lt", "exists"]),
+            value: zod.unknown(),
+            logic: zod.enum(["and", "or"]).optional(),
+          }),
+        )
+        .nullish(),
+      actions: zod
+        .array(
+          zod.object({
+            type: zod.enum([
+              "create_task",
+              "send_notification",
+              "send_email",
+              "send_sms",
+              "change_contact_status",
+              "enroll_sequence",
+              "change_deal_stage",
+            ]),
+            config: zod.record(zod.string(), zod.unknown()),
+          }),
+        )
+        .nullish(),
+      isActive: zod.boolean(),
+      lastRunAt: zod.coerce.date().nullish(),
+      runCount: zod.number(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+    }),
+  ),
+  total: zod.number(),
+});
+
+/**
+ * @summary Create automation rule
+ */
+export const CreateAutomationRuleBody = zod.object({
+  name: zod.string(),
+  triggerType: zod.string(),
+  triggerConfig: zod.record(zod.string(), zod.unknown()).nullish(),
+  conditions: zod
+    .array(
+      zod.object({
+        field: zod.string(),
+        operator: zod.enum(["eq", "neq", "contains", "gt", "lt", "exists"]),
+        value: zod.unknown(),
+        logic: zod.enum(["and", "or"]).optional(),
+      }),
+    )
+    .optional(),
+  actions: zod.array(
+    zod.object({
+      type: zod.enum([
+        "create_task",
+        "send_notification",
+        "send_email",
+        "send_sms",
+        "change_contact_status",
+        "enroll_sequence",
+        "change_deal_stage",
+      ]),
+      config: zod.record(zod.string(), zod.unknown()),
+    }),
+  ),
+  isActive: zod.boolean().optional(),
+});
+
+/**
+ * @summary Get automation rule
+ */
+export const GetAutomationRuleParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetAutomationRuleResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  triggerType: zod.string(),
+  triggerConfig: zod.record(zod.string(), zod.unknown()).nullish(),
+  conditions: zod
+    .array(
+      zod.object({
+        field: zod.string(),
+        operator: zod.enum(["eq", "neq", "contains", "gt", "lt", "exists"]),
+        value: zod.unknown(),
+        logic: zod.enum(["and", "or"]).optional(),
+      }),
+    )
+    .nullish(),
+  actions: zod
+    .array(
+      zod.object({
+        type: zod.enum([
+          "create_task",
+          "send_notification",
+          "send_email",
+          "send_sms",
+          "change_contact_status",
+          "enroll_sequence",
+          "change_deal_stage",
+        ]),
+        config: zod.record(zod.string(), zod.unknown()),
+      }),
+    )
+    .nullish(),
+  isActive: zod.boolean(),
+  lastRunAt: zod.coerce.date().nullish(),
+  runCount: zod.number(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Update automation rule
+ */
+export const UpdateAutomationRuleParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateAutomationRuleBody = zod.object({
+  name: zod.string().optional(),
+  triggerType: zod.string().optional(),
+  triggerConfig: zod.record(zod.string(), zod.unknown()).nullish(),
+  conditions: zod
+    .array(
+      zod.object({
+        field: zod.string(),
+        operator: zod.enum(["eq", "neq", "contains", "gt", "lt", "exists"]),
+        value: zod.unknown(),
+        logic: zod.enum(["and", "or"]).optional(),
+      }),
+    )
+    .optional(),
+  actions: zod
+    .array(
+      zod.object({
+        type: zod.enum([
+          "create_task",
+          "send_notification",
+          "send_email",
+          "send_sms",
+          "change_contact_status",
+          "enroll_sequence",
+          "change_deal_stage",
+        ]),
+        config: zod.record(zod.string(), zod.unknown()),
+      }),
+    )
+    .optional(),
+  isActive: zod.boolean().optional(),
+});
+
+export const UpdateAutomationRuleResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  triggerType: zod.string(),
+  triggerConfig: zod.record(zod.string(), zod.unknown()).nullish(),
+  conditions: zod
+    .array(
+      zod.object({
+        field: zod.string(),
+        operator: zod.enum(["eq", "neq", "contains", "gt", "lt", "exists"]),
+        value: zod.unknown(),
+        logic: zod.enum(["and", "or"]).optional(),
+      }),
+    )
+    .nullish(),
+  actions: zod
+    .array(
+      zod.object({
+        type: zod.enum([
+          "create_task",
+          "send_notification",
+          "send_email",
+          "send_sms",
+          "change_contact_status",
+          "enroll_sequence",
+          "change_deal_stage",
+        ]),
+        config: zod.record(zod.string(), zod.unknown()),
+      }),
+    )
+    .nullish(),
+  isActive: zod.boolean(),
+  lastRunAt: zod.coerce.date().nullish(),
+  runCount: zod.number(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete automation rule
+ */
+export const DeleteAutomationRuleParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary Toggle rule enabled/disabled
+ */
+export const ToggleAutomationRuleParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ToggleAutomationRuleResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  name: zod.string(),
+  triggerType: zod.string(),
+  triggerConfig: zod.record(zod.string(), zod.unknown()).nullish(),
+  conditions: zod
+    .array(
+      zod.object({
+        field: zod.string(),
+        operator: zod.enum(["eq", "neq", "contains", "gt", "lt", "exists"]),
+        value: zod.unknown(),
+        logic: zod.enum(["and", "or"]).optional(),
+      }),
+    )
+    .nullish(),
+  actions: zod
+    .array(
+      zod.object({
+        type: zod.enum([
+          "create_task",
+          "send_notification",
+          "send_email",
+          "send_sms",
+          "change_contact_status",
+          "enroll_sequence",
+          "change_deal_stage",
+        ]),
+        config: zod.record(zod.string(), zod.unknown()),
+      }),
+    )
+    .nullish(),
+  isActive: zod.boolean(),
+  lastRunAt: zod.coerce.date().nullish(),
+  runCount: zod.number(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Get rule execution history
+ */
+export const GetAutomationRuleLogsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const getAutomationRuleLogsQueryLimitDefault = 50;
+export const getAutomationRuleLogsQueryOffsetDefault = 0;
+
+export const GetAutomationRuleLogsQueryParams = zod.object({
+  result: zod.enum(["success", "partial", "failed"]).optional(),
+  limit: zod.coerce.number().default(getAutomationRuleLogsQueryLimitDefault),
+  offset: zod.coerce.number().default(getAutomationRuleLogsQueryOffsetDefault),
+});
+
+export const GetAutomationRuleLogsResponseItem = zod.object({
+  id: zod.string(),
+  ruleId: zod.string(),
+  triggerEvent: zod.string().nullish(),
+  matchedRecordType: zod.string().nullish(),
+  matchedRecordId: zod.string().nullish(),
+  actionsExecuted: zod.array(zod.string()).nullish(),
+  result: zod.enum(["success", "partial", "failed"]),
+  errorMessage: zod.string().nullish(),
+  executedAt: zod.coerce.date(),
+});
+export const GetAutomationRuleLogsResponse = zod.array(
+  GetAutomationRuleLogsResponseItem,
+);
+
+/**
+ * @summary Manually trigger a rule
+ */
+export const RunAutomationRuleParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const RunAutomationRuleBody = zod.object({
+  resourceType: zod.string().optional(),
+  resourceId: zod.string().optional(),
+});
+
+export const RunAutomationRuleResponse = zod.object({
+  queued: zod.boolean(),
+  ruleId: zod.string(),
+});
+
+/**
+ * @summary Context-aware AI chat (SSE streaming)
+ */
+export const AiChatBody = zod.object({
+  message: zod.string(),
+  history: zod
+    .array(
+      zod.object({
+        role: zod.enum(["user", "assistant"]),
+        content: zod.string(),
+      }),
+    )
+    .optional(),
+  context: zod
+    .object({
+      pageType: zod.enum(["dashboard", "agent", "contact", "other"]).optional(),
+      agentId: zod.string().optional(),
+      contactId: zod.string().optional(),
+    })
+    .optional(),
+});
+
+/**
+ * @summary Draft SMS or email for a contact using AI
+ */
+export const AiDraftBody = zod.object({
+  channel: zod.enum(["sms", "email"]),
+  contactId: zod.string(),
+  goal: zod.string(),
+});
+
+export const AiDraftResponse = zod.object({
+  draft: zod.string(),
+  subject: zod.string().optional(),
+  aiAssisted: zod.boolean(),
 });

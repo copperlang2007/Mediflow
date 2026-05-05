@@ -17,6 +17,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { enqueue, JOB_NAMES } from "../lib/jobs";
 
 const router: IRouter = Router();
 
@@ -260,6 +261,14 @@ router.patch("/deals/:id", requireAuth, requirePermission("contact", "update"), 
     await db.insert(dealStageHistoryTable).values({ id: randomUUID(), dealId: id, fromStageId: existing.stageId, toStageId: d.stageId, changedByUserId: authReq.userId });
     // Log activity on contact
     await db.insert(activitiesTable).values({ id: randomUUID(), orgId: authReq.orgId, contactId: existing.contactId, dealId: id, type: "status_change", body: `Deal moved to new stage`, createdBy: authReq.userId });
+    // Fire event-triggered automation rules for "deal_stage_changed"
+    void enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+      orgId: authReq.orgId,
+      trigger: "deal_stage_changed",
+      resourceType: "deal",
+      resourceId: id,
+      context: { fromStageId: existing.stageId, toStageId: d.stageId, contactId: existing.contactId },
+    });
   }
 
   res.json(updated);

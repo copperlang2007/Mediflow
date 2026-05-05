@@ -25,7 +25,13 @@ import type {
   AgentListResponse,
   AhipDashboard,
   AhipRecord,
+  AiChatBody,
+  AiDraftBody,
+  AiDraftResponse,
   AuditLogResponse,
+  AutomationRule,
+  AutomationRuleListResponse,
+  AutomationRuleLog,
   BulkContactAction200,
   BulkContactActionBody,
   BulkImportLicensesBody,
@@ -44,6 +50,7 @@ import type {
   ConvertLead200,
   CreateAgentBody,
   CreateAhipBody,
+  CreateAutomationRuleBody,
   CreateCarrierBody,
   CreateCertificationBody,
   CreateChecklistBody,
@@ -73,6 +80,8 @@ import type {
   GetAgentsParams,
   GetAhipDashboardParams,
   GetAuditLogParams,
+  GetAutomationRuleLogsParams,
+  GetAutomationRulesParams,
   GetCertificationMatrixParams,
   GetContactActivitiesParams,
   GetContactEnrollments200Item,
@@ -131,6 +140,8 @@ import type {
   ResolveRenewal200,
   ResolveRetentionFlag200,
   RetentionSummary,
+  RunAutomationRuleBody,
+  RunAutomationRuleResponse,
   SeedCarriersResponse,
   SendContactEmail201,
   SendContactEmailBody,
@@ -152,6 +163,7 @@ import type {
   ThreadWithContact,
   UpdateAgentBody,
   UpdateAhipBody,
+  UpdateAutomationRuleBody,
   UpdateCarrierBody,
   UpdateCertificationBody,
   UpdateChecklistItemBody,
@@ -12690,3 +12702,993 @@ export function useGetRetentionSummary<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary List automation rules
+ */
+export const getGetAutomationRulesUrl = (params?: GetAutomationRulesParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/automations/rules?${stringifiedParams}`
+    : `/api/automations/rules`;
+};
+
+export const getAutomationRules = async (
+  params?: GetAutomationRulesParams,
+  options?: RequestInit,
+): Promise<AutomationRuleListResponse> => {
+  return customFetch<AutomationRuleListResponse>(
+    getGetAutomationRulesUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAutomationRulesQueryKey = (
+  params?: GetAutomationRulesParams,
+) => {
+  return [`/api/automations/rules`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetAutomationRulesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAutomationRules>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetAutomationRulesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAutomationRules>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAutomationRulesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAutomationRules>>
+  > = ({ signal }) => getAutomationRules(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAutomationRules>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAutomationRulesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAutomationRules>>
+>;
+export type GetAutomationRulesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List automation rules
+ */
+
+export function useGetAutomationRules<
+  TData = Awaited<ReturnType<typeof getAutomationRules>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetAutomationRulesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAutomationRules>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAutomationRulesQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create automation rule
+ */
+export const getCreateAutomationRuleUrl = () => {
+  return `/api/automations/rules`;
+};
+
+export const createAutomationRule = async (
+  createAutomationRuleBody: CreateAutomationRuleBody,
+  options?: RequestInit,
+): Promise<AutomationRule> => {
+  return customFetch<AutomationRule>(getCreateAutomationRuleUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createAutomationRuleBody),
+  });
+};
+
+export const getCreateAutomationRuleMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAutomationRule>>,
+    TError,
+    { data: BodyType<CreateAutomationRuleBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createAutomationRule>>,
+  TError,
+  { data: BodyType<CreateAutomationRuleBody> },
+  TContext
+> => {
+  const mutationKey = ["createAutomationRule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createAutomationRule>>,
+    { data: BodyType<CreateAutomationRuleBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createAutomationRule(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateAutomationRuleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createAutomationRule>>
+>;
+export type CreateAutomationRuleMutationBody =
+  BodyType<CreateAutomationRuleBody>;
+export type CreateAutomationRuleMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create automation rule
+ */
+export const useCreateAutomationRule = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAutomationRule>>,
+    TError,
+    { data: BodyType<CreateAutomationRuleBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createAutomationRule>>,
+  TError,
+  { data: BodyType<CreateAutomationRuleBody> },
+  TContext
+> => {
+  return useMutation(getCreateAutomationRuleMutationOptions(options));
+};
+
+/**
+ * @summary Get automation rule
+ */
+export const getGetAutomationRuleUrl = (id: string) => {
+  return `/api/automations/rules/${id}`;
+};
+
+export const getAutomationRule = async (
+  id: string,
+  options?: RequestInit,
+): Promise<AutomationRule> => {
+  return customFetch<AutomationRule>(getGetAutomationRuleUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAutomationRuleQueryKey = (id: string) => {
+  return [`/api/automations/rules/${id}`] as const;
+};
+
+export const getGetAutomationRuleQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAutomationRule>>,
+  TError = ErrorType<Error>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAutomationRule>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetAutomationRuleQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAutomationRule>>
+  > = ({ signal }) => getAutomationRule(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAutomationRule>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAutomationRuleQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAutomationRule>>
+>;
+export type GetAutomationRuleQueryError = ErrorType<Error>;
+
+/**
+ * @summary Get automation rule
+ */
+
+export function useGetAutomationRule<
+  TData = Awaited<ReturnType<typeof getAutomationRule>>,
+  TError = ErrorType<Error>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAutomationRule>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAutomationRuleQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update automation rule
+ */
+export const getUpdateAutomationRuleUrl = (id: string) => {
+  return `/api/automations/rules/${id}`;
+};
+
+export const updateAutomationRule = async (
+  id: string,
+  updateAutomationRuleBody: UpdateAutomationRuleBody,
+  options?: RequestInit,
+): Promise<AutomationRule> => {
+  return customFetch<AutomationRule>(getUpdateAutomationRuleUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateAutomationRuleBody),
+  });
+};
+
+export const getUpdateAutomationRuleMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateAutomationRule>>,
+    TError,
+    { id: string; data: BodyType<UpdateAutomationRuleBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateAutomationRule>>,
+  TError,
+  { id: string; data: BodyType<UpdateAutomationRuleBody> },
+  TContext
+> => {
+  const mutationKey = ["updateAutomationRule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateAutomationRule>>,
+    { id: string; data: BodyType<UpdateAutomationRuleBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateAutomationRule(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateAutomationRuleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateAutomationRule>>
+>;
+export type UpdateAutomationRuleMutationBody =
+  BodyType<UpdateAutomationRuleBody>;
+export type UpdateAutomationRuleMutationError = ErrorType<Error>;
+
+/**
+ * @summary Update automation rule
+ */
+export const useUpdateAutomationRule = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateAutomationRule>>,
+    TError,
+    { id: string; data: BodyType<UpdateAutomationRuleBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateAutomationRule>>,
+  TError,
+  { id: string; data: BodyType<UpdateAutomationRuleBody> },
+  TContext
+> => {
+  return useMutation(getUpdateAutomationRuleMutationOptions(options));
+};
+
+/**
+ * @summary Delete automation rule
+ */
+export const getDeleteAutomationRuleUrl = (id: string) => {
+  return `/api/automations/rules/${id}`;
+};
+
+export const deleteAutomationRule = async (
+  id: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteAutomationRuleUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteAutomationRuleMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteAutomationRule>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteAutomationRule>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteAutomationRule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteAutomationRule>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteAutomationRule(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteAutomationRuleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteAutomationRule>>
+>;
+
+export type DeleteAutomationRuleMutationError = ErrorType<Error>;
+
+/**
+ * @summary Delete automation rule
+ */
+export const useDeleteAutomationRule = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteAutomationRule>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteAutomationRule>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteAutomationRuleMutationOptions(options));
+};
+
+/**
+ * @summary Toggle rule enabled/disabled
+ */
+export const getToggleAutomationRuleUrl = (id: string) => {
+  return `/api/automations/rules/${id}/toggle`;
+};
+
+export const toggleAutomationRule = async (
+  id: string,
+  options?: RequestInit,
+): Promise<AutomationRule> => {
+  return customFetch<AutomationRule>(getToggleAutomationRuleUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getToggleAutomationRuleMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof toggleAutomationRule>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof toggleAutomationRule>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["toggleAutomationRule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof toggleAutomationRule>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return toggleAutomationRule(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ToggleAutomationRuleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof toggleAutomationRule>>
+>;
+
+export type ToggleAutomationRuleMutationError = ErrorType<Error>;
+
+/**
+ * @summary Toggle rule enabled/disabled
+ */
+export const useToggleAutomationRule = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof toggleAutomationRule>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof toggleAutomationRule>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getToggleAutomationRuleMutationOptions(options));
+};
+
+/**
+ * @summary Get rule execution history
+ */
+export const getGetAutomationRuleLogsUrl = (
+  id: string,
+  params?: GetAutomationRuleLogsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/automations/rules/${id}/logs?${stringifiedParams}`
+    : `/api/automations/rules/${id}/logs`;
+};
+
+export const getAutomationRuleLogs = async (
+  id: string,
+  params?: GetAutomationRuleLogsParams,
+  options?: RequestInit,
+): Promise<AutomationRuleLog[]> => {
+  return customFetch<AutomationRuleLog[]>(
+    getGetAutomationRuleLogsUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAutomationRuleLogsQueryKey = (
+  id: string,
+  params?: GetAutomationRuleLogsParams,
+) => {
+  return [
+    `/api/automations/rules/${id}/logs`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetAutomationRuleLogsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAutomationRuleLogs>>,
+  TError = ErrorType<Error>,
+>(
+  id: string,
+  params?: GetAutomationRuleLogsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAutomationRuleLogs>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAutomationRuleLogsQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAutomationRuleLogs>>
+  > = ({ signal }) =>
+    getAutomationRuleLogs(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAutomationRuleLogs>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAutomationRuleLogsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAutomationRuleLogs>>
+>;
+export type GetAutomationRuleLogsQueryError = ErrorType<Error>;
+
+/**
+ * @summary Get rule execution history
+ */
+
+export function useGetAutomationRuleLogs<
+  TData = Awaited<ReturnType<typeof getAutomationRuleLogs>>,
+  TError = ErrorType<Error>,
+>(
+  id: string,
+  params?: GetAutomationRuleLogsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAutomationRuleLogs>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAutomationRuleLogsQueryOptions(
+    id,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Manually trigger a rule
+ */
+export const getRunAutomationRuleUrl = (id: string) => {
+  return `/api/automations/rules/${id}/run`;
+};
+
+export const runAutomationRule = async (
+  id: string,
+  runAutomationRuleBody?: RunAutomationRuleBody,
+  options?: RequestInit,
+): Promise<RunAutomationRuleResponse> => {
+  return customFetch<RunAutomationRuleResponse>(getRunAutomationRuleUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(runAutomationRuleBody),
+  });
+};
+
+export const getRunAutomationRuleMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof runAutomationRule>>,
+    TError,
+    { id: string; data: BodyType<RunAutomationRuleBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof runAutomationRule>>,
+  TError,
+  { id: string; data: BodyType<RunAutomationRuleBody> },
+  TContext
+> => {
+  const mutationKey = ["runAutomationRule"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof runAutomationRule>>,
+    { id: string; data: BodyType<RunAutomationRuleBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return runAutomationRule(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RunAutomationRuleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof runAutomationRule>>
+>;
+export type RunAutomationRuleMutationBody = BodyType<RunAutomationRuleBody>;
+export type RunAutomationRuleMutationError = ErrorType<Error>;
+
+/**
+ * @summary Manually trigger a rule
+ */
+export const useRunAutomationRule = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof runAutomationRule>>,
+    TError,
+    { id: string; data: BodyType<RunAutomationRuleBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof runAutomationRule>>,
+  TError,
+  { id: string; data: BodyType<RunAutomationRuleBody> },
+  TContext
+> => {
+  return useMutation(getRunAutomationRuleMutationOptions(options));
+};
+
+/**
+ * @summary Context-aware AI chat (SSE streaming)
+ */
+export const getAiChatUrl = () => {
+  return `/api/ai/chat`;
+};
+
+export const aiChat = async (
+  aiChatBody: AiChatBody,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getAiChatUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(aiChatBody),
+  });
+};
+
+export const getAiChatMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof aiChat>>,
+    TError,
+    { data: BodyType<AiChatBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof aiChat>>,
+  TError,
+  { data: BodyType<AiChatBody> },
+  TContext
+> => {
+  const mutationKey = ["aiChat"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof aiChat>>,
+    { data: BodyType<AiChatBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return aiChat(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AiChatMutationResult = NonNullable<
+  Awaited<ReturnType<typeof aiChat>>
+>;
+export type AiChatMutationBody = BodyType<AiChatBody>;
+export type AiChatMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Context-aware AI chat (SSE streaming)
+ */
+export const useAiChat = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof aiChat>>,
+    TError,
+    { data: BodyType<AiChatBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof aiChat>>,
+  TError,
+  { data: BodyType<AiChatBody> },
+  TContext
+> => {
+  return useMutation(getAiChatMutationOptions(options));
+};
+
+/**
+ * @summary Draft SMS or email for a contact using AI
+ */
+export const getAiDraftUrl = () => {
+  return `/api/ai/draft`;
+};
+
+export const aiDraft = async (
+  aiDraftBody: AiDraftBody,
+  options?: RequestInit,
+): Promise<AiDraftResponse> => {
+  return customFetch<AiDraftResponse>(getAiDraftUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(aiDraftBody),
+  });
+};
+
+export const getAiDraftMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof aiDraft>>,
+    TError,
+    { data: BodyType<AiDraftBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof aiDraft>>,
+  TError,
+  { data: BodyType<AiDraftBody> },
+  TContext
+> => {
+  const mutationKey = ["aiDraft"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof aiDraft>>,
+    { data: BodyType<AiDraftBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return aiDraft(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AiDraftMutationResult = NonNullable<
+  Awaited<ReturnType<typeof aiDraft>>
+>;
+export type AiDraftMutationBody = BodyType<AiDraftBody>;
+export type AiDraftMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Draft SMS or email for a contact using AI
+ */
+export const useAiDraft = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof aiDraft>>,
+    TError,
+    { data: BodyType<AiDraftBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof aiDraft>>,
+  TError,
+  { data: BodyType<AiDraftBody> },
+  TContext
+> => {
+  return useMutation(getAiDraftMutationOptions(options));
+};
+
+/**
+ * @summary Generate AI compliance intelligence report (SSE streaming)
+ */
+export const getAiComplianceReportUrl = () => {
+  return `/api/ai/compliance-report`;
+};
+
+export const aiComplianceReport = async (
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getAiComplianceReportUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getAiComplianceReportMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof aiComplianceReport>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof aiComplianceReport>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["aiComplianceReport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof aiComplianceReport>>,
+    void
+  > = () => {
+    return aiComplianceReport(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AiComplianceReportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof aiComplianceReport>>
+>;
+
+export type AiComplianceReportMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Generate AI compliance intelligence report (SSE streaming)
+ */
+export const useAiComplianceReport = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof aiComplianceReport>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof aiComplianceReport>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getAiComplianceReportMutationOptions(options));
+};

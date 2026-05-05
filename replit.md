@@ -78,7 +78,7 @@ lib/
 - `documents.ts` — documents
 - `crm.ts` — contacts, leads, pipelines, pipeline_stages, deals, deal_stage_history, activities
 - `communications.ts` — message_threads, messages, email_templates, sms_templates, opt_outs
-- `automations.ts` — sequences, sequence_steps, sequence_enrollments
+- `automations.ts` — sequences, sequence_steps, sequence_enrollments, automation_rules, automation_rule_logs
 - `notifications.ts` — notifications (with priority, resourceType, resourceId)
 - `retention.ts` — retention_flags
 
@@ -171,6 +171,15 @@ lib/
 - `GET /notifications/stream` — SSE real-time push stream
 - `POST /notifications/read-all` — bulk mark read
 - `PATCH /notifications/:id/read` — mark single read
+- `GET /automations/rules` — list automation rules
+- `POST /automations/rules` — create rule (agency_admin+)
+- `GET/PATCH/DELETE /automations/rules/:id` — rule detail CRUD
+- `POST /automations/rules/:id/toggle` — enable/disable rule
+- `POST /automations/rules/:id/run` — manually trigger rule
+- `GET /automations/rules/:id/logs` — rule execution history
+- `POST /ai/chat` — SSE streaming context-aware chat (system-prompt injected with live DB data)
+- `POST /ai/draft` — draft SMS or email for a contact (contactId + type + goal)
+- `POST /ai/compliance-report` — SSE streaming agency-wide compliance intelligence report
 - `GET /audit-log` — HIPAA audit trail (compliance_manager+ only)
 - `POST /storage/uploads/request-url` — presigned upload URL
 - `GET /storage/public-objects/*` — public assets (no auth)
@@ -198,12 +207,31 @@ Ad-hoc jobs (enqueue via `enqueue(JOB_NAMES.X, data)`):
 - `send-email` — fire-and-forget email via Resend
 - `send-sms` — fire-and-forget SMS via Twilio
 
+## AI Integration (lib/integrations-openai-ai-server)
+
+- OpenAI client via Replit AI Integrations proxy (`AI_INTEGRATIONS_OPENAI_BASE_URL` + `AI_INTEGRATIONS_OPENAI_API_KEY`)
+- Context builders in `api-server/src/lib/aiContext.ts`: `buildAgentContext`, `buildContactContext`, `buildDashboardContext`
+- SSE streaming for chat + compliance report endpoints
+- Model: `gpt-5.4` with `gpt-image-1` for image generation
+
+## Automation Rules Engine
+
+- `automation_rules` table: trigger (enum), conditions (JSONB array), actions (JSONB array), enabled flag
+- `automation_rule_logs` table: ruleId, triggeredBy, status, result, executedAt
+- Triggers: `lead_created`, `deal_stage_changed`, `contact_birthday`, `license_expiring_soon`, `certification_expiring_soon`, `ahip_incomplete`, `task_overdue`
+- Actions: `create_task`, `send_notification`, `send_email`, `send_sms`, `change_contact_status`, `enroll_sequence`, `change_deal_stage`
+- Event hooks: leads.ts fires `lead_created`, pipelines.ts fires `deal_stage_changed`
+
 ## Frontend Architecture
 
 - **Lazy loading**: All page components use `React.lazy` + `Suspense` with skeleton fallback
 - **Error boundary**: `ErrorBoundary` component wraps each page; global boundary wraps the router
 - **Auth**: Clerk `ClerkProvider` → signs in/out users; `Show` components gate authenticated routes
 - **Theme**: Navy sidebar (`221 50% 18%`), Medicare blue primary (`221 83% 43%`), cyan accent (`199 89% 48%`)
+- **AI panel**: `components/ai-assistant.tsx` — floating Bot button + right-side SSE chat drawer; slash commands; context-aware (reads page type/agentId/contactId)
+- **Automations page**: `pages/automations.tsx` — rule builder with trigger picker, condition builder, multi-action list, enable/disable toggle, execution history modal, manual run
+- **CRM contact**: "Draft with AI" button in Send SMS and Send Email modals (calls POST /ai/draft)
+- **Compliance page**: "AI Compliance Report" card at top with SSE streaming report generator
 
 ## Important Notes
 

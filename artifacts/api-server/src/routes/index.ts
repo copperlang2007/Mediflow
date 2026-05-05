@@ -25,6 +25,8 @@ import communicationsRouter from "./communications";
 import templatesRouter from "./templates";
 import sequencesRouter from "./sequences";
 import retentionCrmRouter from "./retentionCrm";
+import automationsRouter from "./automations";
+import aiRouter from "./ai";
 
 const router: IRouter = Router();
 
@@ -54,5 +56,7 @@ router.use(communicationsRouter);
 router.use(templatesRouter);
 router.use(sequencesRouter);
 router.use(retentionCrmRouter);
+router.use(automationsRouter);
+router.use(aiRouter);
 
 export default router;

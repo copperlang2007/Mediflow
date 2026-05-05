@@ -14,6 +14,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { enqueue, JOB_NAMES } from "../lib/jobs";
 
 const router: IRouter = Router();
 
@@ -104,6 +105,16 @@ router.post(
       status: parsed.data.status ?? "new",
       assignedAgentId: parsed.data.assignedAgentId ?? null,
     }).returning();
+
+    // Fire event-triggered automation rules for "lead_created"
+    void enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+      orgId: authReq.orgId,
+      trigger: "lead_created",
+      resourceType: "lead",
+      resourceId: lead.id,
+      context: { contactId: parsed.data.contactId, source: parsed.data.source ?? null },
+    });
+
     res.status(201).json(lead);
   },
 );

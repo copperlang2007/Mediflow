@@ -57,6 +57,10 @@ tags:
     description: Drip sequence builder and enrollment
   - name: retention
     description: Medicare-specific retention tools
+  - name: automations
+    description: Automation rules engine
+  - name: ai
+    description: AI assistant, outreach drafting, and compliance reports
 
 paths:
   /healthz:
@@ -2919,6 +2923,258 @@ paths:
               schema:
                 $ref: "#/components/schemas/RetentionSummary"
 
+
+  /automations/rules:
+    get:
+      operationId: getAutomationRules
+      tags: [automations]
+      summary: List automation rules
+      parameters:
+        - name: triggerType
+          in: query
+          schema: { type: string }
+        - name: isActive
+          in: query
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Paginated list of rules
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationRuleListResponse"
+    post:
+      operationId: createAutomationRule
+      tags: [automations]
+      summary: Create automation rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAutomationRuleBody"
+      responses:
+        "201":
+          description: Created rule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationRule"
+
+  /automations/rules/{id}:
+    get:
+      operationId: getAutomationRule
+      tags: [automations]
+      summary: Get automation rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Rule detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationRule"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    patch:
+      operationId: updateAutomationRule
+      tags: [automations]
+      summary: Update automation rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAutomationRuleBody"
+      responses:
+        "200":
+          description: Updated rule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationRule"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteAutomationRule
+      tags: [automations]
+      summary: Delete automation rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /automations/rules/{id}/toggle:
+    post:
+      operationId: toggleAutomationRule
+      tags: [automations]
+      summary: Toggle rule enabled/disabled
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Toggled rule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationRule"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /automations/rules/{id}/logs:
+    get:
+      operationId: getAutomationRuleLogs
+      tags: [automations]
+      summary: Get rule execution history
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: result
+          in: query
+          schema:
+            type: string
+            enum: [success, partial, failed]
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Execution logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AutomationRuleLog"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /automations/rules/{id}/run:
+    post:
+      operationId: runAutomationRule
+      tags: [automations]
+      summary: Manually trigger a rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunAutomationRuleBody"
+      responses:
+        "200":
+          description: Queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunAutomationRuleResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /ai/chat:
+    post:
+      operationId: aiChat
+      tags: [ai]
+      summary: Context-aware AI chat (SSE streaming)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AiChatBody"
+      responses:
+        "200":
+          description: SSE stream of AI response chunks
+          content:
+            text/event-stream: {}
+
+  /ai/draft:
+    post:
+      operationId: aiDraft
+      tags: [ai]
+      summary: Draft SMS or email for a contact using AI
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AiDraftBody"
+      responses:
+        "200":
+          description: AI-generated draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiDraftResponse"
+
+  /ai/compliance-report:
+    post:
+      operationId: aiComplianceReport
+      tags: [ai]
+      summary: Generate AI compliance intelligence report (SSE streaming)
+      responses:
+        "200":
+          description: SSE stream of report content
+          content:
+            text/event-stream: {}
+
 components:
   schemas:
     HealthStatus:
@@ -5204,7 +5460,184 @@ components:
     RetentionSummary:
       type: object
       properties:
-        birthdaysInNext30Days: { type: integer }
-        atRiskContacts: { type: integer }
-        openFlags: { type: integer }
-      required: [birthdaysInNext30Days, atRiskContacts, openFlags]
+
+    AutomationCondition:
+      type: object
+      properties:
+        field: { type: string }
+        operator:
+          type: string
+          enum: [eq, neq, contains, gt, lt, exists]
+        value: {}
+        logic:
+          type: string
+          enum: [and, or]
+      required: [field, operator, value]
+
+    AutomationAction:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [create_task, send_notification, send_email, send_sms, change_contact_status, enroll_sequence, change_deal_stage]
+        config:
+          type: object
+          additionalProperties: true
+      required: [type, config]
+
+    AutomationRule:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        name: { type: string }
+        triggerType: { type: string }
+        triggerConfig:
+          type: object
+          additionalProperties: true
+          nullable: true
+        conditions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationCondition"
+          nullable: true
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationAction"
+          nullable: true
+        isActive: { type: boolean }
+        lastRunAt: { type: string, format: date-time, nullable: true }
+        runCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, orgId, name, triggerType, isActive, runCount, createdAt, updatedAt]
+
+    AutomationRuleListResponse:
+      type: object
+      properties:
+        rules:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationRule"
+        total: { type: integer }
+      required: [rules, total]
+
+    CreateAutomationRuleBody:
+      type: object
+      properties:
+        name: { type: string }
+        triggerType: { type: string }
+        triggerConfig:
+          type: object
+          additionalProperties: true
+          nullable: true
+        conditions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationCondition"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationAction"
+        isActive: { type: boolean }
+      required: [name, triggerType, actions]
+
+    UpdateAutomationRuleBody:
+      type: object
+      properties:
+        name: { type: string }
+        triggerType: { type: string }
+        triggerConfig:
+          type: object
+          additionalProperties: true
+          nullable: true
+        conditions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationCondition"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationAction"
+        isActive: { type: boolean }
+
+    AutomationRuleLog:
+      type: object
+      properties:
+        id: { type: string }
+        ruleId: { type: string }
+        triggerEvent: { type: string, nullable: true }
+        matchedRecordType: { type: string, nullable: true }
+        matchedRecordId: { type: string, nullable: true }
+        actionsExecuted:
+          type: array
+          items: { type: string }
+          nullable: true
+        result:
+          type: string
+          enum: [success, partial, failed]
+        errorMessage: { type: string, nullable: true }
+        executedAt: { type: string, format: date-time }
+      required: [id, ruleId, result, executedAt]
+
+    RunAutomationRuleBody:
+      type: object
+      properties:
+        resourceType: { type: string }
+        resourceId: { type: string }
+
+    RunAutomationRuleResponse:
+      type: object
+      properties:
+        queued: { type: boolean }
+        ruleId: { type: string }
+      required: [queued, ruleId]
+
+    AiChatMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content: { type: string }
+      required: [role, content]
+
+    AiChatContext:
+      type: object
+      properties:
+        pageType:
+          type: string
+          enum: [dashboard, agent, contact, other]
+        agentId: { type: string }
+        contactId: { type: string }
+
+    AiChatBody:
+      type: object
+      properties:
+        message: { type: string }
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/AiChatMessage"
+        context:
+          $ref: "#/components/schemas/AiChatContext"
+      required: [message]
+
+    AiDraftBody:
+      type: object
+      properties:
+        channel:
+          type: string
+          enum: [sms, email]
+        contactId: { type: string }
+        goal: { type: string }
+      required: [channel, contactId, goal]
+
+    AiDraftResponse:
+      type: object
+      properties:
+        draft: { type: string }
+        subject: { type: string }
+        aiAssisted: { type: boolean }
+      required: [draft, aiAssisted]

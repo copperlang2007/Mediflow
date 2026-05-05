@@ -1,0 +1,352 @@
+/**
+ * AI assistant routes — context-aware OpenAI chat, outreach drafting,
+ * and compliance intelligence reports.
+ *
+ * POST /ai/chat            — SSE streaming context-aware chat
+ * POST /ai/draft           — draft SMS/email text for a contact
+ * POST /ai/compliance-report  — SSE streaming agency compliance report
+ */
+
+import { Router, type IRouter, type Request, type Response } from "express";
+import { z } from "zod";
+import { eq, and, desc, sql } from "drizzle-orm";
+import {
+  db,
+  agentsTable,
+  stateLicensesTable,
+  carrierCertificationsTable,
+  ahipRecordsTable,
+  taskInstancesTable,
+  contactsTable,
+} from "@workspace/db";
+import { openai } from "@workspace/integrations-openai-ai-server";
+import {
+  requireAuth,
+  type AuthenticatedRequest,
+} from "../middlewares/requireAuth";
+import {
+  buildAgentContext,
+  buildContactContext,
+  buildDashboardContext,
+} from "../lib/aiContext";
+import { logger } from "../lib/logger";
+
+const router: IRouter = Router();
+
+const MEDIFLOW_SYSTEM_PREAMBLE = `You are MediFlow AI, an intelligent assistant built into the MediFlow Medicare Sales Agency Platform. You help insurance agents, compliance managers, and agency administrators manage agent lifecycle, CRM contacts, compliance, and outreach.
+
+You have access to real-time platform data provided in the context below. Always base your answers on this data — never fabricate names, numbers, or details. When asked to draft communications, produce professional, compliant content appropriate for Medicare insurance outreach.
+
+Available slash commands:
+  /compliance-check [agent name] — structured compliance gap report with prioritized action items
+  /draft-sms [contact name] [goal] — SMS draft using contact's Medicare context
+  /draft-email [contact name] [goal] — full email draft
+  /summarize [contact name] — brief on contact history + recommended next action
+  /renewal-report — agency-wide license/cert renewal status narrative
+  /offboarding-check [agent name] — list all remaining offboarding steps
+
+Always be concise, accurate, and action-oriented. Format reports and gap analyses as structured Markdown with headers and bullet points.`;
+
+// ---- POST /ai/chat ----
+
+const ChatMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+});
+
+const ChatRequestSchema = z.object({
+  message: z.string().min(1).max(8000),
+  history: z.array(ChatMessageSchema).max(50).optional().default([]),
+  context: z.object({
+    pageType: z.enum(["dashboard", "agent", "contact", "other"]).optional(),
+    agentId: z.string().optional(),
+    contactId: z.string().optional(),
+  }).optional(),
+});
+
+router.post(
+  "/ai/chat",
+  requireAuth,
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const parsed = ChatRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
+      return;
+    }
+
+    const { message, history, context } = parsed.data;
+
+    // Build page-specific context
+    let pageContext = "";
+    try {
+      if (context?.pageType === "agent" && context.agentId) {
+        pageContext = await buildAgentContext(context.agentId, authReq.orgId);
+      } else if (context?.pageType === "contact" && context.contactId) {
+        pageContext = await buildContactContext(context.contactId, authReq.orgId);
+      } else if (context?.pageType === "dashboard") {
+        pageContext = await buildDashboardContext(authReq.orgId);
+      }
+    } catch (err) {
+      logger.warn({ err }, "Failed to build AI page context — proceeding without it");
+    }
+
+    const systemPrompt = [
+      MEDIFLOW_SYSTEM_PREAMBLE,
+      `\nUser role: ${authReq.userRole}`,
+      `Organization ID: ${authReq.orgId}`,
+      pageContext ? `\n--- CURRENT PAGE CONTEXT ---\n${pageContext}\n--- END CONTEXT ---` : "",
+    ].filter(Boolean).join("\n");
+
+    // Parse slash commands to structured prompts
+    const processedMessage = parseSlashCommand(message);
+
+    const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
+      { role: "system", content: systemPrompt },
+      ...history.map((h) => ({ role: h.role as "user" | "assistant", content: h.content })),
+      { role: "user", content: processedMessage },
+    ];
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+
+    try {
+      const stream = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 8192,
+        messages: chatMessages,
+        stream: true,
+      });
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          res.write(`data: ${JSON.stringify({ content })}\n\n`);
+        }
+      }
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    } catch (err) {
+      logger.error({ err }, "AI chat stream failed");
+      res.write(`data: ${JSON.stringify({ error: "AI service unavailable" })}\n\n`);
+    } finally {
+      res.end();
+    }
+  },
+);
+
+// ---- POST /ai/draft ----
+
+const DraftRequestSchema = z.object({
+  channel: z.enum(["sms", "email"]),
+  contactId: z.string(),
+  goal: z.string().min(1).max(500),
+});
+
+router.post(
+  "/ai/draft",
+  requireAuth,
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const parsed = DraftRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
+      return;
+    }
+
+    const { channel, contactId, goal } = parsed.data;
+
+    const [contact] = await db
+      .select()
+      .from(contactsTable)
+      .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, authReq.orgId)))
+      .limit(1);
+
+    if (!contact) {
+      res.status(404).json({ error: "Contact not found" });
+      return;
+    }
+
+    const contactCtx = await buildContactContext(contactId, authReq.orgId);
+
+    const channelInstructions =
+      channel === "sms"
+        ? "Draft a concise, professional SMS message (max 160 characters). No subject line. Return ONLY the message text."
+        : "Draft a professional email with a subject line and body. Return JSON with keys 'subject' (string) and 'body' (string). The body should use plain text with paragraphs.";
+
+    const prompt = [
+      `You are drafting outreach for a Medicare insurance agent.`,
+      `Channel: ${channel.toUpperCase()}`,
+      `Goal: ${goal}`,
+      ``,
+      contactCtx,
+      ``,
+      channelInstructions,
+    ].join("\n");
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: channel === "sms" ? 256 : 1024,
+        messages: [{ role: "user", content: prompt }],
+        stream: false,
+      });
+
+      const text = response.choices[0]?.message?.content ?? "";
+
+      if (channel === "email") {
+        try {
+          const parsed = JSON.parse(text) as { subject?: string; body?: string };
+          res.json({ draft: parsed.body ?? text, subject: parsed.subject ?? "", aiAssisted: true });
+          return;
+        } catch {
+          res.json({ draft: text, subject: "", aiAssisted: true });
+          return;
+        }
+      }
+
+      res.json({ draft: text, aiAssisted: true });
+    } catch (err) {
+      logger.error({ err }, "AI draft failed");
+      res.status(503).json({ error: "AI service unavailable" });
+    }
+  },
+);
+
+// ---- POST /ai/compliance-report ----
+
+router.post(
+  "/ai/compliance-report",
+  requireAuth,
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+
+    const now = new Date();
+    const in90 = new Date(now.getTime() + 90 * 86400000);
+
+    // Fetch all agents and their compliance data
+    let agents: {
+      id: string; firstName: string; lastName: string; email: string; status: string; npn: string | null;
+    }[] = [];
+
+    try {
+      agents = await db
+        .select({ id: agentsTable.id, firstName: agentsTable.firstName, lastName: agentsTable.lastName, email: agentsTable.email, status: agentsTable.status, npn: agentsTable.npn })
+        .from(agentsTable)
+        .where(eq(agentsTable.orgId, authReq.orgId))
+        .limit(100);
+    } catch (err) {
+      logger.error({ err }, "Failed to fetch agents for compliance report");
+      res.status(500).json({ error: "Failed to fetch agent data" });
+      return;
+    }
+
+    const agentDataLines: string[] = [];
+    for (const agent of agents) {
+      const [licenses, certs, ahip, overdueTasks] = await Promise.all([
+        db.select().from(stateLicensesTable).where(eq(stateLicensesTable.agentId, agent.id)).limit(20),
+        db.select().from(carrierCertificationsTable).where(eq(carrierCertificationsTable.agentId, agent.id)).limit(20),
+        db.select().from(ahipRecordsTable).where(eq(ahipRecordsTable.agentId, agent.id)).orderBy(desc(ahipRecordsTable.certificationYear)).limit(1),
+        db.select({ count: sql<number>`count(*)` }).from(taskInstancesTable).where(and(eq(taskInstancesTable.agentId, agent.id), eq(taskInstancesTable.status, "open"))),
+      ]);
+
+      const expLicenses = licenses.filter((l) => l.expiryDate && new Date(l.expiryDate) <= in90);
+      const expCerts = certs.filter((c) => c.status !== "passed" && c.certificationYear < now.getFullYear());
+      const ahipStatus = ahip[0]?.status ?? "none";
+      const overdueCount = Number(overdueTasks[0]?.count ?? 0);
+
+      agentDataLines.push(
+        `Agent: ${agent.firstName} ${agent.lastName} (${agent.status}) — NPN: ${agent.npn ?? "missing"} — Licenses expiring: ${expLicenses.length} — Certs expiring: ${expCerts.length} — AHIP: ${ahipStatus} — Overdue tasks: ${overdueCount}`,
+      );
+    }
+
+    const reportPrompt = [
+      `You are generating a Compliance Intelligence Report for a Medicare insurance agency.`,
+      `Today's date: ${now.toISOString().slice(0, 10)}`,
+      ``,
+      `Below is a summary of all agents and their current compliance status. Analyze this data and produce:`,
+      `1. An executive summary (2-3 sentences)`,
+      `2. Top 5 priority compliance issues ranked by urgency`,
+      `3. A ranked table of agents with the most critical compliance gaps`,
+      `4. Recommended immediate action items for the compliance manager`,
+      `5. Agents in good standing (brief mention)`,
+      ``,
+      `Format the report as Markdown with clear headers (##) and bullet points.`,
+      ``,
+      `AGENT COMPLIANCE DATA (${agents.length} agents):`,
+      ...agentDataLines,
+    ].join("\n");
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+
+    try {
+      const stream = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 8192,
+        messages: [{ role: "user", content: reportPrompt }],
+        stream: true,
+      });
+
+      let fullReport = "";
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          fullReport += content;
+          res.write(`data: ${JSON.stringify({ content })}\n\n`);
+        }
+      }
+
+      res.write(`data: ${JSON.stringify({ done: true, reportLength: fullReport.length })}\n\n`);
+    } catch (err) {
+      logger.error({ err }, "AI compliance report stream failed");
+      res.write(`data: ${JSON.stringify({ error: "AI service unavailable" })}\n\n`);
+    } finally {
+      res.end();
+    }
+  },
+);
+
+// ---- Slash command parser ----
+
+function parseSlashCommand(message: string): string {
+  const trimmed = message.trim();
+
+  const complianceMatch = trimmed.match(/^\/compliance-check\s+(.+)/i);
+  if (complianceMatch) {
+    return `Perform a full compliance gap report for the agent named "${complianceMatch[1]}". Include: (1) License status and expiry risks, (2) Carrier certification gaps, (3) AHIP status, (4) Overdue tasks, (5) Priority action items ranked by urgency. Format as structured Markdown.`;
+  }
+
+  const draftSmsMatch = trimmed.match(/^\/draft-sms\s+(\S+)\s+(.+)/i);
+  if (draftSmsMatch) {
+    return `Draft a professional SMS for the contact named "${draftSmsMatch[1]}". Goal: ${draftSmsMatch[2]}. Use the Medicare context in the system prompt. Keep it under 160 characters.`;
+  }
+
+  const draftEmailMatch = trimmed.match(/^\/draft-email\s+(\S+)\s+(.+)/i);
+  if (draftEmailMatch) {
+    return `Draft a professional email for the contact named "${draftEmailMatch[1]}". Goal: ${draftEmailMatch[2]}. Use the Medicare context. Provide subject and body separately.`;
+  }
+
+  const summarizeMatch = trimmed.match(/^\/summarize\s+(.+)/i);
+  if (summarizeMatch) {
+    return `Provide a brief summary for the contact named "${summarizeMatch[1]}": (1) enrollment status overview, (2) last interaction and outcome, (3) current sequence status, (4) recommended next action. Be concise (under 200 words).`;
+  }
+
+  const renewalMatch = trimmed.match(/^\/renewal-report/i);
+  if (renewalMatch) {
+    return `Generate a concise agency-wide license and certification renewal status narrative. Identify: (1) who needs to renew within 30 days, (2) who needs to renew within 60-90 days, (3) any missing or lapsed credentials. Rank by urgency and provide a prioritized action list for the compliance manager.`;
+  }
+
+  const offboardingMatch = trimmed.match(/^\/offboarding-check\s+(.+)/i);
+  if (offboardingMatch) {
+    return `List all offboarding steps remaining for the agent named "${offboardingMatch[1]}". Include: (1) open tasks to complete or transfer, (2) active licenses to surrender or transfer, (3) carrier certifications to update, (4) contact reassignments needed, (5) documentation requirements. Format as a checklist.`;
+  }
+
+  return message;
+}
+
+export default router;

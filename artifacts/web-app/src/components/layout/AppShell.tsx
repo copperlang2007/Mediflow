@@ -69,9 +69,11 @@ import {
   Building2,
   ChevronLeft,
   RefreshCcw,
+  Zap,
 } from "lucide-react";
 import NotificationPanel from "@/components/notifications/NotificationPanel";
 import { useSSENotifications } from "@/hooks/useSSENotifications";
+import { AiAssistantPanel } from "@/components/ai-assistant";
 
 type NavItemDef = {
   href: string;
@@ -121,6 +123,10 @@ const navItems: NavGroup[] = [
       {
         href: "/compliance", label: "Audit & Compliance", icon: ShieldCheck,
         roles: ["super_admin", "agency_admin", "compliance_manager"],
+      },
+      {
+        href: "/automations", label: "Automations", icon: Zap,
+        roles: ["super_admin", "agency_admin"],
       },
     ],
   },
@@ -419,6 +425,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+
+      {/* Floating AI Assistant */}
+      <AiAssistantPanel />
     </div>
   );
 }

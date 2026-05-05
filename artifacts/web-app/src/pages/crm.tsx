@@ -1055,13 +1055,13 @@ function RetentionTab() {
         <Card className={cn("py-3 cursor-pointer transition-colors", section === "birthdays" && "ring-2 ring-primary")} onClick={() => setSection("birthdays")}>
           <CardContent className="px-4 py-0 flex items-center gap-3">
             <Cake className="h-8 w-8 text-pink-500 shrink-0" />
-            <div><p className="text-xl font-bold">{summary?.birthdaysInNext30Days ?? "—"}</p><p className="text-xs text-muted-foreground">Birthdays (30d)</p></div>
+            <div><p className="text-xl font-bold">{String(summary?.birthdaysInNext30Days ?? "—")}</p><p className="text-xs text-muted-foreground">Birthdays (30d)</p></div>
           </CardContent>
         </Card>
         <Card className={cn("py-3 cursor-pointer transition-colors", section === "at_risk" && "ring-2 ring-primary")} onClick={() => setSection("at_risk")}>
           <CardContent className="px-4 py-0 flex items-center gap-3">
             <AlertTriangle className="h-8 w-8 text-amber-500 shrink-0" />
-            <div><p className="text-xl font-bold">{summary?.atRiskContacts ?? "—"}</p><p className="text-xs text-muted-foreground">At-Risk (60d)</p></div>
+            <div><p className="text-xl font-bold">{String(summary?.atRiskContacts ?? "—")}</p><p className="text-xs text-muted-foreground">At-Risk (60d)</p></div>
           </CardContent>
         </Card>
         <Card className={cn("py-3 cursor-pointer transition-colors", section === "aep" && "ring-2 ring-primary")} onClick={() => setSection("aep")}>
