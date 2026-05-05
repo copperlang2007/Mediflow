@@ -163,6 +163,8 @@ export interface Agent {
   notes?: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Number of active state licenses (populated in list endpoint) */
+  activeLicenseCount?: number;
 }
 
 export type AgentDetail = Agent & {
@@ -734,6 +736,11 @@ export interface PlatformRequirement {
   platformCategory?: string | null;
   isRequired: boolean;
   onboardingOrder: number;
+  /**
+   * If set, this requirement only applies to agents with this role
+   * @nullable
+   */
+  requiredForRole?: string | null;
 }
 
 export interface CreatePlatformRequirementBody {
@@ -741,6 +748,7 @@ export interface CreatePlatformRequirementBody {
   platformCategory?: string;
   isRequired?: boolean;
   onboardingOrder?: number;
+  requiredForRole?: string | null;
 }
 
 export interface UpdatePlatformRequirementBody {
@@ -748,6 +756,87 @@ export interface UpdatePlatformRequirementBody {
   platformCategory?: string;
   isRequired?: boolean;
   onboardingOrder?: number;
+  requiredForRole?: string | null;
+}
+
+export interface OrgSettings {
+  /** @nullable */
+  id?: string | null;
+  orgId: string;
+  /**
+   * @minimum 1
+   * @maximum 12
+   */
+  ahipSeasonOpenMonth: number;
+  /**
+   * @minimum 1
+   * @maximum 31
+   */
+  ahipSeasonOpenDay: number;
+  /**
+   * @minimum 1
+   * @maximum 12
+   */
+  ahipDeadlineMonth: number;
+  /**
+   * @minimum 1
+   * @maximum 31
+   */
+  ahipDeadlineDay: number;
+  ahipReminderEnabled: boolean;
+  /**
+   * @minimum 1
+   * @maximum 52
+   */
+  ahipReminderIntervalWeeks: number;
+}
+
+export interface UpdateOrgSettingsBody {
+  /**
+   * @minimum 1
+   * @maximum 12
+   */
+  ahipSeasonOpenMonth?: number;
+  /**
+   * @minimum 1
+   * @maximum 31
+   */
+  ahipSeasonOpenDay?: number;
+  /**
+   * @minimum 1
+   * @maximum 12
+   */
+  ahipDeadlineMonth?: number;
+  /**
+   * @minimum 1
+   * @maximum 31
+   */
+  ahipDeadlineDay?: number;
+  ahipReminderEnabled?: boolean;
+  /**
+   * @minimum 1
+   * @maximum 52
+   */
+  ahipReminderIntervalWeeks?: number;
+}
+
+export type BulkUpdateTechStackBodyStatus =
+  (typeof BulkUpdateTechStackBodyStatus)[keyof typeof BulkUpdateTechStackBodyStatus];
+
+export const BulkUpdateTechStackBodyStatus = {
+  provisioned: "provisioned",
+  pending: "pending",
+  deprovisioned: "deprovisioned",
+} as const;
+
+export interface BulkUpdateTechStackBody {
+  /**
+   * @minItems 1
+   * @maxItems 100
+   */
+  accountIds: string[];
+  status: BulkUpdateTechStackBodyStatus;
+  notes?: string;
 }
 
 export type TaskTemplatePriority =
@@ -1081,6 +1170,10 @@ export type GetCertificationMatrixParams = {
 
 export type GetAhipDashboardParams = {
   year?: number;
+};
+
+export type BulkUpdateAgentTechStack200 = {
+  updated: TechStackAccount[];
 };
 
 export type GetTasksParams = {

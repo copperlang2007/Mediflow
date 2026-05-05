@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, sql, ilike, or, desc, type SQL } from "drizzle-orm";
+import { eq, and, sql, ilike, or, desc, inArray, type SQL } from "drizzle-orm";
 import {
   db,
   agentsTable,
@@ -131,8 +131,31 @@ router.get(
         .where(and(...conditions)),
     ]);
 
+    const agentIds = allAgents.map((a) => a.id);
+    const licCounts =
+      agentIds.length > 0
+        ? await db
+            .select({
+              agentId: stateLicensesTable.agentId,
+              count: sql<number>`count(*)::int`,
+            })
+            .from(stateLicensesTable)
+            .where(
+              and(
+                inArray(stateLicensesTable.agentId, agentIds),
+                eq(stateLicensesTable.status, "active"),
+              ),
+            )
+            .groupBy(stateLicensesTable.agentId)
+        : [];
+    const licCountMap = new Map(licCounts.map((r) => [r.agentId, r.count]));
+    const agentsWithCounts = allAgents.map((a) => ({
+      ...a,
+      activeLicenseCount: licCountMap.get(a.id) ?? 0,
+    }));
+
     res.json({
-      agents: allAgents,
+      agents: agentsWithCounts,
       total: Number(totalResult[0]?.count ?? 0),
       limit: limitNum,
       offset: offsetNum,
@@ -502,7 +525,7 @@ router.get(
       activeCertifications: activeCerts,
       totalCertifications: certs.length,
       ahipCompleted,
-      onboardingComplete: agent.status !== "onboarding",
+      onboardingComplete: onboardingTotalItems > 0 && onboardingCompletedItems >= onboardingTotalItems,
       onboardingCompletedItems,
       onboardingTotalItems,
     });

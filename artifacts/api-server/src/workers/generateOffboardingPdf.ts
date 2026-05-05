@@ -17,6 +17,10 @@ import {
   ahipRecordsTable,
   taskInstancesTable,
   documentsTable,
+  techStackAccountsTable,
+  checklistRunsTable,
+  checklistItemsTable,
+  sql,
 } from "@workspace/db";
 import { type GenerateOffboardingPdfPayload } from "../lib/jobs";
 import { ObjectStorageService } from "../lib/objectStorage";
@@ -30,12 +34,30 @@ function fmt(d: Date | null | undefined): string {
   return (d instanceof Date ? d : new Date(d as string)).toISOString().split("T")[0];
 }
 
+function calcTenure(hireDate: Date | null | undefined, offboardDate: string): string {
+  if (!hireDate) return "—";
+  const hire = hireDate instanceof Date ? hireDate : new Date(hireDate as string);
+  const offboard = new Date(offboardDate);
+  const diffMs = offboard.getTime() - hire.getTime();
+  const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const years = Math.floor(totalDays / 365);
+  const months = Math.floor((totalDays % 365) / 30);
+  const parts: string[] = [];
+  if (years > 0) parts.push(`${years} year${years !== 1 ? "s" : ""}`);
+  if (months > 0) parts.push(`${months} month${months !== 1 ? "s" : ""}`);
+  if (parts.length === 0) parts.push(`${totalDays} day${totalDays !== 1 ? "s" : ""}`);
+  return parts.join(", ");
+}
+
 async function buildPdf(data: {
   agent: Record<string, unknown>;
   licenses: Array<Record<string, unknown>>;
   certifications: Array<Record<string, unknown>>;
   ahipRecords: Array<Record<string, unknown>>;
   openTasks: Array<Record<string, unknown>>;
+  techStack: Array<Record<string, unknown>>;
+  releaseDocuments: Array<Record<string, unknown>>;
+  offboardingSteps: Array<Record<string, unknown>>;
   offboardDate: string;
 }): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -45,7 +67,17 @@ async function buildPdf(data: {
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    const { agent, licenses, certifications, ahipRecords, openTasks, offboardDate } = data;
+    const {
+      agent,
+      licenses,
+      certifications,
+      ahipRecords,
+      openTasks,
+      techStack,
+      releaseDocuments,
+      offboardingSteps,
+      offboardDate,
+    } = data;
 
     // ── Colour palette ──────────────────────────────────────────────
     const NAVY = "#1a365d";
@@ -144,6 +176,7 @@ async function buildPdf(data: {
     metaRow("Status", String(agent.status ?? "—"));
     metaRow("Hire Date", fmt(agent.hireDate as Date));
     metaRow("Offboard Date", fmt(agent.offboardDate as Date));
+    metaRow("Tenure", calcTenure(agent.hireDate as Date, offboardDate));
 
     // ── State Licenses ───────────────────────────────────────────────
     sectionHeading(`State Licenses (${licenses.length})`);
@@ -214,6 +247,63 @@ async function buildPdf(data: {
       doc.fontSize(9).font("Helvetica-Oblique").text("No open tasks.", 56).moveDown(0.3);
     }
 
+    // ── Tech Stack Deprovisioning ────────────────────────────────────
+    sectionHeading(`Tech Stack Deprovisioning (${techStack.length} platforms)`);
+    if (techStack.length > 0) {
+      const provisioned = techStack.filter((a) => a.status === "provisioned").length;
+      const deprovisioned = techStack.filter((a) => a.status === "deprovisioned").length;
+      const pending = techStack.filter((a) => a.status === "pending").length;
+      doc.fontSize(9).font("Helvetica")
+        .text(`Provisioned: ${provisioned}  |  Deprovisioned: ${deprovisioned}  |  Pending: ${pending}`, 56)
+        .moveDown(0.3);
+      drawTable(
+        ["Platform", "Category", "Status", "Provisioned", "Deprovisioned"],
+        techStack.map((a) => [
+          String(a.platformName ?? ""),
+          String(a.platformCategory ?? "—"),
+          String(a.status ?? ""),
+          fmt(a.provisionedAt as Date),
+          fmt(a.deprovisionedAt as Date),
+        ]),
+        [155, 90, 85, 90, 100],
+      );
+    } else {
+      doc.fontSize(9).font("Helvetica-Oblique").text("No tech stack accounts configured.", 56).moveDown(0.3);
+    }
+
+    // ── Release Documents ────────────────────────────────────────────
+    sectionHeading(`Release Documents (${releaseDocuments.length})`);
+    if (releaseDocuments.length > 0) {
+      drawTable(
+        ["Document Name", "Category", "Created"],
+        releaseDocuments.map((d) => [
+          String(d.name ?? "").substring(0, 60),
+          String(d.category ?? ""),
+          fmt(d.createdAt as Date),
+        ]),
+        [280, 100, 90],
+      );
+    } else {
+      doc.fontSize(9).font("Helvetica-Oblique").text("No release documents on file.", 56).moveDown(0.3);
+    }
+
+    // ── Offboarding Checklist Step Trace ─────────────────────────────
+    sectionHeading(`Offboarding Step Trace (${offboardingSteps.length} items)`);
+    if (offboardingSteps.length > 0) {
+      drawTable(
+        ["Step", "Status", "Completed By", "Completed At"],
+        offboardingSteps.map((s) => [
+          String(s.title ?? "").substring(0, 50),
+          String(s.status ?? ""),
+          String(s.completedBy ?? "—").substring(0, 30),
+          s.completedAt ? fmt(s.completedAt as Date) : "—",
+        ]),
+        [215, 75, 130, 100],
+      );
+    } else {
+      doc.fontSize(9).font("Helvetica-Oblique").text("No offboarding checklist steps recorded.", 56).moveDown(0.3);
+    }
+
     // ── Footer on each page ──────────────────────────────────────────
     const pages = doc.bufferedPageRange();
     for (let i = 0; i < pages.count; i++) {
@@ -250,12 +340,57 @@ export async function generateOffboardingPdfWorker(
     return;
   }
 
-  const [licenses, certifications, ahipRecords, openTasks] = await Promise.all([
-    db.select().from(stateLicensesTable).where(eq(stateLicensesTable.agentId, agentId)),
-    db.select().from(carrierCertificationsTable).where(eq(carrierCertificationsTable.agentId, agentId)),
-    db.select().from(ahipRecordsTable).where(eq(ahipRecordsTable.agentId, agentId)).orderBy(ahipRecordsTable.certificationYear),
-    db.select().from(taskInstancesTable).where(and(eq(taskInstancesTable.agentId, agentId), eq(taskInstancesTable.status, "open"))),
-  ]);
+  const [licenses, certifications, ahipRecords, openTasks, techStack, releaseDocuments] =
+    await Promise.all([
+      db.select().from(stateLicensesTable).where(eq(stateLicensesTable.agentId, agentId)),
+      db.select().from(carrierCertificationsTable).where(eq(carrierCertificationsTable.agentId, agentId)),
+      db
+        .select()
+        .from(ahipRecordsTable)
+        .where(eq(ahipRecordsTable.agentId, agentId))
+        .orderBy(ahipRecordsTable.certificationYear),
+      db
+        .select()
+        .from(taskInstancesTable)
+        .where(and(eq(taskInstancesTable.agentId, agentId), eq(taskInstancesTable.status, "open"))),
+      db
+        .select()
+        .from(techStackAccountsTable)
+        .where(eq(techStackAccountsTable.agentId, agentId))
+        .orderBy(techStackAccountsTable.platformName),
+      db
+        .select()
+        .from(documentsTable)
+        .where(
+          and(
+            eq(documentsTable.agentId, agentId),
+            sql`${documentsTable.category} IN ('offboarding', 'release', 'separation')`,
+          ),
+        )
+        .orderBy(documentsTable.createdAt),
+    ]);
+
+  // Get offboarding checklist run and its items for step trace
+  const [offboardingRun] = await db
+    .select({ id: checklistRunsTable.id })
+    .from(checklistRunsTable)
+    .where(
+      and(
+        eq(checklistRunsTable.agentId, agentId),
+        eq(checklistRunsTable.orgId, orgId),
+        sql`${checklistRunsTable.type} = 'offboarding'`,
+      ),
+    )
+    .orderBy(sql`${checklistRunsTable.startedAt} desc`)
+    .limit(1);
+
+  const offboardingSteps = offboardingRun
+    ? await db
+        .select()
+        .from(checklistItemsTable)
+        .where(eq(checklistItemsTable.runId, offboardingRun.id))
+        .orderBy(checklistItemsTable.orderIndex)
+    : [];
 
   const pdfBuffer = await buildPdf({
     agent: agent as unknown as Record<string, unknown>,
@@ -263,6 +398,9 @@ export async function generateOffboardingPdfWorker(
     certifications: certifications as unknown as Array<Record<string, unknown>>,
     ahipRecords: ahipRecords as unknown as Array<Record<string, unknown>>,
     openTasks: openTasks as unknown as Array<Record<string, unknown>>,
+    techStack: techStack as unknown as Array<Record<string, unknown>>,
+    releaseDocuments: releaseDocuments as unknown as Array<Record<string, unknown>>,
+    offboardingSteps: offboardingSteps as unknown as Array<Record<string, unknown>>,
     offboardDate,
   });
 

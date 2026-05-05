@@ -41,6 +41,8 @@ tags:
     description: Audit log and compliance
   - name: storage
     description: Object storage uploads
+  - name: settings
+    description: Organization settings
 
 paths:
   /healthz:
@@ -960,6 +962,58 @@ paths:
               schema:
                 $ref: "#/components/schemas/TechStackAccount"
 
+  /agents/{id}/tech-stack/bulk:
+    patch:
+      operationId: bulkUpdateAgentTechStack
+      tags: [techstack]
+      summary: Bulk update tech stack account statuses
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkUpdateTechStackBody"
+      responses:
+        "200":
+          description: Updated accounts list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TechStackAccount"
+                required:
+                  - updated
+
+  /agents/{id}/tech-stack/pdf:
+    get:
+      operationId: getAgentTechStackPdf
+      tags: [techstack]
+      summary: Export tech stack status as PDF
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
   /agents/{id}/tech-stack/{aid}:
     patch:
       operationId: updateAgentTechStackAccount
@@ -1565,6 +1619,36 @@ paths:
         "200":
           description: Object file
 
+  /org-settings:
+    get:
+      operationId: getOrgSettings
+      tags: [settings]
+      summary: Get organization settings (AHIP season config, etc.)
+      responses:
+        "200":
+          description: Organization settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgSettings"
+    put:
+      operationId: updateOrgSettings
+      tags: [settings]
+      summary: Update organization settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrgSettingsBody"
+      responses:
+        "200":
+          description: Updated organization settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgSettings"
+
 components:
   schemas:
     HealthStatus:
@@ -1828,6 +1912,9 @@ components:
         updatedAt:
           type: string
           format: date-time
+        activeLicenseCount:
+          type: integer
+          description: Number of active state licenses (populated in list endpoint)
       required:
         - id
         - orgId
@@ -2631,6 +2718,9 @@ components:
           type: boolean
         onboardingOrder:
           type: integer
+        requiredForRole:
+          type: ["string", "null"]
+          description: If set, this requirement only applies to agents with this role
       required:
         - id
         - orgId
@@ -2649,6 +2739,9 @@ components:
           type: boolean
         onboardingOrder:
           type: integer
+        requiredForRole:
+          type: string
+          nullable: true
       required:
         - platformName
 
@@ -2663,6 +2756,91 @@ components:
           type: boolean
         onboardingOrder:
           type: integer
+        requiredForRole:
+          type: string
+          nullable: true
+
+    OrgSettings:
+      type: object
+      properties:
+        id:
+          type: ["string", "null"]
+        orgId:
+          type: string
+        ahipSeasonOpenMonth:
+          type: integer
+          minimum: 1
+          maximum: 12
+        ahipSeasonOpenDay:
+          type: integer
+          minimum: 1
+          maximum: 31
+        ahipDeadlineMonth:
+          type: integer
+          minimum: 1
+          maximum: 12
+        ahipDeadlineDay:
+          type: integer
+          minimum: 1
+          maximum: 31
+        ahipReminderEnabled:
+          type: boolean
+        ahipReminderIntervalWeeks:
+          type: integer
+          minimum: 1
+          maximum: 52
+      required:
+        - orgId
+        - ahipSeasonOpenMonth
+        - ahipSeasonOpenDay
+        - ahipDeadlineMonth
+        - ahipDeadlineDay
+        - ahipReminderEnabled
+        - ahipReminderIntervalWeeks
+
+    UpdateOrgSettingsBody:
+      type: object
+      properties:
+        ahipSeasonOpenMonth:
+          type: integer
+          minimum: 1
+          maximum: 12
+        ahipSeasonOpenDay:
+          type: integer
+          minimum: 1
+          maximum: 31
+        ahipDeadlineMonth:
+          type: integer
+          minimum: 1
+          maximum: 12
+        ahipDeadlineDay:
+          type: integer
+          minimum: 1
+          maximum: 31
+        ahipReminderEnabled:
+          type: boolean
+        ahipReminderIntervalWeeks:
+          type: integer
+          minimum: 1
+          maximum: 52
+
+    BulkUpdateTechStackBody:
+      type: object
+      properties:
+        accountIds:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 100
+        status:
+          type: string
+          enum: [provisioned, pending, deprovisioned]
+        notes:
+          type: string
+      required:
+        - accountIds
+        - status
 
     TaskTemplate:
       type: object

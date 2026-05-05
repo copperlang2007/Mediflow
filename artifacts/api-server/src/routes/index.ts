@@ -17,6 +17,7 @@ import techstackRouter from "./techstack";
 import tasksRouter from "./tasks";
 import agentDocumentsRouter from "./agentDocuments";
 import renewalsRouter from "./renewals";
+import orgSettingsRouter from "./orgSettings";
 
 const router: IRouter = Router();
 
@@ -38,5 +39,6 @@ router.use(techstackRouter);
 router.use(tasksRouter);
 router.use(agentDocumentsRouter);
 router.use(renewalsRouter);
+router.use(orgSettingsRouter);
 
 export default router;

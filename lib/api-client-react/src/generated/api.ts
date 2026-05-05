@@ -27,6 +27,8 @@ import type {
   AuditLogResponse,
   BulkImportLicensesBody,
   BulkImportResult,
+  BulkUpdateAgentTechStack200,
+  BulkUpdateTechStackBody,
   Carrier,
   CarrierCertification,
   CertificationMatrix,
@@ -62,6 +64,7 @@ import type {
   NotificationCount,
   OffboardResponse,
   OffboardingReportDocument,
+  OrgSettings,
   Organization,
   PlatformRequirement,
   RenewalSnoozeResponse,
@@ -83,6 +86,7 @@ import type {
   UpdateCertificationBody,
   UpdateChecklistItemBody,
   UpdateLicenseBody,
+  UpdateOrgSettingsBody,
   UpdateOrganizationBody,
   UpdatePlatformRequirementBody,
   UpdateTaskBody,
@@ -3830,6 +3834,185 @@ export const useCreateAgentTechStackAccount = <
 };
 
 /**
+ * @summary Bulk update tech stack account statuses
+ */
+export const getBulkUpdateAgentTechStackUrl = (id: string) => {
+  return `/api/agents/${id}/tech-stack/bulk`;
+};
+
+export const bulkUpdateAgentTechStack = async (
+  id: string,
+  bulkUpdateTechStackBody: BulkUpdateTechStackBody,
+  options?: RequestInit,
+): Promise<BulkUpdateAgentTechStack200> => {
+  return customFetch<BulkUpdateAgentTechStack200>(
+    getBulkUpdateAgentTechStackUrl(id),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(bulkUpdateTechStackBody),
+    },
+  );
+};
+
+export const getBulkUpdateAgentTechStackMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof bulkUpdateAgentTechStack>>,
+    TError,
+    { id: string; data: BodyType<BulkUpdateTechStackBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof bulkUpdateAgentTechStack>>,
+  TError,
+  { id: string; data: BodyType<BulkUpdateTechStackBody> },
+  TContext
+> => {
+  const mutationKey = ["bulkUpdateAgentTechStack"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof bulkUpdateAgentTechStack>>,
+    { id: string; data: BodyType<BulkUpdateTechStackBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return bulkUpdateAgentTechStack(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type BulkUpdateAgentTechStackMutationResult = NonNullable<
+  Awaited<ReturnType<typeof bulkUpdateAgentTechStack>>
+>;
+export type BulkUpdateAgentTechStackMutationBody =
+  BodyType<BulkUpdateTechStackBody>;
+export type BulkUpdateAgentTechStackMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Bulk update tech stack account statuses
+ */
+export const useBulkUpdateAgentTechStack = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof bulkUpdateAgentTechStack>>,
+    TError,
+    { id: string; data: BodyType<BulkUpdateTechStackBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof bulkUpdateAgentTechStack>>,
+  TError,
+  { id: string; data: BodyType<BulkUpdateTechStackBody> },
+  TContext
+> => {
+  return useMutation(getBulkUpdateAgentTechStackMutationOptions(options));
+};
+
+/**
+ * @summary Export tech stack status as PDF
+ */
+export const getGetAgentTechStackPdfUrl = (id: string) => {
+  return `/api/agents/${id}/tech-stack/pdf`;
+};
+
+export const getAgentTechStackPdf = async (
+  id: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getGetAgentTechStackPdfUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAgentTechStackPdfQueryKey = (id: string) => {
+  return [`/api/agents/${id}/tech-stack/pdf`] as const;
+};
+
+export const getGetAgentTechStackPdfQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAgentTechStackPdf>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentTechStackPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAgentTechStackPdfQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAgentTechStackPdf>>
+  > = ({ signal }) => getAgentTechStackPdf(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAgentTechStackPdf>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAgentTechStackPdfQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAgentTechStackPdf>>
+>;
+export type GetAgentTechStackPdfQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Export tech stack status as PDF
+ */
+
+export function useGetAgentTechStackPdf<
+  TData = Awaited<ReturnType<typeof getAgentTechStackPdf>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentTechStackPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAgentTechStackPdfQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * @summary Update a tech stack account
  */
 export const getUpdateAgentTechStackAccountUrl = (id: string, aid: string) => {
@@ -6280,3 +6463,164 @@ export function useGetStorageObject<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Get organization settings (AHIP season config, etc.)
+ */
+export const getGetOrgSettingsUrl = () => {
+  return `/api/org-settings`;
+};
+
+export const getOrgSettings = async (
+  options?: RequestInit,
+): Promise<OrgSettings> => {
+  return customFetch<OrgSettings>(getGetOrgSettingsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetOrgSettingsQueryKey = () => {
+  return [`/api/org-settings`] as const;
+};
+
+export const getGetOrgSettingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getOrgSettings>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getOrgSettings>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetOrgSettingsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getOrgSettings>>> = ({
+    signal,
+  }) => getOrgSettings({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getOrgSettings>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetOrgSettingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getOrgSettings>>
+>;
+export type GetOrgSettingsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get organization settings (AHIP season config, etc.)
+ */
+
+export function useGetOrgSettings<
+  TData = Awaited<ReturnType<typeof getOrgSettings>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getOrgSettings>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetOrgSettingsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update organization settings
+ */
+export const getUpdateOrgSettingsUrl = () => {
+  return `/api/org-settings`;
+};
+
+export const updateOrgSettings = async (
+  updateOrgSettingsBody: UpdateOrgSettingsBody,
+  options?: RequestInit,
+): Promise<OrgSettings> => {
+  return customFetch<OrgSettings>(getUpdateOrgSettingsUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateOrgSettingsBody),
+  });
+};
+
+export const getUpdateOrgSettingsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateOrgSettings>>,
+    TError,
+    { data: BodyType<UpdateOrgSettingsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateOrgSettings>>,
+  TError,
+  { data: BodyType<UpdateOrgSettingsBody> },
+  TContext
+> => {
+  const mutationKey = ["updateOrgSettings"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateOrgSettings>>,
+    { data: BodyType<UpdateOrgSettingsBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateOrgSettings(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateOrgSettingsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateOrgSettings>>
+>;
+export type UpdateOrgSettingsMutationBody = BodyType<UpdateOrgSettingsBody>;
+export type UpdateOrgSettingsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update organization settings
+ */
+export const useUpdateOrgSettings = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateOrgSettings>>,
+    TError,
+    { data: BodyType<UpdateOrgSettingsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateOrgSettings>>,
+  TError,
+  { data: BodyType<UpdateOrgSettingsBody> },
+  TContext
+> => {
+  return useMutation(getUpdateOrgSettingsMutationOptions(options));
+};

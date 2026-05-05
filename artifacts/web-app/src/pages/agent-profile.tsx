@@ -21,7 +21,10 @@ import {
   useGetAgentTechStack,
   useCreateAgentTechStackAccount,
   useUpdateAgentTechStackAccount,
+  useBulkUpdateAgentTechStack,
+  useRequestUploadUrl,
   useGetAgentTasks,
+  useGetAuditLog,
   useGetAgentDocuments,
   useGetAgentOffboardingReport,
   useGetAgentComplianceScore,
@@ -73,6 +76,8 @@ import {
   FolderOpen,
   Monitor,
   ShieldCheck,
+  Upload,
+  Link,
   User,
   Plus,
   Check,
@@ -109,7 +114,7 @@ const LICENSE_STATUS_STYLES: Record<string, string> = {
   not_appointed: "bg-slate-100 text-slate-600",
 };
 
-type Tab = "overview" | "licenses" | "certifications" | "ahip" | "checklist" | "techstack" | "tasks" | "documents";
+type Tab = "overview" | "licenses" | "certifications" | "ahip" | "checklist" | "techstack" | "tasks" | "documents" | "activity";
 
 const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "overview", label: "Overview", icon: User },
@@ -120,6 +125,7 @@ const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: st
   { id: "techstack", label: "Tech Stack", icon: Monitor },
   { id: "tasks", label: "Tasks", icon: CheckSquare },
   { id: "documents", label: "Documents", icon: FolderOpen },
+  { id: "activity", label: "Activity", icon: FileText },
 ];
 
 function OverviewTab({ agentId }: { agentId: string }) {
@@ -177,8 +183,25 @@ function LicensesTab({ agentId }: { agentId: string }) {
   const { mutateAsync: createLicense } = useCreateAgentLicense();
   const { mutateAsync: updateLicense } = useUpdateAgentLicense();
   const { mutateAsync: deleteLicense } = useDeleteAgentLicense();
+  const { mutateAsync: requestUploadUrl } = useRequestUploadUrl();
   const [addOpen, setAddOpen] = useState(false);
+  const [uploadingLicId, setUploadingLicId] = useState<string | null>(null);
   const [form, setForm] = useState({ stateCode: "", licenseType: "Life & Health", licenseNumber: "", expiryDate: "", status: "active" as string });
+
+  const handleDocUpload = async (licId: string, file: File) => {
+    setUploadingLicId(licId);
+    try {
+      const { uploadURL, objectPath } = await requestUploadUrl({
+        data: { name: file.name, size: file.size, contentType: file.type || "application/octet-stream" },
+      });
+      const res = await fetch(uploadURL, { method: "PUT", body: file, headers: { "Content-Type": file.type || "application/octet-stream" } });
+      if (!res.ok) throw new Error("Upload failed");
+      await updateLicense({ id: agentId, lid: licId, data: { documentKey: objectPath } });
+      toast.success("License document uploaded");
+      void qc.invalidateQueries({ queryKey: getGetAgentLicensesQueryKey(agentId) });
+    } catch { toast.error("Failed to upload document"); }
+    finally { setUploadingLicId(null); }
+  };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -218,15 +241,58 @@ function LicensesTab({ agentId }: { agentId: string }) {
                   <span className="text-sm">{lic.licenseType}</span>
                 </div>
                 {lic.licenseNumber && <p className="text-xs text-muted-foreground mt-0.5">#{lic.licenseNumber}</p>}
-                {lic.expiryDate && (
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Expires {format(new Date(lic.expiryDate), "MMM d, yyyy")}
-                  </p>
-                )}
+                {lic.expiryDate && (() => {
+                  const daysLeft = Math.ceil((new Date(lic.expiryDate).getTime() - Date.now()) / 86400000);
+                  const color = daysLeft <= 0 ? "text-red-600 font-semibold" : daysLeft <= 30 ? "text-red-600" : daysLeft <= 60 ? "text-amber-600" : daysLeft <= 90 ? "text-amber-500" : "text-muted-foreground";
+                  return (
+                    <p className={cn("text-xs mt-0.5", color)}>
+                      Expires {format(new Date(lic.expiryDate), "MMM d, yyyy")}
+                      {daysLeft <= 90 && daysLeft > 0 && ` · ${daysLeft}d`}
+                      {daysLeft <= 0 && " · Expired"}
+                    </p>
+                  );
+                })()}
               </div>
               <Badge variant="secondary" className={`text-xs capitalize ${LICENSE_STATUS_STYLES[lic.status] ?? ""}`}>
                 {lic.status.replace("_", " ")}
               </Badge>
+              {lic.documentKey && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-blue-600 hover:text-blue-700"
+                  title="View document"
+                  onClick={() => {
+                    const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+                    window.open(`${base}/api/storage/objects/${lic.documentKey}`, "_blank");
+                  }}
+                >
+                  <Link className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              <label className="cursor-pointer">
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  className="hidden"
+                  disabled={uploadingLicId === lic.id}
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (file) await handleDocUpload(lic.id, file);
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-muted-foreground hover:text-foreground pointer-events-none"
+                  title="Upload license document"
+                  disabled={uploadingLicId === lic.id}
+                  asChild={false}
+                >
+                  <Upload className={cn("h-3.5 w-3.5", uploadingLicId === lic.id && "animate-pulse")} />
+                </Button>
+              </label>
               <Button
                 size="sm"
                 variant="ghost"
@@ -646,25 +712,63 @@ function TechStackTab({ agentId }: { agentId: string }) {
   const { data: accounts, isLoading } = useGetAgentTechStack(agentId);
   const { mutateAsync: createAccount } = useCreateAgentTechStackAccount();
   const { mutateAsync: updateAccount } = useUpdateAgentTechStackAccount();
+  const { mutateAsync: bulkUpdate, isPending: bulkPending } = useBulkUpdateAgentTechStack();
   const [addOpen, setAddOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [form, setForm] = useState({ platformName: "", platformCategory: "", status: "pending" as string, accountIdentifier: "" });
 
-  const TECH_STATUS_STYLES: Record<string, string> = {
-    provisioned: "bg-green-100 text-green-800",
-    pending: "bg-amber-100 text-amber-800",
-    deprovisioned: "bg-slate-100 text-slate-600",
+  const toggleSelect = (id: string) => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const handleBulkUpdate = async (status: "provisioned" | "pending" | "deprovisioned") => {
+    if (selected.size === 0) return;
+    try {
+      await bulkUpdate({ id: agentId, data: { accountIds: [...selected], status } });
+      toast.success(`Updated ${selected.size} account${selected.size !== 1 ? "s" : ""} to ${status}`);
+      setSelected(new Set());
+      void qc.invalidateQueries({ queryKey: getGetAgentTechStackQueryKey(agentId) });
+    } catch { toast.error("Bulk update failed"); }
+  };
+
+  const handleExportPdf = () => {
+    const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+    window.open(`${base}/api/agents/${agentId}/tech-stack/pdf`, "_blank");
   };
 
   if (isLoading) return <div className="p-6"><Skeleton className="h-40 w-full" /></div>;
 
   return (
     <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <p className="text-sm text-muted-foreground">{accounts?.length ?? 0} platform{accounts?.length !== 1 ? "s" : ""}</p>
-        <Button size="sm" onClick={() => setAddOpen(true)}>
-          <Plus className="h-3.5 w-3.5 mr-1.5" />
-          Add Platform
-        </Button>
+        <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <>
+              <span className="text-xs text-muted-foreground">{selected.size} selected</span>
+              <Select onValueChange={(v) => handleBulkUpdate(v as "provisioned" | "pending" | "deprovisioned")} disabled={bulkPending}>
+                <SelectTrigger className="h-7 text-xs w-40">
+                  <SelectValue placeholder="Bulk set status…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {["provisioned", "pending", "deprovisioned"].map((s) => (
+                    <SelectItem key={s} value={s} className="text-xs capitalize">{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          )}
+          <Button size="sm" variant="outline" onClick={handleExportPdf}>
+            <FileDown className="h-3.5 w-3.5 mr-1.5" />
+            Export PDF
+          </Button>
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            Add Platform
+          </Button>
+        </div>
       </div>
 
       {(accounts ?? []).length === 0 ? (
@@ -675,7 +779,21 @@ function TechStackTab({ agentId }: { agentId: string }) {
       ) : (
         <div className="space-y-2">
           {(accounts ?? []).map((acct) => (
-            <div key={acct.id} className="flex items-center gap-3 rounded-lg border border-border px-4 py-3">
+            <div
+              key={acct.id}
+              className={cn(
+                "flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors cursor-pointer",
+                selected.has(acct.id) ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"
+              )}
+              onClick={() => toggleSelect(acct.id)}
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(acct.id)}
+                onChange={() => toggleSelect(acct.id)}
+                onClick={(e) => e.stopPropagation()}
+                className="h-4 w-4 rounded border-border accent-primary"
+              />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium">{acct.platformName}</p>
                 {acct.platformCategory && <p className="text-xs text-muted-foreground capitalize">{acct.platformCategory}</p>}
@@ -690,7 +808,7 @@ function TechStackTab({ agentId }: { agentId: string }) {
                   } catch { toast.error("Failed to update"); }
                 }}
               >
-                <SelectTrigger className="w-36 h-7 text-xs">
+                <SelectTrigger className="w-36 h-7 text-xs" onClick={(e) => e.stopPropagation()}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -792,6 +910,67 @@ function TasksTab({ agentId }: { agentId: string }) {
               </Badge>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActivityTab({ agentId }: { agentId: string }) {
+  const { data, isLoading } = useGetAuditLog({ limit: 100 });
+
+  const entries = (data?.entries ?? []).filter(
+    (e) =>
+      e.resourceId === agentId ||
+      (e.changes && typeof e.changes === "object" && "agentId" in e.changes && (e.changes as Record<string, unknown>).agentId === agentId)
+  );
+
+  const ACTION_STYLES: Record<string, string> = {
+    create: "bg-green-100 text-green-800",
+    update: "bg-blue-100 text-blue-800",
+    delete: "bg-red-100 text-red-800",
+    offboard: "bg-orange-100 text-orange-800",
+    complete: "bg-green-100 text-green-800",
+  };
+
+  if (isLoading) return <div className="p-6"><Skeleton className="h-40 w-full" /></div>;
+
+  return (
+    <div className="p-6 space-y-4">
+      <p className="text-sm text-muted-foreground">{entries.length} event{entries.length !== 1 ? "s" : ""}</p>
+      {entries.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">
+          <FileText className="h-10 w-10 mx-auto mb-2 opacity-20" />
+          <p className="text-sm">No activity recorded</p>
+        </div>
+      ) : (
+        <div className="relative border-l-2 border-border ml-3 space-y-0">
+          {entries.map((entry) => {
+            const actionKey = entry.action?.split(".").pop() ?? entry.action ?? "";
+            const badgeStyle = ACTION_STYLES[actionKey] ?? "bg-slate-100 text-slate-600";
+            return (
+              <div key={entry.id} className="relative pl-6 pb-5 last:pb-0">
+                <span className="absolute -left-1.5 top-1.5 h-3 w-3 rounded-full bg-border border-2 border-background" />
+                <div className="flex items-start gap-2 flex-wrap">
+                  <Badge variant="secondary" className={cn("text-[10px] px-1.5 py-0 capitalize", badgeStyle)}>
+                    {entry.action}
+                  </Badge>
+                  {entry.resourceType && (
+                    <span className="text-xs text-muted-foreground capitalize">{entry.resourceType.replace(/_/g, " ")}</span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {format(new Date(entry.createdAt), "MMM d, yyyy 'at' h:mm a")}
+                  {entry.userId && <span className="ml-2">· by user</span>}
+                </p>
+                {entry.changes && Object.keys(entry.changes).length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-0.5 font-mono truncate">
+                    {JSON.stringify(entry.changes).slice(0, 120)}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -983,6 +1162,7 @@ export default function AgentProfilePage() {
         {activeTab === "techstack" && <TechStackTab agentId={agentId} />}
         {activeTab === "tasks" && <TasksTab agentId={agentId} />}
         {activeTab === "documents" && <DocumentsTab agentId={agentId} />}
+        {activeTab === "activity" && <ActivityTab agentId={agentId} />}
       </div>
 
       <AlertDialog open={offboardConfirm} onOpenChange={setOffboardConfirm}>

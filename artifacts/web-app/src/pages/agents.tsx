@@ -54,7 +54,7 @@ const STATUS_OPTIONS = [
   { value: "offboarded", label: "Offboarded" },
 ];
 
-type SortField = "name" | "email" | "status" | "hireDate";
+type SortField = "name" | "email" | "status" | "hireDate" | "licenseCount";
 type SortDir = "asc" | "desc";
 
 function ComplianceBar({ agentId }: { agentId: string }) {
@@ -526,6 +526,11 @@ export default function AgentsPage() {
   const sorted = useMemo(() => {
     const arr = [...agents];
     arr.sort((a, b) => {
+      if (sortBy === "licenseCount") {
+        const av = a.activeLicenseCount ?? 0;
+        const bv = b.activeLicenseCount ?? 0;
+        return sortDir === "asc" ? av - bv : bv - av;
+      }
       let av = "";
       let bv = "";
       if (sortBy === "name") { av = `${a.firstName} ${a.lastName}`.toLowerCase(); bv = `${b.firstName} ${b.lastName}`.toLowerCase(); }
@@ -649,7 +654,7 @@ export default function AgentsPage() {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-[auto_auto_1fr_auto_auto_auto] items-center gap-4 px-5 py-2.5 border-b border-border">
+              <div className="grid grid-cols-[auto_auto_1fr_auto_auto_auto_auto] items-center gap-4 px-5 py-2.5 border-b border-border">
                 <button onClick={toggleAll} className="w-5 flex items-center text-muted-foreground hover:text-foreground">
                   {allSelected
                     ? <CheckSquare className="h-4 w-4 text-primary" />
@@ -659,13 +664,14 @@ export default function AgentsPage() {
                 <HeaderCell field="name" label="Agent" />
                 <HeaderCell field="status" label="Status" className="hidden md:flex w-24 justify-center" />
                 <HeaderCell field="hireDate" label="Hire Date" className="hidden lg:flex w-24 justify-center" />
+                <HeaderCell field="licenseCount" label="Licenses" className="hidden lg:flex w-20 justify-center" />
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-28 text-right">Compliance</span>
               </div>
               <div className="divide-y divide-border">
                 {sorted.map((agent) => (
                   <div
                     key={agent.id}
-                    className={`grid grid-cols-[auto_auto_1fr_auto_auto_auto] items-center gap-4 px-5 py-3.5 hover:bg-muted/40 transition-colors group
+                    className={`grid grid-cols-[auto_auto_1fr_auto_auto_auto_auto] items-center gap-4 px-5 py-3.5 hover:bg-muted/40 transition-colors group
                       ${selected.has(agent.id) ? "bg-primary/5" : ""}`}
                   >
                     <button
@@ -714,6 +720,21 @@ export default function AgentsPage() {
                     <span className="text-xs text-muted-foreground hidden lg:block w-24 text-center tabular-nums">
                       {agent.hireDate ? new Date(agent.hireDate).toLocaleDateString() : "—"}
                     </span>
+                    <div className="hidden lg:flex w-20 justify-center">
+                      {agent.activeLicenseCount != null ? (
+                        <span className={`text-xs font-semibold tabular-nums px-2 py-0.5 rounded-full ${
+                          agent.activeLicenseCount === 0
+                            ? "bg-red-100 text-red-700"
+                            : agent.activeLicenseCount < 3
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-green-100 text-green-700"
+                        }`}>
+                          {agent.activeLicenseCount}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </div>
                     <div className="w-28 flex justify-end">
                       <ComplianceBar agentId={agent.id} />
                     </div>

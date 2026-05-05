@@ -13,6 +13,7 @@ import {
   ahipRecordsTable,
   usersTable,
   notificationsTable,
+  orgSettingsTable,
 } from "@workspace/db";
 import { type AhipDeadlineCheckPayload, enqueue, JOB_NAMES } from "../lib/jobs";
 import { ahipReminderEmailHtml } from "../lib/email";
@@ -62,7 +63,60 @@ export async function ahipReminderCheckWorker(
     "AHIP reminder check: agents without AHIP",
   );
 
+  // Cache org settings to avoid N+1 queries
+  const orgSettingsCache = new Map<
+    string,
+    {
+      ahipSeasonOpenMonth: number;
+      ahipSeasonOpenDay: number;
+      ahipDeadlineMonth: number;
+      ahipDeadlineDay: number;
+      ahipReminderEnabled: boolean;
+    }
+  >();
+
+  const today = new Date();
+  const todayMonth = today.getMonth() + 1;
+  const todayDay = today.getDate();
+
+  async function getOrgSettings(orgId: string) {
+    if (orgSettingsCache.has(orgId)) return orgSettingsCache.get(orgId)!;
+    const [s] = await db
+      .select()
+      .from(orgSettingsTable)
+      .where(eq(orgSettingsTable.orgId, orgId))
+      .limit(1);
+    const defaults = {
+      ahipSeasonOpenMonth: s?.ahipSeasonOpenMonth ?? 7,
+      ahipSeasonOpenDay: s?.ahipSeasonOpenDay ?? 1,
+      ahipDeadlineMonth: s?.ahipDeadlineMonth ?? 12,
+      ahipDeadlineDay: s?.ahipDeadlineDay ?? 7,
+      ahipReminderEnabled: s?.ahipReminderEnabled ?? true,
+    };
+    orgSettingsCache.set(orgId, defaults);
+    return defaults;
+  }
+
   for (const agent of agentsWithoutAhip) {
+    const orgSettings = await getOrgSettings(agent.orgId);
+
+    if (!orgSettings.ahipReminderEnabled) continue;
+
+    // Only send reminders if we are within the configured AHIP season window
+    const afterOpen =
+      todayMonth > orgSettings.ahipSeasonOpenMonth ||
+      (todayMonth === orgSettings.ahipSeasonOpenMonth && todayDay >= orgSettings.ahipSeasonOpenDay);
+    const beforeDeadline =
+      todayMonth < orgSettings.ahipDeadlineMonth ||
+      (todayMonth === orgSettings.ahipDeadlineMonth && todayDay <= orgSettings.ahipDeadlineDay);
+
+    if (!afterOpen || !beforeDeadline) {
+      logger.debug(
+        { agentId: agent.id, orgId: agent.orgId, todayMonth, todayDay },
+        "AHIP reminder skipped: outside configured season window",
+      );
+      continue;
+    }
     const orgAdmins = await db
       .select({ id: usersTable.id, email: usersTable.email })
       .from(usersTable)

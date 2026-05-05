@@ -279,6 +279,7 @@ export const platformRequirementsTable = pgTable("platform_requirements", {
   platformCategory: text("platform_category"),
   isRequired: boolean("is_required").notNull().default(true),
   onboardingOrder: integer("onboarding_order").notNull().default(0),
+  requiredForRole: text("required_for_role"),
 });
 
 export type PlatformRequirement = typeof platformRequirementsTable.$inferSelect;

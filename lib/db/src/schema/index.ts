@@ -7,3 +7,4 @@ export * from "./communications";
 export * from "./automations";
 export * from "./notifications";
 export * from "./retention";
+export * from "./settings";

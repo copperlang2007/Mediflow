@@ -257,6 +257,12 @@ export const GetAgentsResponse = zod.object({
       notes: zod.string().nullish(),
       createdAt: zod.coerce.date(),
       updatedAt: zod.coerce.date(),
+      activeLicenseCount: zod
+        .number()
+        .optional()
+        .describe(
+          "Number of active state licenses (populated in list endpoint)",
+        ),
     }),
   ),
   total: zod.number(),
@@ -320,6 +326,10 @@ export const GetAgentResponse = zod
     notes: zod.string().nullish(),
     createdAt: zod.coerce.date(),
     updatedAt: zod.coerce.date(),
+    activeLicenseCount: zod
+      .number()
+      .optional()
+      .describe("Number of active state licenses (populated in list endpoint)"),
   })
   .and(
     zod.object({
@@ -398,6 +408,10 @@ export const UpdateAgentResponse = zod.object({
   notes: zod.string().nullish(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
+  activeLicenseCount: zod
+    .number()
+    .optional()
+    .describe("Number of active state licenses (populated in list endpoint)"),
 });
 
 /**
@@ -476,6 +490,10 @@ export const OffboardAgentResponse = zod.object({
     notes: zod.string().nullish(),
     createdAt: zod.coerce.date(),
     updatedAt: zod.coerce.date(),
+    activeLicenseCount: zod
+      .number()
+      .optional()
+      .describe("Number of active state licenses (populated in list endpoint)"),
   }),
   checklistRun: zod.object({
     id: zod.string(),
@@ -1066,6 +1084,47 @@ export const CreateAgentTechStackAccountBody = zod.object({
 });
 
 /**
+ * @summary Bulk update tech stack account statuses
+ */
+export const BulkUpdateAgentTechStackParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const bulkUpdateAgentTechStackBodyAccountIdsMax = 100;
+
+export const BulkUpdateAgentTechStackBody = zod.object({
+  accountIds: zod
+    .array(zod.string())
+    .min(1)
+    .max(bulkUpdateAgentTechStackBodyAccountIdsMax),
+  status: zod.enum(["provisioned", "pending", "deprovisioned"]),
+  notes: zod.string().optional(),
+});
+
+export const BulkUpdateAgentTechStackResponse = zod.object({
+  updated: zod.array(
+    zod.object({
+      id: zod.string(),
+      agentId: zod.string(),
+      platformName: zod.string(),
+      platformCategory: zod.string().nullish(),
+      status: zod.enum(["provisioned", "pending", "deprovisioned"]),
+      accountIdentifier: zod.string().nullish(),
+      provisionedAt: zod.coerce.date().nullish(),
+      deprovisionedAt: zod.coerce.date().nullish(),
+      notes: zod.string().nullish(),
+    }),
+  ),
+});
+
+/**
+ * @summary Export tech stack status as PDF
+ */
+export const GetAgentTechStackPdfParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
  * @summary Update a tech stack account
  */
 export const UpdateAgentTechStackAccountParams = zod.object({
@@ -1101,6 +1160,10 @@ export const GetPlatformRequirementsResponseItem = zod.object({
   platformCategory: zod.string().nullish(),
   isRequired: zod.boolean(),
   onboardingOrder: zod.number(),
+  requiredForRole: zod
+    .string()
+    .nullish()
+    .describe("If set, this requirement only applies to agents with this role"),
 });
 export const GetPlatformRequirementsResponse = zod.array(
   GetPlatformRequirementsResponseItem,
@@ -1114,6 +1177,7 @@ export const CreatePlatformRequirementBody = zod.object({
   platformCategory: zod.string().optional(),
   isRequired: zod.boolean().optional(),
   onboardingOrder: zod.number().optional(),
+  requiredForRole: zod.string().nullish(),
 });
 
 /**
@@ -1128,6 +1192,7 @@ export const UpdatePlatformRequirementBody = zod.object({
   platformCategory: zod.string().optional(),
   isRequired: zod.boolean().optional(),
   onboardingOrder: zod.number().optional(),
+  requiredForRole: zod.string().nullish(),
 });
 
 export const UpdatePlatformRequirementResponse = zod.object({
@@ -1137,6 +1202,10 @@ export const UpdatePlatformRequirementResponse = zod.object({
   platformCategory: zod.string().nullish(),
   isRequired: zod.boolean(),
   onboardingOrder: zod.number(),
+  requiredForRole: zod
+    .string()
+    .nullish()
+    .describe("If set, this requirement only applies to agents with this role"),
 });
 
 /**
@@ -1585,4 +1654,121 @@ export const RequestUploadUrlResponse = zod.object({
  */
 export const GetStorageObjectParams = zod.object({
   objectPath: zod.coerce.string(),
+});
+
+/**
+ * @summary Get organization settings (AHIP season config, etc.)
+ */
+export const getOrgSettingsResponseAhipSeasonOpenMonthMax = 12;
+
+export const getOrgSettingsResponseAhipSeasonOpenDayMax = 31;
+
+export const getOrgSettingsResponseAhipDeadlineMonthMax = 12;
+
+export const getOrgSettingsResponseAhipDeadlineDayMax = 31;
+
+export const getOrgSettingsResponseAhipReminderIntervalWeeksMax = 52;
+
+export const GetOrgSettingsResponse = zod.object({
+  id: zod.string().nullish(),
+  orgId: zod.string(),
+  ahipSeasonOpenMonth: zod
+    .number()
+    .min(1)
+    .max(getOrgSettingsResponseAhipSeasonOpenMonthMax),
+  ahipSeasonOpenDay: zod
+    .number()
+    .min(1)
+    .max(getOrgSettingsResponseAhipSeasonOpenDayMax),
+  ahipDeadlineMonth: zod
+    .number()
+    .min(1)
+    .max(getOrgSettingsResponseAhipDeadlineMonthMax),
+  ahipDeadlineDay: zod
+    .number()
+    .min(1)
+    .max(getOrgSettingsResponseAhipDeadlineDayMax),
+  ahipReminderEnabled: zod.boolean(),
+  ahipReminderIntervalWeeks: zod
+    .number()
+    .min(1)
+    .max(getOrgSettingsResponseAhipReminderIntervalWeeksMax),
+});
+
+/**
+ * @summary Update organization settings
+ */
+export const updateOrgSettingsBodyAhipSeasonOpenMonthMax = 12;
+
+export const updateOrgSettingsBodyAhipSeasonOpenDayMax = 31;
+
+export const updateOrgSettingsBodyAhipDeadlineMonthMax = 12;
+
+export const updateOrgSettingsBodyAhipDeadlineDayMax = 31;
+
+export const updateOrgSettingsBodyAhipReminderIntervalWeeksMax = 52;
+
+export const UpdateOrgSettingsBody = zod.object({
+  ahipSeasonOpenMonth: zod
+    .number()
+    .min(1)
+    .max(updateOrgSettingsBodyAhipSeasonOpenMonthMax)
+    .optional(),
+  ahipSeasonOpenDay: zod
+    .number()
+    .min(1)
+    .max(updateOrgSettingsBodyAhipSeasonOpenDayMax)
+    .optional(),
+  ahipDeadlineMonth: zod
+    .number()
+    .min(1)
+    .max(updateOrgSettingsBodyAhipDeadlineMonthMax)
+    .optional(),
+  ahipDeadlineDay: zod
+    .number()
+    .min(1)
+    .max(updateOrgSettingsBodyAhipDeadlineDayMax)
+    .optional(),
+  ahipReminderEnabled: zod.boolean().optional(),
+  ahipReminderIntervalWeeks: zod
+    .number()
+    .min(1)
+    .max(updateOrgSettingsBodyAhipReminderIntervalWeeksMax)
+    .optional(),
+});
+
+export const updateOrgSettingsResponseAhipSeasonOpenMonthMax = 12;
+
+export const updateOrgSettingsResponseAhipSeasonOpenDayMax = 31;
+
+export const updateOrgSettingsResponseAhipDeadlineMonthMax = 12;
+
+export const updateOrgSettingsResponseAhipDeadlineDayMax = 31;
+
+export const updateOrgSettingsResponseAhipReminderIntervalWeeksMax = 52;
+
+export const UpdateOrgSettingsResponse = zod.object({
+  id: zod.string().nullish(),
+  orgId: zod.string(),
+  ahipSeasonOpenMonth: zod
+    .number()
+    .min(1)
+    .max(updateOrgSettingsResponseAhipSeasonOpenMonthMax),
+  ahipSeasonOpenDay: zod
+    .number()
+    .min(1)
+    .max(updateOrgSettingsResponseAhipSeasonOpenDayMax),
+  ahipDeadlineMonth: zod
+    .number()
+    .min(1)
+    .max(updateOrgSettingsResponseAhipDeadlineMonthMax),
+  ahipDeadlineDay: zod
+    .number()
+    .min(1)
+    .max(updateOrgSettingsResponseAhipDeadlineDayMax),
+  ahipReminderEnabled: zod.boolean(),
+  ahipReminderIntervalWeeks: zod
+    .number()
+    .min(1)
+    .max(updateOrgSettingsResponseAhipReminderIntervalWeeksMax),
 });

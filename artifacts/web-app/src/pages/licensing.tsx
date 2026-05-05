@@ -353,6 +353,24 @@ function AgentLicenseRow({
   const activeLicenses = (licenses ?? []).filter((l) => l.status === "active").length;
   const totalLicenses = (licenses ?? []).length;
 
+  // Find nearest expiry across all active licenses
+  const nearestExpiry = (licenses ?? [])
+    .filter((l) => l.status === "active" && l.expiryDate)
+    .map((l) => ({ id: l.id, stateCode: l.stateCode, daysLeft: Math.ceil((new Date(l.expiryDate!).getTime() - Date.now()) / 86400000) }))
+    .sort((a, b) => a.daysLeft - b.daysLeft)[0];
+
+  const expiryColor = nearestExpiry
+    ? nearestExpiry.daysLeft <= 0
+      ? "text-red-600 font-semibold"
+      : nearestExpiry.daysLeft <= 30
+      ? "text-red-600"
+      : nearestExpiry.daysLeft <= 60
+      ? "text-amber-600"
+      : nearestExpiry.daysLeft <= 90
+      ? "text-amber-500"
+      : "text-muted-foreground"
+    : "text-muted-foreground";
+
   return (
     <div
       className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 hover:bg-muted/40 cursor-pointer transition-colors"
@@ -361,6 +379,11 @@ function AgentLicenseRow({
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium">{agentName}</p>
         <p className="text-xs text-muted-foreground">{agentEmail}</p>
+        {nearestExpiry && nearestExpiry.daysLeft <= 90 && (
+          <p className={cn("text-xs mt-0.5", expiryColor)}>
+            {nearestExpiry.stateCode} expires {nearestExpiry.daysLeft <= 0 ? "now" : `in ${nearestExpiry.daysLeft}d`}
+          </p>
+        )}
       </div>
       {licenses === undefined ? (
         <Skeleton className="h-4 w-20" />
@@ -370,19 +393,26 @@ function AgentLicenseRow({
             <span className="text-xs text-muted-foreground">No licenses</span>
           ) : (
             <>
-              <span className="text-xs text-muted-foreground">{activeLicenses}/{totalLicenses} active</span>
+              <span className={cn("text-xs", activeLicenses === 0 ? "text-red-600 font-medium" : "text-muted-foreground")}>
+                {activeLicenses}/{totalLicenses} active
+              </span>
               <div className="flex gap-1 flex-wrap max-w-xs">
-                {(licenses ?? []).slice(0, 5).map((lic) => (
-                  <span
-                    key={lic.id}
-                    className={cn(
-                      "text-[10px] px-1.5 py-0.5 rounded font-medium",
-                      LICENSE_STATUS_STYLES[lic.status] ?? "bg-slate-100 text-slate-600"
-                    )}
-                  >
-                    {lic.stateCode}
-                  </span>
-                ))}
+                {(licenses ?? []).slice(0, 5).map((lic) => {
+                  const daysLeft = lic.expiryDate ? Math.ceil((new Date(lic.expiryDate).getTime() - Date.now()) / 86400000) : null;
+                  const urgentBorder = daysLeft !== null && daysLeft <= 30 && lic.status === "active" ? "ring-1 ring-red-400" : "";
+                  return (
+                    <span
+                      key={lic.id}
+                      className={cn(
+                        "text-[10px] px-1.5 py-0.5 rounded font-medium",
+                        LICENSE_STATUS_STYLES[lic.status] ?? "bg-slate-100 text-slate-600",
+                        urgentBorder
+                      )}
+                    >
+                      {lic.stateCode}
+                    </span>
+                  );
+                })}
                 {(licenses ?? []).length > 5 && (
                   <span className="text-[10px] text-muted-foreground">+{licenses!.length - 5}</span>
                 )}
