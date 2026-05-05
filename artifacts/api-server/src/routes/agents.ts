@@ -195,27 +195,30 @@ router.post(
       })
       .returning();
 
-    // Create onboarding checklist — honour caller-specified template if provided
-    createChecklistRun(authReq.orgId, agent!.id, "onboarding", authReq.userId, checklistTemplateId).catch(
-      (err: unknown) => {
-        req.log?.warn({ err }, "Failed to auto-create onboarding checklist");
-      },
-    );
+    // Create onboarding checklist atomically — roll back agent on failure
+    try {
+      await createChecklistRun(authReq.orgId, agent!.id, "onboarding", authReq.userId, checklistTemplateId);
+    } catch (err: unknown) {
+      req.log?.error({ err }, "Failed to auto-create onboarding checklist; rolling back agent");
+      await db.delete(agentsTable).where(eq(agentsTable.id, agent!.id));
+      res.status(500).json({ error: "Failed to initialise onboarding checklist; agent not created" });
+      return;
+    }
 
     // Create initial license record if provided
     if (initialLicense) {
-      db.insert(stateLicensesTable)
-        .values({
+      try {
+        await db.insert(stateLicensesTable).values({
           id: randomUUID(),
           agentId: agent!.id,
           stateCode: initialLicense.stateCode,
           licenseType: initialLicense.licenseType,
           licenseNumber: initialLicense.licenseNumber ?? null,
           status: initialLicense.status,
-        })
-        .catch((err: unknown) => {
-          req.log?.warn({ err }, "Failed to create initial license for agent");
         });
+      } catch (err: unknown) {
+        req.log?.warn({ err }, "Failed to create initial license for agent");
+      }
     }
 
     res.status(201).json(agent);
@@ -492,8 +495,8 @@ router.get(
         (i) => i.status === "completed" || i.status === "skipped",
       ).length;
       onboardingTaskScore =
-        onboardingTotalItems > 0
-          ? (onboardingCompletedItems / onboardingTotalItems) * 100
+        onboardingTotalItems > 0 && onboardingCompletedItems >= onboardingTotalItems
+          ? 100
           : 0;
     }
 

@@ -137,7 +137,13 @@ router.post(
         score: data.score ?? null,
         documentKey: data.documentKey ?? null,
       })
+      .onConflictDoNothing()
       .returning();
+
+    if (!cert) {
+      res.status(409).json({ error: `Certification for carrier ${data.carrierId} in year ${data.certificationYear} already exists for this agent` });
+      return;
+    }
 
     res.status(201).json(cert);
   },

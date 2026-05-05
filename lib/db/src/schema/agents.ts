@@ -7,6 +7,7 @@ import {
   pgEnum,
   real,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -197,7 +198,7 @@ export const carrierCertificationsTable = pgTable(
   },
   (t) => [
     index("carrier_certs_agent_id_idx").on(t.agentId),
-    index("carrier_certs_agent_id_year_idx").on(t.agentId, t.certificationYear),
+    uniqueIndex("carrier_certs_agent_carrier_year_unique").on(t.agentId, t.carrierId, t.certificationYear),
   ],
 );
 
@@ -229,10 +230,7 @@ export const ahipRecordsTable = pgTable(
       .$onUpdate(() => new Date()),
   },
   (t) => [
-    index("ahip_records_agent_id_year_idx").on(
-      t.agentId,
-      t.certificationYear,
-    ),
+    uniqueIndex("ahip_records_agent_id_year_unique").on(t.agentId, t.certificationYear),
   ],
 );
 

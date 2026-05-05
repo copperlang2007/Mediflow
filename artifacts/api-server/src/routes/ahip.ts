@@ -102,6 +102,11 @@ router.post(
       .onConflictDoNothing()
       .returning();
 
+    if (!record) {
+      res.status(409).json({ error: `AHIP record for year ${data.certificationYear} already exists for this agent` });
+      return;
+    }
+
     res.status(201).json(record);
   },
 );
