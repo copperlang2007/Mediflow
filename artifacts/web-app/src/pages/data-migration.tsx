@@ -144,7 +144,7 @@ function ImportWizard({
   };
 
   const pollProgress = (jid: string) => {
-    const evtSource = new EventSource(`${base}/api/imports/progress/${jid}`);
+    const evtSource = new EventSource(`${base}/api/imports/progress/${jid}`, { withCredentials: true });
     evtSource.onmessage = (e) => {
       const data = JSON.parse(e.data as string) as ProgressEvent;
       setProgress(data);

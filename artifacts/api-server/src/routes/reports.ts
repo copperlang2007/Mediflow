@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, gte, lte, sql, inArray, count, sum } from "drizzle-orm";
+import { eq, and, gte, lte, sql, inArray, count, sum, isNull } from "drizzle-orm";
 import {
   db,
   agentsTable,
@@ -114,10 +114,10 @@ router.get(
       certifications,
       ahipRecords,
     ] = await Promise.all([
-      // Contacts assigned to each agent
+      // Contacts assigned to each agent (exclude soft-deleted)
       db.select({ agentId: contactsTable.assignedAgentId, cnt: count() })
         .from(contactsTable)
-        .where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.assignedAgentId, agentIds)))
+        .where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.assignedAgentId, agentIds), isNull(contactsTable.deletedAt)))
         .groupBy(contactsTable.assignedAgentId),
 
       // Calls logged (activities type=call_log in range, authored by agent's user — fallback: all org calls)
@@ -131,7 +131,7 @@ router.get(
         ))
         .groupBy(activitiesTable.createdBy),
 
-      // SMS sent per agent — via contact.assignedAgentId
+      // SMS sent per agent — via contact.assignedAgentId (exclude soft-deleted contacts)
       db.select({
         agentId: contactsTable.assignedAgentId,
         cnt: count(),
@@ -146,10 +146,11 @@ router.get(
           gte(messagesTable.createdAt, start),
           lte(messagesTable.createdAt, end),
           inArray(contactsTable.assignedAgentId, agentIds),
+          isNull(contactsTable.deletedAt),
         ))
         .groupBy(contactsTable.assignedAgentId),
 
-      // Email sent per agent — via contact.assignedAgentId
+      // Email sent per agent — via contact.assignedAgentId (exclude soft-deleted contacts)
       db.select({
         agentId: contactsTable.assignedAgentId,
         cnt: count(),
@@ -164,10 +165,11 @@ router.get(
           gte(messagesTable.createdAt, start),
           lte(messagesTable.createdAt, end),
           inArray(contactsTable.assignedAgentId, agentIds),
+          isNull(contactsTable.deletedAt),
         ))
         .groupBy(contactsTable.assignedAgentId),
 
-      // Deals won per agent in range
+      // Deals won per agent in range (exclude soft-deleted)
       db.select({ agentId: dealsTable.assignedAgentId, cnt: count(), totalValue: sum(dealsTable.valueEst) })
         .from(dealsTable)
         .where(and(
@@ -176,16 +178,18 @@ router.get(
           inArray(dealsTable.assignedAgentId, agentIds),
           gte(dealsTable.wonAt, start),
           lte(dealsTable.wonAt, end),
+          isNull(dealsTable.deletedAt),
         ))
         .groupBy(dealsTable.assignedAgentId),
 
-      // Enrolled contacts per agent
+      // Enrolled contacts per agent (exclude soft-deleted)
       db.select({ agentId: contactsTable.assignedAgentId, cnt: count() })
         .from(contactsTable)
         .where(and(
           eq(contactsTable.orgId, authReq.orgId),
           eq(contactsTable.status, "enrolled"),
           inArray(contactsTable.assignedAgentId, agentIds),
+          isNull(contactsTable.deletedAt),
         ))
         .groupBy(contactsTable.assignedAgentId),
 
@@ -275,27 +279,27 @@ router.get(
     const [contactCounts, dealsCounts, enrollCounts, smsPerAgent, emailPerAgent] = await Promise.all([
       db.select({ agentId: contactsTable.assignedAgentId, cnt: count() })
         .from(contactsTable)
-        .where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.assignedAgentId, agentIds)))
+        .where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.assignedAgentId, agentIds), isNull(contactsTable.deletedAt)))
         .groupBy(contactsTable.assignedAgentId),
       db.select({ agentId: dealsTable.assignedAgentId, cnt: count() })
         .from(dealsTable)
-        .where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "won"), inArray(dealsTable.assignedAgentId, agentIds)))
+        .where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "won"), inArray(dealsTable.assignedAgentId, agentIds), isNull(dealsTable.deletedAt)))
         .groupBy(dealsTable.assignedAgentId),
       db.select({ agentId: contactsTable.assignedAgentId, cnt: count() })
         .from(contactsTable)
-        .where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"), inArray(contactsTable.assignedAgentId, agentIds)))
+        .where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"), inArray(contactsTable.assignedAgentId, agentIds), isNull(contactsTable.deletedAt)))
         .groupBy(contactsTable.assignedAgentId),
       db.select({ agentId: contactsTable.assignedAgentId, cnt: count() })
         .from(messagesTable)
         .innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id))
         .innerJoin(contactsTable, eq(messageThreadsTable.contactId, contactsTable.id))
-        .where(and(eq(messageThreadsTable.orgId, authReq.orgId), eq(messageThreadsTable.channel, "sms"), eq(messagesTable.direction, "outbound"), gte(messagesTable.createdAt, start), lte(messagesTable.createdAt, end), inArray(contactsTable.assignedAgentId, agentIds)))
+        .where(and(eq(messageThreadsTable.orgId, authReq.orgId), eq(messageThreadsTable.channel, "sms"), eq(messagesTable.direction, "outbound"), gte(messagesTable.createdAt, start), lte(messagesTable.createdAt, end), inArray(contactsTable.assignedAgentId, agentIds), isNull(contactsTable.deletedAt)))
         .groupBy(contactsTable.assignedAgentId),
       db.select({ agentId: contactsTable.assignedAgentId, cnt: count() })
         .from(messagesTable)
         .innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id))
         .innerJoin(contactsTable, eq(messageThreadsTable.contactId, contactsTable.id))
-        .where(and(eq(messageThreadsTable.orgId, authReq.orgId), eq(messageThreadsTable.channel, "email"), eq(messagesTable.direction, "outbound"), gte(messagesTable.createdAt, start), lte(messagesTable.createdAt, end), inArray(contactsTable.assignedAgentId, agentIds)))
+        .where(and(eq(messageThreadsTable.orgId, authReq.orgId), eq(messageThreadsTable.channel, "email"), eq(messagesTable.direction, "outbound"), gte(messagesTable.createdAt, start), lte(messagesTable.createdAt, end), inArray(contactsTable.assignedAgentId, agentIds), isNull(contactsTable.deletedAt)))
         .groupBy(contactsTable.assignedAgentId),
     ]);
 
@@ -1219,22 +1223,22 @@ router.get(
         .where(and(eq(agentsTable.orgId, authReq.orgId), eq(agentsTable.status, "onboarding"))),
 
       db.select({ cnt: count() }).from(contactsTable)
-        .where(and(eq(contactsTable.orgId, authReq.orgId), gte(contactsTable.createdAt, start), lte(contactsTable.createdAt, end))),
+        .where(and(eq(contactsTable.orgId, authReq.orgId), gte(contactsTable.createdAt, start), lte(contactsTable.createdAt, end), isNull(contactsTable.deletedAt))),
 
       db.select({ cnt: count() }).from(contactsTable)
-        .where(and(eq(contactsTable.orgId, authReq.orgId), gte(contactsTable.createdAt, priorStart), lte(contactsTable.createdAt, priorEnd))),
+        .where(and(eq(contactsTable.orgId, authReq.orgId), gte(contactsTable.createdAt, priorStart), lte(contactsTable.createdAt, priorEnd), isNull(contactsTable.deletedAt))),
 
       db.select({ cnt: count(), val: sum(dealsTable.valueEst) }).from(dealsTable)
-        .where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "won"), gte(dealsTable.wonAt, start), lte(dealsTable.wonAt, end))),
+        .where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "won"), gte(dealsTable.wonAt, start), lte(dealsTable.wonAt, end), isNull(dealsTable.deletedAt))),
 
       db.select({ cnt: count() }).from(dealsTable)
-        .where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "lost"), gte(dealsTable.updatedAt, start), lte(dealsTable.updatedAt, end))),
+        .where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "lost"), gte(dealsTable.updatedAt, start), lte(dealsTable.updatedAt, end), isNull(dealsTable.deletedAt))),
 
       db.select({ val: sum(dealsTable.valueEst) }).from(dealsTable)
-        .where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "open"))),
+        .where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "open"), isNull(dealsTable.deletedAt))),
 
       db.select({ cnt: count() }).from(contactsTable)
-        .where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"))),
+        .where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"), isNull(contactsTable.deletedAt))),
 
       db.select({ cnt: count() }).from(messagesTable)
         .innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id))
