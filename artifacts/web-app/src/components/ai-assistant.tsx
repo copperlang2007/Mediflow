@@ -26,6 +26,77 @@ interface ChatMessage {
   draftType?: "sms" | "email";
 }
 
+// ─── Persistence (localStorage) ───────────────────────────────────────────────
+// The panel's open state is restored across page navigations and refreshes,
+// and chat history survives reloads so users can resume conversations.
+const STORAGE_KEYS = {
+  open: "mediflow.ai-panel.open",
+  history: "mediflow.ai-panel.history",
+} as const;
+
+// Cap persisted history to keep localStorage small; older messages drop off.
+const HISTORY_CAP = 50;
+
+function readBool(key: string, fallback: boolean): boolean {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const v = window.localStorage.getItem(key);
+    return v === null ? fallback : v === "1";
+  } catch {
+    return fallback;
+  }
+}
+
+function writeBool(key: string, value: boolean) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    // localStorage may be unavailable; ignore.
+  }
+}
+
+function readHistory(): ChatMessage[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.history);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (m): m is ChatMessage =>
+          typeof m === "object" &&
+          m !== null &&
+          (((m as { role?: unknown }).role === "user") ||
+            ((m as { role?: unknown }).role === "assistant")) &&
+          typeof (m as { content?: unknown }).content === "string",
+      )
+      // Drop the streaming flag — anything mid-stream when the page closed
+      // is gone; we don't want to render a perpetually-streaming bubble.
+      .map((m) => ({ role: m.role, content: m.content, draftType: m.draftType }));
+  } catch {
+    return [];
+  }
+}
+
+function writeHistory(messages: ChatMessage[]) {
+  if (typeof window === "undefined") return;
+  try {
+    const trimmed =
+      messages.length > HISTORY_CAP ? messages.slice(-HISTORY_CAP) : messages;
+    // Strip transient flags so we don't persist a "still streaming" bubble.
+    const sanitized = trimmed.map((m) => ({
+      role: m.role,
+      content: m.content,
+      ...(m.draftType ? { draftType: m.draftType } : {}),
+    }));
+    window.localStorage.setItem(STORAGE_KEYS.history, JSON.stringify(sanitized));
+  } catch {
+    // ignore
+  }
+}
+
 const SLASH_COMMANDS = [
   { cmd: "/compliance-check", hint: "[agent name] — compliance gap report" },
   { cmd: "/draft-sms", hint: "[contact name] [goal] — SMS draft" },
@@ -69,11 +140,28 @@ function MessageContent({ content }: { content: string }) {
 }
 
 export function AiAssistantPanel({ context }: { context?: AiContext }) {
-  const [open, setOpen] = useState(false);
+  // Lazy initializers restore persisted state from localStorage so the panel
+  // remembers whether it was open and the chat history survives navigation
+  // and full page refreshes.
+  const [open, setOpen] = useState<boolean>(() =>
+    readBool(STORAGE_KEYS.open, false),
+  );
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => readHistory());
   const [streaming, setStreaming] = useState(false);
   const [showCommands, setShowCommands] = useState(false);
+
+  useEffect(() => {
+    writeBool(STORAGE_KEYS.open, open);
+  }, [open]);
+
+  // Persist history whenever it settles (skip while a response is streaming
+  // — we'd otherwise write on every token, and partial messages aren't
+  // useful to restore).
+  useEffect(() => {
+    if (streaming) return;
+    writeHistory(messages);
+  }, [messages, streaming]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -196,6 +284,7 @@ export function AiAssistantPanel({ context }: { context?: AiContext }) {
 
   const clearHistory = () => {
     setMessages([]);
+    writeHistory([]);
   };
 
   const filteredCommands = SLASH_COMMANDS.filter((c) =>

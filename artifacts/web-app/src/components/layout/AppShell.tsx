@@ -1,7 +1,13 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
-import { useGetMe, useGetAgent, useGetContact } from "@workspace/api-client-react";
+import {
+  useGetMe,
+  useGetAgent,
+  useGetContact,
+  useGetDashboardStats,
+  getGetDashboardStatsQueryKey,
+} from "@workspace/api-client-react";
 import type { AiContext } from "@/components/ai-assistant";
 import { cn } from "@/lib/utils";
 
@@ -163,14 +169,20 @@ function NavItem({
   label,
   icon: Icon,
   collapsed,
+  badgeCount,
+  badgeLabel,
 }: {
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   collapsed: boolean;
+  badgeCount?: number;
+  badgeLabel?: string;
 }) {
   const [location] = useLocation();
   const isActive = location === href || (href !== "/dashboard" && location.startsWith(href));
+  const showBadge = typeof badgeCount === "number" && badgeCount > 0;
+  const badgeText = showBadge && badgeCount > 99 ? "99+" : showBadge ? String(badgeCount) : "";
 
   if (collapsed) {
     return (
@@ -179,18 +191,27 @@ function NavItem({
           <Link href={href}>
             <div
               className={cn(
-                "flex items-center justify-center h-10 w-10 rounded-lg mx-auto transition-colors cursor-pointer",
+                "relative flex items-center justify-center h-10 w-10 rounded-lg mx-auto transition-colors cursor-pointer",
                 isActive
                   ? "bg-sidebar-primary text-sidebar-primary-foreground"
                   : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               )}
             >
               <Icon className="h-5 w-5" />
+              {showBadge && (
+                <span
+                  aria-label={badgeLabel ?? `${badgeCount} ${label}`}
+                  className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-semibold leading-none flex items-center justify-center"
+                >
+                  {badgeText}
+                </span>
+              )}
             </div>
           </Link>
         </TooltipTrigger>
         <TooltipContent side="right" className="font-medium">
           {label}
+          {showBadge && ` · ${badgeCount} overdue`}
         </TooltipContent>
       </Tooltip>
     );
@@ -208,7 +229,22 @@ function NavItem({
       >
         <Icon className="h-5 w-5 shrink-0" />
         <span className="text-sm truncate">{label}</span>
-        {isActive && <ChevronRight className="h-3.5 w-3.5 ml-auto shrink-0 opacity-60" />}
+        {showBadge && (
+          <span
+            aria-label={badgeLabel ?? `${badgeCount} ${label}`}
+            className={cn(
+              "ml-auto min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-semibold leading-none flex items-center justify-center",
+              isActive
+                ? "bg-sidebar-primary-foreground/20 text-sidebar-primary-foreground"
+                : "bg-destructive text-destructive-foreground",
+            )}
+          >
+            {badgeText}
+          </span>
+        )}
+        {!showBadge && isActive && (
+          <ChevronRight className="h-3.5 w-3.5 ml-auto shrink-0 opacity-60" />
+        )}
       </div>
     </Link>
   );
@@ -255,6 +291,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { unreadCount } = useSSENotifications();
   const { data: me } = useGetMe();
   const userRole = (me?.role ?? null) as Role | null;
+
+  // Overdue tasks badge for the Tasks nav item. Refresh once a minute so the
+  // count rolls over as items pass their due date without a hard refresh.
+  const { data: dashboardStats } = useGetDashboardStats({
+    query: {
+      queryKey: getGetDashboardStatsQueryKey(),
+      refetchInterval: 60_000,
+      staleTime: 30_000,
+    },
+  });
+  const overdueTaskCount = dashboardStats?.overdueTasks ?? 0;
 
   // Filter nav groups to items allowed for this user's role.
   // While role is loading, show all to avoid flicker.
@@ -309,6 +356,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     label={item.label}
                     icon={item.icon}
                     collapsed={collapsed}
+                    badgeCount={item.href === "/tasks" ? overdueTaskCount : undefined}
+                    badgeLabel={
+                      item.href === "/tasks"
+                        ? `${overdueTaskCount} overdue tasks`
+                        : undefined
+                    }
                   />
                 ))}
               </div>
