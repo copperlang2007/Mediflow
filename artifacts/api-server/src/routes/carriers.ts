@@ -9,6 +9,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { seedDefaultCarriers } from "../lib/carrierSeed";
 
 const router: IRouter = Router();
 
@@ -24,20 +25,6 @@ const UpdateCarrierSchema = z.object({
   logoUrl: z.string().url().nullable().optional(),
   isActive: z.boolean().optional(),
 });
-
-const DEFAULT_CARRIERS = [
-  "Humana",
-  "UnitedHealth/AARP",
-  "Aetna/CVS",
-  "Cigna",
-  "Anthem/BCBS",
-  "Wellcare",
-  "Molina",
-  "Centene",
-  "Devoted",
-  "Oscar",
-  "Clover",
-];
 
 router.use(
   auditMiddleware("agent", undefined, {
@@ -71,22 +58,7 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
 
-    const existing = await db
-      .select({ name: carriersTable.name })
-      .from(carriersTable)
-      .where(eq(carriersTable.orgId, authReq.orgId));
-
-    const existingNames = new Set(existing.map((c) => c.name));
-    const toInsert = DEFAULT_CARRIERS.filter((name) => !existingNames.has(name)).map((name) => ({
-      id: randomUUID(),
-      orgId: authReq.orgId,
-      name,
-      isActive: true,
-    }));
-
-    if (toInsert.length > 0) {
-      await db.insert(carriersTable).values(toInsert);
-    }
+    const seeded = await seedDefaultCarriers(authReq.orgId);
 
     const carriers = await db
       .select()
@@ -94,7 +66,7 @@ router.post(
       .where(eq(carriersTable.orgId, authReq.orgId))
       .orderBy(carriersTable.name);
 
-    res.json({ seeded: toInsert.length, carriers });
+    res.json({ seeded, carriers });
   },
 );
 

@@ -5,6 +5,7 @@ import { getAuth } from "@clerk/express";
 import { db, usersTable, organizationsTable } from "@workspace/db";
 import { randomUUID } from "crypto";
 import { logger } from "../lib/logger";
+import { seedDefaultCarriers } from "../lib/carrierSeed";
 
 const ProvisionSchema = z.object({
   email: z.string().email(),
@@ -73,6 +74,16 @@ router.post("/auth/provision", async (req: Request, res: Response): Promise<void
       lastLoginAt: new Date(),
     })
     .returning();
+
+  // Seed the default Medicare carriers so the Carrier Certification Matrix
+  // works out of the box. Failures here shouldn't block provisioning — admins
+  // can re-run via POST /carriers/seed.
+  try {
+    const seeded = await seedDefaultCarriers(org.id);
+    logger.info({ orgId: org.id, seeded }, "Seeded default carriers for new org");
+  } catch (err) {
+    logger.error({ err, orgId: org.id }, "Failed to seed default carriers");
+  }
 
   logger.info({ userId: user.id, orgId: org.id }, "New user provisioned");
 
