@@ -132,7 +132,8 @@ async function scanAhipDeadlines(orgId: string): Promise<number> {
   // Only scan within 90 days before the deadline
   if (daysUntilDeadline < 0 || daysUntilDeadline > 90) return 0;
 
-  const rows = await db
+  // Existing in-flight records that aren't yet passed/completed.
+  const inflight = await db
     .select({
       ahipId: ahipRecordsTable.id,
       agentId: ahipRecordsTable.agentId,
@@ -148,7 +149,7 @@ async function scanAhipDeadlines(orgId: string): Promise<number> {
       ),
     );
 
-  for (const row of rows) {
+  for (const row of inflight) {
     await enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
       orgId,
       trigger: "ahip_deadline",
@@ -163,7 +164,43 @@ async function scanAhipDeadlines(orgId: string): Promise<number> {
       },
     });
   }
-  return rows.length;
+
+  // Active agents with no AHIP record at all for the current year — these
+  // are also "incomplete AHIP" and need to fire the same trigger so that
+  // managers can be notified before the deadline. We key the trigger on the
+  // agentId since there's no ahip record id to point at yet.
+  const missing = await db
+    .select({ agentId: agentsTable.id })
+    .from(agentsTable)
+    .where(
+      and(
+        eq(agentsTable.orgId, orgId),
+        inArray(agentsTable.status, ["onboarding", "active"]),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${ahipRecordsTable}
+          WHERE ${ahipRecordsTable.agentId} = ${agentsTable.id}
+            AND ${ahipRecordsTable.certificationYear} = ${currentYear}
+        )`,
+      ),
+    );
+
+  for (const row of missing) {
+    await enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+      orgId,
+      trigger: "ahip_deadline",
+      resourceType: "agent",
+      resourceId: row.agentId,
+      context: {
+        agentId: row.agentId,
+        certificationYear: currentYear,
+        daysUntilDeadline,
+        deadlineDate: deadline.toISOString(),
+        currentStatus: "missing",
+      },
+    });
+  }
+
+  return inflight.length + missing.length;
 }
 
 async function scanContactNoActivity(orgId: string): Promise<number> {

@@ -386,6 +386,7 @@ export async function runAutomationRulesWorker(
   const TIME_THRESHOLD_TRIGGERS: Record<string, string> = {
     license_expires: "daysUntilExpiry",
     certification_expiring: "daysUntilExpiry",
+    ahip_deadline: "daysUntilDeadline",
     contact_no_activity: "daysSinceActivity",
     task_overdue: "daysOverdue",
   };
