@@ -38,6 +38,7 @@ const TRIGGER_TYPES = [
   "contact_no_activity",
   "deal_stage_changed",
   "task_overdue",
+  "task_completed",
   "enrollment_period_opens",
   "scheduled",
 ] as const;

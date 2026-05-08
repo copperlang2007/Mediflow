@@ -96,6 +96,42 @@ function evaluateConditions(
   return result;
 }
 
+// ---- Variable substitution ----
+
+/**
+ * Replace `{{key}}` placeholders in an action config string with values from
+ * the enriched trigger context. Unknown keys collapse to an empty string so
+ * partially-templated rules don't blow up on missing values.
+ */
+function renderTemplate(
+  text: string,
+  ctx: Record<string, unknown>,
+): string {
+  return text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => {
+    const value = key
+      .split(".")
+      .reduce<unknown>((acc, part) => {
+        if (acc && typeof acc === "object" && part in (acc as Record<string, unknown>)) {
+          return (acc as Record<string, unknown>)[part];
+        }
+        return undefined;
+      }, ctx);
+    if (value === undefined || value === null) return "";
+    return String(value);
+  });
+}
+
+function renderConfig<T extends Record<string, unknown>>(
+  config: T,
+  ctx: Record<string, unknown>,
+): T {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(config)) {
+    out[k] = typeof v === "string" ? renderTemplate(v, ctx) : v;
+  }
+  return out as T;
+}
+
 // ---- Action execution ----
 
 async function executeAction(
@@ -104,11 +140,20 @@ async function executeAction(
     orgId,
     resourceType,
     resourceId,
-  }: { orgId: string; resourceType: string; resourceId: string },
+    context,
+  }: {
+    orgId: string;
+    resourceType: string;
+    resourceId: string;
+    context: Record<string, unknown>;
+  },
 ): Promise<void> {
+  // Substitute {{var}} placeholders in any string config before reading it.
+  const config = renderConfig(action.config, context);
+
   switch (action.type) {
     case "create_task": {
-      const { title, agentId: taskAgentId, dueDate: taskDueDate } = action.config as {
+      const { title, agentId: taskAgentId, dueDate: taskDueDate } = config as {
         title: string;
         agentId?: string;
         dueDate?: string;
@@ -130,7 +175,7 @@ async function executeAction(
     }
 
     case "send_notification": {
-      const { userId, message } = action.config as {
+      const { userId, message } = config as {
         userId?: string;
         message: string;
       };
@@ -172,7 +217,7 @@ async function executeAction(
     }
 
     case "send_email": {
-      const { to, subject, html } = action.config as {
+      const { to, subject, html } = config as {
         to: string;
         subject: string;
         html: string;
@@ -184,7 +229,7 @@ async function executeAction(
     }
 
     case "send_sms": {
-      const { to, body } = action.config as { to: string; body: string };
+      const { to, body } = config as { to: string; body: string };
       if (to && body) {
         await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { to, body });
       }
@@ -192,7 +237,7 @@ async function executeAction(
     }
 
     case "change_contact_status": {
-      const { status } = action.config as { status: Contact["status"] };
+      const { status } = config as { status: Contact["status"] };
       if (resourceType === "contact" && resourceId && status) {
         await db
           .update(contactsTable)
@@ -205,7 +250,7 @@ async function executeAction(
     }
 
     case "enroll_sequence": {
-      const { sequenceId } = action.config as { sequenceId: string };
+      const { sequenceId } = config as { sequenceId: string };
       if (resourceType === "contact" && resourceId && sequenceId) {
         // Create (or verify) an active enrollment record before scheduling the
         // first step — sendSequenceStepWorker requires an active enrollment row.
@@ -242,7 +287,7 @@ async function executeAction(
     }
 
     case "change_deal_stage": {
-      const { stageId } = action.config as { stageId: string };
+      const { stageId } = config as { stageId: string };
       if (resourceType === "deal" && resourceId && stageId) {
         await db
           .update(dealsTable)
@@ -425,7 +470,12 @@ export async function runAutomationRulesWorker(
 
     for (const action of actions) {
       try {
-        await executeAction(action, { orgId, resourceType, resourceId });
+        await executeAction(action, {
+          orgId,
+          resourceType,
+          resourceId,
+          context: enrichedContext,
+        });
         actionsExecuted.push(action.type);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

@@ -4,7 +4,9 @@ import {
   useSnoozeRenewal,
   useResolveRenewal,
   getGetRenewalsQueryKey,
+  customFetch,
 } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +31,174 @@ const URGENCY_CONFIG = {
 
 type UrgencyFilter = "all" | "critical" | "warning" | "notice";
 type TypeFilter = "all" | "license" | "certification";
+
+// ─── Compliance alerts dashboard card ─────────────────────────────────────────
+type ComplianceAlerts = {
+  generatedAt: string;
+  currentCertYear: number;
+  daysUntilAhipDeadline: number;
+  licenses: { critical: number; warning: number; notice: number };
+  certifications: { critical: number; warning: number; notice: number };
+  ahip: {
+    passed: number;
+    in_progress: number;
+    not_started: number;
+    missing: number;
+    failed: number;
+    totalActiveAgents: number;
+    completionRate: number;
+  };
+  topAgents: Array<{
+    agentId: string;
+    agentName: string;
+    licensesExpiring: number;
+    certsExpiring: number;
+    ahipStatus: "passed" | "in_progress" | "not_started" | "missing" | "failed";
+    alertCount: number;
+  }>;
+  agentsWithAlerts: number;
+};
+
+function ComplianceAlertsCard({
+  onNavigate,
+}: {
+  onNavigate: (path: string) => void;
+}) {
+  const { data, isLoading } = useQuery<ComplianceAlerts>({
+    queryKey: ["/api/compliance-alerts"],
+    queryFn: () => customFetch<ComplianceAlerts>("/api/compliance-alerts"),
+    staleTime: 60_000,
+  });
+
+  if (isLoading) {
+    return <Skeleton className="h-44 w-full" />;
+  }
+  if (!data) return null;
+
+  const ahipPending =
+    data.ahip.in_progress + data.ahip.not_started + data.ahip.missing + data.ahip.failed;
+  const totalLicenseAlerts =
+    data.licenses.critical + data.licenses.warning + data.licenses.notice;
+  const totalCertAlerts =
+    data.certifications.critical + data.certifications.warning + data.certifications.notice;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3 pt-4 px-5">
+        <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+          Agency-wide compliance alerts
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="px-5 pb-5 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="rounded-lg border border-border p-3">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              Expiring licenses (≤90d)
+            </p>
+            <p className="text-2xl font-bold mt-0.5 tabular-nums">{totalLicenseAlerts}</p>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              <span className="text-red-600 font-medium">{data.licenses.critical}</span> critical ·{" "}
+              <span className="text-amber-600 font-medium">{data.licenses.warning}</span> warning ·{" "}
+              <span className="text-blue-600 font-medium">{data.licenses.notice}</span> notice
+            </p>
+          </div>
+          <div className="rounded-lg border border-border p-3">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              Expiring certifications (≤90d)
+            </p>
+            <p className="text-2xl font-bold mt-0.5 tabular-nums">{totalCertAlerts}</p>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              <span className="text-red-600 font-medium">{data.certifications.critical}</span> critical ·{" "}
+              <span className="text-amber-600 font-medium">{data.certifications.warning}</span> warning ·{" "}
+              <span className="text-blue-600 font-medium">{data.certifications.notice}</span> notice
+            </p>
+          </div>
+          <div className="rounded-lg border border-border p-3">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              AHIP {data.currentCertYear}{" "}
+              {data.daysUntilAhipDeadline >= 0
+                ? `· ${data.daysUntilAhipDeadline}d to Oct 1`
+                : "· deadline passed"}
+            </p>
+            <p className="text-2xl font-bold mt-0.5 tabular-nums">
+              {data.ahip.completionRate}%
+              <span className="text-sm font-normal text-muted-foreground ml-2">
+                {data.ahip.passed}/{data.ahip.totalActiveAgents}
+              </span>
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              {data.ahip.missing > 0 && (
+                <span className="text-red-600 font-medium">{data.ahip.missing} missing</span>
+              )}
+              {data.ahip.missing > 0 && (data.ahip.in_progress > 0 || data.ahip.not_started > 0) && " · "}
+              {data.ahip.in_progress > 0 && (
+                <span className="text-amber-600 font-medium">
+                  {data.ahip.in_progress} in progress
+                </span>
+              )}
+              {data.ahip.in_progress > 0 && data.ahip.not_started > 0 && " · "}
+              {data.ahip.not_started > 0 && (
+                <span className="text-amber-600 font-medium">
+                  {data.ahip.not_started} not started
+                </span>
+              )}
+              {ahipPending === 0 && (
+                <span className="text-green-700 font-medium">All caught up</span>
+              )}
+            </p>
+          </div>
+        </div>
+
+        {data.topAgents.length > 0 && (
+          <div>
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">
+              Top {data.topAgents.length} of {data.agentsWithAlerts} agent
+              {data.agentsWithAlerts !== 1 ? "s" : ""} needing attention
+            </p>
+            <div className="space-y-1">
+              {data.topAgents.map((a) => (
+                <button
+                  key={a.agentId}
+                  onClick={() => onNavigate(`/agents/${a.agentId}`)}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-muted/50 transition-colors text-left"
+                >
+                  <span className="flex-1 text-sm font-medium truncate">{a.agentName}</span>
+                  <div className="flex items-center gap-1.5 text-[11px]">
+                    {a.licensesExpiring > 0 && (
+                      <Badge variant="secondary" className="font-mono">
+                        {a.licensesExpiring} lic
+                      </Badge>
+                    )}
+                    {a.certsExpiring > 0 && (
+                      <Badge variant="secondary" className="font-mono">
+                        {a.certsExpiring} cert
+                      </Badge>
+                    )}
+                    {a.ahipStatus !== "passed" && (
+                      <Badge
+                        variant="secondary"
+                        className={
+                          a.ahipStatus === "missing" || a.ahipStatus === "failed"
+                            ? "bg-red-100 text-red-800"
+                            : "bg-amber-100 text-amber-800"
+                        }
+                      >
+                        AHIP {a.ahipStatus.replace("_", " ")}
+                      </Badge>
+                    )}
+                  </div>
+                  <span className="text-xs font-bold tabular-nums w-6 text-right">
+                    {a.alertCount}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function RenewalsPage() {
   const qc = useQueryClient();
@@ -87,6 +257,8 @@ export default function RenewalsPage() {
           </Button>
         </div>
       </div>
+
+      <ComplianceAlertsCard onNavigate={navigate} />
 
       {/* Urgency summary cards */}
       <div className="grid grid-cols-3 gap-4">
