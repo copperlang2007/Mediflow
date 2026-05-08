@@ -1240,6 +1240,25 @@ paths:
         "204":
           description: Deleted
 
+  /tasks/bulk-from-template:
+    post:
+      operationId: bulkAssignTasksFromTemplate
+      tags: [tasks]
+      summary: Assign one task per agent from a template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkAssignTasksFromTemplateBody"
+      responses:
+        "201":
+          description: Tasks created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkAssignTasksFromTemplateResponse"
+
   /agents/{id}/tasks:
     get:
       operationId: getAgentTasks
@@ -4602,6 +4621,40 @@ components:
         priority:
           type: string
           enum: [low, medium, high, urgent]
+
+    BulkAssignTasksFromTemplateBody:
+      type: object
+      required:
+        - templateId
+        - agentIds
+      properties:
+        templateId:
+          type: string
+        agentIds:
+          type: array
+          items:
+            type: string
+        dueDate:
+          type: string
+          format: date-time
+
+    BulkAssignTasksFromTemplateResponse:
+      type: object
+      required:
+        - created
+        - skipped
+        - tasks
+      properties:
+        created:
+          type: integer
+        skipped:
+          type: array
+          items:
+            type: string
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
 
     AgentDocument:
       type: object

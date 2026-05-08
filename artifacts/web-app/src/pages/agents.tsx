@@ -4,9 +4,9 @@ import {
   useCreateAgent,
   useGetAgentComplianceScore,
   useGetUsers,
-  useCreateTask,
   useGetTaskTemplates,
   getGetAgentsQueryKey,
+  customFetch,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -427,31 +427,52 @@ function BulkActionsBar({
   onExport: () => void;
   onClear: () => void;
 }) {
+  const qc = useQueryClient();
   const [assignOpen, setAssignOpen] = useState(false);
   const [templateId, setTemplateId] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [assigning, setAssigning] = useState(false);
   const { data: taskTemplates } = useGetTaskTemplates();
-  const { mutateAsync: createTask } = useCreateTask();
 
   const handleAssign = async () => {
     if (!templateId) return;
     setAssigning(true);
-    let success = 0;
-    let fail = 0;
-    for (const agentId of Array.from(selected)) {
-      try {
-        const tpl = (taskTemplates ?? []).find((t) => t.id === templateId);
-        await createTask({ data: { agentId, templateId, title: tpl?.name ?? "Assigned Task" } });
-        success++;
-      } catch {
-        fail++;
-      }
+    try {
+      const result = await customFetch<{
+        created: number;
+        skipped: string[];
+      }>("/api/tasks/bulk-from-template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          templateId,
+          agentIds: Array.from(selected),
+          dueDate: dueDate || undefined,
+        }),
+      });
+      const skipMsg = result.skipped.length > 0 ? ` (${result.skipped.length} skipped)` : "";
+      toast.success(
+        `Created ${result.created} task${result.created !== 1 ? "s" : ""}${skipMsg}`,
+      );
+      void qc.invalidateQueries({ queryKey: ["/api/tasks"] });
+      void qc.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      // Per-agent task lists too — agentId is part of the cache key tail.
+      void qc.invalidateQueries({ predicate: (q) =>
+        Array.isArray(q.queryKey) &&
+        typeof q.queryKey[0] === "string" &&
+        q.queryKey[0].startsWith("/api/agents/") &&
+        q.queryKey[0].endsWith("/tasks"),
+      });
+      setAssignOpen(false);
+      setTemplateId("");
+      setDueDate("");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to assign tasks",
+      );
+    } finally {
+      setAssigning(false);
     }
-    setAssigning(false);
-    setAssignOpen(false);
-    setTemplateId("");
-    if (success > 0) toast.success(`Task assigned to ${success} agent${success !== 1 ? "s" : ""}${fail > 0 ? ` (${fail} failed)` : ""}`);
-    else toast.error("Failed to assign task to any agent");
   };
 
   return (
@@ -469,7 +490,7 @@ function BulkActionsBar({
         Clear
       </Button>
 
-      <Dialog open={assignOpen} onOpenChange={(v) => { if (!v) { setAssignOpen(false); setTemplateId(""); } }}>
+      <Dialog open={assignOpen} onOpenChange={(v) => { if (!v) { setAssignOpen(false); setTemplateId(""); setDueDate(""); } }}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Assign Task to {selected.size} Agent{selected.size !== 1 ? "s" : ""}</DialogTitle>
@@ -490,12 +511,23 @@ function BulkActionsBar({
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1.5">
+              <Label>Due date (optional)</Label>
+              <Input
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Overrides the template's "due in N days" offset if set.
+              </p>
+            </div>
             <p className="text-xs text-muted-foreground">
-              This task will be created for each selected agent using the chosen template.
+              This task will be created for each selected agent using the chosen template's title, description, and priority.
             </p>
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => { setAssignOpen(false); setTemplateId(""); }}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setAssignOpen(false); setTemplateId(""); setDueDate(""); }}>Cancel</Button>
             <Button disabled={!templateId || assigning} onClick={handleAssign}>
               {assigning ? "Assigning…" : "Assign Task"}
             </Button>

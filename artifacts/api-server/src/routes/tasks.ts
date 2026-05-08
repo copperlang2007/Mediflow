@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, sql, desc, type SQL } from "drizzle-orm";
+import { eq, and, sql, desc, inArray, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { db, agentsTable, taskInstancesTable, taskTemplatesTable } from "@workspace/db";
@@ -9,6 +9,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { enqueue, JOB_NAMES } from "../lib/jobs";
 
 const router: IRouter = Router();
 
@@ -209,7 +210,131 @@ router.patch(
       return;
     }
 
+    // Fire `task_completed` automation trigger when status transitions to completed.
+    if (data.status === "completed") {
+      void enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+        orgId: authReq.orgId,
+        trigger: "task_completed",
+        resourceType: "task",
+        resourceId: task.id,
+        context: {
+          taskTitle: task.title,
+          agentId: task.agentId ?? null,
+          contactId: task.contactId ?? null,
+          templateId: task.templateId ?? null,
+          completedBy: authReq.userId,
+        },
+      });
+    }
+
     res.json(task);
+  },
+);
+
+// POST /tasks/bulk-from-template — assign one task per agent using a template
+const BulkFromTemplateSchema = z.object({
+  templateId: z.string().min(1),
+  agentIds: z.array(z.string().min(1)).min(1).max(500),
+  dueDate: z.string().optional(),
+});
+
+router.post(
+  "/tasks/bulk-from-template",
+  requireAuth,
+  requirePermission("task_instance", "create"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+
+    const parsed = BulkFromTemplateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ error: "Invalid request body", details: parsed.error.issues });
+      return;
+    }
+
+    const { templateId, agentIds, dueDate } = parsed.data;
+
+    const [template] = await db
+      .select()
+      .from(taskTemplatesTable)
+      .where(
+        and(
+          eq(taskTemplatesTable.id, templateId),
+          eq(taskTemplatesTable.orgId, authReq.orgId),
+          eq(taskTemplatesTable.isActive, true),
+        ),
+      )
+      .limit(1);
+
+    if (!template) {
+      res.status(404).json({ error: "Template not found" });
+      return;
+    }
+
+    const uniqueAgentIds = Array.from(new Set(agentIds));
+
+    // Validate every agent belongs to this org. Filter to avoid cross-org FK
+    // associations. If any input ID is missing from this set, it's silently
+    // skipped (and returned as `skipped`).
+    const validAgents = await db
+      .select({ id: agentsTable.id })
+      .from(agentsTable)
+      .where(
+        and(
+          eq(agentsTable.orgId, authReq.orgId),
+          inArray(agentsTable.id, uniqueAgentIds),
+        ),
+      );
+
+    const validIds = new Set(validAgents.map((a) => a.id));
+    const skipped = uniqueAgentIds.filter((id) => !validIds.has(id));
+
+    if (validIds.size === 0) {
+      res.status(400).json({
+        error: "No valid agents in this organisation for the supplied IDs",
+        skipped,
+      });
+      return;
+    }
+
+    // Compute the per-task due date once. Explicit dueDate overrides the
+    // template's dueDaysFromTrigger offset (relative to "now").
+    let computedDue: Date | null = null;
+    if (dueDate) {
+      computedDue = new Date(dueDate);
+    } else if (template.dueDaysFromTrigger != null) {
+      computedDue = new Date(
+        Date.now() + template.dueDaysFromTrigger * 86_400_000,
+      );
+    }
+
+    const now = new Date();
+    const rows = Array.from(validIds).map((agentId) => ({
+      id: randomUUID(),
+      orgId: authReq.orgId,
+      templateId: template.id,
+      agentId,
+      contactId: null,
+      title: template.title || template.name,
+      description: template.description ?? null,
+      dueDate: computedDue,
+      assignedTo: null,
+      assignedToUserId: null,
+      priority: template.priority,
+      status: "open" as const,
+      createdBy: authReq.userId,
+      createdAt: now,
+      updatedAt: now,
+    }));
+
+    const created = await db.insert(taskInstancesTable).values(rows).returning();
+
+    res.status(201).json({
+      created: created.length,
+      skipped,
+      tasks: created,
+    });
   },
 );
 

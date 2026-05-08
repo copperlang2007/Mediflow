@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, sql, gt, lte, desc } from "drizzle-orm";
+import { eq, and, sql, gt, lte, desc, inArray } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -8,6 +8,7 @@ import {
   carrierCertificationsTable,
   carriersTable,
   renewalSnoozesTable,
+  ahipRecordsTable,
 } from "@workspace/db";
 import {
   requireAuth,
@@ -203,6 +204,210 @@ router.post(
       });
 
     res.json({ resolved: true, resourceType: rawType, resourceId: rawId });
+  },
+);
+
+// GET /compliance-alerts — agency-wide compliance dashboard rollup
+//
+// Surfaces compliance gaps that complement the renewals list (which only
+// covers items with an explicit expiry date). Specifically it reports:
+//   - Total counts of expiring licenses & certs by urgency (≤30, ≤60, ≤90 days)
+//   - AHIP status for the current cert year: passed / in-progress / missing
+//   - Per-agent rollup of how many alerts each agent has (top 10)
+router.get(
+  "/compliance-alerts",
+  requireAuth,
+  requirePermission("agent", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const now = new Date();
+    const in30 = new Date(now.getTime() + 30 * 86_400_000);
+    const in60 = new Date(now.getTime() + 60 * 86_400_000);
+    const in90 = new Date(now.getTime() + 90 * 86_400_000);
+    const currentYear = now.getFullYear();
+    const ahipDeadline = new Date(`${currentYear}-10-01T00:00:00Z`);
+    const daysUntilAhipDeadline = Math.ceil(
+      (ahipDeadline.getTime() - now.getTime()) / 86_400_000,
+    );
+
+    const [licRows, certRows, agentsActive, ahipRecords] = await Promise.all([
+      db
+        .select({
+          id: stateLicensesTable.id,
+          agentId: stateLicensesTable.agentId,
+          firstName: agentsTable.firstName,
+          lastName: agentsTable.lastName,
+          expiryDate: stateLicensesTable.expiryDate,
+        })
+        .from(stateLicensesTable)
+        .innerJoin(agentsTable, eq(stateLicensesTable.agentId, agentsTable.id))
+        .where(
+          and(
+            eq(agentsTable.orgId, authReq.orgId),
+            gt(stateLicensesTable.expiryDate, now),
+            lte(stateLicensesTable.expiryDate, in90),
+            eq(stateLicensesTable.status, "active"),
+          ),
+        ),
+      db
+        .select({
+          id: carrierCertificationsTable.id,
+          agentId: carrierCertificationsTable.agentId,
+          firstName: agentsTable.firstName,
+          lastName: agentsTable.lastName,
+          expiryDate: carrierCertificationsTable.expiryDate,
+        })
+        .from(carrierCertificationsTable)
+        .innerJoin(agentsTable, eq(carrierCertificationsTable.agentId, agentsTable.id))
+        .where(
+          and(
+            eq(agentsTable.orgId, authReq.orgId),
+            gt(carrierCertificationsTable.expiryDate, now),
+            lte(carrierCertificationsTable.expiryDate, in90),
+            eq(carrierCertificationsTable.status, "passed"),
+          ),
+        ),
+      db
+        .select({
+          id: agentsTable.id,
+          firstName: agentsTable.firstName,
+          lastName: agentsTable.lastName,
+        })
+        .from(agentsTable)
+        .where(
+          and(
+            eq(agentsTable.orgId, authReq.orgId),
+            inArray(agentsTable.status, ["onboarding", "active"]),
+          ),
+        ),
+      db
+        .select({
+          agentId: ahipRecordsTable.agentId,
+          status: ahipRecordsTable.status,
+        })
+        .from(ahipRecordsTable)
+        .innerJoin(agentsTable, eq(ahipRecordsTable.agentId, agentsTable.id))
+        .where(
+          and(
+            eq(agentsTable.orgId, authReq.orgId),
+            eq(ahipRecordsTable.certificationYear, currentYear),
+          ),
+        ),
+    ]);
+
+    type AgentRollup = {
+      agentId: string;
+      agentName: string;
+      licensesExpiring: number;
+      certsExpiring: number;
+      ahipStatus: "passed" | "in_progress" | "not_started" | "missing" | "failed";
+      alertCount: number;
+    };
+    const rollup = new Map<string, AgentRollup>();
+    const ensureAgent = (id: string, name: string): AgentRollup => {
+      let row = rollup.get(id);
+      if (!row) {
+        row = {
+          agentId: id,
+          agentName: name,
+          licensesExpiring: 0,
+          certsExpiring: 0,
+          ahipStatus: "missing",
+          alertCount: 0,
+        };
+        rollup.set(id, row);
+      }
+      return row;
+    };
+
+    const bucketize = (date: Date) => {
+      if (date <= in30) return "critical" as const;
+      if (date <= in60) return "warning" as const;
+      return "notice" as const;
+    };
+
+    const licCounts = { critical: 0, warning: 0, notice: 0 };
+    for (const r of licRows) {
+      if (!r.expiryDate) continue;
+      const b = bucketize(r.expiryDate);
+      licCounts[b]++;
+      const row = ensureAgent(r.agentId, `${r.firstName} ${r.lastName}`);
+      row.licensesExpiring++;
+    }
+
+    const certCounts = { critical: 0, warning: 0, notice: 0 };
+    for (const r of certRows) {
+      if (!r.expiryDate) continue;
+      const b = bucketize(r.expiryDate);
+      certCounts[b]++;
+      const row = ensureAgent(r.agentId, `${r.firstName} ${r.lastName}`);
+      row.certsExpiring++;
+    }
+
+    // Seed rollup with active agents so AHIP-missing rows show up even if the
+    // agent has no expiring licenses/certs.
+    for (const a of agentsActive) {
+      ensureAgent(a.id, `${a.firstName} ${a.lastName}`);
+    }
+
+    const ahipByAgent = new Map(ahipRecords.map((r) => [r.agentId, r.status]));
+    const ahipCounts = { passed: 0, in_progress: 0, not_started: 0, missing: 0, failed: 0 };
+
+    for (const a of agentsActive) {
+      const row = ensureAgent(a.id, `${a.firstName} ${a.lastName}`);
+      const status = ahipByAgent.get(a.id);
+      if (status === "passed") {
+        row.ahipStatus = "passed";
+        ahipCounts.passed++;
+      } else if (status === "in_progress") {
+        row.ahipStatus = "in_progress";
+        ahipCounts.in_progress++;
+      } else if (status === "not_started") {
+        row.ahipStatus = "not_started";
+        ahipCounts.not_started++;
+      } else if (status === "failed") {
+        row.ahipStatus = "failed";
+        ahipCounts.failed++;
+      } else {
+        row.ahipStatus = "missing";
+        ahipCounts.missing++;
+      }
+    }
+
+    // alertCount = expiring items + (AHIP not passed)
+    for (const row of rollup.values()) {
+      row.alertCount =
+        row.licensesExpiring +
+        row.certsExpiring +
+        (row.ahipStatus !== "passed" ? 1 : 0);
+    }
+
+    const topAgents = Array.from(rollup.values())
+      .filter((r) => r.alertCount > 0)
+      .sort((a, b) => b.alertCount - a.alertCount)
+      .slice(0, 10);
+
+    const totalActiveAgents = agentsActive.length;
+    const ahipCompletionRate =
+      totalActiveAgents > 0
+        ? Math.round((ahipCounts.passed / totalActiveAgents) * 1000) / 10
+        : 0;
+
+    res.json({
+      generatedAt: now.toISOString(),
+      currentCertYear: currentYear,
+      ahipDeadline: ahipDeadline.toISOString(),
+      daysUntilAhipDeadline,
+      licenses: licCounts,
+      certifications: certCounts,
+      ahip: {
+        ...ahipCounts,
+        totalActiveAgents,
+        completionRate: ahipCompletionRate,
+      },
+      topAgents,
+      agentsWithAlerts: Array.from(rollup.values()).filter((r) => r.alertCount > 0).length,
+    });
   },
 );
 
