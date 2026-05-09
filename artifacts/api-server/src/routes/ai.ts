@@ -8,6 +8,7 @@
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { eq, and, desc, sql, ilike } from "drizzle-orm";
 import { randomUUID } from "crypto";
@@ -54,6 +55,41 @@ const storageService = new ObjectStorageService();
 
 const router: IRouter = Router();
 
+/**
+ * Strip characters that could be used to inject into the system prompt
+ * (newlines, quotes, backslashes) and clamp length. Use whenever a
+ * user-controllable DB field (contact / agent name) is interpolated
+ * into a prompt template.
+ */
+function sanitizeForPrompt(s: string): string {
+  return s.replace(/[\n\r"\\]/g, "").slice(0, 200);
+}
+
+// ---- Per-endpoint AI rate limits (keyed by userId, not IP) ----
+//
+// Applied AFTER requireAuth so unauthenticated callers hit the auth wall
+// first and don't burn rate-limit budget. The limiter only counts the
+// initial request; SSE streams don't re-trigger it once the connection
+// is open, so streaming behavior is preserved.
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+function aiRateLimiter(max: number) {
+  return rateLimit({
+    windowMs: RATE_LIMIT_WINDOW_MS,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: { keyGeneratorIpFallback: false },
+    keyGenerator: (req) => (req as AuthenticatedRequest).userId ?? req.ip ?? "unknown",
+    message: { error: "AI request rate limit exceeded. Please slow down." },
+  });
+}
+
+const aiChatLimiter = aiRateLimiter(30);
+const aiDraftLimiter = aiRateLimiter(20);
+const aiComplianceReportLimiter = aiRateLimiter(5);
+const aiComplianceReportDownloadLimiter = aiRateLimiter(30);
+
 const MEDIFLOW_SYSTEM_PREAMBLE = `You are MediFlow AI, an intelligent assistant built into the MediFlow Medicare Sales Agency Platform. You help insurance agents, compliance managers, and agency administrators manage agent lifecycle, CRM contacts, compliance, and outreach.
 
 You have access to real-time platform data provided in the context below. Always base your answers on this data — never fabricate names, numbers, or details. When asked to draft communications, produce professional, compliant content appropriate for Medicare insurance outreach.
@@ -88,6 +124,7 @@ const ChatRequestSchema = z.object({
 router.post(
   "/ai/chat",
   requireAuth,
+  aiChatLimiter,
   requirePermission("contact", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -176,6 +213,7 @@ const DraftRequestSchema = z.object({
 router.post(
   "/ai/draft",
   requireAuth,
+  aiDraftLimiter,
   requirePermission("contact", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -255,6 +293,7 @@ router.post(
 router.post(
   "/ai/compliance-report",
   requireAuth,
+  aiComplianceReportLimiter,
   requirePermission("compliance_report", "create"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -392,6 +431,7 @@ router.post(
 router.get(
   "/ai/compliance-report/:documentId",
   requireAuth,
+  aiComplianceReportDownloadLimiter,
   requirePermission("compliance_report", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -434,6 +474,7 @@ async function resolveSlashCommand(message: string, orgId: string): Promise<stri
   const complianceMatch = trimmed.match(/^\/compliance-check\s+(.+)/i);
   if (complianceMatch) {
     const name = complianceMatch[1].trim();
+    const safeName = sanitizeForPrompt(name);
     const nameParts = name.split(/\s+/);
     const agents = await db.select().from(agentsTable).where(
       and(
@@ -445,15 +486,19 @@ async function resolveSlashCommand(message: string, orgId: string): Promise<stri
     ).limit(1);
     if (agents[0]) {
       const ctx = await buildAgentContext(agents[0].id, orgId);
-      return `Perform a full compliance gap report for ${agents[0].firstName} ${agents[0].lastName}. Include: (1) License status and expiry risks, (2) Carrier certification gaps, (3) AHIP status, (4) Overdue tasks, (5) Priority action items ranked by urgency. Format as structured Markdown.\n\nAGENT DATA:\n${ctx}`;
+      const safeFirst = sanitizeForPrompt(agents[0].firstName);
+      const safeLast = sanitizeForPrompt(agents[0].lastName);
+      return `Perform a full compliance gap report for ${safeFirst} ${safeLast}. Include: (1) License status and expiry risks, (2) Carrier certification gaps, (3) AHIP status, (4) Overdue tasks, (5) Priority action items ranked by urgency. Format as structured Markdown.\n\nAGENT DATA:\n${ctx}`;
     }
-    return `Perform a full compliance gap report for the agent named "${name}". No matching agent was found in the system — ask the user to verify the name. Include: (1) License status and expiry risks, (2) Carrier certification gaps, (3) AHIP status, (4) Overdue tasks, (5) Priority action items ranked by urgency. Format as structured Markdown.`;
+    return `Perform a full compliance gap report for the agent named "${safeName}". No matching agent was found in the system — ask the user to verify the name. Include: (1) License status and expiry risks, (2) Carrier certification gaps, (3) AHIP status, (4) Overdue tasks, (5) Priority action items ranked by urgency. Format as structured Markdown.`;
   }
 
   const draftSmsMatch = trimmed.match(/^\/draft-sms\s+(\S+(?:\s+\S+)?)\s+(.+)/i);
   if (draftSmsMatch) {
     const contactName = draftSmsMatch[1].trim();
     const goal = draftSmsMatch[2].trim();
+    const safeName = sanitizeForPrompt(contactName);
+    const safeGoal = sanitizeForPrompt(goal);
     const nameParts = contactName.split(/\s+/);
     const contacts = await db.select().from(contactsTable).where(
       and(
@@ -465,15 +510,19 @@ async function resolveSlashCommand(message: string, orgId: string): Promise<stri
     ).limit(1);
     if (contacts[0]) {
       const ctx = await buildContactContext(contacts[0].id, orgId);
-      return `Draft a professional SMS (max 160 chars) for ${contacts[0].firstName} ${contacts[0].lastName}. Goal: ${goal}. Return ONLY the message text.\n\nCONTACT DATA:\n${ctx}`;
+      const safeFirst = sanitizeForPrompt(contacts[0].firstName);
+      const safeLast = sanitizeForPrompt(contacts[0].lastName);
+      return `Draft a professional SMS (max 160 chars) for ${safeFirst} ${safeLast}. Goal: ${safeGoal}. Return ONLY the message text.\n\nCONTACT DATA:\n${ctx}`;
     }
-    return `Draft a professional SMS (max 160 chars) for the contact named "${contactName}". Goal: ${goal}. Return ONLY the message text. Note: no matching contact found — draft a generic outreach.`;
+    return `Draft a professional SMS (max 160 chars) for the contact named "${safeName}". Goal: ${safeGoal}. Return ONLY the message text. Note: no matching contact found — draft a generic outreach.`;
   }
 
   const draftEmailMatch = trimmed.match(/^\/draft-email\s+(\S+(?:\s+\S+)?)\s+(.+)/i);
   if (draftEmailMatch) {
     const contactName = draftEmailMatch[1].trim();
     const goal = draftEmailMatch[2].trim();
+    const safeName = sanitizeForPrompt(contactName);
+    const safeGoal = sanitizeForPrompt(goal);
     const nameParts = contactName.split(/\s+/);
     const contacts = await db.select().from(contactsTable).where(
       and(
@@ -485,14 +534,17 @@ async function resolveSlashCommand(message: string, orgId: string): Promise<stri
     ).limit(1);
     if (contacts[0]) {
       const ctx = await buildContactContext(contacts[0].id, orgId);
-      return `Draft a professional email for ${contacts[0].firstName} ${contacts[0].lastName}. Goal: ${goal}. Return JSON with keys "subject" (string) and "body" (plain text with paragraphs).\n\nCONTACT DATA:\n${ctx}`;
+      const safeFirst = sanitizeForPrompt(contacts[0].firstName);
+      const safeLast = sanitizeForPrompt(contacts[0].lastName);
+      return `Draft a professional email for ${safeFirst} ${safeLast}. Goal: ${safeGoal}. Return JSON with keys "subject" (string) and "body" (plain text with paragraphs).\n\nCONTACT DATA:\n${ctx}`;
     }
-    return `Draft a professional email for the contact named "${contactName}". Goal: ${goal}. Return JSON with keys "subject" (string) and "body" (plain text with paragraphs). Note: no matching contact found — draft generic outreach.`;
+    return `Draft a professional email for the contact named "${safeName}". Goal: ${safeGoal}. Return JSON with keys "subject" (string) and "body" (plain text with paragraphs). Note: no matching contact found — draft generic outreach.`;
   }
 
   const summarizeMatch = trimmed.match(/^\/summarize\s+(.+)/i);
   if (summarizeMatch) {
     const name = summarizeMatch[1].trim();
+    const safeName = sanitizeForPrompt(name);
     const nameParts = name.split(/\s+/);
     const contacts = await db.select().from(contactsTable).where(
       and(
@@ -504,9 +556,11 @@ async function resolveSlashCommand(message: string, orgId: string): Promise<stri
     ).limit(1);
     if (contacts[0]) {
       const ctx = await buildContactContext(contacts[0].id, orgId);
-      return `Provide a brief summary for ${contacts[0].firstName} ${contacts[0].lastName}: (1) enrollment status overview, (2) last interaction and outcome, (3) current sequence status, (4) recommended next action. Be concise (under 200 words).\n\nCONTACT DATA:\n${ctx}`;
+      const safeFirst = sanitizeForPrompt(contacts[0].firstName);
+      const safeLast = sanitizeForPrompt(contacts[0].lastName);
+      return `Provide a brief summary for ${safeFirst} ${safeLast}: (1) enrollment status overview, (2) last interaction and outcome, (3) current sequence status, (4) recommended next action. Be concise (under 200 words).\n\nCONTACT DATA:\n${ctx}`;
     }
-    return `Provide a brief summary for the contact named "${name}": (1) enrollment status overview, (2) last interaction and outcome, (3) current sequence status, (4) recommended next action. Be concise (under 200 words). Note: no matching contact found.`;
+    return `Provide a brief summary for the contact named "${safeName}": (1) enrollment status overview, (2) last interaction and outcome, (3) current sequence status, (4) recommended next action. Be concise (under 200 words). Note: no matching contact found.`;
   }
 
   const renewalMatch = trimmed.match(/^\/renewal-report/i);
@@ -517,6 +571,7 @@ async function resolveSlashCommand(message: string, orgId: string): Promise<stri
   const offboardingMatch = trimmed.match(/^\/offboarding-check\s+(.+)/i);
   if (offboardingMatch) {
     const name = offboardingMatch[1].trim();
+    const safeName = sanitizeForPrompt(name);
     const nameParts = name.split(/\s+/);
     const agents = await db.select().from(agentsTable).where(
       and(
@@ -528,9 +583,11 @@ async function resolveSlashCommand(message: string, orgId: string): Promise<stri
     ).limit(1);
     if (agents[0]) {
       const ctx = await buildAgentContext(agents[0].id, orgId);
-      return `List all offboarding steps remaining for ${agents[0].firstName} ${agents[0].lastName}. Include: (1) open tasks to complete or transfer, (2) active licenses to surrender or transfer, (3) carrier certifications to update, (4) contact reassignments needed, (5) documentation requirements. Format as a checklist.\n\nAGENT DATA:\n${ctx}`;
+      const safeFirst = sanitizeForPrompt(agents[0].firstName);
+      const safeLast = sanitizeForPrompt(agents[0].lastName);
+      return `List all offboarding steps remaining for ${safeFirst} ${safeLast}. Include: (1) open tasks to complete or transfer, (2) active licenses to surrender or transfer, (3) carrier certifications to update, (4) contact reassignments needed, (5) documentation requirements. Format as a checklist.\n\nAGENT DATA:\n${ctx}`;
     }
-    return `List all offboarding steps remaining for the agent named "${name}". Include: (1) open tasks to complete or transfer, (2) active licenses to surrender or transfer, (3) carrier certifications to update, (4) contact reassignments needed, (5) documentation requirements. Format as a checklist. Note: no matching agent found.`;
+    return `List all offboarding steps remaining for the agent named "${safeName}". Include: (1) open tasks to complete or transfer, (2) active licenses to surrender or transfer, (3) carrier certifications to update, (4) contact reassignments needed, (5) documentation requirements. Format as a checklist. Note: no matching agent found.`;
   }
 
   return message;
