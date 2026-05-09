@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { db, agentsTable, documentsTable } from "@workspace/db";
@@ -63,6 +63,49 @@ router.get(
   },
 );
 
+// GET /documents — org-wide list with optional filters
+router.get(
+  "/documents",
+  requireAuth,
+  requirePermission("agent", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const { agentId, category } = req.query as {
+      agentId?: string;
+      category?: string;
+    };
+
+    const conditions: SQL[] = [eq(documentsTable.orgId, authReq.orgId)];
+    if (agentId) conditions.push(eq(documentsTable.agentId, agentId));
+    if (category) conditions.push(eq(documentsTable.category, category));
+
+    // Join agents so the UI can render the owner without an N+1.
+    const docs = await db
+      .select({
+        id: documentsTable.id,
+        orgId: documentsTable.orgId,
+        agentId: documentsTable.agentId,
+        contactId: documentsTable.contactId,
+        name: documentsTable.name,
+        category: documentsTable.category,
+        storageKey: documentsTable.storageKey,
+        fileSizeBytes: documentsTable.fileSizeBytes,
+        mimeType: documentsTable.mimeType,
+        uploadedBy: documentsTable.uploadedBy,
+        createdAt: documentsTable.createdAt,
+        agentFirstName: agentsTable.firstName,
+        agentLastName: agentsTable.lastName,
+      })
+      .from(documentsTable)
+      .leftJoin(agentsTable, eq(documentsTable.agentId, agentsTable.id))
+      .where(and(...conditions))
+      .orderBy(desc(documentsTable.createdAt))
+      .limit(500);
+
+    res.json({ documents: docs, total: docs.length });
+  },
+);
+
 router.post(
   "/agents/:id/documents",
   requireAuth,
@@ -96,6 +139,46 @@ router.post(
       .returning();
 
     res.status(201).json(doc);
+  },
+);
+
+// GET /documents/:docId/download — stream the object via signed url
+router.get(
+  "/documents/:docId/download",
+  requireAuth,
+  requirePermission("agent", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const docId = Array.isArray(req.params.docId) ? req.params.docId[0] : req.params.docId;
+
+    const [doc] = await db
+      .select()
+      .from(documentsTable)
+      .where(and(eq(documentsTable.id, docId), eq(documentsTable.orgId, authReq.orgId)))
+      .limit(1);
+
+    if (!doc) {
+      res.status(404).json({ error: "Document not found" });
+      return;
+    }
+
+    try {
+      const { ObjectStorageService } = await import("../lib/objectStorage");
+      const objectStorage = new ObjectStorageService();
+      const file = await objectStorage.getObjectEntityFile(doc.storageKey);
+      const contentType = doc.mimeType ?? "application/octet-stream";
+      const safeName = encodeURIComponent(doc.name.replace(/[^\w\s.-]/g, "_"));
+
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Disposition", `attachment; filename="${safeName}"`);
+
+      const dlResponse = await objectStorage.downloadObject(file);
+      const buffer = Buffer.from(await dlResponse.arrayBuffer());
+      res.send(buffer);
+    } catch (err) {
+      req.log.error({ err, docId }, "Failed to stream document");
+      res.status(500).json({ error: "Failed to retrieve document file" });
+    }
   },
 );
 
