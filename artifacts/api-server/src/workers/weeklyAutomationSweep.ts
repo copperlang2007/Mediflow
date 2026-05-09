@@ -28,6 +28,7 @@ import {
 } from "@workspace/db";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { logger } from "../lib/logger";
+import { captureWorkerError } from "../lib/sentry";
 
 // ---- helpers ----
 
@@ -351,6 +352,7 @@ export async function dailyAutomationSweepWorker(): Promise<void> {
       );
     } catch (err) {
       logger.error({ err, orgId: org.id }, "Automation sweep failed for org — skipping");
+      captureWorkerError(err, { worker: "weeklyAutomationSweep", orgId: org.id });
     }
   }
 
