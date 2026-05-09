@@ -15,9 +15,11 @@ import {
   useSendContactSms, useSendContactEmail,
   useGetDeals, useCreateDeal,
   useGetPipelines,
+  customFetch,
   getGetContactQueryKey, getGetContactActivitiesQueryKey,
   getGetDealsQueryKey,
 } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -272,40 +274,160 @@ function LogActivityModal({ contactId, open, onClose }: { contactId: string; ope
 // Timeline Tab
 // ──────────────────────────────────────────────
 
+type ContactMessage = {
+  id: string;
+  threadId: string;
+  channel: "sms" | "email";
+  direction: "inbound" | "outbound";
+  body: string | null;
+  subject: string | null;
+  fromAddress: string | null;
+  toAddress: string | null;
+  status: string;
+  sentAt: string | null;
+  createdAt: string;
+};
+
+type TimelineEntry =
+  | { kind: "activity"; id: string; at: Date; activity: Activity }
+  | { kind: "message"; id: string; at: Date; message: ContactMessage };
+
 function TimelineTab({ contactId }: { contactId: string }) {
   const [logOpen, setLogOpen] = useState(false);
-  const { data: activitiesRaw, isLoading } = useGetContactActivities(contactId, { limit: 100 });
+  const { data: activitiesRaw, isLoading: activitiesLoading } = useGetContactActivities(
+    contactId,
+    { limit: 100 },
+  );
   const activities: Activity[] = activitiesRaw ?? [];
+
+  // Pull messages (SMS + email) for this contact and merge them into the
+  // timeline so the user sees the full communication history in one stream.
+  const { data: messagesData, isLoading: messagesLoading } = useQuery({
+    queryKey: ["/api/contacts", contactId, "messages"],
+    queryFn: () =>
+      customFetch<{ messages: ContactMessage[]; total: number }>(
+        `/api/contacts/${contactId}/messages?limit=200`,
+      ),
+    staleTime: 30_000,
+  });
+  const messages: ContactMessage[] = messagesData?.messages ?? [];
+
+  const isLoading = activitiesLoading || messagesLoading;
+
+  const entries: TimelineEntry[] = [
+    ...activities.map((a): TimelineEntry => ({
+      kind: "activity",
+      id: a.id,
+      at: new Date(a.createdAt),
+      activity: a,
+    })),
+    ...messages.map((m): TimelineEntry => ({
+      kind: "message",
+      id: m.id,
+      at: new Date(m.sentAt ?? m.createdAt),
+      message: m,
+    })),
+  ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <Button size="sm" variant="outline" onClick={() => setLogOpen(true)}><Plus className="h-4 w-4 mr-1" />Log Activity</Button>
+      <div className="flex items-center justify-end gap-3">
+        <span className="text-xs text-muted-foreground">
+          {messages.length} message{messages.length !== 1 ? "s" : ""} · {activities.length} activit
+          {activities.length !== 1 ? "ies" : "y"}
+        </span>
+        <Button size="sm" variant="outline" onClick={() => setLogOpen(true)}>
+          <Plus className="h-4 w-4 mr-1" />
+          Log Activity
+        </Button>
       </div>
       {isLoading ? (
-        <div className="space-y-3">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-16 rounded-lg" />)}</div>
-      ) : activities.length === 0 ? (
-        <div className="text-center py-12 text-sm text-muted-foreground">No activity yet — log a note or make contact to get started.</div>
+        <div className="space-y-3">
+          {[...Array(4)].map((_, i) => (
+            <Skeleton key={i} className="h-16 rounded-lg" />
+          ))}
+        </div>
+      ) : entries.length === 0 ? (
+        <div className="text-center py-12 text-sm text-muted-foreground">
+          No activity yet — log a note or send a message to get started.
+        </div>
       ) : (
         <div className="relative">
           <div className="absolute left-5 top-0 bottom-0 w-px bg-border" />
           <div className="space-y-4">
-            {activities.map((act) => (
-              <div key={act.id} className="flex gap-4">
-                <div className="relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-background shadow-sm">
-                  {ACTIVITY_ICONS[act.type] ?? <ActivityIcon className="h-4 w-4 text-muted-foreground" />}
-                </div>
-                <div className="flex-1 pb-2">
-                  <div className="flex items-start gap-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium capitalize">{act.type.replace(/_/g, " ")}</p>
-                      {act.body && <p className="text-sm text-muted-foreground mt-0.5 whitespace-pre-line">{act.body}</p>}
+            {entries.map((entry) =>
+              entry.kind === "activity" ? (
+                <div key={`a-${entry.id}`} className="flex gap-4">
+                  <div className="relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-background shadow-sm">
+                    {ACTIVITY_ICONS[entry.activity.type] ?? (
+                      <ActivityIcon className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </div>
+                  <div className="flex-1 pb-2">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium capitalize">
+                          {entry.activity.type.replace(/_/g, " ")}
+                        </p>
+                        {entry.activity.body && (
+                          <p className="text-sm text-muted-foreground mt-0.5 whitespace-pre-line">
+                            {entry.activity.body}
+                          </p>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground shrink-0 mt-0.5">
+                        {formatDistanceToNow(entry.at)} ago
+                      </p>
                     </div>
-                    <p className="text-xs text-muted-foreground shrink-0 mt-0.5">{formatDistanceToNow(new Date(act.createdAt))} ago</p>
                   </div>
                 </div>
-              </div>
-            ))}
+              ) : (
+                <div key={`m-${entry.id}`} className="flex gap-4">
+                  <div
+                    className={cn(
+                      "relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-background shadow-sm",
+                      entry.message.direction === "inbound"
+                        ? "ring-2 ring-blue-200"
+                        : "ring-2 ring-green-100",
+                    )}
+                  >
+                    {entry.message.channel === "sms" ? (
+                      <MessageSquare className="h-4 w-4 text-blue-600" />
+                    ) : (
+                      <Mail className="h-4 w-4 text-purple-600" />
+                    )}
+                  </div>
+                  <div className="flex-1 pb-2">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium">
+                          {entry.message.direction === "inbound" ? "Received" : "Sent"}{" "}
+                          <span className="uppercase text-xs text-muted-foreground tracking-wide ml-1">
+                            {entry.message.channel}
+                          </span>
+                          {entry.message.subject && (
+                            <span className="text-muted-foreground ml-2">
+                              · {entry.message.subject}
+                            </span>
+                          )}
+                        </p>
+                        {entry.message.body && (
+                          <p className="text-sm text-muted-foreground mt-0.5 whitespace-pre-line line-clamp-4">
+                            {entry.message.body}
+                          </p>
+                        )}
+                        <p className="text-[11px] text-muted-foreground/70 mt-1 capitalize">
+                          {entry.message.status}
+                        </p>
+                      </div>
+                      <p className="text-xs text-muted-foreground shrink-0 mt-0.5">
+                        {formatDistanceToNow(entry.at)} ago
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ),
+            )}
           </div>
         </div>
       )}
