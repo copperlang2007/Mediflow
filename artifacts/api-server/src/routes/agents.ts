@@ -21,6 +21,7 @@ import {
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { randomUUID } from "crypto";
 import { createChecklistRun } from "./checklists";
+import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const InitialLicenseSchema = z.object({
   stateCode: z.string().length(2).toUpperCase(),
@@ -99,8 +100,8 @@ router.get(
       sortDir?: string;
     };
 
-    const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 200);
-    const offsetNum = parseInt(offset ?? "0", 10) || 0;
+    const limitNum = safeLimit(limit, 50, 1000);
+    const offsetNum = safeOffset(offset);
 
     const conditions: SQL[] = [eq(agentsTable.orgId, authReq.orgId)];
 

@@ -21,6 +21,7 @@ import {
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
+import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const router: IRouter = Router();
 
@@ -114,8 +115,8 @@ router.get(
       conditions.push(sql`${contactsTable.tags} @> ARRAY[${tag}]::text[]`);
     }
 
-    const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 200);
-    const offsetNum = parseInt(offset ?? "0", 10) || 0;
+    const limitNum = safeLimit(limit, 50, 1000);
+    const offsetNum = safeOffset(offset);
     const dir = sortDir === "desc" ? desc : asc;
     const orderExpr =
       sortBy === "name" ? [dir(contactsTable.lastName), dir(contactsTable.firstName)] :
@@ -285,8 +286,8 @@ router.get(
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
-    const limitNum = Math.min(parseInt((req.query.limit as string) ?? "50", 10) || 50, 200);
-    const offsetNum = parseInt((req.query.offset as string) ?? "0", 10) || 0;
+    const limitNum = safeLimit(req.query.limit, 50, 1000);
+    const offsetNum = safeOffset(req.query.offset);
     const activities = await db.select().from(activitiesTable).where(and(eq(activitiesTable.contactId, id), eq(activitiesTable.orgId, authReq.orgId))).orderBy(desc(activitiesTable.createdAt)).limit(limitNum).offset(offsetNum);
     res.json(activities);
   },
@@ -442,7 +443,7 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const limit = Math.min(parseInt((req.query.limit as string) ?? "100", 10) || 100, 500);
+    const limit = safeLimit(req.query.limit, 100, 500);
 
     const [contact] = await db
       .select({ id: contactsTable.id })
