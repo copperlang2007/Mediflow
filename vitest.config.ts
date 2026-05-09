@@ -16,5 +16,9 @@ export default defineConfig({
     ],
     environment: "node",
     globals: false,
+    // Integration tests boot a pglite instance and run every drizzle
+    // migration against it, which can take a few seconds on first run.
+    testTimeout: 30000,
+    hookTimeout: 30000,
   },
 });
