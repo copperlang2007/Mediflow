@@ -1017,6 +1017,18 @@ export interface UpdateTaskBody {
   priority?: UpdateTaskBodyPriority;
 }
 
+export interface BulkAssignTasksFromTemplateBody {
+  templateId: string;
+  agentIds: string[];
+  dueDate?: string;
+}
+
+export interface BulkAssignTasksFromTemplateResponse {
+  created: number;
+  skipped: string[];
+  tasks: Task[];
+}
+
 export interface AgentDocument {
   id: string;
   orgId: string;
@@ -1943,6 +1955,276 @@ export interface AiDraftResponse {
   aiAssisted: boolean;
 }
 
+export interface AgentPerformanceRow {
+  agentId: string;
+  agentName: string;
+  email: string;
+  status: string;
+  contactsWorked: number;
+  callsLogged: number;
+  dealsWon: number;
+  dealValueWon: number;
+  enrolledContacts: number;
+  complianceScore: number;
+  licensesActive: number;
+  licensesExpiring: number;
+  certificationsPassed: number;
+  ahipStatus: string;
+}
+
+export interface PipelineFunnelStage {
+  stageId: string;
+  stageName: string;
+  orderIndex: number;
+  dealCount: number;
+  totalValue: number;
+  wonCount: number;
+  lostCount: number;
+}
+
+export interface PipelineReportRow {
+  pipelineId: string;
+  pipelineName: string;
+  totalDeals: number;
+  wonDeals: number;
+  lostDeals: number;
+  winRate: number;
+  totalWonValue: number;
+  funnel: PipelineFunnelStage[];
+}
+
+export interface LeadSourceRow {
+  source: string;
+  total: number;
+  converted: number;
+  enrolled: number;
+  conversionRate: number;
+  enrollmentRate: number;
+}
+
+export type LeadsReportTrendItem = {
+  date: string;
+  count: number;
+};
+
+export interface LeadsReport {
+  sourceBreakdown: LeadSourceRow[];
+  trend: LeadsReportTrendItem[];
+  totalLeads: number;
+  convertedLeads: number;
+}
+
+export type ComplianceMatrixReportLicenseMatrixItem = {
+  [key: string]: unknown;
+};
+
+export type ComplianceMatrixReportExpiryByMonthItem = {
+  [key: string]: unknown;
+};
+
+export type ComplianceMatrixReportCarrierCertCompletionItem = {
+  [key: string]: unknown;
+};
+
+export type ComplianceMatrixReportAhipTrendItem = { [key: string]: unknown };
+
+export interface ComplianceMatrixReport {
+  licenseMatrix: ComplianceMatrixReportLicenseMatrixItem[];
+  expiryByMonth: ComplianceMatrixReportExpiryByMonthItem[];
+  carrierCertCompletion: ComplianceMatrixReportCarrierCertCompletionItem[];
+  ahipTrend: ComplianceMatrixReportAhipTrendItem[];
+}
+
+export type CommunicationsReportTrendItem = {
+  date: string;
+  sms: number;
+  email: number;
+};
+
+export interface CommunicationsReport {
+  totalSms: number;
+  totalEmail: number;
+  aiAssistedSms: number;
+  aiAssistedEmail: number;
+  trend: CommunicationsReportTrendItem[];
+}
+
+export interface RetentionReport {
+  enrolledContacts: number;
+  lostContacts: number;
+  atRiskContacts: number;
+  retentionRate: number;
+  atRiskRate: number;
+}
+
+export type PaginatedAuditLogEntriesItem = { [key: string]: unknown };
+
+export interface PaginatedAuditLog {
+  entries: PaginatedAuditLogEntriesItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface UserAccessReviewRow {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  isActive: boolean;
+  lastLoginAt?: string | null;
+  createdAt: string;
+}
+
+export interface LoginEvent {
+  id: string;
+  orgId: string;
+  userId?: string | null;
+  email?: string | null;
+  success: boolean;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  failureReason?: string | null;
+  createdAt: string;
+}
+
+export interface PaginatedLoginHistory {
+  events: LoginEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export type ExportLogEntryFilters = { [key: string]: unknown } | null;
+
+export interface ExportLogEntry {
+  id: string;
+  userId?: string | null;
+  exportType: string;
+  filters?: ExportLogEntryFilters;
+  recordCount?: number | null;
+  createdAt: string;
+  userFullName?: string | null;
+}
+
+export interface PaginatedExportLog {
+  exports: ExportLogEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export type SessionConfigSessionTimeoutMinutes =
+  (typeof SessionConfigSessionTimeoutMinutes)[keyof typeof SessionConfigSessionTimeoutMinutes];
+
+export const SessionConfigSessionTimeoutMinutes = {
+  NUMBER_15: 15,
+  NUMBER_30: 30,
+  NUMBER_60: 60,
+} as const;
+
+export interface SessionConfig {
+  sessionTimeoutMinutes: SessionConfigSessionTimeoutMinutes;
+}
+
+export interface DataRetentionPolicy {
+  id?: string | null;
+  orgId: string;
+  recordType: string;
+  retentionDays: number;
+  isEnabled: boolean;
+  updatedAt?: string;
+  updatedByUserId?: string | null;
+}
+
+export interface UpdateDataRetentionPolicyBody {
+  recordType: string;
+  retentionDays: number;
+  isEnabled: boolean;
+}
+
+export type BaaControlStatus =
+  (typeof BaaControlStatus)[keyof typeof BaaControlStatus];
+
+export const BaaControlStatus = {
+  implemented: "implemented",
+  partial: "partial",
+  not_implemented: "not_implemented",
+} as const;
+
+export interface BaaControl {
+  id: string;
+  category: string;
+  control: string;
+  status: BaaControlStatus;
+  notes?: string;
+}
+
+export type ImportUploadResponseSampleRowsItem = { [key: string]: unknown };
+
+export type ImportUploadResponseSuggestedMapping = { [key: string]: unknown };
+
+export type ImportUploadResponseTargetFieldsItem = {
+  field: string;
+  label: string;
+  required?: boolean;
+};
+
+export interface ImportUploadResponse {
+  headers: string[];
+  sampleRows: ImportUploadResponseSampleRowsItem[];
+  totalRows: number;
+  suggestedMapping: ImportUploadResponseSuggestedMapping;
+  targetFields: ImportUploadResponseTargetFieldsItem[];
+}
+
+export type ImportValidationResponseErrorsItem = {
+  row: number;
+  field: string;
+  message: string;
+  value?: string;
+};
+
+export interface ImportValidationResponse {
+  totalRows: number;
+  errorCount: number;
+  validRows: number;
+  errors: ImportValidationResponseErrorsItem[];
+}
+
+export type GhlValidationResponseErrorsItem = { [key: string]: unknown };
+
+export interface GhlValidationResponse {
+  totalRows: number;
+  errorCount: number;
+  validRows: number;
+  errors: GhlValidationResponseErrorsItem[];
+  duplicateEmails: number;
+  duplicatePhones: number;
+}
+
+export interface ImportJobStarted {
+  jobId: string;
+  totalRows: number;
+}
+
+export interface ImportJob {
+  id: string;
+  orgId: string;
+  userId?: string | null;
+  importType: string;
+  status: string;
+  totalRows: number;
+  processedRows: number;
+  createdCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  errorCount: number;
+  fileName?: string | null;
+  createdAt: string;
+  completedAt?: string | null;
+}
+
 export type GetUsersParams = {
   role?: string;
   isActive?: boolean;
@@ -2271,3 +2553,116 @@ export const GetAutomationRuleLogsResult = {
   partial: "partial",
   failed: "failed",
 } as const;
+
+export type GetAgentPerformanceReportParams = {
+  startDate?: string;
+  endDate?: string;
+  managerId?: string;
+  agentId?: string;
+};
+
+export type ExportAgentPerformanceReportParams = {
+  startDate?: string;
+  endDate?: string;
+};
+
+export type GetPipelineReportParams = {
+  startDate?: string;
+  endDate?: string;
+};
+
+export type GetLeadsReportParams = {
+  startDate?: string;
+  endDate?: string;
+};
+
+export type GetCommunicationsReportParams = {
+  startDate?: string;
+  endDate?: string;
+};
+
+export type GetAdminAuditLogParams = {
+  userId?: string;
+  action?: string;
+  resourceType?: string;
+  startDate?: string;
+  endDate?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type ExportAdminAuditLogParams = {
+  startDate?: string;
+  endDate?: string;
+};
+
+export type DeactivateUser200 = {
+  success: boolean;
+};
+
+export type ReactivateUser200 = {
+  success: boolean;
+};
+
+export type GetLoginHistoryParams = {
+  userId?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type GetExportLogParams = {
+  limit?: number;
+  offset?: number;
+};
+
+export type UpdateDataRetentionPolicy200 = {
+  success: boolean;
+};
+
+export type UploadMondayImportBody = {
+  file: Blob;
+};
+
+export type ValidateMondayImportBody = {
+  file: Blob;
+  /** JSON stringified field mapping */
+  mapping?: string;
+};
+
+export type ConfirmMondayImportBody = {
+  file: Blob;
+  mapping?: string;
+};
+
+export type UploadGhlImportBody = {
+  file: Blob;
+};
+
+export type ValidateGhlImportBody = {
+  file: Blob;
+  mapping?: string;
+};
+
+export type ConfirmGhlImportBodyDuplicateAction =
+  (typeof ConfirmGhlImportBodyDuplicateAction)[keyof typeof ConfirmGhlImportBodyDuplicateAction];
+
+export const ConfirmGhlImportBodyDuplicateAction = {
+  skip: "skip",
+  merge: "merge",
+  create_new: "create_new",
+} as const;
+
+export type ConfirmGhlImportBody = {
+  file: Blob;
+  mapping?: string;
+  duplicateAction?: ConfirmGhlImportBodyDuplicateAction;
+};
+
+export type UploadContactsImportBody = {
+  file: Blob;
+};
+
+export type ConfirmContactsImportBody = {
+  file: Blob;
+  mapping?: string;
+};

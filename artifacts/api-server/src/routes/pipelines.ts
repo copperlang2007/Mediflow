@@ -18,6 +18,7 @@ import {
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
+import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const router: IRouter = Router();
 
@@ -151,8 +152,8 @@ router.get("/deals", requireAuth, requirePermission("contact", "read"), async (r
   if (stageId) conditions.push(eq(dealsTable.stageId, stageId));
   if (status) conditions.push(eq(dealsTable.status, status as "open" | "won" | "lost"));
   if (contactId) conditions.push(eq(dealsTable.contactId, contactId));
-  const limitNum = Math.min(parseInt(limit ?? "100", 10) || 100, 500);
-  const offsetNum = parseInt(offset ?? "0", 10) || 0;
+  const limitNum = safeLimit(limit, 100, 500);
+  const offsetNum = safeOffset(offset);
   const deals = await db
     .select({ deal: dealsTable, contactFirstName: contactsTable.firstName, contactLastName: contactsTable.lastName, contactEmail: contactsTable.email })
     .from(dealsTable)

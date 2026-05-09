@@ -11,4 +11,4 @@ export * from "./settings";
 export * from "./analytics";
 export * from "./conversations";
 export * from "./messages";
-export * from "./commissions";
+export * from "./admin";

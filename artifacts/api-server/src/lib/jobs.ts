@@ -17,6 +17,15 @@
  *    send-scheduled-sms          deferred transactional SMS
  *
  * IMPORTANT: pg-boss v12 requires createQueue() before schedule()/work().
+ *
+ * Concurrency:
+ *   pg-boss v12 dropped `teamSize` / `teamConcurrency` (the v9-era names) in
+ *   favor of `batchSize` (jobs fetched per poll) and `localConcurrency`
+ *   (parallel worker loops on this node). Each `boss.work()` call below
+ *   passes both explicitly so no single slow job (e.g. PDF generation) can
+ *   starve the rest of the queue. Heavy/expensive jobs are isolated at 1;
+ *   high-volume cheap jobs get 5; outreach-rate-sensitive jobs get 3.
+ *   Scheduled crons stay at the pg-boss default (1) since they're singletons.
  */
 
 import { PgBoss, type Job, type WorkHandler } from "pg-boss";
@@ -205,6 +214,7 @@ export async function startWorkers(): Promise<void> {
     const { licenseExpiryCheckWorker } = await import("../workers/licenseExpiryCheck");
     for (const job of jobs) await licenseExpiryCheckWorker(job.data);
   };
+  // Scheduled cron — singleton, default concurrency (1) is intentional.
   await boss.work<LicenseExpiryCheckPayload>(JOB_NAMES.LICENSE_EXPIRY_CHECK, licenseHandler);
 
   const certHandler: WorkHandler<CertExpiryCheckPayload> = async (
@@ -213,6 +223,7 @@ export async function startWorkers(): Promise<void> {
     const { certExpiryCheckWorker } = await import("../workers/certExpiryCheck");
     for (const job of jobs) await certExpiryCheckWorker(job.data);
   };
+  // Scheduled cron — singleton, default concurrency (1) is intentional.
   await boss.work<CertExpiryCheckPayload>(JOB_NAMES.CERT_EXPIRY_CHECK, certHandler);
 
   const ahipHandler: WorkHandler<AhipDeadlineCheckPayload> = async (
@@ -221,6 +232,7 @@ export async function startWorkers(): Promise<void> {
     const { ahipReminderCheckWorker } = await import("../workers/ahipReminderCheck");
     for (const job of jobs) await ahipReminderCheckWorker(job.data);
   };
+  // Scheduled cron — singleton, default concurrency (1) is intentional.
   await boss.work<AhipDeadlineCheckPayload>(JOB_NAMES.AHIP_DEADLINE_CHECK, ahipHandler);
 
   const dailyAutomationSweepHandler: WorkHandler<Record<string, never>> = async () => {
@@ -229,6 +241,7 @@ export async function startWorkers(): Promise<void> {
     );
     await dailyAutomationSweepWorker();
   };
+  // Scheduled cron — singleton, default concurrency (1) is intentional.
   await boss.work<Record<string, never>>(
     JOB_NAMES.AUTOMATION_DAILY_SWEEP,
     dailyAutomationSweepHandler,
@@ -240,6 +253,7 @@ export async function startWorkers(): Promise<void> {
     );
     await weeklyComplianceReportWorker();
   };
+  // Scheduled cron — singleton, default concurrency (1) is intentional.
   await boss.work<Record<string, never>>(
     JOB_NAMES.WEEKLY_COMPLIANCE_REPORT,
     weeklyComplianceReportHandler,
@@ -251,7 +265,12 @@ export async function startWorkers(): Promise<void> {
     const { taskAutoAssignWorker } = await import("../workers/taskAutoAssign");
     for (const job of jobs) await taskAutoAssignWorker(job.data);
   };
-  await boss.work<TaskAutoAssignPayload>(JOB_NAMES.TASK_AUTO_ASSIGN, taskHandler);
+  // Triggered on agent create / status change — modest fan-out.
+  await boss.work<TaskAutoAssignPayload>(
+    JOB_NAMES.TASK_AUTO_ASSIGN,
+    { batchSize: 3, localConcurrency: 3 },
+    taskHandler,
+  );
 
   const automationHandler: WorkHandler<RunAutomationRulesPayload> = async (
     jobs: Job<RunAutomationRulesPayload>[],
@@ -259,7 +278,12 @@ export async function startWorkers(): Promise<void> {
     const { runAutomationRulesWorker } = await import("../workers/runAutomationRules");
     for (const job of jobs) await runAutomationRulesWorker(job.data);
   };
-  await boss.work<RunAutomationRulesPayload>(JOB_NAMES.RUN_AUTOMATION_RULES, automationHandler);
+  // High-volume, cheap evaluation work — parallelize aggressively.
+  await boss.work<RunAutomationRulesPayload>(
+    JOB_NAMES.RUN_AUTOMATION_RULES,
+    { batchSize: 5, localConcurrency: 5 },
+    automationHandler,
+  );
 
   const sequenceHandler: WorkHandler<SendSequenceStepPayload> = async (
     jobs: Job<SendSequenceStepPayload>[],
@@ -267,7 +291,13 @@ export async function startWorkers(): Promise<void> {
     const { sendSequenceStepWorker } = await import("../workers/sendSequenceStep");
     for (const job of jobs) await sendSequenceStepWorker(job.data);
   };
-  await boss.work<SendSequenceStepPayload>(JOB_NAMES.SEND_SEQUENCE_STEP, sequenceHandler);
+  // Outreach-rate sensitive — keep fan-out conservative to avoid carrier
+  // throttling and maintain spacing across recipients.
+  await boss.work<SendSequenceStepPayload>(
+    JOB_NAMES.SEND_SEQUENCE_STEP,
+    { batchSize: 3, localConcurrency: 3 },
+    sequenceHandler,
+  );
 
   const offboardingPdfHandler: WorkHandler<GenerateOffboardingPdfPayload> = async (
     jobs: Job<GenerateOffboardingPdfPayload>[],
@@ -277,8 +307,10 @@ export async function startWorkers(): Promise<void> {
     );
     for (const job of jobs) await generateOffboardingPdfWorker(job.data);
   };
+  // Heavy PDF generation — isolate at 1 so it can't starve other queues.
   await boss.work<GenerateOffboardingPdfPayload>(
     JOB_NAMES.GENERATE_OFFBOARDING_PDF,
+    { batchSize: 1, localConcurrency: 1 },
     offboardingPdfHandler,
   );
 
@@ -298,7 +330,12 @@ export async function startWorkers(): Promise<void> {
       });
     }
   };
-  await boss.work<SendScheduledEmailPayload>(JOB_NAMES.SEND_SCHEDULED_EMAIL, emailHandler);
+  // Transactional email — high volume, provider handles its own rate limiting.
+  await boss.work<SendScheduledEmailPayload>(
+    JOB_NAMES.SEND_SCHEDULED_EMAIL,
+    { batchSize: 5, localConcurrency: 5 },
+    emailHandler,
+  );
 
   const smsHandler: WorkHandler<SendScheduledSmsPayload> = async (
     jobs: Job<SendScheduledSmsPayload>[],
@@ -308,12 +345,18 @@ export async function startWorkers(): Promise<void> {
       await sendSMS(job.data.to, job.data.body, job.data.agentId ?? "system");
     }
   };
-  await boss.work<SendScheduledSmsPayload>(JOB_NAMES.SEND_SCHEDULED_SMS, smsHandler);
+  // SMS — outreach-rate sensitive, carriers throttle aggressively.
+  await boss.work<SendScheduledSmsPayload>(
+    JOB_NAMES.SEND_SCHEDULED_SMS,
+    { batchSize: 3, localConcurrency: 3 },
+    smsHandler,
+  );
 
   const retentionHandler: WorkHandler<Record<string, never>> = async () => {
     const { retentionEnforcementWorker } = await import("../workers/retentionEnforcement");
     await retentionEnforcementWorker();
   };
+  // Scheduled cron — singleton, default concurrency (1) is intentional.
   await boss.work<Record<string, never>>(JOB_NAMES.RETENTION_ENFORCEMENT, retentionHandler);
 
   // ---- Import workers (ad-hoc, triggered by import routes) ----
@@ -321,19 +364,32 @@ export async function startWorkers(): Promise<void> {
     const { importMondayWorker } = await import("../workers/importProcessing");
     for (const job of jobs) await importMondayWorker(job.data);
   };
-  await boss.work<{ jobId: string }>(JOB_NAMES.IMPORT_MONDAY, importMondayHandler);
+  // Import workers — large file work; ok to parallelize 2-wide.
+  await boss.work<{ jobId: string }>(
+    JOB_NAMES.IMPORT_MONDAY,
+    { batchSize: 2, localConcurrency: 2 },
+    importMondayHandler,
+  );
 
   const importGhlHandler: WorkHandler<{ jobId: string }> = async (jobs) => {
     const { importGhlWorker } = await import("../workers/importProcessing");
     for (const job of jobs) await importGhlWorker(job.data);
   };
-  await boss.work<{ jobId: string }>(JOB_NAMES.IMPORT_GHL, importGhlHandler);
+  await boss.work<{ jobId: string }>(
+    JOB_NAMES.IMPORT_GHL,
+    { batchSize: 2, localConcurrency: 2 },
+    importGhlHandler,
+  );
 
   const importCsvHandler: WorkHandler<{ jobId: string }> = async (jobs) => {
     const { importCsvContactsWorker } = await import("../workers/importProcessing");
     for (const job of jobs) await importCsvContactsWorker(job.data);
   };
-  await boss.work<{ jobId: string }>(JOB_NAMES.IMPORT_CSV_CONTACTS, importCsvHandler);
+  await boss.work<{ jobId: string }>(
+    JOB_NAMES.IMPORT_CSV_CONTACTS,
+    { batchSize: 2, localConcurrency: 2 },
+    importCsvHandler,
+  );
 
   const reconcileCommissionHandler: WorkHandler<ReconcileCommissionStatementPayload> = async (
     jobs: Job<ReconcileCommissionStatementPayload>[],

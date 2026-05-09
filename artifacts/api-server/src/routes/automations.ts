@@ -14,6 +14,7 @@ import {
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
+import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const router: IRouter = Router();
 
@@ -86,8 +87,8 @@ router.get(
   requirePermission("automation", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const limit = Math.min(parseInt((req.query.limit as string) ?? "50", 10) || 50, 200);
-    const offset = parseInt((req.query.offset as string) ?? "0", 10) || 0;
+    const limit = safeLimit(req.query.limit, 50, 1000);
+    const offset = safeOffset(req.query.offset);
     const triggerType = req.query.triggerType as string | undefined;
     const isActive = req.query.isActive as string | undefined;
 
@@ -220,7 +221,7 @@ router.get(
   requirePermission("automation", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const limit = Math.min(parseInt((req.query.limit as string) ?? "30", 10) || 30, 200);
+    const limit = safeLimit(req.query.limit, 30, 500);
     const result = req.query.result as string | undefined;
 
     const conditions = [eq(automationRulesTable.orgId, authReq.orgId)];
@@ -298,8 +299,8 @@ router.get(
     const [rule] = await db.select({ id: automationRulesTable.id }).from(automationRulesTable).where(and(eq(automationRulesTable.id, id), eq(automationRulesTable.orgId, authReq.orgId))).limit(1);
     if (!rule) { res.status(404).json({ error: "Automation rule not found" }); return; }
 
-    const limit = Math.min(parseInt((req.query.limit as string) ?? "50", 10) || 50, 200);
-    const offset = parseInt((req.query.offset as string) ?? "0", 10) || 0;
+    const limit = safeLimit(req.query.limit, 50, 500);
+    const offset = safeOffset(req.query.offset);
     const result = req.query.result as string | undefined;
     const startDate = req.query.startDate as string | undefined;
     const endDate = req.query.endDate as string | undefined;
