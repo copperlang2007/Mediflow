@@ -30,6 +30,7 @@ import aiRouter from "./ai";
 import reportsRouter from "./reports";
 import adminRouter from "./admin";
 import importsRouter from "./imports";
+import commissionsRouter from "./commissions";
 
 const router: IRouter = Router();
 
@@ -64,5 +65,6 @@ router.use(aiRouter);
 router.use(reportsRouter);
 router.use(adminRouter);
 router.use(importsRouter);
+router.use(commissionsRouter);
 
 export default router;

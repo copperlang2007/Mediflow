@@ -42,6 +42,9 @@ const TRIGGER_TYPES = [
   "task_completed",
   "enrollment_period_opens",
   "scheduled",
+  "commission_received",
+  "commission_missed",
+  "chargeback_received",
 ] as const;
 
 const ACTION_TYPES = [

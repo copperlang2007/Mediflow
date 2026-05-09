@@ -68,6 +68,7 @@ export const JOB_NAMES = {
   AUTOMATION_DAILY_SWEEP: "automation-daily-sweep",
   WEEKLY_COMPLIANCE_REPORT: "weekly-compliance-report",
   RETENTION_ENFORCEMENT: "retention-enforcement",
+  COMMISSION_MISSED_PAYMENT_CHECK: "commission-missed-payment-check",
   // Import workers (ad-hoc, enqueued from import routes)
   IMPORT_MONDAY: "import-monday",
   IMPORT_GHL: "import-ghl",
@@ -79,6 +80,7 @@ export const JOB_NAMES = {
   GENERATE_OFFBOARDING_PDF: "generate-offboarding-pdf",
   SEND_SCHEDULED_EMAIL: "send-scheduled-email",
   SEND_SCHEDULED_SMS: "send-scheduled-sms",
+  RECONCILE_COMMISSION_STATEMENT: "reconcile-commission-statement",
 } as const;
 
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
@@ -141,6 +143,15 @@ export interface SendScheduledSmsPayload {
   mediaUrl?: string[];
 }
 
+export interface ReconcileCommissionStatementPayload extends Record<string, unknown> {
+  statementId: string;
+  orgId: string;
+}
+
+export interface CommissionMissedPaymentCheckPayload extends Record<string, unknown> {
+  orgId?: string;
+}
+
 // ---- Enqueue helper ----
 
 /** Send a typed job to the queue. Never throws. */
@@ -187,6 +198,13 @@ export async function startWorkers(): Promise<void> {
   await boss.schedule(JOB_NAMES.WEEKLY_COMPLIANCE_REPORT, "0 6 * * 1", {}, { tz: "UTC" });
   // Daily retention enforcement — 02:00 UTC; soft-deletes expired records, creates review tasks
   await boss.schedule(JOB_NAMES.RETENTION_ENFORCEMENT, "0 2 * * *", {}, { tz: "UTC" });
+  // Daily commission missed-payment check — 02:30 UTC
+  await boss.schedule(
+    JOB_NAMES.COMMISSION_MISSED_PAYMENT_CHECK,
+    "30 2 * * *",
+    {},
+    { tz: "UTC" },
+  );
 
   // ---- Workers ----
 
@@ -371,6 +389,32 @@ export async function startWorkers(): Promise<void> {
     JOB_NAMES.IMPORT_CSV_CONTACTS,
     { batchSize: 2, localConcurrency: 2 },
     importCsvHandler,
+  );
+
+  const reconcileCommissionHandler: WorkHandler<ReconcileCommissionStatementPayload> = async (
+    jobs: Job<ReconcileCommissionStatementPayload>[],
+  ) => {
+    const { reconcileCommissionStatementWorker } = await import(
+      "../workers/reconcileCommissionStatement"
+    );
+    for (const job of jobs) await reconcileCommissionStatementWorker(job.data);
+  };
+  await boss.work<ReconcileCommissionStatementPayload>(
+    JOB_NAMES.RECONCILE_COMMISSION_STATEMENT,
+    reconcileCommissionHandler,
+  );
+
+  const missedPaymentHandler: WorkHandler<CommissionMissedPaymentCheckPayload> = async (
+    jobs: Job<CommissionMissedPaymentCheckPayload>[],
+  ) => {
+    const { commissionMissedPaymentCheckWorker } = await import(
+      "../workers/commissionMissedPaymentCheck"
+    );
+    for (const job of jobs) await commissionMissedPaymentCheckWorker(job.data);
+  };
+  await boss.work<CommissionMissedPaymentCheckPayload>(
+    JOB_NAMES.COMMISSION_MISSED_PAYMENT_CHECK,
+    missedPaymentHandler,
   );
 
   logger.info("All background workers registered");
