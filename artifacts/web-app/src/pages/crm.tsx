@@ -631,7 +631,38 @@ function PipelineTab() {
     );
   }
 
-  const pipelineAnalytics = analytics as { totalDeals?: number; wonDeals?: number; conversionRate?: number } | undefined;
+  const pipelineAnalytics = analytics as
+    | {
+        totalDeals?: number;
+        wonDeals?: number;
+        lostDeals?: number;
+        openDeals?: number;
+        conversionRate?: number;
+        openValueTotal?: number;
+        wonValueTotal?: number;
+        lostValueTotal?: number;
+      }
+    | undefined;
+
+  const fmtCurrency = (n: number) => `$${Math.round(n).toLocaleString()}`;
+
+  const closeDeal = async (
+    dealId: string,
+    status: "won" | "lost",
+    lostReason?: string,
+  ) => {
+    try {
+      await updateDeal({
+        id: dealId,
+        data: { status, ...(status === "lost" ? { lostReason: lostReason ?? null } : {}) } satisfies UpdateDealBody,
+      });
+      toast.success(status === "won" ? "Deal marked as won" : "Deal marked as lost");
+      void qc.invalidateQueries({ queryKey: getGetDealsQueryKey() });
+      void qc.invalidateQueries({ queryKey: ["pipeline-analytics", activePipeline?.id ?? ""] });
+    } catch {
+      toast.error(`Failed to mark deal as ${status}`);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -651,10 +682,27 @@ function PipelineTab() {
       </div>
 
       {pipelineAnalytics && (
-        <div className="grid grid-cols-3 gap-3">
-          <Card className="py-3"><CardContent className="px-4 py-0 text-center"><p className="text-xl font-bold">{pipelineAnalytics.totalDeals ?? 0}</p><p className="text-xs text-muted-foreground">Total Deals</p></CardContent></Card>
-          <Card className="py-3"><CardContent className="px-4 py-0 text-center"><p className="text-xl font-bold">{pipelineAnalytics.wonDeals ?? 0}</p><p className="text-xs text-muted-foreground">Won</p></CardContent></Card>
-          <Card className="py-3"><CardContent className="px-4 py-0 text-center"><p className="text-xl font-bold">{pipelineAnalytics.conversionRate ?? 0}%</p><p className="text-xs text-muted-foreground">Conv. Rate</p></CardContent></Card>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <Card className="py-3"><CardContent className="px-4 py-0 text-center">
+            <p className="text-xl font-bold">{pipelineAnalytics.totalDeals ?? 0}</p>
+            <p className="text-xs text-muted-foreground">Total Deals</p>
+          </CardContent></Card>
+          <Card className="py-3"><CardContent className="px-4 py-0 text-center">
+            <p className="text-xl font-bold tabular-nums">{fmtCurrency(pipelineAnalytics.openValueTotal ?? 0)}</p>
+            <p className="text-xs text-muted-foreground">Open Pipeline</p>
+          </CardContent></Card>
+          <Card className="py-3"><CardContent className="px-4 py-0 text-center">
+            <p className="text-xl font-bold text-green-700 tabular-nums">{fmtCurrency(pipelineAnalytics.wonValueTotal ?? 0)}</p>
+            <p className="text-xs text-muted-foreground">Won ({pipelineAnalytics.wonDeals ?? 0})</p>
+          </CardContent></Card>
+          <Card className="py-3"><CardContent className="px-4 py-0 text-center">
+            <p className="text-xl font-bold text-red-700 tabular-nums">{fmtCurrency(pipelineAnalytics.lostValueTotal ?? 0)}</p>
+            <p className="text-xs text-muted-foreground">Lost ({pipelineAnalytics.lostDeals ?? 0})</p>
+          </CardContent></Card>
+          <Card className="py-3"><CardContent className="px-4 py-0 text-center">
+            <p className="text-xl font-bold">{pipelineAnalytics.conversionRate ?? 0}%</p>
+            <p className="text-xs text-muted-foreground">Conv. Rate</p>
+          </CardContent></Card>
         </div>
       )}
 
@@ -665,14 +713,28 @@ function PipelineTab() {
               const stageDeals = deals.filter((rowRaw) => {
                 const row = rowRaw as Record<string, unknown>;
                 const deal = row.deal as Record<string, unknown> | undefined;
-                return deal?.stageId === stage.id;
+                // Only count open deals in stage columns — won/lost get their
+                // own pipeline-level totals shown in the stat cards above.
+                return deal?.stageId === stage.id && deal?.status === "open";
               });
+              // Real-time per-stage value rolls up from the deals list, so the
+              // total updates immediately on stage moves / won/lost without
+              // waiting for the analytics refetch.
+              const stageValueTotal = stageDeals.reduce((sum, rowRaw) => {
+                const deal = (rowRaw as Record<string, unknown>).deal as
+                  | Record<string, unknown>
+                  | undefined;
+                return sum + (Number(deal?.valueEst ?? 0) || 0);
+              }, 0);
               return (
                 <div key={stage.id} className="w-72 flex-shrink-0">
                   <div className="flex items-center gap-2 mb-2 px-1">
                     <div className="h-2.5 w-2.5 rounded-full" style={{ background: stage.color }} />
                     <span className="font-medium text-sm">{stage.name}</span>
                     <Badge variant="secondary" className="ml-auto text-xs">{stageDeals.length}</Badge>
+                  </div>
+                  <div className="px-1 mb-2 text-[11px] text-muted-foreground tabular-nums">
+                    {stageValueTotal > 0 ? fmtCurrency(stageValueTotal) : "—"}
                   </div>
                   <div className="space-y-2 bg-muted/30 rounded-xl p-2 min-h-[120px]">
                     {stageDeals.map((rowRaw) => {
@@ -691,6 +753,27 @@ function PipelineTab() {
                                 {stages.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
                               </SelectContent>
                             </Select>
+                          </div>
+                          <div className="flex gap-1.5 mt-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 px-2 text-[11px] flex-1 text-green-700 border-green-200 hover:bg-green-50"
+                              onClick={() => closeDeal(String(deal.id), "won")}
+                            >
+                              Won
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 px-2 text-[11px] flex-1 text-red-700 border-red-200 hover:bg-red-50"
+                              onClick={() => {
+                                const reason = window.prompt("Reason for losing this deal? (optional)") ?? undefined;
+                                void closeDeal(String(deal.id), "lost", reason);
+                              }}
+                            >
+                              Lost
+                            </Button>
                           </div>
                         </div>
                       );

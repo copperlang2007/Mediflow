@@ -307,10 +307,25 @@ router.get("/pipelines/:id/analytics", requireAuth, requirePermission("contact",
   });
 
   const totalDeals = deals.length;
-  const wonDeals = deals.filter((d) => d.status === "won").length;
-  const conversionRate = totalDeals > 0 ? Math.round((wonDeals / totalDeals) * 100) : 0;
+  const wonDeals = deals.filter((d) => d.status === "won");
+  const lostDeals = deals.filter((d) => d.status === "lost");
+  const openDeals = deals.filter((d) => d.status === "open");
+  const conversionRate = totalDeals > 0 ? Math.round((wonDeals.length / totalDeals) * 100) : 0;
 
-  res.json({ stageAnalytics, totalDeals, wonDeals, conversionRate });
+  const sumValues = (rows: { valueEst: number | null }[]): number =>
+    rows.reduce((sum, d) => sum + (d.valueEst ?? 0), 0);
+
+  res.json({
+    stageAnalytics,
+    totalDeals,
+    wonDeals: wonDeals.length,
+    lostDeals: lostDeals.length,
+    openDeals: openDeals.length,
+    conversionRate,
+    openValueTotal: sumValues(openDeals),
+    wonValueTotal: sumValues(wonDeals),
+    lostValueTotal: sumValues(lostDeals),
+  });
 });
 
 export default router;
