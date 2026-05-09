@@ -27,7 +27,7 @@
       "idx": 3,
       "version": "7",
       "when": 1778200000000,
-      "tag": "0003_breach_notifications",
+      "tag": "0003_perf_partial_indexes",
       "breakpoints": true
     }
   ]
