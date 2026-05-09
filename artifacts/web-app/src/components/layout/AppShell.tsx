@@ -80,6 +80,7 @@ import {
   BarChart2,
   Lock,
   Database,
+  DollarSign,
 } from "lucide-react";
 import NotificationPanel from "@/components/notifications/NotificationPanel";
 import { useSSENotifications } from "@/hooks/useSSENotifications";
@@ -124,6 +125,10 @@ const navItems: NavGroup[] = [
         roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
       },
       { href: "/tasks", label: "Tasks", icon: CheckSquare, roles: ALL_ROLES },
+      {
+        href: "/commissions", label: "Commissions", icon: DollarSign,
+        roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
+      },
     ],
   },
   {
