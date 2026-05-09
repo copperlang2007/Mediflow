@@ -14,6 +14,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
+import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const router: IRouter = Router();
 
@@ -29,8 +30,8 @@ router.get(
     const conditions = [eq(messageThreadsTable.orgId, authReq.orgId)];
     if (channel) conditions.push(eq(messageThreadsTable.channel, channel as "sms" | "email"));
 
-    const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 200);
-    const offsetNum = parseInt(offset ?? "0", 10) || 0;
+    const limitNum = safeLimit(limit, 50, 1000);
+    const offsetNum = safeOffset(offset);
 
     const threads = await db
       .select({
@@ -72,7 +73,7 @@ router.get(
       .limit(1);
     if (!thread) { res.status(404).json({ error: "Thread not found" }); return; }
 
-    const limitNum = Math.min(parseInt((req.query.limit as string) ?? "100", 10) || 100, 500);
+    const limitNum = safeLimit(req.query.limit, 100, 500);
     const messages = await db
       .select()
       .from(messagesTable)
@@ -147,8 +148,8 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { channel, limit, offset } = req.query as Record<string, string | undefined>;
-    const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 200);
-    const offsetNum = parseInt(offset ?? "0", 10) || 0;
+    const limitNum = safeLimit(limit, 50, 500);
+    const offsetNum = safeOffset(offset);
 
     const conditions = [
       eq(messageThreadsTable.orgId, authReq.orgId),

@@ -15,6 +15,7 @@ import {
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
+import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const router: IRouter = Router();
 
@@ -62,8 +63,8 @@ router.get(
       conditions.push(eq(leadsTable.assignedAgentId, assignedAgentId));
     }
 
-    const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 200);
-    const offsetNum = parseInt(offset ?? "0", 10) || 0;
+    const limitNum = safeLimit(limit, 50, 1000);
+    const offsetNum = safeOffset(offset);
 
     const [leads, totalRes] = await Promise.all([
       db

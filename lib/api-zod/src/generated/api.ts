@@ -1328,6 +1328,15 @@ export const DeleteTaskParams = zod.object({
 });
 
 /**
+ * @summary Assign one task per agent from a template
+ */
+export const BulkAssignTasksFromTemplateBody = zod.object({
+  templateId: zod.string(),
+  agentIds: zod.array(zod.string()),
+  dueDate: zod.coerce.date().optional(),
+});
+
+/**
  * @summary List tasks for an agent
  */
 export const GetAgentTasksParams = zod.object({
@@ -3603,4 +3612,520 @@ export const AiDraftResponse = zod.object({
  */
 export const GetComplianceReportDownloadParams = zod.object({
   documentId: zod.coerce.string(),
+});
+
+/**
+ * @summary Agent performance metrics report
+ */
+export const GetAgentPerformanceReportQueryParams = zod.object({
+  startDate: zod.date().optional(),
+  endDate: zod.date().optional(),
+  managerId: zod.coerce.string().optional(),
+  agentId: zod.coerce.string().optional(),
+});
+
+export const GetAgentPerformanceReportResponseItem = zod.object({
+  agentId: zod.string(),
+  agentName: zod.string(),
+  email: zod.string(),
+  status: zod.string(),
+  contactsWorked: zod.number(),
+  callsLogged: zod.number(),
+  dealsWon: zod.number(),
+  dealValueWon: zod.number(),
+  enrolledContacts: zod.number(),
+  complianceScore: zod.number(),
+  licensesActive: zod.number(),
+  licensesExpiring: zod.number(),
+  certificationsPassed: zod.number(),
+  ahipStatus: zod.string(),
+});
+export const GetAgentPerformanceReportResponse = zod.array(
+  GetAgentPerformanceReportResponseItem,
+);
+
+/**
+ * @summary Export agent performance as CSV
+ */
+export const ExportAgentPerformanceReportQueryParams = zod.object({
+  startDate: zod.date().optional(),
+  endDate: zod.date().optional(),
+});
+
+/**
+ * @summary Pipeline funnel and conversion report
+ */
+export const GetPipelineReportQueryParams = zod.object({
+  startDate: zod.date().optional(),
+  endDate: zod.date().optional(),
+});
+
+export const GetPipelineReportResponseItem = zod.object({
+  pipelineId: zod.string(),
+  pipelineName: zod.string(),
+  totalDeals: zod.number(),
+  wonDeals: zod.number(),
+  lostDeals: zod.number(),
+  winRate: zod.number(),
+  totalWonValue: zod.number(),
+  funnel: zod.array(
+    zod.object({
+      stageId: zod.string(),
+      stageName: zod.string(),
+      orderIndex: zod.number(),
+      dealCount: zod.number(),
+      totalValue: zod.number(),
+      wonCount: zod.number(),
+      lostCount: zod.number(),
+    }),
+  ),
+});
+export const GetPipelineReportResponse = zod.array(
+  GetPipelineReportResponseItem,
+);
+
+/**
+ * @summary Lead source and conversion report
+ */
+export const GetLeadsReportQueryParams = zod.object({
+  startDate: zod.date().optional(),
+  endDate: zod.date().optional(),
+});
+
+export const GetLeadsReportResponse = zod.object({
+  sourceBreakdown: zod.array(
+    zod.object({
+      source: zod.string(),
+      total: zod.number(),
+      converted: zod.number(),
+      enrolled: zod.number(),
+      conversionRate: zod.number(),
+      enrollmentRate: zod.number(),
+    }),
+  ),
+  trend: zod.array(
+    zod.object({
+      date: zod.string(),
+      count: zod.number(),
+    }),
+  ),
+  totalLeads: zod.number(),
+  convertedLeads: zod.number(),
+});
+
+/**
+ * @summary License, certification, and AHIP compliance matrix
+ */
+export const GetComplianceMatrixReportResponse = zod.object({
+  licenseMatrix: zod.array(zod.object({}).passthrough()),
+  expiryByMonth: zod.array(zod.object({}).passthrough()),
+  carrierCertCompletion: zod.array(zod.object({}).passthrough()),
+  ahipTrend: zod.array(zod.object({}).passthrough()),
+});
+
+/**
+ * @summary SMS and email volume report
+ */
+export const GetCommunicationsReportQueryParams = zod.object({
+  startDate: zod.date().optional(),
+  endDate: zod.date().optional(),
+});
+
+export const GetCommunicationsReportResponse = zod.object({
+  totalSms: zod.number(),
+  totalEmail: zod.number(),
+  aiAssistedSms: zod.number(),
+  aiAssistedEmail: zod.number(),
+  trend: zod.array(
+    zod.object({
+      date: zod.string(),
+      sms: zod.number(),
+      email: zod.number(),
+    }),
+  ),
+});
+
+/**
+ * @summary Member retention report
+ */
+export const GetRetentionReportResponse = zod.object({
+  enrolledContacts: zod.number(),
+  lostContacts: zod.number(),
+  atRiskContacts: zod.number(),
+  retentionRate: zod.number(),
+  atRiskRate: zod.number(),
+});
+
+/**
+ * @summary Admin-level audit log viewer with enriched user info
+ */
+export const getAdminAuditLogQueryLimitDefault = 50;
+export const getAdminAuditLogQueryOffsetDefault = 0;
+
+export const GetAdminAuditLogQueryParams = zod.object({
+  userId: zod.coerce.string().optional(),
+  action: zod.coerce.string().optional(),
+  resourceType: zod.coerce.string().optional(),
+  startDate: zod.date().optional(),
+  endDate: zod.date().optional(),
+  limit: zod.coerce.number().default(getAdminAuditLogQueryLimitDefault),
+  offset: zod.coerce.number().default(getAdminAuditLogQueryOffsetDefault),
+});
+
+export const GetAdminAuditLogResponse = zod.object({
+  entries: zod.array(zod.object({}).passthrough()),
+  total: zod.number(),
+  limit: zod.number(),
+  offset: zod.number(),
+});
+
+/**
+ * @summary Export audit log as CSV
+ */
+export const ExportAdminAuditLogQueryParams = zod.object({
+  startDate: zod.date().optional(),
+  endDate: zod.date().optional(),
+});
+
+/**
+ * @summary User access review for SOC 2 compliance
+ */
+export const GetAccessReviewResponseItem = zod.object({
+  id: zod.string(),
+  email: zod.string(),
+  fullName: zod.string(),
+  role: zod.string(),
+  isActive: zod.boolean(),
+  lastLoginAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+});
+export const GetAccessReviewResponse = zod.array(GetAccessReviewResponseItem);
+
+/**
+ * @summary Deactivate a user account
+ */
+export const DeactivateUserParams = zod.object({
+  userId: zod.coerce.string(),
+});
+
+export const DeactivateUserResponse = zod.object({
+  success: zod.boolean(),
+});
+
+/**
+ * @summary Reactivate a user account
+ */
+export const ReactivateUserParams = zod.object({
+  userId: zod.coerce.string(),
+});
+
+export const ReactivateUserResponse = zod.object({
+  success: zod.boolean(),
+});
+
+/**
+ * @summary Login event history for HIPAA audit
+ */
+export const getLoginHistoryQueryLimitDefault = 100;
+export const getLoginHistoryQueryOffsetDefault = 0;
+
+export const GetLoginHistoryQueryParams = zod.object({
+  userId: zod.coerce.string().optional(),
+  limit: zod.coerce.number().default(getLoginHistoryQueryLimitDefault),
+  offset: zod.coerce.number().default(getLoginHistoryQueryOffsetDefault),
+});
+
+export const GetLoginHistoryResponse = zod.object({
+  events: zod.array(
+    zod.object({
+      id: zod.string(),
+      orgId: zod.string(),
+      userId: zod.string().nullish(),
+      email: zod.string().nullish(),
+      success: zod.boolean(),
+      ipAddress: zod.string().nullish(),
+      userAgent: zod.string().nullish(),
+      failureReason: zod.string().nullish(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+  total: zod.number(),
+  limit: zod.number(),
+  offset: zod.number(),
+});
+
+/**
+ * @summary Data export audit log
+ */
+export const getExportLogQueryLimitDefault = 50;
+export const getExportLogQueryOffsetDefault = 0;
+
+export const GetExportLogQueryParams = zod.object({
+  limit: zod.coerce.number().default(getExportLogQueryLimitDefault),
+  offset: zod.coerce.number().default(getExportLogQueryOffsetDefault),
+});
+
+export const GetExportLogResponse = zod.object({
+  exports: zod.array(
+    zod.object({
+      id: zod.string(),
+      userId: zod.string().nullish(),
+      exportType: zod.string(),
+      filters: zod.object({}).passthrough().nullish(),
+      recordCount: zod.number().nullish(),
+      createdAt: zod.coerce.date(),
+      userFullName: zod.string().nullish(),
+    }),
+  ),
+  total: zod.number(),
+  limit: zod.number(),
+  offset: zod.number(),
+});
+
+/**
+ * @summary Get session timeout configuration
+ */
+export const GetSessionConfigResponse = zod.object({
+  sessionTimeoutMinutes: zod.union([
+    zod.literal(15),
+    zod.literal(30),
+    zod.literal(60),
+  ]),
+});
+
+/**
+ * @summary Update session timeout configuration
+ */
+export const UpdateSessionConfigBody = zod.object({
+  sessionTimeoutMinutes: zod.union([
+    zod.literal(15),
+    zod.literal(30),
+    zod.literal(60),
+  ]),
+});
+
+export const UpdateSessionConfigResponse = zod.object({
+  sessionTimeoutMinutes: zod.union([
+    zod.literal(15),
+    zod.literal(30),
+    zod.literal(60),
+  ]),
+});
+
+/**
+ * @summary Get data retention policies
+ */
+export const GetDataRetentionPoliciesResponseItem = zod.object({
+  id: zod.string().nullish(),
+  orgId: zod.string(),
+  recordType: zod.string(),
+  retentionDays: zod.number(),
+  isEnabled: zod.boolean(),
+  updatedAt: zod.coerce.date().optional(),
+  updatedByUserId: zod.string().nullish(),
+});
+export const GetDataRetentionPoliciesResponse = zod.array(
+  GetDataRetentionPoliciesResponseItem,
+);
+
+/**
+ * @summary Update a data retention policy
+ */
+export const UpdateDataRetentionPolicyBody = zod.object({
+  recordType: zod.string(),
+  retentionDays: zod.number(),
+  isEnabled: zod.boolean(),
+});
+
+export const UpdateDataRetentionPolicyResponse = zod.object({
+  success: zod.boolean(),
+});
+
+/**
+ * @summary HIPAA BAA readiness checklist
+ */
+export const GetBaaChecklistResponseItem = zod.object({
+  id: zod.string(),
+  category: zod.string(),
+  control: zod.string(),
+  status: zod.enum(["implemented", "partial", "not_implemented"]),
+  notes: zod.string().optional(),
+});
+export const GetBaaChecklistResponse = zod.array(GetBaaChecklistResponseItem);
+
+/**
+ * @summary Upload and parse a Monday.com CSV for field mapping
+ */
+export const UploadMondayImportBody = zod.object({
+  file: zod.instanceof(File),
+});
+
+export const UploadMondayImportResponse = zod.object({
+  headers: zod.array(zod.string()),
+  sampleRows: zod.array(zod.object({}).passthrough()),
+  totalRows: zod.number(),
+  suggestedMapping: zod.object({}).passthrough(),
+  targetFields: zod.array(
+    zod.object({
+      field: zod.string(),
+      label: zod.string(),
+      required: zod.boolean().optional(),
+    }),
+  ),
+});
+
+/**
+ * @summary Validate Monday.com CSV with field mapping applied
+ */
+export const ValidateMondayImportBody = zod.object({
+  file: zod.instanceof(File),
+  mapping: zod.string().optional().describe("JSON stringified field mapping"),
+});
+
+export const ValidateMondayImportResponse = zod.object({
+  totalRows: zod.number(),
+  errorCount: zod.number(),
+  validRows: zod.number(),
+  errors: zod.array(
+    zod.object({
+      row: zod.number(),
+      field: zod.string(),
+      message: zod.string(),
+      value: zod.string().optional(),
+    }),
+  ),
+});
+
+/**
+ * @summary Confirm and start Monday.com CSV import job
+ */
+export const ConfirmMondayImportBody = zod.object({
+  file: zod.instanceof(File),
+  mapping: zod.string().optional(),
+});
+
+export const ConfirmMondayImportResponse = zod.object({
+  jobId: zod.string(),
+  totalRows: zod.number(),
+});
+
+/**
+ * @summary Upload and parse a GoHighLevel CSV for field mapping
+ */
+export const UploadGhlImportBody = zod.object({
+  file: zod.instanceof(File),
+});
+
+export const UploadGhlImportResponse = zod.object({
+  headers: zod.array(zod.string()),
+  sampleRows: zod.array(zod.object({}).passthrough()),
+  totalRows: zod.number(),
+  suggestedMapping: zod.object({}).passthrough(),
+  targetFields: zod.array(
+    zod.object({
+      field: zod.string(),
+      label: zod.string(),
+      required: zod.boolean().optional(),
+    }),
+  ),
+});
+
+/**
+ * @summary Validate GoHighLevel CSV with field mapping applied
+ */
+export const ValidateGhlImportBody = zod.object({
+  file: zod.instanceof(File),
+  mapping: zod.string().optional(),
+});
+
+export const ValidateGhlImportResponse = zod.object({
+  totalRows: zod.number(),
+  errorCount: zod.number(),
+  validRows: zod.number(),
+  errors: zod.array(zod.object({}).passthrough()),
+  duplicateEmails: zod.number(),
+  duplicatePhones: zod.number(),
+});
+
+/**
+ * @summary Confirm and start GoHighLevel CSV import job
+ */
+export const ConfirmGhlImportBody = zod.object({
+  file: zod.instanceof(File),
+  mapping: zod.string().optional(),
+  duplicateAction: zod.enum(["skip", "merge", "create_new"]).optional(),
+});
+
+export const ConfirmGhlImportResponse = zod.object({
+  jobId: zod.string(),
+  totalRows: zod.number(),
+});
+
+/**
+ * @summary Upload and parse a generic contacts CSV for field mapping
+ */
+export const UploadContactsImportBody = zod.object({
+  file: zod.instanceof(File),
+});
+
+export const UploadContactsImportResponse = zod.object({
+  headers: zod.array(zod.string()),
+  sampleRows: zod.array(zod.object({}).passthrough()),
+  totalRows: zod.number(),
+  suggestedMapping: zod.object({}).passthrough(),
+  targetFields: zod.array(
+    zod.object({
+      field: zod.string(),
+      label: zod.string(),
+      required: zod.boolean().optional(),
+    }),
+  ),
+});
+
+/**
+ * @summary Confirm and start generic contacts CSV import job
+ */
+export const ConfirmContactsImportBody = zod.object({
+  file: zod.instanceof(File),
+  mapping: zod.string().optional(),
+});
+
+export const ConfirmContactsImportResponse = zod.object({
+  jobId: zod.string(),
+  totalRows: zod.number(),
+});
+
+/**
+ * @summary SSE stream of import job progress
+ */
+export const GetImportProgressParams = zod.object({
+  jobId: zod.coerce.string(),
+});
+
+/**
+ * @summary List all import jobs for the organization
+ */
+export const GetImportHistoryResponseItem = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  userId: zod.string().nullish(),
+  importType: zod.string(),
+  status: zod.string(),
+  totalRows: zod.number(),
+  processedRows: zod.number(),
+  createdCount: zod.number(),
+  updatedCount: zod.number(),
+  skippedCount: zod.number(),
+  errorCount: zod.number(),
+  fileName: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  completedAt: zod.coerce.date().nullish(),
+});
+export const GetImportHistoryResponse = zod.array(GetImportHistoryResponseItem);
+
+/**
+ * @summary Download error CSV for a completed import job
+ */
+export const GetImportErrorsCsvParams = zod.object({
+  jobId: zod.coerce.string(),
 });

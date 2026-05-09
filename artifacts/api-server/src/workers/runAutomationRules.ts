@@ -29,6 +29,7 @@ import {
 } from "@workspace/db";
 import { type RunAutomationRulesPayload, enqueue, JOB_NAMES } from "../lib/jobs";
 import { logger } from "../lib/logger";
+import { captureWorkerError } from "../lib/sentry";
 import {
   evaluateConditions,
   renderConfig,
@@ -461,6 +462,7 @@ export async function runAutomationRulesWorker(
       }
     } catch (err) {
       logger.warn({ err, resourceType, resourceId }, "Failed to enrich automation context — using raw context");
+      captureWorkerError(err, { worker: "runAutomationRules", phase: "enrich", resourceType, resourceId });
     }
   }
 
@@ -522,6 +524,15 @@ export async function runAutomationRulesWorker(
           { err, ruleId: rule.id, actionType: action.type },
           "Automation action failed",
         );
+        captureWorkerError(err, {
+          worker: "runAutomationRules",
+          phase: "executeAction",
+          ruleId: rule.id,
+          actionType: action.type,
+          orgId,
+          resourceType,
+          resourceId,
+        });
         result = actionsExecuted.length > 0 ? "partial" : "failed";
       }
     }

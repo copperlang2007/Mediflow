@@ -10,6 +10,7 @@ import {
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
+import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const router: IRouter = Router();
 
@@ -59,8 +60,8 @@ router.get(
       offset?: string;
     };
 
-    const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 200);
-    const offsetNum = parseInt(offset ?? "0", 10) || 0;
+    const limitNum = safeLimit(limit, 50, 1000);
+    const offsetNum = safeOffset(offset);
 
     const conditions: SQL[] = [eq(taskInstancesTable.orgId, authReq.orgId)];
     if (status && ["open", "in_progress", "completed", "cancelled"].includes(status)) {
