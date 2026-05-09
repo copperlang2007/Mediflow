@@ -29,11 +29,13 @@ import {
   getGetAutomationRulesQueryKey,
   getGetAutomationRuleLogsQueryKey,
   GetAutomationRuleLogsResult,
+  customFetch,
   type AutomationRule,
   type AutomationCondition,
   type AutomationAction,
   type CreateAutomationRuleBody,
 } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
 
 // ---- Constants ----
 
@@ -544,6 +546,115 @@ function RuleCard({ rule }: { rule: AutomationRule }) {
 
 // ---- Main Page ----
 
+type RecentActivityRow = {
+  id: string;
+  ruleId: string;
+  ruleName: string;
+  triggerType: string;
+  triggerEvent: string;
+  matchedRecordType: string | null;
+  matchedRecordId: string | null;
+  actionsExecuted: string[] | null;
+  result: "success" | "partial" | "failed";
+  errorMessage: string | null;
+  executedAt: string;
+};
+
+type RecentActivityResponse = {
+  recent: RecentActivityRow[];
+  last24h: { success: number; partial: number; failed: number };
+  total: number;
+};
+
+function RecentActivityCard() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["/api/automations/recent-activity"],
+    queryFn: () =>
+      customFetch<RecentActivityResponse>(
+        "/api/automations/recent-activity?limit=20",
+      ),
+    refetchInterval: 30_000,
+    staleTime: 10_000,
+  });
+
+  if (isLoading) {
+    return <Skeleton className="h-40 w-full" />;
+  }
+  if (!data) return null;
+
+  const { recent, last24h } = data;
+  const total24h = last24h.success + last24h.partial + last24h.failed;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2 pt-4 px-5">
+        <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+          Recent activity (last 24h: {total24h} run{total24h !== 1 ? "s" : ""}
+          {total24h > 0 && (
+            <>
+              {" — "}
+              <span className="text-green-700">{last24h.success}✓</span>
+              {last24h.partial > 0 && (
+                <>
+                  {" "}
+                  · <span className="text-amber-700">{last24h.partial}⚠</span>
+                </>
+              )}
+              {last24h.failed > 0 && (
+                <>
+                  {" "}
+                  · <span className="text-red-700">{last24h.failed}✗</span>
+                </>
+              )}
+            </>
+          )}
+          )
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="px-5 pb-4">
+        {recent.length === 0 ? (
+          <p className="py-6 text-center text-xs text-muted-foreground">
+            No automation runs yet — rules will execute when their triggers fire.
+          </p>
+        ) : (
+          <div className="space-y-1 max-h-72 overflow-y-auto">
+            {recent.map((row) => {
+              const Icon =
+                row.result === "success"
+                  ? CheckCircle2
+                  : row.result === "partial"
+                  ? AlertCircle
+                  : XCircle;
+              const colorClass =
+                row.result === "success"
+                  ? "text-green-600"
+                  : row.result === "partial"
+                  ? "text-amber-600"
+                  : "text-red-600";
+              return (
+                <div
+                  key={row.id}
+                  className="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-muted/40 text-sm"
+                >
+                  <Icon className={`h-3.5 w-3.5 shrink-0 ${colorClass}`} />
+                  <span className="font-medium truncate">{row.ruleName}</span>
+                  <span className="text-xs text-muted-foreground truncate hidden sm:inline">
+                    {row.triggerEvent}
+                    {row.matchedRecordType ? ` · ${row.matchedRecordType}` : ""}
+                  </span>
+                  <span className="text-xs text-muted-foreground/80 ml-auto shrink-0 tabular-nums">
+                    {formatDistanceToNow(new Date(row.executedAt), { addSuffix: true })}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AutomationsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [triggerFilter, setTriggerFilter] = useState("all");
@@ -568,6 +679,8 @@ export default function AutomationsPage() {
           <Plus className="h-4 w-4 mr-1" />New Rule
         </Button>
       </div>
+
+      <RecentActivityCard />
 
       {/* Filter */}
       <div className="flex items-center gap-3">
