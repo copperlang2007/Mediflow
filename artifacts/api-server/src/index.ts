@@ -1,6 +1,13 @@
+import { initSentry } from "./lib/sentry";
+
+// Initialize Sentry before any other module so that errors thrown during
+// app/jobs/workers boot are captured. No-op when SENTRY_DSN is unset.
+initSentry();
+
 import app from "./app";
 import { logger } from "./lib/logger";
 import { getQueue, startWorkers } from "./lib/jobs";
+import { captureWorkerError } from "./lib/sentry";
 
 const rawPort = process.env["PORT"];
 
@@ -46,8 +53,9 @@ const shutdown = async (signal: string): Promise<void> => {
     const { getQueue: q } = await import("./lib/jobs");
     const boss = await q();
     await boss.stop({ graceful: true });
-  } catch (_) {
-    // ignore
+  } catch (err) {
+    logger.error({ err, signal }, "Error stopping job queue during shutdown");
+    captureWorkerError(err, { worker: "bootstrap", phase: "shutdown", signal });
   }
   process.exit(0);
 };

@@ -22,6 +22,8 @@ import {
 } from "@workspace/db";
 import { requireAuth, requireRole, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
+import { logger } from "../lib/logger";
+import { captureWorkerError } from "../lib/sentry";
 import { randomUUID } from "crypto";
 import multer from "multer";
 import { parse } from "csv-parse/sync";
@@ -33,7 +35,10 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 
 void db.update(importJobsTable)
   .set({ status: "failed" })
   .where(eq(importJobsTable.status, "processing"))
-  .catch(console.error);
+  .catch((err) => {
+    logger.error({ err }, "imports: failed to mark orphaned import jobs as failed on startup");
+    captureWorkerError(err, { worker: "imports", phase: "startup-cleanup" });
+  });
 
 function parseCSV(buffer: Buffer): { headers: string[]; rows: Record<string, string>[] } {
   const records = parse(buffer, { columns: true, skip_empty_lines: true, trim: true, relax_quotes: true }) as Record<string, string>[];
@@ -99,7 +104,9 @@ router.post(
           { field: "fullName", label: "Full Name (will be split)" },
         ],
       });
-    } catch {
+    } catch (err) {
+      logger.error({ err }, "imports: failed to parse Monday CSV upload");
+      captureWorkerError(err, { worker: "imports", route: "monday/upload" });
       res.status(400).json({ error: "Failed to parse CSV. Please ensure the file is valid CSV format." });
     }
   },
@@ -286,9 +293,11 @@ export async function processMondayImport(jobId: string, orgId: string, rows: Re
       await importMondayAgentRelations(get, orgId, agentId);
 
       created++;
-    } catch {
+    } catch (err) {
       errors++;
       errorList.push({ row: i + 2, message: "Failed to create agent record" });
+      logger.error({ err, jobId, row: i + 2 }, "imports: failed to create Monday agent record");
+      captureWorkerError(err, { worker: "imports", route: "monday/confirm", jobId, row: i + 2 });
     }
 
     // Persist progress to DB every 50 rows (restart-safe)
@@ -464,7 +473,9 @@ router.post(
           { field: "assignedAgentEmail", label: "Assigned Agent (email)" },
         ],
       });
-    } catch {
+    } catch (err) {
+      logger.error({ err }, "imports: failed to parse GHL CSV upload");
+      captureWorkerError(err, { worker: "imports", route: "ghl/upload" });
       res.status(400).json({ error: "Failed to parse CSV" });
     }
   },
@@ -655,9 +666,11 @@ export async function processGhlImport(jobId: string, orgId: string, rows: Recor
       if (pipelineStageRaw) await createGhlDeal(orgId, contactId, pipelineStageRaw, allStages);
 
       created++;
-    } catch {
+    } catch (err) {
       errors++;
       errorList.push({ row: i + 2, message: "Failed to create contact" });
+      logger.error({ err, jobId, row: i + 2 }, "imports: failed to create GHL contact");
+      captureWorkerError(err, { worker: "imports", route: "ghl/confirm", jobId, row: i + 2 });
     }
 
     if (i % 50 === 0) {
@@ -784,7 +797,9 @@ router.post(
           { field: "optOut", label: "Opt-Out (yes/true = opt out)" },
         ],
       });
-    } catch {
+    } catch (err) {
+      logger.error({ err }, "imports: failed to parse contacts CSV upload");
+      captureWorkerError(err, { worker: "imports", route: "contacts/upload" });
       res.status(400).json({ error: "Failed to parse CSV" });
     }
   },
@@ -856,9 +871,11 @@ export async function processCsvContactImport(jobId: string, orgId: string, rows
         status: "lead",
       });
       created++;
-    } catch {
+    } catch (err) {
       errors++;
       errorList.push({ row: i + 2, message: "Failed to create contact" });
+      logger.error({ err, jobId, row: i + 2 }, "imports: failed to create contact");
+      captureWorkerError(err, { worker: "imports", route: "contacts/confirm", jobId, row: i + 2 });
     }
 
     if (i % 50 === 0) {
