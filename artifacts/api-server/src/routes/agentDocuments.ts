@@ -164,8 +164,20 @@ router.get(
 
     try {
       const { ObjectStorageService } = await import("../lib/objectStorage");
+      const { ObjectPermission } = await import("../lib/objectAcl");
       const objectStorage = new ObjectStorageService();
       const file = await objectStorage.getObjectEntityFile(doc.storageKey);
+
+      const canAccess = await objectStorage.canAccessObjectEntity({
+        userId: authReq.userId,
+        objectFile: file,
+        requestedPermission: ObjectPermission.READ,
+      });
+      if (!canAccess) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
       const contentType = doc.mimeType ?? "application/octet-stream";
       const safeName = encodeURIComponent(doc.name.replace(/[^\w\s.-]/g, "_"));
 
