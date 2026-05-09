@@ -206,6 +206,84 @@ router.post(
   },
 );
 
+// GET /automations/recent-activity — org-wide recent rule runs
+//
+// Surfaces the last N execution log entries across every rule in the org so
+// admins can quickly see what the engine is actually doing. Joined to
+// automation_rules so each row carries the rule name + trigger type.
+router.get(
+  "/automations/recent-activity",
+  requireAuth,
+  requirePermission("automation", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const limit = Math.min(parseInt((req.query.limit as string) ?? "30", 10) || 30, 200);
+    const result = req.query.result as string | undefined;
+
+    const conditions = [eq(automationRulesTable.orgId, authReq.orgId)];
+    if (result === "success" || result === "partial" || result === "failed") {
+      conditions.push(eq(automationRuleLogsTable.result, result));
+    }
+
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const [recent, totals] = await Promise.all([
+      db
+        .select({
+          id: automationRuleLogsTable.id,
+          ruleId: automationRuleLogsTable.ruleId,
+          ruleName: automationRulesTable.name,
+          triggerType: automationRulesTable.triggerType,
+          triggerEvent: automationRuleLogsTable.triggerEvent,
+          matchedRecordType: automationRuleLogsTable.matchedRecordType,
+          matchedRecordId: automationRuleLogsTable.matchedRecordId,
+          actionsExecuted: automationRuleLogsTable.actionsExecuted,
+          result: automationRuleLogsTable.result,
+          errorMessage: automationRuleLogsTable.errorMessage,
+          executedAt: automationRuleLogsTable.executedAt,
+        })
+        .from(automationRuleLogsTable)
+        .innerJoin(
+          automationRulesTable,
+          eq(automationRuleLogsTable.ruleId, automationRulesTable.id),
+        )
+        .where(and(...conditions))
+        .orderBy(desc(automationRuleLogsTable.executedAt))
+        .limit(limit),
+      db
+        .select({
+          result: automationRuleLogsTable.result,
+          count: sql<number>`count(*)`,
+        })
+        .from(automationRuleLogsTable)
+        .innerJoin(
+          automationRulesTable,
+          eq(automationRuleLogsTable.ruleId, automationRulesTable.id),
+        )
+        .where(
+          and(
+            eq(automationRulesTable.orgId, authReq.orgId),
+            gte(automationRuleLogsTable.executedAt, since24h),
+          ),
+        )
+        .groupBy(automationRuleLogsTable.result),
+    ]);
+
+    const last24h = { success: 0, partial: 0, failed: 0 };
+    for (const row of totals) {
+      if (row.result in last24h) {
+        last24h[row.result as keyof typeof last24h] = Number(row.count);
+      }
+    }
+
+    res.json({
+      recent,
+      last24h,
+      total: recent.length,
+    });
+  },
+);
+
 // GET /automations/rules/:id/logs — execution history
 router.get(
   "/automations/rules/:id/logs",
