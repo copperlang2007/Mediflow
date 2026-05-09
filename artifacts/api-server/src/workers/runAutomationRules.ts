@@ -153,22 +153,59 @@ async function executeAction(
 
   switch (action.type) {
     case "create_task": {
-      const { title, agentId: taskAgentId, dueDate: taskDueDate } = config as {
+      const {
+        title,
+        description,
+        agentId: taskAgentId,
+        contactId: taskContactId,
+        dueDate: taskDueDate,
+        dueOffsetDays,
+        priority,
+      } = config as {
         title: string;
+        description?: string;
         agentId?: string;
+        contactId?: string;
         dueDate?: string;
+        dueOffsetDays?: number | string;
+        priority?: "low" | "medium" | "high" | "urgent";
       };
       if (title) {
+        // Default agentId/contactId to the resource being acted on so a rule
+        // doesn't have to repeat them in config when the trigger already
+        // points at the right record.
+        const resolvedAgentId =
+          taskAgentId ??
+          (typeof context.agentId === "string" ? context.agentId : null) ??
+          (resourceType === "agent" ? resourceId : null);
+        const resolvedContactId =
+          taskContactId ??
+          (typeof context.contactId === "string" ? context.contactId : null) ??
+          (resourceType === "contact" ? resourceId : null);
+
+        let dueDate: Date | null = null;
+        if (taskDueDate) {
+          dueDate = new Date(taskDueDate);
+        } else if (dueOffsetDays != null) {
+          const days = Number(dueOffsetDays);
+          if (Number.isFinite(days)) {
+            dueDate = new Date(Date.now() + days * 86_400_000);
+          }
+        }
+
         await db.insert(taskInstancesTable).values({
           id: randomUUID(),
           orgId,
           templateId: null,
-          agentId: (taskAgentId as string) ?? null,
+          agentId: resolvedAgentId,
+          contactId: resolvedContactId,
           title,
-          description: `Auto-created by automation rule (${resourceType}: ${resourceId})`,
+          description:
+            description ??
+            `Auto-created by automation rule (${resourceType}: ${resourceId})`,
           status: "open",
-          priority: "medium",
-          dueDate: taskDueDate ? new Date(taskDueDate) : null,
+          priority: priority ?? "medium",
+          dueDate,
         });
       }
       break;
@@ -218,71 +255,154 @@ async function executeAction(
 
     case "send_email": {
       const { to, subject, html } = config as {
-        to: string;
+        to?: string;
         subject: string;
         html: string;
       };
-      if (to && subject && html) {
-        await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, { to, subject, html });
+      // Resolve `to` from the action config first; fall back to the resource's
+      // own email so a rule like "send email" on a contact_created trigger
+      // doesn't need to know the contact's address.
+      let resolvedTo = to;
+      if (!resolvedTo) {
+        if (typeof context.email === "string") {
+          resolvedTo = context.email;
+        } else if (resourceType === "contact" && resourceId) {
+          const [c] = await db
+            .select({ email: contactsTable.email })
+            .from(contactsTable)
+            .where(and(eq(contactsTable.id, resourceId), eq(contactsTable.orgId, orgId)));
+          if (c?.email) resolvedTo = c.email;
+        } else if (resourceType === "agent" && resourceId) {
+          const [a] = await db
+            .select({ email: agentsTable.email })
+            .from(agentsTable)
+            .where(and(eq(agentsTable.id, resourceId), eq(agentsTable.orgId, orgId)));
+          if (a?.email) resolvedTo = a.email;
+        }
+      }
+      if (resolvedTo && subject && html) {
+        await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
+          to: resolvedTo,
+          subject,
+          html,
+        });
+      } else {
+        logger.warn(
+          { action: "send_email", resourceType, resourceId, hasTo: !!resolvedTo },
+          "send_email skipped — missing recipient/subject/html after resolution",
+        );
       }
       break;
     }
 
     case "send_sms": {
-      const { to, body } = config as { to: string; body: string };
-      if (to && body) {
-        await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { to, body });
+      const { to, body } = config as { to?: string; body: string };
+      let resolvedTo = to;
+      if (!resolvedTo) {
+        if (typeof context.phone === "string") {
+          resolvedTo = context.phone;
+        } else if (resourceType === "contact" && resourceId) {
+          const [c] = await db
+            .select({ phone: contactsTable.phone })
+            .from(contactsTable)
+            .where(and(eq(contactsTable.id, resourceId), eq(contactsTable.orgId, orgId)));
+          if (c?.phone) resolvedTo = c.phone;
+        }
+      }
+      if (resolvedTo && body) {
+        await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { to: resolvedTo, body });
+      } else {
+        logger.warn(
+          { action: "send_sms", resourceType, resourceId, hasTo: !!resolvedTo },
+          "send_sms skipped — missing recipient/body after resolution",
+        );
       }
       break;
     }
 
     case "change_contact_status": {
       const { status } = config as { status: Contact["status"] };
-      if (resourceType === "contact" && resourceId && status) {
+      if (!status) break;
+      // Resolve the target contactId: prefer the resource itself when it's a
+      // contact; otherwise fall back to a contactId in the trigger context
+      // (e.g. lead_created carries the related contactId).
+      let targetContactId: string | null = null;
+      if (resourceType === "contact" && resourceId) {
+        targetContactId = resourceId;
+      } else if (typeof context.contactId === "string") {
+        targetContactId = context.contactId;
+      }
+      if (targetContactId) {
         await db
           .update(contactsTable)
           .set({ status })
           .where(
-            and(eq(contactsTable.id, resourceId), eq(contactsTable.orgId, orgId)),
+            and(
+              eq(contactsTable.id, targetContactId),
+              eq(contactsTable.orgId, orgId),
+            ),
           );
+      } else {
+        logger.warn(
+          { action: "change_contact_status", resourceType },
+          "change_contact_status skipped — no contactId resolved",
+        );
       }
       break;
     }
 
     case "enroll_sequence": {
-      const { sequenceId } = config as { sequenceId: string };
-      if (resourceType === "contact" && resourceId && sequenceId) {
-        // Create (or verify) an active enrollment record before scheduling the
-        // first step — sendSequenceStepWorker requires an active enrollment row.
-        const existing = await db
-          .select({ id: sequenceEnrollmentsTable.id })
-          .from(sequenceEnrollmentsTable)
-          .where(
-            and(
-              eq(sequenceEnrollmentsTable.sequenceId, sequenceId),
-              eq(sequenceEnrollmentsTable.contactId, resourceId),
-              eq(sequenceEnrollmentsTable.status, "active"),
-            ),
-          )
-          .limit(1);
+      const { sequenceId, channel } = config as {
+        sequenceId: string;
+        channel?: "email" | "sms";
+      };
+      if (!sequenceId) break;
+      // Same fallback as change_contact_status — accept a contactId from the
+      // trigger context so lead_* triggers can enroll the linked contact.
+      let targetContactId: string | null = null;
+      if (resourceType === "contact" && resourceId) {
+        targetContactId = resourceId;
+      } else if (typeof context.contactId === "string") {
+        targetContactId = context.contactId;
+      }
+      if (!targetContactId) {
+        logger.warn(
+          { action: "enroll_sequence", resourceType },
+          "enroll_sequence skipped — no contactId resolved",
+        );
+        break;
+      }
 
-        if (!existing.length) {
-          await db.insert(sequenceEnrollmentsTable).values({
-            id: randomUUID(),
-            sequenceId,
-            contactId: resourceId,
-            status: "active",
-            nextStepIndex: 0,
-          });
-        }
+      // Create (or verify) an active enrollment record before scheduling the
+      // first step — sendSequenceStepWorker requires an active enrollment row.
+      const existing = await db
+        .select({ id: sequenceEnrollmentsTable.id })
+        .from(sequenceEnrollmentsTable)
+        .where(
+          and(
+            eq(sequenceEnrollmentsTable.sequenceId, sequenceId),
+            eq(sequenceEnrollmentsTable.contactId, targetContactId),
+            eq(sequenceEnrollmentsTable.status, "active"),
+          ),
+        )
+        .limit(1);
 
-        await enqueue(JOB_NAMES.SEND_SEQUENCE_STEP, {
+      if (!existing.length) {
+        await db.insert(sequenceEnrollmentsTable).values({
+          id: randomUUID(),
           sequenceId,
-          contactId: resourceId,
-          stepIndex: 0,
-          channel: "sms",
+          contactId: targetContactId,
+          status: "active",
+          nextStepIndex: 0,
         });
       }
+
+      await enqueue(JOB_NAMES.SEND_SEQUENCE_STEP, {
+        sequenceId,
+        contactId: targetContactId,
+        stepIndex: 0,
+        channel: channel ?? "sms",
+      });
       break;
     }
 
