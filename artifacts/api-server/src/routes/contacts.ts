@@ -27,6 +27,9 @@ const router: IRouter = Router();
 // PHI masking — roles that may see full DOB and Medicare ID
 const PHI_PRIVILEGED_ROLES = new Set(["super_admin", "agency_admin", "compliance_manager"]);
 
+// Defensive cap on list endpoint pagination to prevent unbounded responses.
+const MAX_LIMIT = 1000;
+
 function maskContact<T extends { dob?: Date | null; medicareId?: string | null; healthConditions?: string[] | null }>(
   contact: T,
   userRole: string,
@@ -114,7 +117,7 @@ router.get(
       conditions.push(sql`${contactsTable.tags} @> ARRAY[${tag}]::text[]`);
     }
 
-    const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 200);
+    const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 200, MAX_LIMIT);
     const offsetNum = parseInt(offset ?? "0", 10) || 0;
     const dir = sortDir === "desc" ? desc : asc;
     const orderExpr =
@@ -183,7 +186,7 @@ router.post(
       },
     });
 
-    res.status(201).json(contact);
+    res.status(201).json(maskContact(contact, authReq.userRole));
   },
 );
 
@@ -575,7 +578,8 @@ router.post(
       }
       case "export_csv": {
         const headers = ["id","firstName","lastName","email","phone","status","medicareId","currentPlanType","stateCode","zipCode","leadSource","createdAt"];
-        const rows = contacts.map((c) => headers.map((h) => {
+        const maskedContacts = contacts.map((c) => maskContact(c, authReq.userRole));
+        const rows = maskedContacts.map((c) => headers.map((h) => {
           const v = (c as Record<string, unknown>)[h];
           return `"${String(v ?? "").replace(/"/g, '""')}"`;
         }).join(","));
