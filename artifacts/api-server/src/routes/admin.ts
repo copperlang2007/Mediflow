@@ -28,6 +28,7 @@ import { randomUUID } from "crypto";
 import PDFDocument from "pdfkit";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { clerkClient } from "@clerk/express";
+import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const objectStorage = new ObjectStorageService();
 
@@ -47,8 +48,8 @@ router.get(
     const authReq = req as AuthenticatedRequest;
     const { userId, action, resourceType, startDate, endDate, limit, offset } = req.query as Record<string, string>;
 
-    const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 500);
-    const offsetNum = parseInt(offset ?? "0", 10) || 0;
+    const limitNum = safeLimit(limit, 50, 500);
+    const offsetNum = safeOffset(offset);
 
     const conditions = [eq(auditLogTable.orgId, authReq.orgId)];
     if (userId) conditions.push(eq(auditLogTable.userId, userId));
@@ -228,8 +229,8 @@ router.get(
     const authReq = req as AuthenticatedRequest;
     const { userId, limit, offset } = req.query as Record<string, string>;
 
-    const limitNum = Math.min(parseInt(limit ?? "100", 10) || 100, 1000);
-    const offsetNum = parseInt(offset ?? "0", 10) || 0;
+    const limitNum = safeLimit(limit, 100, 1000);
+    const offsetNum = safeOffset(offset);
 
     const conditions = [eq(loginEventsTable.orgId, authReq.orgId)];
     if (userId) conditions.push(eq(loginEventsTable.userId, userId));
@@ -300,8 +301,8 @@ router.get(
     const authReq = req as AuthenticatedRequest;
     const { limit, offset } = req.query as Record<string, string>;
 
-    const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 500);
-    const offsetNum = parseInt(offset ?? "0", 10) || 0;
+    const limitNum = safeLimit(limit, 50, 500);
+    const offsetNum = safeOffset(offset);
 
     const [exports, [{ total }]] = await Promise.all([
       db.select({

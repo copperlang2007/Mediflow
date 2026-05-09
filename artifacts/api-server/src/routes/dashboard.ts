@@ -14,6 +14,7 @@ import {
 } from "@workspace/db";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { safeLimit } from "../lib/listGuards";
 
 const router: IRouter = Router();
 
@@ -209,7 +210,7 @@ router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read
 router.get("/dashboard/activity", requireAuth, requirePermission("dashboard", "read"), async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthenticatedRequest;
   const { limit } = req.query as { limit?: string };
-  const limitNum = Math.min(parseInt(limit ?? "20", 10) || 20, 100);
+  const limitNum = safeLimit(limit, 20, 200);
 
   const activities = await db
     .select({

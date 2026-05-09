@@ -12,6 +12,7 @@ import {
   removeSseSubscriber,
   broadcastToUser,
 } from "../lib/sseManager";
+import { safeLimit } from "../lib/listGuards";
 
 const router: IRouter = Router();
 
@@ -64,7 +65,7 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const { unreadOnly, limit } = req.query as { unreadOnly?: string; limit?: string };
-    const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 200);
+    const limitNum = safeLimit(limit, 50, 1000);
 
     const conditions: ReturnType<typeof eq>[] = [
       eq(notificationsTable.userId, authReq.userId),

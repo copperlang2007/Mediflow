@@ -7,6 +7,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const router: IRouter = Router();
 
@@ -30,8 +31,8 @@ router.get(
         offset?: string;
       };
 
-    const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 500);
-    const offsetNum = parseInt(offset ?? "0", 10) || 0;
+    const limitNum = safeLimit(limit, 50, 500);
+    const offsetNum = safeOffset(offset);
 
     const conditions = [eq(auditLogTable.orgId, authReq.orgId)];
     if (userId) conditions.push(eq(auditLogTable.userId, userId));

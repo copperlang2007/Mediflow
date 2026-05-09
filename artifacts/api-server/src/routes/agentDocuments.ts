@@ -9,6 +9,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const router: IRouter = Router();
 
@@ -74,6 +75,8 @@ router.get(
       agentId?: string;
       category?: string;
     };
+    const limitNum = safeLimit(req.query.limit, 100, 500);
+    const offsetNum = safeOffset(req.query.offset);
 
     const conditions: SQL[] = [eq(documentsTable.orgId, authReq.orgId)];
     if (agentId) conditions.push(eq(documentsTable.agentId, agentId));
@@ -100,7 +103,8 @@ router.get(
       .leftJoin(agentsTable, eq(documentsTable.agentId, agentsTable.id))
       .where(and(...conditions))
       .orderBy(desc(documentsTable.createdAt))
-      .limit(500);
+      .limit(limitNum)
+      .offset(offsetNum);
 
     res.json({ documents: docs, total: docs.length });
   },
