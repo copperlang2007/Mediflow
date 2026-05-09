@@ -432,6 +432,63 @@ router.get(
   },
 );
 
+// GET /contacts/:id/messages — every message across all threads for one contact,
+// ordered chronologically. Used by the contact-detail timeline to merge SMS
+// and email history alongside activities.
+router.get(
+  "/contacts/:id/messages",
+  requireAuth,
+  requirePermission("contact", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const limit = Math.min(parseInt((req.query.limit as string) ?? "100", 10) || 100, 500);
+
+    const [contact] = await db
+      .select({ id: contactsTable.id })
+      .from(contactsTable)
+      .where(
+        and(
+          eq(contactsTable.id, id),
+          eq(contactsTable.orgId, authReq.orgId),
+          isNull(contactsTable.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!contact) {
+      res.status(404).json({ error: "Contact not found" });
+      return;
+    }
+
+    const rows = await db
+      .select({
+        id: messagesTable.id,
+        threadId: messagesTable.threadId,
+        channel: messageThreadsTable.channel,
+        direction: messagesTable.direction,
+        body: messagesTable.body,
+        subject: messagesTable.subject,
+        fromAddress: messagesTable.fromAddress,
+        toAddress: messagesTable.toAddress,
+        status: messagesTable.status,
+        sentAt: messagesTable.sentAt,
+        createdAt: messagesTable.createdAt,
+      })
+      .from(messagesTable)
+      .innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id))
+      .where(
+        and(
+          eq(messageThreadsTable.contactId, id),
+          eq(messageThreadsTable.orgId, authReq.orgId),
+        ),
+      )
+      .orderBy(desc(messagesTable.createdAt))
+      .limit(limit);
+
+    res.json({ messages: rows, total: rows.length });
+  },
+);
+
 // GET /contacts/:id/tasks
 router.get(
   "/contacts/:id/tasks",
