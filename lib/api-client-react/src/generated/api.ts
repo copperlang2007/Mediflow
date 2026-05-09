@@ -23,6 +23,7 @@ import type {
   AgentDetail,
   AgentDocument,
   AgentListResponse,
+  AgentPerformanceRow,
   AhipDashboard,
   AhipRecord,
   AiChatBody,
@@ -32,6 +33,9 @@ import type {
   AutomationRule,
   AutomationRuleListResponse,
   AutomationRuleLog,
+  BaaControl,
+  BulkAssignTasksFromTemplateBody,
+  BulkAssignTasksFromTemplateResponse,
   BulkContactAction200,
   BulkContactActionBody,
   BulkImportLicensesBody,
@@ -44,7 +48,12 @@ import type {
   ChecklistItem,
   ChecklistRun,
   ChecklistRunDetail,
+  CommunicationsReport,
+  ComplianceMatrixReport,
   ComplianceScore,
+  ConfirmContactsImportBody,
+  ConfirmGhlImportBody,
+  ConfirmMondayImportBody,
   Contact,
   ContactListResponse,
   ConvertLead200,
@@ -72,17 +81,24 @@ import type {
   CreateTaskTemplateBody,
   CreateTechStackAccountBody,
   DashboardStats,
+  DataRetentionPolicy,
+  DeactivateUser200,
   Deal,
   EmailTemplate,
   EnrollInSequence200,
   EnrollInSequenceBody,
   Error,
+  ExportAdminAuditLogParams,
+  ExportAgentPerformanceReportParams,
+  GetAdminAuditLogParams,
+  GetAgentPerformanceReportParams,
   GetAgentsParams,
   GetAhipDashboardParams,
   GetAuditLogParams,
   GetAutomationRuleLogsParams,
   GetAutomationRulesParams,
   GetCertificationMatrixParams,
+  GetCommunicationsReportParams,
   GetContactActivitiesParams,
   GetContactEnrollments200Item,
   GetContactTasks200Item,
@@ -92,10 +108,14 @@ import type {
   GetDeals200Item,
   GetDealsParams,
   GetEmailTemplatesParams,
+  GetExportLogParams,
   GetInboxParams,
   GetLead200,
   GetLeadsParams,
+  GetLeadsReportParams,
+  GetLoginHistoryParams,
   GetNotificationsParams,
+  GetPipelineReportParams,
   GetRenewalsParams,
   GetRetentionAepParams,
   GetRetentionAnniversariesParams,
@@ -109,11 +129,17 @@ import type {
   GetThreadMessagesParams,
   GetThreadsParams,
   GetUsersParams,
+  GhlValidationResponse,
   HealthStatus,
+  ImportJob,
+  ImportJobStarted,
+  ImportUploadResponse,
+  ImportValidationResponse,
   InboxResponse,
   Lead,
   LeadListResponse,
   LeadStats,
+  LeadsReport,
   LicenseRenewalAlert,
   LogActivityBody,
   MarkMessageRead200,
@@ -125,13 +151,18 @@ import type {
   OffboardingReportDocument,
   OrgSettings,
   Organization,
+  PaginatedAuditLog,
+  PaginatedExportLog,
+  PaginatedLoginHistory,
   Pipeline,
   PipelineAnalytics,
+  PipelineReportRow,
   PipelineStage,
   PipelineWithStages,
   PlatformRequirement,
   PreviewTemplate200,
   PreviewTemplateBody,
+  ReactivateUser200,
   RenewalSnoozeResponse,
   RenewalsResponse,
   ReplyInThreadBody,
@@ -139,6 +170,7 @@ import type {
   RequestUploadUrlResponse,
   ResolveRenewal200,
   ResolveRetentionFlag200,
+  RetentionReport,
   RetentionSummary,
   RunAutomationRuleBody,
   RunAutomationRuleResponse,
@@ -152,6 +184,7 @@ import type {
   SequenceStep,
   SequenceWithStats,
   SequenceWithSteps,
+  SessionConfig,
   SmsTemplate,
   SnoozeRenewalBody,
   StateLicense,
@@ -168,6 +201,8 @@ import type {
   UpdateCertificationBody,
   UpdateChecklistItemBody,
   UpdateContactBody,
+  UpdateDataRetentionPolicy200,
+  UpdateDataRetentionPolicyBody,
   UpdateDealBody,
   UpdateEmailTemplateBody,
   UpdateLeadBody,
@@ -186,7 +221,13 @@ import type {
   UpdateTechStackAccountBody,
   UpdateUserBody,
   UpdateUserRoleBody,
+  UploadContactsImportBody,
+  UploadGhlImportBody,
+  UploadMondayImportBody,
   User,
+  UserAccessReviewRow,
+  ValidateGhlImportBody,
+  ValidateMondayImportBody,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -4880,6 +4921,96 @@ export const useDeleteTask = <
   TContext
 > => {
   return useMutation(getDeleteTaskMutationOptions(options));
+};
+
+/**
+ * @summary Assign one task per agent from a template
+ */
+export const getBulkAssignTasksFromTemplateUrl = () => {
+  return `/api/tasks/bulk-from-template`;
+};
+
+export const bulkAssignTasksFromTemplate = async (
+  bulkAssignTasksFromTemplateBody: BulkAssignTasksFromTemplateBody,
+  options?: RequestInit,
+): Promise<BulkAssignTasksFromTemplateResponse> => {
+  return customFetch<BulkAssignTasksFromTemplateResponse>(
+    getBulkAssignTasksFromTemplateUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(bulkAssignTasksFromTemplateBody),
+    },
+  );
+};
+
+export const getBulkAssignTasksFromTemplateMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof bulkAssignTasksFromTemplate>>,
+    TError,
+    { data: BodyType<BulkAssignTasksFromTemplateBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof bulkAssignTasksFromTemplate>>,
+  TError,
+  { data: BodyType<BulkAssignTasksFromTemplateBody> },
+  TContext
+> => {
+  const mutationKey = ["bulkAssignTasksFromTemplate"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof bulkAssignTasksFromTemplate>>,
+    { data: BodyType<BulkAssignTasksFromTemplateBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return bulkAssignTasksFromTemplate(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type BulkAssignTasksFromTemplateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof bulkAssignTasksFromTemplate>>
+>;
+export type BulkAssignTasksFromTemplateMutationBody =
+  BodyType<BulkAssignTasksFromTemplateBody>;
+export type BulkAssignTasksFromTemplateMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Assign one task per agent from a template
+ */
+export const useBulkAssignTasksFromTemplate = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof bulkAssignTasksFromTemplate>>,
+    TError,
+    { data: BodyType<BulkAssignTasksFromTemplateBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof bulkAssignTasksFromTemplate>>,
+  TError,
+  { data: BodyType<BulkAssignTasksFromTemplateBody> },
+  TContext
+> => {
+  return useMutation(getBulkAssignTasksFromTemplateMutationOptions(options));
 };
 
 /**
@@ -13778,6 +13909,2831 @@ export function useGetComplianceReportDownload<
     documentId,
     options,
   );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Agent performance metrics report
+ */
+export const getGetAgentPerformanceReportUrl = (
+  params?: GetAgentPerformanceReportParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/reports/agent-performance?${stringifiedParams}`
+    : `/api/reports/agent-performance`;
+};
+
+export const getAgentPerformanceReport = async (
+  params?: GetAgentPerformanceReportParams,
+  options?: RequestInit,
+): Promise<AgentPerformanceRow[]> => {
+  return customFetch<AgentPerformanceRow[]>(
+    getGetAgentPerformanceReportUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAgentPerformanceReportQueryKey = (
+  params?: GetAgentPerformanceReportParams,
+) => {
+  return [
+    `/api/reports/agent-performance`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetAgentPerformanceReportQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAgentPerformanceReport>>,
+  TError = ErrorType<Error>,
+>(
+  params?: GetAgentPerformanceReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentPerformanceReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAgentPerformanceReportQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAgentPerformanceReport>>
+  > = ({ signal }) =>
+    getAgentPerformanceReport(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAgentPerformanceReport>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAgentPerformanceReportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAgentPerformanceReport>>
+>;
+export type GetAgentPerformanceReportQueryError = ErrorType<Error>;
+
+/**
+ * @summary Agent performance metrics report
+ */
+
+export function useGetAgentPerformanceReport<
+  TData = Awaited<ReturnType<typeof getAgentPerformanceReport>>,
+  TError = ErrorType<Error>,
+>(
+  params?: GetAgentPerformanceReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentPerformanceReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAgentPerformanceReportQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Export agent performance as CSV
+ */
+export const getExportAgentPerformanceReportUrl = (
+  params?: ExportAgentPerformanceReportParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/reports/agent-performance/export?${stringifiedParams}`
+    : `/api/reports/agent-performance/export`;
+};
+
+export const exportAgentPerformanceReport = async (
+  params?: ExportAgentPerformanceReportParams,
+  options?: RequestInit,
+): Promise<string> => {
+  return customFetch<string>(getExportAgentPerformanceReportUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getExportAgentPerformanceReportQueryKey = (
+  params?: ExportAgentPerformanceReportParams,
+) => {
+  return [
+    `/api/reports/agent-performance/export`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getExportAgentPerformanceReportQueryOptions = <
+  TData = Awaited<ReturnType<typeof exportAgentPerformanceReport>>,
+  TError = ErrorType<Error>,
+>(
+  params?: ExportAgentPerformanceReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportAgentPerformanceReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getExportAgentPerformanceReportQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof exportAgentPerformanceReport>>
+  > = ({ signal }) =>
+    exportAgentPerformanceReport(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof exportAgentPerformanceReport>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ExportAgentPerformanceReportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof exportAgentPerformanceReport>>
+>;
+export type ExportAgentPerformanceReportQueryError = ErrorType<Error>;
+
+/**
+ * @summary Export agent performance as CSV
+ */
+
+export function useExportAgentPerformanceReport<
+  TData = Awaited<ReturnType<typeof exportAgentPerformanceReport>>,
+  TError = ErrorType<Error>,
+>(
+  params?: ExportAgentPerformanceReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportAgentPerformanceReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getExportAgentPerformanceReportQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Pipeline funnel and conversion report
+ */
+export const getGetPipelineReportUrl = (params?: GetPipelineReportParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/reports/pipeline?${stringifiedParams}`
+    : `/api/reports/pipeline`;
+};
+
+export const getPipelineReport = async (
+  params?: GetPipelineReportParams,
+  options?: RequestInit,
+): Promise<PipelineReportRow[]> => {
+  return customFetch<PipelineReportRow[]>(getGetPipelineReportUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPipelineReportQueryKey = (
+  params?: GetPipelineReportParams,
+) => {
+  return [`/api/reports/pipeline`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetPipelineReportQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPipelineReport>>,
+  TError = ErrorType<Error>,
+>(
+  params?: GetPipelineReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPipelineReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetPipelineReportQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPipelineReport>>
+  > = ({ signal }) => getPipelineReport(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPipelineReport>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPipelineReportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPipelineReport>>
+>;
+export type GetPipelineReportQueryError = ErrorType<Error>;
+
+/**
+ * @summary Pipeline funnel and conversion report
+ */
+
+export function useGetPipelineReport<
+  TData = Awaited<ReturnType<typeof getPipelineReport>>,
+  TError = ErrorType<Error>,
+>(
+  params?: GetPipelineReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPipelineReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPipelineReportQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Lead source and conversion report
+ */
+export const getGetLeadsReportUrl = (params?: GetLeadsReportParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/reports/leads?${stringifiedParams}`
+    : `/api/reports/leads`;
+};
+
+export const getLeadsReport = async (
+  params?: GetLeadsReportParams,
+  options?: RequestInit,
+): Promise<LeadsReport> => {
+  return customFetch<LeadsReport>(getGetLeadsReportUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetLeadsReportQueryKey = (params?: GetLeadsReportParams) => {
+  return [`/api/reports/leads`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetLeadsReportQueryOptions = <
+  TData = Awaited<ReturnType<typeof getLeadsReport>>,
+  TError = ErrorType<Error>,
+>(
+  params?: GetLeadsReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getLeadsReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetLeadsReportQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getLeadsReport>>> = ({
+    signal,
+  }) => getLeadsReport(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getLeadsReport>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetLeadsReportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getLeadsReport>>
+>;
+export type GetLeadsReportQueryError = ErrorType<Error>;
+
+/**
+ * @summary Lead source and conversion report
+ */
+
+export function useGetLeadsReport<
+  TData = Awaited<ReturnType<typeof getLeadsReport>>,
+  TError = ErrorType<Error>,
+>(
+  params?: GetLeadsReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getLeadsReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetLeadsReportQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary License, certification, and AHIP compliance matrix
+ */
+export const getGetComplianceMatrixReportUrl = () => {
+  return `/api/reports/compliance-matrix`;
+};
+
+export const getComplianceMatrixReport = async (
+  options?: RequestInit,
+): Promise<ComplianceMatrixReport> => {
+  return customFetch<ComplianceMatrixReport>(
+    getGetComplianceMatrixReportUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetComplianceMatrixReportQueryKey = () => {
+  return [`/api/reports/compliance-matrix`] as const;
+};
+
+export const getGetComplianceMatrixReportQueryOptions = <
+  TData = Awaited<ReturnType<typeof getComplianceMatrixReport>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getComplianceMatrixReport>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetComplianceMatrixReportQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getComplianceMatrixReport>>
+  > = ({ signal }) => getComplianceMatrixReport({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getComplianceMatrixReport>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetComplianceMatrixReportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getComplianceMatrixReport>>
+>;
+export type GetComplianceMatrixReportQueryError = ErrorType<Error>;
+
+/**
+ * @summary License, certification, and AHIP compliance matrix
+ */
+
+export function useGetComplianceMatrixReport<
+  TData = Awaited<ReturnType<typeof getComplianceMatrixReport>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getComplianceMatrixReport>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetComplianceMatrixReportQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary SMS and email volume report
+ */
+export const getGetCommunicationsReportUrl = (
+  params?: GetCommunicationsReportParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/reports/communications?${stringifiedParams}`
+    : `/api/reports/communications`;
+};
+
+export const getCommunicationsReport = async (
+  params?: GetCommunicationsReportParams,
+  options?: RequestInit,
+): Promise<CommunicationsReport> => {
+  return customFetch<CommunicationsReport>(
+    getGetCommunicationsReportUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetCommunicationsReportQueryKey = (
+  params?: GetCommunicationsReportParams,
+) => {
+  return [`/api/reports/communications`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetCommunicationsReportQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCommunicationsReport>>,
+  TError = ErrorType<Error>,
+>(
+  params?: GetCommunicationsReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCommunicationsReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetCommunicationsReportQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCommunicationsReport>>
+  > = ({ signal }) =>
+    getCommunicationsReport(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCommunicationsReport>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCommunicationsReportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCommunicationsReport>>
+>;
+export type GetCommunicationsReportQueryError = ErrorType<Error>;
+
+/**
+ * @summary SMS and email volume report
+ */
+
+export function useGetCommunicationsReport<
+  TData = Awaited<ReturnType<typeof getCommunicationsReport>>,
+  TError = ErrorType<Error>,
+>(
+  params?: GetCommunicationsReportParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCommunicationsReport>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCommunicationsReportQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Member retention report
+ */
+export const getGetRetentionReportUrl = () => {
+  return `/api/reports/retention`;
+};
+
+export const getRetentionReport = async (
+  options?: RequestInit,
+): Promise<RetentionReport> => {
+  return customFetch<RetentionReport>(getGetRetentionReportUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetRetentionReportQueryKey = () => {
+  return [`/api/reports/retention`] as const;
+};
+
+export const getGetRetentionReportQueryOptions = <
+  TData = Awaited<ReturnType<typeof getRetentionReport>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getRetentionReport>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetRetentionReportQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getRetentionReport>>
+  > = ({ signal }) => getRetentionReport({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getRetentionReport>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetRetentionReportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getRetentionReport>>
+>;
+export type GetRetentionReportQueryError = ErrorType<Error>;
+
+/**
+ * @summary Member retention report
+ */
+
+export function useGetRetentionReport<
+  TData = Awaited<ReturnType<typeof getRetentionReport>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getRetentionReport>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetRetentionReportQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Admin-level audit log viewer with enriched user info
+ */
+export const getGetAdminAuditLogUrl = (params?: GetAdminAuditLogParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/audit-log?${stringifiedParams}`
+    : `/api/admin/audit-log`;
+};
+
+export const getAdminAuditLog = async (
+  params?: GetAdminAuditLogParams,
+  options?: RequestInit,
+): Promise<PaginatedAuditLog> => {
+  return customFetch<PaginatedAuditLog>(getGetAdminAuditLogUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAdminAuditLogQueryKey = (
+  params?: GetAdminAuditLogParams,
+) => {
+  return [`/api/admin/audit-log`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetAdminAuditLogQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAdminAuditLog>>,
+  TError = ErrorType<Error>,
+>(
+  params?: GetAdminAuditLogParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAdminAuditLog>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAdminAuditLogQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAdminAuditLog>>
+  > = ({ signal }) => getAdminAuditLog(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAdminAuditLog>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAdminAuditLogQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAdminAuditLog>>
+>;
+export type GetAdminAuditLogQueryError = ErrorType<Error>;
+
+/**
+ * @summary Admin-level audit log viewer with enriched user info
+ */
+
+export function useGetAdminAuditLog<
+  TData = Awaited<ReturnType<typeof getAdminAuditLog>>,
+  TError = ErrorType<Error>,
+>(
+  params?: GetAdminAuditLogParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAdminAuditLog>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAdminAuditLogQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Export audit log as CSV
+ */
+export const getExportAdminAuditLogUrl = (
+  params?: ExportAdminAuditLogParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/audit-log/export?${stringifiedParams}`
+    : `/api/admin/audit-log/export`;
+};
+
+export const exportAdminAuditLog = async (
+  params?: ExportAdminAuditLogParams,
+  options?: RequestInit,
+): Promise<string> => {
+  return customFetch<string>(getExportAdminAuditLogUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getExportAdminAuditLogQueryKey = (
+  params?: ExportAdminAuditLogParams,
+) => {
+  return [`/api/admin/audit-log/export`, ...(params ? [params] : [])] as const;
+};
+
+export const getExportAdminAuditLogQueryOptions = <
+  TData = Awaited<ReturnType<typeof exportAdminAuditLog>>,
+  TError = ErrorType<Error>,
+>(
+  params?: ExportAdminAuditLogParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportAdminAuditLog>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getExportAdminAuditLogQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof exportAdminAuditLog>>
+  > = ({ signal }) =>
+    exportAdminAuditLog(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof exportAdminAuditLog>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ExportAdminAuditLogQueryResult = NonNullable<
+  Awaited<ReturnType<typeof exportAdminAuditLog>>
+>;
+export type ExportAdminAuditLogQueryError = ErrorType<Error>;
+
+/**
+ * @summary Export audit log as CSV
+ */
+
+export function useExportAdminAuditLog<
+  TData = Awaited<ReturnType<typeof exportAdminAuditLog>>,
+  TError = ErrorType<Error>,
+>(
+  params?: ExportAdminAuditLogParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportAdminAuditLog>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getExportAdminAuditLogQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary User access review for SOC 2 compliance
+ */
+export const getGetAccessReviewUrl = () => {
+  return `/api/admin/access-review`;
+};
+
+export const getAccessReview = async (
+  options?: RequestInit,
+): Promise<UserAccessReviewRow[]> => {
+  return customFetch<UserAccessReviewRow[]>(getGetAccessReviewUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAccessReviewQueryKey = () => {
+  return [`/api/admin/access-review`] as const;
+};
+
+export const getGetAccessReviewQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAccessReview>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getAccessReview>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetAccessReviewQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAccessReview>>> = ({
+    signal,
+  }) => getAccessReview({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAccessReview>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAccessReviewQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAccessReview>>
+>;
+export type GetAccessReviewQueryError = ErrorType<Error>;
+
+/**
+ * @summary User access review for SOC 2 compliance
+ */
+
+export function useGetAccessReview<
+  TData = Awaited<ReturnType<typeof getAccessReview>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getAccessReview>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAccessReviewQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Export access review as CSV
+ */
+export const getExportAccessReviewUrl = () => {
+  return `/api/admin/access-review/export`;
+};
+
+export const exportAccessReview = async (
+  options?: RequestInit,
+): Promise<string> => {
+  return customFetch<string>(getExportAccessReviewUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getExportAccessReviewQueryKey = () => {
+  return [`/api/admin/access-review/export`] as const;
+};
+
+export const getExportAccessReviewQueryOptions = <
+  TData = Awaited<ReturnType<typeof exportAccessReview>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof exportAccessReview>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getExportAccessReviewQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof exportAccessReview>>
+  > = ({ signal }) => exportAccessReview({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof exportAccessReview>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ExportAccessReviewQueryResult = NonNullable<
+  Awaited<ReturnType<typeof exportAccessReview>>
+>;
+export type ExportAccessReviewQueryError = ErrorType<Error>;
+
+/**
+ * @summary Export access review as CSV
+ */
+
+export function useExportAccessReview<
+  TData = Awaited<ReturnType<typeof exportAccessReview>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof exportAccessReview>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getExportAccessReviewQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Deactivate a user account
+ */
+export const getDeactivateUserUrl = (userId: string) => {
+  return `/api/admin/users/${userId}/deactivate`;
+};
+
+export const deactivateUser = async (
+  userId: string,
+  options?: RequestInit,
+): Promise<DeactivateUser200> => {
+  return customFetch<DeactivateUser200>(getDeactivateUserUrl(userId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getDeactivateUserMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deactivateUser>>,
+    TError,
+    { userId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deactivateUser>>,
+  TError,
+  { userId: string },
+  TContext
+> => {
+  const mutationKey = ["deactivateUser"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deactivateUser>>,
+    { userId: string }
+  > = (props) => {
+    const { userId } = props ?? {};
+
+    return deactivateUser(userId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeactivateUserMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deactivateUser>>
+>;
+
+export type DeactivateUserMutationError = ErrorType<Error>;
+
+/**
+ * @summary Deactivate a user account
+ */
+export const useDeactivateUser = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deactivateUser>>,
+    TError,
+    { userId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deactivateUser>>,
+  TError,
+  { userId: string },
+  TContext
+> => {
+  return useMutation(getDeactivateUserMutationOptions(options));
+};
+
+/**
+ * @summary Reactivate a user account
+ */
+export const getReactivateUserUrl = (userId: string) => {
+  return `/api/admin/users/${userId}/reactivate`;
+};
+
+export const reactivateUser = async (
+  userId: string,
+  options?: RequestInit,
+): Promise<ReactivateUser200> => {
+  return customFetch<ReactivateUser200>(getReactivateUserUrl(userId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getReactivateUserMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof reactivateUser>>,
+    TError,
+    { userId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof reactivateUser>>,
+  TError,
+  { userId: string },
+  TContext
+> => {
+  const mutationKey = ["reactivateUser"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof reactivateUser>>,
+    { userId: string }
+  > = (props) => {
+    const { userId } = props ?? {};
+
+    return reactivateUser(userId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReactivateUserMutationResult = NonNullable<
+  Awaited<ReturnType<typeof reactivateUser>>
+>;
+
+export type ReactivateUserMutationError = ErrorType<Error>;
+
+/**
+ * @summary Reactivate a user account
+ */
+export const useReactivateUser = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof reactivateUser>>,
+    TError,
+    { userId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof reactivateUser>>,
+  TError,
+  { userId: string },
+  TContext
+> => {
+  return useMutation(getReactivateUserMutationOptions(options));
+};
+
+/**
+ * @summary Login event history for HIPAA audit
+ */
+export const getGetLoginHistoryUrl = (params?: GetLoginHistoryParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/login-history?${stringifiedParams}`
+    : `/api/admin/login-history`;
+};
+
+export const getLoginHistory = async (
+  params?: GetLoginHistoryParams,
+  options?: RequestInit,
+): Promise<PaginatedLoginHistory> => {
+  return customFetch<PaginatedLoginHistory>(getGetLoginHistoryUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetLoginHistoryQueryKey = (params?: GetLoginHistoryParams) => {
+  return [`/api/admin/login-history`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetLoginHistoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getLoginHistory>>,
+  TError = ErrorType<Error>,
+>(
+  params?: GetLoginHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getLoginHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetLoginHistoryQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getLoginHistory>>> = ({
+    signal,
+  }) => getLoginHistory(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getLoginHistory>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetLoginHistoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getLoginHistory>>
+>;
+export type GetLoginHistoryQueryError = ErrorType<Error>;
+
+/**
+ * @summary Login event history for HIPAA audit
+ */
+
+export function useGetLoginHistory<
+  TData = Awaited<ReturnType<typeof getLoginHistory>>,
+  TError = ErrorType<Error>,
+>(
+  params?: GetLoginHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getLoginHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetLoginHistoryQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Data export audit log
+ */
+export const getGetExportLogUrl = (params?: GetExportLogParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/export-log?${stringifiedParams}`
+    : `/api/admin/export-log`;
+};
+
+export const getExportLog = async (
+  params?: GetExportLogParams,
+  options?: RequestInit,
+): Promise<PaginatedExportLog> => {
+  return customFetch<PaginatedExportLog>(getGetExportLogUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetExportLogQueryKey = (params?: GetExportLogParams) => {
+  return [`/api/admin/export-log`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetExportLogQueryOptions = <
+  TData = Awaited<ReturnType<typeof getExportLog>>,
+  TError = ErrorType<Error>,
+>(
+  params?: GetExportLogParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getExportLog>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetExportLogQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getExportLog>>> = ({
+    signal,
+  }) => getExportLog(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getExportLog>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetExportLogQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getExportLog>>
+>;
+export type GetExportLogQueryError = ErrorType<Error>;
+
+/**
+ * @summary Data export audit log
+ */
+
+export function useGetExportLog<
+  TData = Awaited<ReturnType<typeof getExportLog>>,
+  TError = ErrorType<Error>,
+>(
+  params?: GetExportLogParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getExportLog>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetExportLogQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get session timeout configuration
+ */
+export const getGetSessionConfigUrl = () => {
+  return `/api/admin/session-config`;
+};
+
+export const getSessionConfig = async (
+  options?: RequestInit,
+): Promise<SessionConfig> => {
+  return customFetch<SessionConfig>(getGetSessionConfigUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSessionConfigQueryKey = () => {
+  return [`/api/admin/session-config`] as const;
+};
+
+export const getGetSessionConfigQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSessionConfig>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSessionConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetSessionConfigQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSessionConfig>>
+  > = ({ signal }) => getSessionConfig({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSessionConfig>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSessionConfigQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSessionConfig>>
+>;
+export type GetSessionConfigQueryError = ErrorType<Error>;
+
+/**
+ * @summary Get session timeout configuration
+ */
+
+export function useGetSessionConfig<
+  TData = Awaited<ReturnType<typeof getSessionConfig>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSessionConfig>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSessionConfigQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update session timeout configuration
+ */
+export const getUpdateSessionConfigUrl = () => {
+  return `/api/admin/session-config`;
+};
+
+export const updateSessionConfig = async (
+  sessionConfig: SessionConfig,
+  options?: RequestInit,
+): Promise<SessionConfig> => {
+  return customFetch<SessionConfig>(getUpdateSessionConfigUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(sessionConfig),
+  });
+};
+
+export const getUpdateSessionConfigMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateSessionConfig>>,
+    TError,
+    { data: BodyType<SessionConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateSessionConfig>>,
+  TError,
+  { data: BodyType<SessionConfig> },
+  TContext
+> => {
+  const mutationKey = ["updateSessionConfig"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateSessionConfig>>,
+    { data: BodyType<SessionConfig> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateSessionConfig(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateSessionConfigMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateSessionConfig>>
+>;
+export type UpdateSessionConfigMutationBody = BodyType<SessionConfig>;
+export type UpdateSessionConfigMutationError = ErrorType<Error>;
+
+/**
+ * @summary Update session timeout configuration
+ */
+export const useUpdateSessionConfig = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateSessionConfig>>,
+    TError,
+    { data: BodyType<SessionConfig> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateSessionConfig>>,
+  TError,
+  { data: BodyType<SessionConfig> },
+  TContext
+> => {
+  return useMutation(getUpdateSessionConfigMutationOptions(options));
+};
+
+/**
+ * @summary Get data retention policies
+ */
+export const getGetDataRetentionPoliciesUrl = () => {
+  return `/api/admin/data-retention`;
+};
+
+export const getDataRetentionPolicies = async (
+  options?: RequestInit,
+): Promise<DataRetentionPolicy[]> => {
+  return customFetch<DataRetentionPolicy[]>(getGetDataRetentionPoliciesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetDataRetentionPoliciesQueryKey = () => {
+  return [`/api/admin/data-retention`] as const;
+};
+
+export const getGetDataRetentionPoliciesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDataRetentionPolicies>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getDataRetentionPolicies>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetDataRetentionPoliciesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDataRetentionPolicies>>
+  > = ({ signal }) => getDataRetentionPolicies({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDataRetentionPolicies>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDataRetentionPoliciesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDataRetentionPolicies>>
+>;
+export type GetDataRetentionPoliciesQueryError = ErrorType<Error>;
+
+/**
+ * @summary Get data retention policies
+ */
+
+export function useGetDataRetentionPolicies<
+  TData = Awaited<ReturnType<typeof getDataRetentionPolicies>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getDataRetentionPolicies>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDataRetentionPoliciesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update a data retention policy
+ */
+export const getUpdateDataRetentionPolicyUrl = () => {
+  return `/api/admin/data-retention`;
+};
+
+export const updateDataRetentionPolicy = async (
+  updateDataRetentionPolicyBody: UpdateDataRetentionPolicyBody,
+  options?: RequestInit,
+): Promise<UpdateDataRetentionPolicy200> => {
+  return customFetch<UpdateDataRetentionPolicy200>(
+    getUpdateDataRetentionPolicyUrl(),
+    {
+      ...options,
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(updateDataRetentionPolicyBody),
+    },
+  );
+};
+
+export const getUpdateDataRetentionPolicyMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateDataRetentionPolicy>>,
+    TError,
+    { data: BodyType<UpdateDataRetentionPolicyBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateDataRetentionPolicy>>,
+  TError,
+  { data: BodyType<UpdateDataRetentionPolicyBody> },
+  TContext
+> => {
+  const mutationKey = ["updateDataRetentionPolicy"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateDataRetentionPolicy>>,
+    { data: BodyType<UpdateDataRetentionPolicyBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateDataRetentionPolicy(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateDataRetentionPolicyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateDataRetentionPolicy>>
+>;
+export type UpdateDataRetentionPolicyMutationBody =
+  BodyType<UpdateDataRetentionPolicyBody>;
+export type UpdateDataRetentionPolicyMutationError = ErrorType<Error>;
+
+/**
+ * @summary Update a data retention policy
+ */
+export const useUpdateDataRetentionPolicy = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateDataRetentionPolicy>>,
+    TError,
+    { data: BodyType<UpdateDataRetentionPolicyBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateDataRetentionPolicy>>,
+  TError,
+  { data: BodyType<UpdateDataRetentionPolicyBody> },
+  TContext
+> => {
+  return useMutation(getUpdateDataRetentionPolicyMutationOptions(options));
+};
+
+/**
+ * @summary HIPAA BAA readiness checklist
+ */
+export const getGetBaaChecklistUrl = () => {
+  return `/api/admin/baa-checklist`;
+};
+
+export const getBaaChecklist = async (
+  options?: RequestInit,
+): Promise<BaaControl[]> => {
+  return customFetch<BaaControl[]>(getGetBaaChecklistUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetBaaChecklistQueryKey = () => {
+  return [`/api/admin/baa-checklist`] as const;
+};
+
+export const getGetBaaChecklistQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBaaChecklist>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBaaChecklist>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetBaaChecklistQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getBaaChecklist>>> = ({
+    signal,
+  }) => getBaaChecklist({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBaaChecklist>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBaaChecklistQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBaaChecklist>>
+>;
+export type GetBaaChecklistQueryError = ErrorType<Error>;
+
+/**
+ * @summary HIPAA BAA readiness checklist
+ */
+
+export function useGetBaaChecklist<
+  TData = Awaited<ReturnType<typeof getBaaChecklist>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getBaaChecklist>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBaaChecklistQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Generate SOC 2 evidence PDF report
+ */
+export const getGenerateSoc2EvidencePackUrl = () => {
+  return `/api/admin/soc2-evidence-pack`;
+};
+
+export const generateSoc2EvidencePack = async (
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getGenerateSoc2EvidencePackUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getGenerateSoc2EvidencePackMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateSoc2EvidencePack>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateSoc2EvidencePack>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["generateSoc2EvidencePack"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateSoc2EvidencePack>>,
+    void
+  > = () => {
+    return generateSoc2EvidencePack(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateSoc2EvidencePackMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateSoc2EvidencePack>>
+>;
+
+export type GenerateSoc2EvidencePackMutationError = ErrorType<Error>;
+
+/**
+ * @summary Generate SOC 2 evidence PDF report
+ */
+export const useGenerateSoc2EvidencePack = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateSoc2EvidencePack>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof generateSoc2EvidencePack>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getGenerateSoc2EvidencePackMutationOptions(options));
+};
+
+/**
+ * @summary Upload and parse a Monday.com CSV for field mapping
+ */
+export const getUploadMondayImportUrl = () => {
+  return `/api/imports/monday/upload`;
+};
+
+export const uploadMondayImport = async (
+  uploadMondayImportBody: UploadMondayImportBody,
+  options?: RequestInit,
+): Promise<ImportUploadResponse> => {
+  const formData = new FormData();
+  formData.append(`file`, uploadMondayImportBody.file);
+
+  return customFetch<ImportUploadResponse>(getUploadMondayImportUrl(), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getUploadMondayImportMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadMondayImport>>,
+    TError,
+    { data: BodyType<UploadMondayImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof uploadMondayImport>>,
+  TError,
+  { data: BodyType<UploadMondayImportBody> },
+  TContext
+> => {
+  const mutationKey = ["uploadMondayImport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof uploadMondayImport>>,
+    { data: BodyType<UploadMondayImportBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return uploadMondayImport(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UploadMondayImportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof uploadMondayImport>>
+>;
+export type UploadMondayImportMutationBody = BodyType<UploadMondayImportBody>;
+export type UploadMondayImportMutationError = ErrorType<Error>;
+
+/**
+ * @summary Upload and parse a Monday.com CSV for field mapping
+ */
+export const useUploadMondayImport = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadMondayImport>>,
+    TError,
+    { data: BodyType<UploadMondayImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof uploadMondayImport>>,
+  TError,
+  { data: BodyType<UploadMondayImportBody> },
+  TContext
+> => {
+  return useMutation(getUploadMondayImportMutationOptions(options));
+};
+
+/**
+ * @summary Validate Monday.com CSV with field mapping applied
+ */
+export const getValidateMondayImportUrl = () => {
+  return `/api/imports/monday/validate`;
+};
+
+export const validateMondayImport = async (
+  validateMondayImportBody: ValidateMondayImportBody,
+  options?: RequestInit,
+): Promise<ImportValidationResponse> => {
+  const formData = new FormData();
+  formData.append(`file`, validateMondayImportBody.file);
+  if (validateMondayImportBody.mapping !== undefined) {
+    formData.append(`mapping`, validateMondayImportBody.mapping);
+  }
+
+  return customFetch<ImportValidationResponse>(getValidateMondayImportUrl(), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getValidateMondayImportMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof validateMondayImport>>,
+    TError,
+    { data: BodyType<ValidateMondayImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof validateMondayImport>>,
+  TError,
+  { data: BodyType<ValidateMondayImportBody> },
+  TContext
+> => {
+  const mutationKey = ["validateMondayImport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof validateMondayImport>>,
+    { data: BodyType<ValidateMondayImportBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return validateMondayImport(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ValidateMondayImportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof validateMondayImport>>
+>;
+export type ValidateMondayImportMutationBody =
+  BodyType<ValidateMondayImportBody>;
+export type ValidateMondayImportMutationError = ErrorType<Error>;
+
+/**
+ * @summary Validate Monday.com CSV with field mapping applied
+ */
+export const useValidateMondayImport = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof validateMondayImport>>,
+    TError,
+    { data: BodyType<ValidateMondayImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof validateMondayImport>>,
+  TError,
+  { data: BodyType<ValidateMondayImportBody> },
+  TContext
+> => {
+  return useMutation(getValidateMondayImportMutationOptions(options));
+};
+
+/**
+ * @summary Confirm and start Monday.com CSV import job
+ */
+export const getConfirmMondayImportUrl = () => {
+  return `/api/imports/monday/confirm`;
+};
+
+export const confirmMondayImport = async (
+  confirmMondayImportBody: ConfirmMondayImportBody,
+  options?: RequestInit,
+): Promise<ImportJobStarted> => {
+  const formData = new FormData();
+  formData.append(`file`, confirmMondayImportBody.file);
+  if (confirmMondayImportBody.mapping !== undefined) {
+    formData.append(`mapping`, confirmMondayImportBody.mapping);
+  }
+
+  return customFetch<ImportJobStarted>(getConfirmMondayImportUrl(), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getConfirmMondayImportMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmMondayImport>>,
+    TError,
+    { data: BodyType<ConfirmMondayImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof confirmMondayImport>>,
+  TError,
+  { data: BodyType<ConfirmMondayImportBody> },
+  TContext
+> => {
+  const mutationKey = ["confirmMondayImport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof confirmMondayImport>>,
+    { data: BodyType<ConfirmMondayImportBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return confirmMondayImport(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConfirmMondayImportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof confirmMondayImport>>
+>;
+export type ConfirmMondayImportMutationBody = BodyType<ConfirmMondayImportBody>;
+export type ConfirmMondayImportMutationError = ErrorType<Error>;
+
+/**
+ * @summary Confirm and start Monday.com CSV import job
+ */
+export const useConfirmMondayImport = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmMondayImport>>,
+    TError,
+    { data: BodyType<ConfirmMondayImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof confirmMondayImport>>,
+  TError,
+  { data: BodyType<ConfirmMondayImportBody> },
+  TContext
+> => {
+  return useMutation(getConfirmMondayImportMutationOptions(options));
+};
+
+/**
+ * @summary Upload and parse a GoHighLevel CSV for field mapping
+ */
+export const getUploadGhlImportUrl = () => {
+  return `/api/imports/ghl/upload`;
+};
+
+export const uploadGhlImport = async (
+  uploadGhlImportBody: UploadGhlImportBody,
+  options?: RequestInit,
+): Promise<ImportUploadResponse> => {
+  const formData = new FormData();
+  formData.append(`file`, uploadGhlImportBody.file);
+
+  return customFetch<ImportUploadResponse>(getUploadGhlImportUrl(), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getUploadGhlImportMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadGhlImport>>,
+    TError,
+    { data: BodyType<UploadGhlImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof uploadGhlImport>>,
+  TError,
+  { data: BodyType<UploadGhlImportBody> },
+  TContext
+> => {
+  const mutationKey = ["uploadGhlImport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof uploadGhlImport>>,
+    { data: BodyType<UploadGhlImportBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return uploadGhlImport(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UploadGhlImportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof uploadGhlImport>>
+>;
+export type UploadGhlImportMutationBody = BodyType<UploadGhlImportBody>;
+export type UploadGhlImportMutationError = ErrorType<Error>;
+
+/**
+ * @summary Upload and parse a GoHighLevel CSV for field mapping
+ */
+export const useUploadGhlImport = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadGhlImport>>,
+    TError,
+    { data: BodyType<UploadGhlImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof uploadGhlImport>>,
+  TError,
+  { data: BodyType<UploadGhlImportBody> },
+  TContext
+> => {
+  return useMutation(getUploadGhlImportMutationOptions(options));
+};
+
+/**
+ * @summary Validate GoHighLevel CSV with field mapping applied
+ */
+export const getValidateGhlImportUrl = () => {
+  return `/api/imports/ghl/validate`;
+};
+
+export const validateGhlImport = async (
+  validateGhlImportBody: ValidateGhlImportBody,
+  options?: RequestInit,
+): Promise<GhlValidationResponse> => {
+  const formData = new FormData();
+  formData.append(`file`, validateGhlImportBody.file);
+  if (validateGhlImportBody.mapping !== undefined) {
+    formData.append(`mapping`, validateGhlImportBody.mapping);
+  }
+
+  return customFetch<GhlValidationResponse>(getValidateGhlImportUrl(), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getValidateGhlImportMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof validateGhlImport>>,
+    TError,
+    { data: BodyType<ValidateGhlImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof validateGhlImport>>,
+  TError,
+  { data: BodyType<ValidateGhlImportBody> },
+  TContext
+> => {
+  const mutationKey = ["validateGhlImport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof validateGhlImport>>,
+    { data: BodyType<ValidateGhlImportBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return validateGhlImport(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ValidateGhlImportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof validateGhlImport>>
+>;
+export type ValidateGhlImportMutationBody = BodyType<ValidateGhlImportBody>;
+export type ValidateGhlImportMutationError = ErrorType<Error>;
+
+/**
+ * @summary Validate GoHighLevel CSV with field mapping applied
+ */
+export const useValidateGhlImport = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof validateGhlImport>>,
+    TError,
+    { data: BodyType<ValidateGhlImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof validateGhlImport>>,
+  TError,
+  { data: BodyType<ValidateGhlImportBody> },
+  TContext
+> => {
+  return useMutation(getValidateGhlImportMutationOptions(options));
+};
+
+/**
+ * @summary Confirm and start GoHighLevel CSV import job
+ */
+export const getConfirmGhlImportUrl = () => {
+  return `/api/imports/ghl/confirm`;
+};
+
+export const confirmGhlImport = async (
+  confirmGhlImportBody: ConfirmGhlImportBody,
+  options?: RequestInit,
+): Promise<ImportJobStarted> => {
+  const formData = new FormData();
+  formData.append(`file`, confirmGhlImportBody.file);
+  if (confirmGhlImportBody.mapping !== undefined) {
+    formData.append(`mapping`, confirmGhlImportBody.mapping);
+  }
+  if (confirmGhlImportBody.duplicateAction !== undefined) {
+    formData.append(`duplicateAction`, confirmGhlImportBody.duplicateAction);
+  }
+
+  return customFetch<ImportJobStarted>(getConfirmGhlImportUrl(), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getConfirmGhlImportMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmGhlImport>>,
+    TError,
+    { data: BodyType<ConfirmGhlImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof confirmGhlImport>>,
+  TError,
+  { data: BodyType<ConfirmGhlImportBody> },
+  TContext
+> => {
+  const mutationKey = ["confirmGhlImport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof confirmGhlImport>>,
+    { data: BodyType<ConfirmGhlImportBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return confirmGhlImport(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConfirmGhlImportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof confirmGhlImport>>
+>;
+export type ConfirmGhlImportMutationBody = BodyType<ConfirmGhlImportBody>;
+export type ConfirmGhlImportMutationError = ErrorType<Error>;
+
+/**
+ * @summary Confirm and start GoHighLevel CSV import job
+ */
+export const useConfirmGhlImport = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmGhlImport>>,
+    TError,
+    { data: BodyType<ConfirmGhlImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof confirmGhlImport>>,
+  TError,
+  { data: BodyType<ConfirmGhlImportBody> },
+  TContext
+> => {
+  return useMutation(getConfirmGhlImportMutationOptions(options));
+};
+
+/**
+ * @summary Upload and parse a generic contacts CSV for field mapping
+ */
+export const getUploadContactsImportUrl = () => {
+  return `/api/imports/contacts/upload`;
+};
+
+export const uploadContactsImport = async (
+  uploadContactsImportBody: UploadContactsImportBody,
+  options?: RequestInit,
+): Promise<ImportUploadResponse> => {
+  const formData = new FormData();
+  formData.append(`file`, uploadContactsImportBody.file);
+
+  return customFetch<ImportUploadResponse>(getUploadContactsImportUrl(), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getUploadContactsImportMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadContactsImport>>,
+    TError,
+    { data: BodyType<UploadContactsImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof uploadContactsImport>>,
+  TError,
+  { data: BodyType<UploadContactsImportBody> },
+  TContext
+> => {
+  const mutationKey = ["uploadContactsImport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof uploadContactsImport>>,
+    { data: BodyType<UploadContactsImportBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return uploadContactsImport(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UploadContactsImportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof uploadContactsImport>>
+>;
+export type UploadContactsImportMutationBody =
+  BodyType<UploadContactsImportBody>;
+export type UploadContactsImportMutationError = ErrorType<Error>;
+
+/**
+ * @summary Upload and parse a generic contacts CSV for field mapping
+ */
+export const useUploadContactsImport = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadContactsImport>>,
+    TError,
+    { data: BodyType<UploadContactsImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof uploadContactsImport>>,
+  TError,
+  { data: BodyType<UploadContactsImportBody> },
+  TContext
+> => {
+  return useMutation(getUploadContactsImportMutationOptions(options));
+};
+
+/**
+ * @summary Confirm and start generic contacts CSV import job
+ */
+export const getConfirmContactsImportUrl = () => {
+  return `/api/imports/contacts/confirm`;
+};
+
+export const confirmContactsImport = async (
+  confirmContactsImportBody: ConfirmContactsImportBody,
+  options?: RequestInit,
+): Promise<ImportJobStarted> => {
+  const formData = new FormData();
+  formData.append(`file`, confirmContactsImportBody.file);
+  if (confirmContactsImportBody.mapping !== undefined) {
+    formData.append(`mapping`, confirmContactsImportBody.mapping);
+  }
+
+  return customFetch<ImportJobStarted>(getConfirmContactsImportUrl(), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getConfirmContactsImportMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmContactsImport>>,
+    TError,
+    { data: BodyType<ConfirmContactsImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof confirmContactsImport>>,
+  TError,
+  { data: BodyType<ConfirmContactsImportBody> },
+  TContext
+> => {
+  const mutationKey = ["confirmContactsImport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof confirmContactsImport>>,
+    { data: BodyType<ConfirmContactsImportBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return confirmContactsImport(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConfirmContactsImportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof confirmContactsImport>>
+>;
+export type ConfirmContactsImportMutationBody =
+  BodyType<ConfirmContactsImportBody>;
+export type ConfirmContactsImportMutationError = ErrorType<Error>;
+
+/**
+ * @summary Confirm and start generic contacts CSV import job
+ */
+export const useConfirmContactsImport = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmContactsImport>>,
+    TError,
+    { data: BodyType<ConfirmContactsImportBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof confirmContactsImport>>,
+  TError,
+  { data: BodyType<ConfirmContactsImportBody> },
+  TContext
+> => {
+  return useMutation(getConfirmContactsImportMutationOptions(options));
+};
+
+/**
+ * @summary SSE stream of import job progress
+ */
+export const getGetImportProgressUrl = (jobId: string) => {
+  return `/api/imports/progress/${jobId}`;
+};
+
+export const getImportProgress = async (
+  jobId: string,
+  options?: RequestInit,
+): Promise<string> => {
+  return customFetch<string>(getGetImportProgressUrl(jobId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetImportProgressQueryKey = (jobId: string) => {
+  return [`/api/imports/progress/${jobId}`] as const;
+};
+
+export const getGetImportProgressQueryOptions = <
+  TData = Awaited<ReturnType<typeof getImportProgress>>,
+  TError = ErrorType<Error>,
+>(
+  jobId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getImportProgress>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetImportProgressQueryKey(jobId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getImportProgress>>
+  > = ({ signal }) => getImportProgress(jobId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!jobId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getImportProgress>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetImportProgressQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getImportProgress>>
+>;
+export type GetImportProgressQueryError = ErrorType<Error>;
+
+/**
+ * @summary SSE stream of import job progress
+ */
+
+export function useGetImportProgress<
+  TData = Awaited<ReturnType<typeof getImportProgress>>,
+  TError = ErrorType<Error>,
+>(
+  jobId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getImportProgress>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetImportProgressQueryOptions(jobId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List all import jobs for the organization
+ */
+export const getGetImportHistoryUrl = () => {
+  return `/api/imports/history`;
+};
+
+export const getImportHistory = async (
+  options?: RequestInit,
+): Promise<ImportJob[]> => {
+  return customFetch<ImportJob[]>(getGetImportHistoryUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetImportHistoryQueryKey = () => {
+  return [`/api/imports/history`] as const;
+};
+
+export const getGetImportHistoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getImportHistory>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getImportHistory>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetImportHistoryQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getImportHistory>>
+  > = ({ signal }) => getImportHistory({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getImportHistory>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetImportHistoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getImportHistory>>
+>;
+export type GetImportHistoryQueryError = ErrorType<Error>;
+
+/**
+ * @summary List all import jobs for the organization
+ */
+
+export function useGetImportHistory<
+  TData = Awaited<ReturnType<typeof getImportHistory>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getImportHistory>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetImportHistoryQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Download error CSV for a completed import job
+ */
+export const getGetImportErrorsCsvUrl = (jobId: string) => {
+  return `/api/imports/${jobId}/errors.csv`;
+};
+
+export const getImportErrorsCsv = async (
+  jobId: string,
+  options?: RequestInit,
+): Promise<string> => {
+  return customFetch<string>(getGetImportErrorsCsvUrl(jobId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetImportErrorsCsvQueryKey = (jobId: string) => {
+  return [`/api/imports/${jobId}/errors.csv`] as const;
+};
+
+export const getGetImportErrorsCsvQueryOptions = <
+  TData = Awaited<ReturnType<typeof getImportErrorsCsv>>,
+  TError = ErrorType<Error>,
+>(
+  jobId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getImportErrorsCsv>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetImportErrorsCsvQueryKey(jobId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getImportErrorsCsv>>
+  > = ({ signal }) => getImportErrorsCsv(jobId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!jobId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getImportErrorsCsv>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetImportErrorsCsvQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getImportErrorsCsv>>
+>;
+export type GetImportErrorsCsvQueryError = ErrorType<Error>;
+
+/**
+ * @summary Download error CSV for a completed import job
+ */
+
+export function useGetImportErrorsCsv<
+  TData = Awaited<ReturnType<typeof getImportErrorsCsv>>,
+  TError = ErrorType<Error>,
+>(
+  jobId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getImportErrorsCsv>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetImportErrorsCsvQueryOptions(jobId, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
