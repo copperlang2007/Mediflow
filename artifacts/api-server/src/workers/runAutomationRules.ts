@@ -29,14 +29,14 @@ import {
 } from "@workspace/db";
 import { type RunAutomationRulesPayload, enqueue, JOB_NAMES } from "../lib/jobs";
 import { logger } from "../lib/logger";
-
-// ---- Typed condition / action interfaces ----
-
-interface AutomationCondition {
-  field: string;
-  operator: "eq" | "neq" | "contains" | "gt" | "lt" | "exists";
-  value: unknown;
-}
+import {
+  evaluateConditions,
+  renderConfig,
+  type AutomationCondition,
+} from "./automationRulesEngine";
+// Re-export for downstream callers that previously imported from this module.
+export { evaluateCondition, evaluateConditions, renderTemplate } from "./automationRulesEngine";
+export type { AutomationCondition } from "./automationRulesEngine";
 
 interface AutomationAction {
   type:
@@ -48,88 +48,6 @@ interface AutomationAction {
     | "enroll_sequence"
     | "change_deal_stage";
   config: Record<string, unknown>;
-}
-
-// ---- Condition evaluation ----
-
-function evaluateCondition(
-  cond: AutomationCondition,
-  ctx: Record<string, unknown>,
-): boolean {
-  const actual = ctx[cond.field];
-  switch (cond.operator) {
-    case "eq":
-      return actual === cond.value;
-    case "neq":
-      return actual !== cond.value;
-    case "contains":
-      return typeof actual === "string" && actual.includes(String(cond.value));
-    case "gt":
-      return Number(actual) > Number(cond.value);
-    case "lt":
-      return Number(actual) < Number(cond.value);
-    case "exists":
-      return actual !== undefined && actual !== null;
-    default:
-      return false;
-  }
-}
-
-function evaluateConditions(
-  conditions: AutomationCondition[],
-  ctx: Record<string, unknown>,
-): boolean {
-  if (conditions.length === 0) return true;
-  // Process conditions respecting AND/OR logic.
-  // Default logic is "and" for the first condition; each subsequent condition
-  // uses its own `logic` to combine with the running result.
-  let result = evaluateCondition(conditions[0]!, ctx);
-  for (let i = 1; i < conditions.length; i++) {
-    const cond = conditions[i]!;
-    const logic = (cond as AutomationCondition & { logic?: string }).logic ?? "and";
-    if (logic === "or") {
-      result = result || evaluateCondition(cond, ctx);
-    } else {
-      result = result && evaluateCondition(cond, ctx);
-    }
-  }
-  return result;
-}
-
-// ---- Variable substitution ----
-
-/**
- * Replace `{{key}}` placeholders in an action config string with values from
- * the enriched trigger context. Unknown keys collapse to an empty string so
- * partially-templated rules don't blow up on missing values.
- */
-function renderTemplate(
-  text: string,
-  ctx: Record<string, unknown>,
-): string {
-  return text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => {
-    const value = key
-      .split(".")
-      .reduce<unknown>((acc, part) => {
-        if (acc && typeof acc === "object" && part in (acc as Record<string, unknown>)) {
-          return (acc as Record<string, unknown>)[part];
-        }
-        return undefined;
-      }, ctx);
-    if (value === undefined || value === null) return "";
-    return String(value);
-  });
-}
-
-function renderConfig<T extends Record<string, unknown>>(
-  config: T,
-  ctx: Record<string, unknown>,
-): T {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(config)) {
-    out[k] = typeof v === "string" ? renderTemplate(v, ctx) : v;
-  }
-  return out as T;
 }
 
 // ---- Action execution ----

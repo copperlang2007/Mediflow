@@ -19,83 +19,14 @@ export interface AiContext {
   label?: string;
 }
 
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-  isStreaming?: boolean;
-  draftType?: "sms" | "email";
-}
-
-// ─── Persistence (localStorage) ───────────────────────────────────────────────
-// The panel's open state is restored across page navigations and refreshes,
-// and chat history survives reloads so users can resume conversations.
-const STORAGE_KEYS = {
-  open: "mediflow.ai-panel.open",
-  history: "mediflow.ai-panel.history",
-} as const;
-
-// Cap persisted history to keep localStorage small; older messages drop off.
-const HISTORY_CAP = 50;
-
-function readBool(key: string, fallback: boolean): boolean {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const v = window.localStorage.getItem(key);
-    return v === null ? fallback : v === "1";
-  } catch {
-    return fallback;
-  }
-}
-
-function writeBool(key: string, value: boolean) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(key, value ? "1" : "0");
-  } catch {
-    // localStorage may be unavailable; ignore.
-  }
-}
-
-function readHistory(): ChatMessage[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEYS.history);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(
-        (m): m is ChatMessage =>
-          typeof m === "object" &&
-          m !== null &&
-          (((m as { role?: unknown }).role === "user") ||
-            ((m as { role?: unknown }).role === "assistant")) &&
-          typeof (m as { content?: unknown }).content === "string",
-      )
-      // Drop the streaming flag — anything mid-stream when the page closed
-      // is gone; we don't want to render a perpetually-streaming bubble.
-      .map((m) => ({ role: m.role, content: m.content, draftType: m.draftType }));
-  } catch {
-    return [];
-  }
-}
-
-function writeHistory(messages: ChatMessage[]) {
-  if (typeof window === "undefined") return;
-  try {
-    const trimmed =
-      messages.length > HISTORY_CAP ? messages.slice(-HISTORY_CAP) : messages;
-    // Strip transient flags so we don't persist a "still streaming" bubble.
-    const sanitized = trimmed.map((m) => ({
-      role: m.role,
-      content: m.content,
-      ...(m.draftType ? { draftType: m.draftType } : {}),
-    }));
-    window.localStorage.setItem(STORAGE_KEYS.history, JSON.stringify(sanitized));
-  } catch {
-    // ignore
-  }
-}
+import {
+  STORAGE_KEYS,
+  readBool,
+  writeBool,
+  readHistory,
+  writeHistory,
+  type ChatMessage,
+} from "./ai-assistant-storage";
 
 const SLASH_COMMANDS = [
   { cmd: "/compliance-check", hint: "[agent name] — compliance gap report" },
