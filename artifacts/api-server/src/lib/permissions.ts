@@ -34,7 +34,8 @@ export type Resource =
   | "storage"
   | "compliance_report"
   | "retention_alert"
-  | "dashboard";
+  | "dashboard"
+  | "commission";
 
 export type Action = "read" | "create" | "update" | "delete" | "admin";
 
@@ -168,6 +169,12 @@ const MATRIX: PermissionMatrix = {
       "viewer",
       "agent",
     ],
+  },
+  commission: {
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
+    create: ["super_admin", "agency_admin"],
+    update: ["super_admin", "agency_admin"],
+    delete: ["super_admin"],
   },
 };
 

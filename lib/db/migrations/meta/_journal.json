@@ -15,6 +15,20 @@
       "when": 1778000000000,
       "tag": "0001_add_performance_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778100000000,
+      "tag": "0002_audit_log_immutability",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1778200000000,
+      "tag": "0003_commissions",
+      "breakpoints": true
     }
   ]
 }
