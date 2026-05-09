@@ -221,35 +221,56 @@ router.get(
         )),
     ]);
 
+    // Build Map-based lookups once (O(N)) instead of .find() per agent (O(N*M)).
+    // For 500 agents × 9 lookup arrays, this drops from ~4500*M ops to ~4500+M.
+    const contactCountsByAgent = new Map(contactCounts.map((c) => [c.agentId, c]));
+    const callCountsByAuthor = new Map(callCounts.map((c) => [c.agentId, c]));
+    const smsByAgent = new Map(smsPerAgent.map((s) => [s.agentId, s]));
+    const emailByAgent = new Map(emailPerAgent.map((e) => [e.agentId, e]));
+    const dealsByAgent = new Map(dealsCounts.map((d) => [d.agentId, d]));
+    const enrollByAgent = new Map(enrollCounts.map((e) => [e.agentId, e]));
+    const certByAgent = new Map(certifications.map((c) => [c.agentId, c]));
+    const ahipByAgent = new Map(ahipRecords.map((r) => [r.agentId, r]));
+    // Bucket licenses by agent (multiple rows per agent — one per status)
+    const licensesByAgent = new Map<string, typeof licenses>();
+    for (const l of licenses) {
+      const arr = licensesByAgent.get(l.agentId);
+      if (arr) arr.push(l); else licensesByAgent.set(l.agentId, [l]);
+    }
+
     const report = agents.map((agent) => {
-      const agentLicenses = licenses.filter((l) => l.agentId === agent.id);
+      const agentLicenses = licensesByAgent.get(agent.id) ?? [];
       const activeLicenses = agentLicenses.filter((l) => l.status === "active").reduce((s, l) => s + Number(l.cnt), 0);
       const expiringLicenses = agentLicenses.filter((l) => l.status === "pending").reduce((s, l) => s + Number(l.cnt), 0);
-      const ahip = ahipRecords.find((r) => r.agentId === agent.id);
+      const ahip = ahipByAgent.get(agent.id);
 
       // Compliance score: 0–100
       const hasActiveLicense = activeLicenses > 0 ? 25 : 0;
-      const hasCert = Number(certifications.find((c) => c.agentId === agent.id)?.cnt ?? 0) > 0 ? 25 : 0;
+      const hasCert = Number(certByAgent.get(agent.id)?.cnt ?? 0) > 0 ? 25 : 0;
       const hasAhip = ahip?.status === "passed" ? 25 : 0;
       const noExpiring = expiringLicenses === 0 ? 25 : 0;
       const complianceScore = hasActiveLicense + hasCert + hasAhip + noExpiring;
+
+      // call_log activities are authored by user_id; fall back to agent.id
+      const calls = callCountsByAuthor.get(agent.userId) ?? callCountsByAuthor.get(agent.id);
+      const dealsRow = dealsByAgent.get(agent.id);
 
       return {
         agentId: agent.id,
         agentName: `${agent.firstName} ${agent.lastName}`,
         email: agent.email,
         status: agent.status,
-        contactsWorked: Number(contactCounts.find((c) => c.agentId === agent.id)?.cnt ?? 0),
-        callsLogged: Number(callCounts.find((c) => c.agentId === agent.userId || c.agentId === agent.id)?.cnt ?? 0),
-        smsSent: Number(smsPerAgent.find((s) => s.agentId === agent.id)?.cnt ?? 0),
-        emailSent: Number(emailPerAgent.find((e) => e.agentId === agent.id)?.cnt ?? 0),
-        dealsWon: Number(dealsCounts.find((d) => d.agentId === agent.id)?.cnt ?? 0),
-        dealValueWon: Number(dealsCounts.find((d) => d.agentId === agent.id)?.totalValue ?? 0),
-        enrolledContacts: Number(enrollCounts.find((e) => e.agentId === agent.id)?.cnt ?? 0),
+        contactsWorked: Number(contactCountsByAgent.get(agent.id)?.cnt ?? 0),
+        callsLogged: Number(calls?.cnt ?? 0),
+        smsSent: Number(smsByAgent.get(agent.id)?.cnt ?? 0),
+        emailSent: Number(emailByAgent.get(agent.id)?.cnt ?? 0),
+        dealsWon: Number(dealsRow?.cnt ?? 0),
+        dealValueWon: Number(dealsRow?.totalValue ?? 0),
+        enrolledContacts: Number(enrollByAgent.get(agent.id)?.cnt ?? 0),
         complianceScore,
         licensesActive: activeLicenses,
         licensesExpiring: expiringLicenses,
-        certificationsPassed: Number(certifications.find((c) => c.agentId === agent.id)?.cnt ?? 0),
+        certificationsPassed: Number(certByAgent.get(agent.id)?.cnt ?? 0),
         ahipStatus: ahip?.status ?? "not_started",
       };
     });
@@ -303,15 +324,22 @@ router.get(
         .groupBy(contactsTable.assignedAgentId),
     ]);
 
+    // Build Map lookups once (O(N)) — avoid quadratic .find() over 5 arrays per agent.
+    const contactCountsByAgent = new Map(contactCounts.map((c) => [c.agentId, c]));
+    const dealsByAgent = new Map(dealsCounts.map((d) => [d.agentId, d]));
+    const enrollByAgent = new Map(enrollCounts.map((e) => [e.agentId, e]));
+    const smsByAgent = new Map(smsPerAgent.map((s) => [s.agentId, s]));
+    const emailByAgent = new Map(emailPerAgent.map((e) => [e.agentId, e]));
+
     const csvRows = agents.map((a) => [
       `${a.firstName} ${a.lastName}`,
       a.email,
       a.status,
-      String(contactCounts.find((c) => c.agentId === a.id)?.cnt ?? 0),
-      String(dealsCounts.find((d) => d.agentId === a.id)?.cnt ?? 0),
-      String(enrollCounts.find((e) => e.agentId === a.id)?.cnt ?? 0),
-      String(smsPerAgent.find((s) => s.agentId === a.id)?.cnt ?? 0),
-      String(emailPerAgent.find((e) => e.agentId === a.id)?.cnt ?? 0),
+      String(contactCountsByAgent.get(a.id)?.cnt ?? 0),
+      String(dealsByAgent.get(a.id)?.cnt ?? 0),
+      String(enrollByAgent.get(a.id)?.cnt ?? 0),
+      String(smsByAgent.get(a.id)?.cnt ?? 0),
+      String(emailByAgent.get(a.id)?.cnt ?? 0),
     ]);
 
     const header = ["Agent Name", "Email", "Status", "Contacts Worked", "Deals Won", "Enrolled Contacts", "SMS Sent", "Email Sent"];
@@ -404,13 +432,26 @@ router.get(
       return entered > 0 ? Math.round((advanced / entered) * 1000) / 10 : 0;
     }
 
+    // Bucket stages and deals by pipeline once instead of filtering N times.
+    const stagesByPipeline = new Map<string, Array<typeof stages[number]["pipeline_stages"]>>();
+    for (const s of stages) {
+      const pid = s.pipeline_stages.pipelineId;
+      const arr = stagesByPipeline.get(pid);
+      if (arr) arr.push(s.pipeline_stages); else stagesByPipeline.set(pid, [s.pipeline_stages]);
+    }
+    const dealsByPipeline = new Map<string, typeof deals>();
+    for (const d of deals) {
+      if (!d.pipelineId) continue;
+      const arr = dealsByPipeline.get(d.pipelineId);
+      if (arr) arr.push(d); else dealsByPipeline.set(d.pipelineId, [d]);
+    }
+
     const pipelineReport = pipelines.map((p) => {
-      const pStages = stages
-        .filter((s) => s.pipeline_stages.pipelineId === p.id)
-        .map((s) => s.pipeline_stages)
+      const pStages = (stagesByPipeline.get(p.id) ?? [])
+        .slice()
         .sort((a, b) => a.orderIndex - b.orderIndex);
 
-      const pDeals = deals.filter((d) => d.pipelineId === p.id);
+      const pDeals = dealsByPipeline.get(p.id) ?? [];
 
       const funnel = pStages.map((stage, idx) => {
         const nextStage = pStages[idx + 1] ?? null;
@@ -543,8 +584,15 @@ router.get(
         .where(eq(agentsTable.orgId, authReq.orgId)),
     ]);
 
+    // Bucket licenses by agent once — avoids O(agents × licenses) .filter scan.
+    const licensesByAgent = new Map<string, typeof licenses>();
+    for (const l of licenses) {
+      const aid = l.state_licenses.agentId;
+      const arr = licensesByAgent.get(aid);
+      if (arr) arr.push(l); else licensesByAgent.set(aid, [l]);
+    }
     const licenseMatrix = agents.map((agent) => {
-      const agentLicenses = licenses.filter((l) => l.state_licenses.agentId === agent.id);
+      const agentLicenses = licensesByAgent.get(agent.id) ?? [];
       return {
         agentId: agent.id,
         agentName: `${agent.firstName} ${agent.lastName}`,
@@ -567,8 +615,14 @@ router.get(
     }
     const expiryByMonth = Object.entries(expiryHeatmap).map(([month, cnt]) => ({ month, count: cnt })).sort((a, b) => a.month.localeCompare(b.month));
 
+    // Bucket certs by carrier once — avoids O(carriers × certs) .filter scan.
+    const certsByCarrier = new Map<string, typeof certs>();
+    for (const c of certs) {
+      const arr = certsByCarrier.get(c.carrierId);
+      if (arr) arr.push(c); else certsByCarrier.set(c.carrierId, [c]);
+    }
     const carrierCertCompletion = carriers.map((carrier) => {
-      const carrierCerts = certs.filter((c) => c.carrierId === carrier.id);
+      const carrierCerts = certsByCarrier.get(carrier.id) ?? [];
       const byYear: Record<number, { total: number; passed: number }> = {};
       for (const cert of carrierCerts) {
         const yr = cert.certYear ?? currentYear;
@@ -848,20 +902,26 @@ router.get(
     const authReq = req as AuthenticatedRequest;
     const { start, end } = parseRange(req);
 
-    const pipelines = await db.select({ id: pipelinesTable.id, name: pipelinesTable.name })
-      .from(pipelinesTable).where(eq(pipelinesTable.orgId, authReq.orgId));
+    // Run pipelines + deals in parallel; stages join on pipelines via the table itself,
+    // so it doesn't need the pipeline IDs from the JS side — also runs in parallel.
+    const [pipelines, allDeals, stagesJoined] = await Promise.all([
+      db.select({ id: pipelinesTable.id, name: pipelinesTable.name })
+        .from(pipelinesTable).where(eq(pipelinesTable.orgId, authReq.orgId)),
 
-    const allDeals = await db.select({
-      pipelineId: dealsTable.pipelineId,
-      stageId: dealsTable.stageId,
-      status: dealsTable.status,
-      value: dealsTable.valueEst,
-    }).from(dealsTable)
-      .where(and(eq(dealsTable.orgId, authReq.orgId), gte(dealsTable.createdAt, start), lte(dealsTable.createdAt, end)));
+      db.select({
+        pipelineId: dealsTable.pipelineId,
+        stageId: dealsTable.stageId,
+        status: dealsTable.status,
+        value: dealsTable.valueEst,
+      }).from(dealsTable)
+        .where(and(eq(dealsTable.orgId, authReq.orgId), gte(dealsTable.createdAt, start), lte(dealsTable.createdAt, end))),
 
-    const stages = await db.select({ id: pipelineStagesTable.id, pipelineId: pipelineStagesTable.pipelineId, name: pipelineStagesTable.name })
-      .from(pipelineStagesTable)
-      .where(inArray(pipelineStagesTable.pipelineId, pipelines.map((p) => p.id)));
+      db.select({ id: pipelineStagesTable.id, pipelineId: pipelineStagesTable.pipelineId, name: pipelineStagesTable.name })
+        .from(pipelineStagesTable)
+        .innerJoin(pipelinesTable, eq(pipelineStagesTable.pipelineId, pipelinesTable.id))
+        .where(eq(pipelinesTable.orgId, authReq.orgId)),
+    ]);
+    const stages = stagesJoined;
 
     const stageMap: Record<string, string> = {};
     for (const s of stages) stageMap[s.id] = s.name;
