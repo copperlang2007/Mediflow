@@ -31,6 +31,7 @@ import reportsRouter from "./reports";
 import adminRouter from "./admin";
 import importsRouter from "./imports";
 import commissionsRouter from "./commissions";
+import devRouter from "./dev";
 
 const router: IRouter = Router();
 
@@ -66,5 +67,14 @@ router.use(reportsRouter);
 router.use(adminRouter);
 router.use(importsRouter);
 router.use(commissionsRouter);
+
+// Dev console is mounted only when the env var is set. The router itself
+// also applies the `devOnly` middleware, so even if this guard were
+// bypassed the routes would 404. Keeping the mount conditional means the
+// router (and its DB-introspection imports) is never even constructed in
+// production builds where the env var is unset.
+if (process.env.ENABLE_DEV_CONSOLE === "true") {
+  router.use(devRouter);
+}
 
 export default router;

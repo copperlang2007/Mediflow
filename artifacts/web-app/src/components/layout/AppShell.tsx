@@ -17,11 +17,12 @@ type Role =
   | "compliance_manager"
   | "agent_support"
   | "viewer"
-  | "agent";
+  | "agent"
+  | "developer";
 
 const ALL_ROLES: Role[] = [
   "super_admin", "agency_admin", "compliance_manager",
-  "agent_support", "viewer", "agent",
+  "agent_support", "viewer", "agent", "developer",
 ];
 
 const ROLE_LABELS: Record<Role, string> = {
@@ -31,6 +32,7 @@ const ROLE_LABELS: Record<Role, string> = {
   agent_support: "Agent Support",
   viewer: "Viewer",
   agent: "Agent",
+  developer: "Developer",
 };
 
 const ROLE_COLORS: Record<Role, string> = {
@@ -40,6 +42,7 @@ const ROLE_COLORS: Record<Role, string> = {
   agent_support: "bg-sky-100 text-sky-800",
   viewer: "bg-slate-100 text-slate-700",
   agent: "bg-green-100 text-green-800",
+  developer: "bg-orange-100 text-orange-800",
 };
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -81,7 +84,10 @@ import {
   Lock,
   Database,
   DollarSign,
+  Wrench,
+  KeyRound,
 } from "lucide-react";
+import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
 import NotificationPanel from "@/components/notifications/NotificationPanel";
 import { useSSENotifications } from "@/hooks/useSSENotifications";
 import { AiAssistantPanel } from "@/components/ai-assistant";
@@ -308,9 +314,47 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   });
   const overdueTaskCount = dashboardStats?.overdueTasks ?? 0;
 
+  // Dev nav group — only added at runtime when the build-time flag is
+  // set AND the user has a developer/super_admin role. The build-time
+  // flag means production bundles never even contain the dev pages, but
+  // we still gate the group by role so a stray developer-flag staging
+  // build doesn't show the nav to ordinary users.
+  const showDevNav =
+    DEV_CONSOLE_ENABLED &&
+    (userRole === "developer" || userRole === "super_admin");
+
+  const navItemsWithDev: NavGroup[] = showDevNav
+    ? [
+        ...navItems,
+        {
+          group: "Dev",
+          items: [
+            {
+              href: "/dev",
+              label: "Dev Console",
+              icon: Wrench,
+              roles: ["developer", "super_admin"],
+            },
+            {
+              href: "/dev/db",
+              label: "Schema",
+              icon: Database,
+              roles: ["developer", "super_admin"],
+            },
+            {
+              href: "/dev/env",
+              label: "Environment",
+              icon: KeyRound,
+              roles: ["developer", "super_admin"],
+            },
+          ],
+        },
+      ]
+    : navItems;
+
   // Filter nav groups to items allowed for this user's role.
   // While role is loading, show all to avoid flicker.
-  const filteredNavItems = navItems
+  const filteredNavItems = navItemsWithDev
     .map((group) => ({
       ...group,
       items: group.items.filter(
