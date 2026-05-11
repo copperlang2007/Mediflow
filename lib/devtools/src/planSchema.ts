@@ -25,8 +25,9 @@ export const FeaturePlan = z.object({
   summary: z.string().min(10).max(500),
   // Slug must be safe for use as a git branch name fragment. We enforce
   // the lowercase-kebab shape here so we don't have to sanitize on the
-  // apply side.
-  branchSlug: z.string().regex(/^[a-z0-9-]+$/),
+  // apply side, and cap length to keep `claude-dev/<branchSlug>` within
+  // practical git ref limits.
+  branchSlug: z.string().regex(/^[a-z0-9-]+$/).max(100),
   files: z.array(FeaturePlanFile).max(50),
   migrationsNeeded: z.boolean(),
   rbacChanges: z.boolean(),

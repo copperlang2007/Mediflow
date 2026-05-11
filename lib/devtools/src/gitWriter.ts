@@ -171,6 +171,7 @@ export async function applyPlan(
 ): Promise<ApplyResult> {
   const branch = `claude-dev/${plan.branchSlug}`;
   const { cwd, mode } = opts;
+  const baseBranch = opts.base ?? "main";
 
   if (plan.files.length > MAX_FILES) {
     throw new Error(
@@ -178,7 +179,16 @@ export async function applyPlan(
     );
   }
 
-  // 1. Create + checkout branch (best-effort: if it exists, switch to it).
+  // 1. Anchor on the configured base branch so the feature branch is
+  //    cleanly forked off `main` (or whatever was passed). Without this we
+  //    were branching off whatever HEAD happened to be — which in tests
+  //    and worktrees can be anything. Best-effort: if checking out the base
+  //    fails (e.g. detached HEAD, or no `main`), we let the next step
+  //    surface the real error.
+  runGit(cwd, ["checkout", baseBranch]);
+
+  // 2. Create + checkout the feature branch (best-effort: if it exists,
+  //    switch to it).
   const checkout = runGit(cwd, ["checkout", "-b", branch]);
   if (checkout.status !== 0) {
     const fallback = runGit(cwd, ["checkout", branch]);

@@ -49,29 +49,49 @@ import {
 
 const router: IRouter = Router();
 
+// OpenAI model is configurable so we can swap versions without a code change.
+// Defaults to the model the agent was originally tested against.
+const FEATURE_BUILDER_MODEL =
+  process.env.FEATURE_BUILDER_MODEL ?? "gpt-5.4";
+
 // Every route here requires the caller hold dev_console:admin. The
 // parent /dev router already applies `devOnly`, so an unset env var
 // 404s before we get here.
 router.use(requireAuth, requirePermission("dev_console", "admin"));
 
 // ---------------------------------------------------------------------------
-// In-memory plan store (30 min TTL).
+// In-memory plan store (30 min TTL, bounded).
 //
 // We use a Map<planId, {plan, expiresAt}>. Plans live for 30 min from
 // creation, which is the longest a developer is plausibly going to take
 // reviewing a plan in the UI before clicking Apply. Eviction is lazy:
-// we sweep stale entries each time we look one up.
+// we sweep stale entries each time we look one up or store a new plan.
+// The store is bounded to keep memory usage predictable in long-lived dev
+// processes even if /plan is called repeatedly without /apply.
 // ---------------------------------------------------------------------------
 type StoredPlan = {
   plan: z.infer<typeof FeaturePlan>;
   expiresAt: number;
 };
 const PLAN_TTL_MS = 30 * 60 * 1000;
+const PLAN_STORE_MAX_SIZE = 100;
 const planStore = new Map<string, StoredPlan>();
 
 function storePlan(plan: z.infer<typeof FeaturePlan>): string {
+  // Lazy eviction + bounding: drop expired entries, then if still at cap,
+  // drop the oldest remaining entry. Map iteration order is insertion order,
+  // so the first key is the oldest.
+  const now = Date.now();
+  for (const [k, v] of planStore) {
+    if (v.expiresAt < now) planStore.delete(k);
+  }
+  if (planStore.size >= PLAN_STORE_MAX_SIZE) {
+    const oldestKey = planStore.keys().next().value;
+    if (oldestKey !== undefined) planStore.delete(oldestKey);
+  }
+
   const id = randomUUID();
-  planStore.set(id, { plan, expiresAt: Date.now() + PLAN_TTL_MS });
+  planStore.set(id, { plan, expiresAt: now + PLAN_TTL_MS });
   return id;
 }
 
@@ -182,7 +202,7 @@ router.post(
     let raw: string;
     try {
       const response = await ai.chat.completions.create({
-        model: "gpt-5.4",
+        model: FEATURE_BUILDER_MODEL,
         messages: [
           { role: "system", content: PLAN_SYSTEM_PROMPT },
           {
@@ -248,7 +268,7 @@ async function generateFileContent(
   reason: string,
 ): Promise<string> {
   const response = await ai.chat.completions.create({
-    model: "gpt-5.4",
+    model: FEATURE_BUILDER_MODEL,
     messages: [
       { role: "system", content: FILE_SYSTEM_PROMPT },
       {
