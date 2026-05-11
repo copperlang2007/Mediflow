@@ -19,11 +19,13 @@ import { devOnly } from "./middleware/devOnly";
 import dbRouter from "./db";
 import envRouter from "./env";
 import opsRouter from "./ops";
+import featureBuilderRouter from "./feature-builder";
 
 const router: IRouter = Router();
 
 router.use("/dev", devOnly, dbRouter);
 router.use("/dev", devOnly, envRouter);
 router.use("/dev/ops", devOnly, opsRouter);
+router.use("/dev", devOnly, featureBuilderRouter);
 
 export default router;
