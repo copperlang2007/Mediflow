@@ -11,10 +11,8 @@
  * production list endpoints to confirm the helper is wired correctly.
  *
  * Endpoints exercised:
- *   - GET /contacts            — uses an inline cap (Math.min(parseInt..., 200))
- *                                rather than safeLimit. Asserted at <= 1000
- *                                so the test still passes after PR #35-style
- *                                migration to safeLimit.
+ *   - GET /contacts            — uses safeLimit(limit, 50, 1000) and
+ *                                safeOffset(offset).
  *   - GET /admin/audit-log     — uses safeLimit(limit, 50, 500).
  *   - GET /agents              — uses safeLimit(limit, 50, 1000) and
  *                                safeOffset(offset).
@@ -177,6 +175,24 @@ describe("Pagination guards on list endpoints", () => {
     // Floor: we seeded SEED_CONTACT_COUNT > 1000, so a healthy cap MUST
     // truncate to fewer rows than were seeded.
     expect(res.body.data.length).toBeLessThan(SEED_CONTACT_COUNT);
+  });
+
+  it("GET /contacts?limit=-5 falls back to the default (50)", async () => {
+    const res = await request(app)
+      .get("/api/contacts?limit=-5")
+      .set(withAuth(agentSupport.id));
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data.length).toBeLessThanOrEqual(50);
+  });
+
+  it("GET /contacts?offset=-100 clamps offset to 0 (does not reach Postgres)", async () => {
+    const res = await request(app)
+      .get("/api/contacts?offset=-100&limit=10")
+      .set(withAuth(agentSupport.id));
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data.length).toBeLessThanOrEqual(10);
   });
 
   it("GET /admin/audit-log?limit=99999 caps response at <= 500 (heavy-list cap)", async () => {

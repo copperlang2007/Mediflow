@@ -28,9 +28,6 @@ const router: IRouter = Router();
 // PHI masking — roles that may see full DOB and Medicare ID
 const PHI_PRIVILEGED_ROLES = new Set(["super_admin", "agency_admin", "compliance_manager"]);
 
-// Defensive cap on list endpoint pagination to prevent unbounded responses.
-const MAX_LIMIT = 1000;
-
 function maskContact<T extends { dob?: Date | null; medicareId?: string | null; healthConditions?: string[] | null }>(
   contact: T,
   userRole: string,
@@ -118,8 +115,8 @@ router.get(
       conditions.push(sql`${contactsTable.tags} @> ARRAY[${tag}]::text[]`);
     }
 
-    const limitNum = Math.min(parseInt(limit ?? "50", 10) || 50, 200, MAX_LIMIT);
-    const offsetNum = parseInt(offset ?? "0", 10) || 0;
+    const limitNum = safeLimit(limit, 50, 1000);
+    const offsetNum = safeOffset(offset);
     const dir = sortDir === "desc" ? desc : asc;
     const orderExpr =
       sortBy === "name" ? [dir(contactsTable.lastName), dir(contactsTable.firstName)] :
