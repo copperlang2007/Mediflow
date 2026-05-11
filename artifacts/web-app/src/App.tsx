@@ -11,6 +11,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import AppShell from "@/components/layout/AppShell";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
 
 // Route-level lazy loading
 const Dashboard = lazy(() => import("@/pages/dashboard"));
@@ -33,6 +34,21 @@ const CommissionsPage = lazy(() => import("@/pages/commissions"));
 const CommissionStatementPage = lazy(() => import("@/pages/commission-statement"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const ForgotPasswordPage = lazy(() => import("@/pages/forgot-password"));
+
+// Dev console pages are only imported when the build-time flag is set, so
+// production bundles never include this code.
+const DevConsolePage = DEV_CONSOLE_ENABLED
+  ? lazy(() => import("@/pages/dev"))
+  : null;
+const DevOpsPage = DEV_CONSOLE_ENABLED
+  ? lazy(() => import("@/pages/dev/ops"))
+  : null;
+const DevDbPage = DEV_CONSOLE_ENABLED
+  ? lazy(() => import("@/pages/dev/db"))
+  : null;
+const DevEnvPage = DEV_CONSOLE_ENABLED
+  ? lazy(() => import("@/pages/dev/env"))
+  : null;
 
 const clerkPubKey = publishableKeyFromHost(
   window.location.hostname,
@@ -361,6 +377,26 @@ function ClerkProviderWithRoutes() {
               <Route path="/settings">
                 <ProtectedLayout><SettingsPage /></ProtectedLayout>
               </Route>
+              {DEV_CONSOLE_ENABLED && DevOpsPage && (
+                <Route path="/dev/ops">
+                  <ProtectedLayout><DevOpsPage /></ProtectedLayout>
+                </Route>
+              )}
+              {DEV_CONSOLE_ENABLED && DevDbPage && (
+                <Route path="/dev/db">
+                  <ProtectedLayout><DevDbPage /></ProtectedLayout>
+                </Route>
+              )}
+              {DEV_CONSOLE_ENABLED && DevEnvPage && (
+                <Route path="/dev/env">
+                  <ProtectedLayout><DevEnvPage /></ProtectedLayout>
+                </Route>
+              )}
+              {DEV_CONSOLE_ENABLED && DevConsolePage && (
+                <Route path="/dev">
+                  <ProtectedLayout><DevConsolePage /></ProtectedLayout>
+                </Route>
+              )}
               <Route>
                 <Suspense fallback={null}>
                   <NotFound />

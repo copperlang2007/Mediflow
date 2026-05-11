@@ -11,7 +11,8 @@ export type Role =
   | "compliance_manager"
   | "agent_support"
   | "viewer"
-  | "agent";
+  | "agent"
+  | "developer";
 
 export type Resource =
   | "org"
@@ -35,7 +36,8 @@ export type Resource =
   | "compliance_report"
   | "retention_alert"
   | "dashboard"
-  | "commission";
+  | "commission"
+  | "dev_console";
 
 export type Action = "read" | "create" | "update" | "delete" | "admin";
 
@@ -47,117 +49,117 @@ type PermissionMatrix = Record<Resource, Partial<Record<Action, Role[]>>>;
  */
 const MATRIX: PermissionMatrix = {
   org: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],
     update: ["super_admin", "agency_admin"],
     admin: ["super_admin"],
   },
   user: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "agent"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "agent", "developer"],
     create: ["super_admin", "agency_admin"],
     update: ["super_admin", "agency_admin", "viewer", "agent"],
     delete: ["super_admin"],
     admin: ["super_admin"],
   },
   agent: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],
     create: ["super_admin", "agency_admin", "compliance_manager"],
     update: ["super_admin", "agency_admin", "compliance_manager"],
     delete: ["super_admin", "agency_admin"],
     admin: ["super_admin", "agency_admin"],
   },
   license: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],
     create: ["super_admin", "agency_admin", "compliance_manager"],
     update: ["super_admin", "agency_admin", "compliance_manager"],
     delete: ["super_admin", "agency_admin"],
   },
   certification: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],
     create: ["super_admin", "agency_admin", "compliance_manager"],
     update: ["super_admin", "agency_admin", "compliance_manager"],
     delete: ["super_admin", "agency_admin"],
   },
   ahip: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],
     create: ["super_admin", "agency_admin", "compliance_manager"],
     update: ["super_admin", "agency_admin", "compliance_manager"],
     delete: ["super_admin", "agency_admin"],
   },
   task_template: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],
     create: ["super_admin", "agency_admin", "compliance_manager"],
     update: ["super_admin", "agency_admin", "compliance_manager"],
     delete: ["super_admin", "agency_admin"],
   },
   task_instance: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],
     create: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
     update: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
     delete: ["super_admin", "agency_admin"],
   },
   document: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],
     create: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
     update: ["super_admin", "agency_admin", "compliance_manager"],
     delete: ["super_admin", "agency_admin"],
   },
   contact: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],
     create: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
     update: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
     delete: ["super_admin", "agency_admin"],
   },
   lead: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],
     create: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
     update: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
     delete: ["super_admin", "agency_admin"],
   },
   deal: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],
     create: ["super_admin", "agency_admin", "agent_support"],
     update: ["super_admin", "agency_admin", "agent_support"],
     delete: ["super_admin", "agency_admin"],
   },
   activity: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],
     create: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
     update: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
     delete: ["super_admin", "agency_admin"],
   },
   communication: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "developer"],
     create: ["super_admin", "agency_admin", "agent_support"],
     update: ["super_admin", "agency_admin"],
     delete: ["super_admin"],
   },
   automation: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "viewer", "developer"],
     create: ["super_admin", "agency_admin"],
     update: ["super_admin", "agency_admin"],
     delete: ["super_admin", "agency_admin"],
     admin: ["super_admin"],
   },
   notification: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "agent"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "agent", "developer"],
     update: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "agent"],
     delete: ["super_admin"],
   },
   audit_log: {
-    read: ["super_admin", "agency_admin", "compliance_manager"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "developer"],
   },
   storage: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],
     create: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
     delete: ["super_admin", "agency_admin"],
   },
   compliance_report: {
-    read: ["super_admin", "agency_admin", "compliance_manager"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "developer"],
     create: ["super_admin", "agency_admin", "compliance_manager"],
     admin: ["super_admin", "agency_admin"],
   },
   retention_alert: {
-    read: ["super_admin", "agency_admin", "compliance_manager"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "developer"],
     update: ["super_admin", "agency_admin", "compliance_manager"],
   },
   dashboard: {
@@ -168,13 +170,18 @@ const MATRIX: PermissionMatrix = {
       "agent_support",
       "viewer",
       "agent",
+      "developer",
     ],
   },
   commission: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "developer"],
     create: ["super_admin", "agency_admin"],
     update: ["super_admin", "agency_admin"],
     delete: ["super_admin"],
+  },
+  dev_console: {
+    read: ["super_admin", "developer"],
+    admin: ["super_admin", "developer"],
   },
 };
 
