@@ -47,7 +47,6 @@ const CARDS: CardDef[] = [
     title: "Feature Builder",
     description: "AI-assisted scaffolding for new endpoints and pages.",
     icon: Sparkles,
-    comingSoon: true,
   },
 ];
 

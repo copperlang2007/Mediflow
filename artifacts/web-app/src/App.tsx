@@ -49,6 +49,9 @@ const DevDbPage = DEV_CONSOLE_ENABLED
 const DevEnvPage = DEV_CONSOLE_ENABLED
   ? lazy(() => import("@/pages/dev/env"))
   : null;
+const DevFeatureBuilderPage = DEV_CONSOLE_ENABLED
+  ? lazy(() => import("@/pages/dev/feature-builder"))
+  : null;
 
 const clerkPubKey = publishableKeyFromHost(
   window.location.hostname,
@@ -390,6 +393,11 @@ function ClerkProviderWithRoutes() {
               {DEV_CONSOLE_ENABLED && DevEnvPage && (
                 <Route path="/dev/env">
                   <ProtectedLayout><DevEnvPage /></ProtectedLayout>
+                </Route>
+              )}
+              {DEV_CONSOLE_ENABLED && DevFeatureBuilderPage && (
+                <Route path="/dev/feature-builder">
+                  <ProtectedLayout><DevFeatureBuilderPage /></ProtectedLayout>
                 </Route>
               )}
               {DEV_CONSOLE_ENABLED && DevConsolePage && (
