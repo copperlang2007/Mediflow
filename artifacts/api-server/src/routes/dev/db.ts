@@ -17,6 +17,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { requireAuth, requirePermission } from "../../middlewares/requireAuth";
@@ -189,18 +190,33 @@ router.get("/db/tables/:name/indexes", async (req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 type JournalEntry = { idx: number; tag: string };
 
+// Build a stable list of candidate migration roots. We try, in order:
+//   1. Anchored at this module's own location (works regardless of cwd,
+//      including from esbuild-bundled dist/index.mjs).
+//   2. The legacy cwd-based fallbacks, kept for back-compat with any
+//      launch context where the module-anchored path doesn't resolve
+//      (e.g. tests running source files with a non-standard layout).
+//
+// Sourcery (PR #56) flagged the cwd-only approach as brittle across
+// dev/test/prod launch contexts. Anchoring on import.meta.url removes
+// that dependency on `where the process was started from`.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const MIGRATION_ROOT_CANDIDATES = [
+  // Source layout: artifacts/api-server/src/routes/dev/db.ts
+  // → up 5 segments lands at <repo-root>, then into lib/db/migrations
+  path.resolve(HERE, "../../../../..", "lib/db/migrations"),
+  // Bundled layout: artifacts/api-server/dist/index.mjs
+  // → up 3 segments lands at <repo-root>
+  path.resolve(HERE, "../..", "lib/db/migrations"),
+  // Legacy cwd-based fallbacks
+  path.resolve(process.cwd(), "lib/db/migrations"),
+  path.resolve(process.cwd(), "../../lib/db/migrations"),
+];
+
 async function readJournal(): Promise<JournalEntry[]> {
-  // Resolve relative to repo root. The api-server runs from the workspace
-  // root (or its dist/), so lib/db/migrations is a known relative location.
-  // Try a couple of candidate roots so this works from `pnpm dev` (cwd=repo
-  // root) and from a built bundle (cwd=artifacts/api-server).
-  const candidates = [
-    path.resolve(process.cwd(), "lib/db/migrations/meta/_journal.json"),
-    path.resolve(process.cwd(), "../../lib/db/migrations/meta/_journal.json"),
-  ];
-  for (const p of candidates) {
+  for (const root of MIGRATION_ROOT_CANDIDATES) {
     try {
-      const raw = await readFile(p, "utf8");
+      const raw = await readFile(path.join(root, "meta/_journal.json"), "utf8");
       const parsed = JSON.parse(raw) as { entries?: JournalEntry[] };
       return parsed.entries ?? [];
     } catch {
@@ -211,10 +227,7 @@ async function readJournal(): Promise<JournalEntry[]> {
 }
 
 async function listMigrationFiles(): Promise<string[]> {
-  const candidates = [
-    path.resolve(process.cwd(), "lib/db/migrations"),
-    path.resolve(process.cwd(), "../../lib/db/migrations"),
-  ];
+  const candidates = MIGRATION_ROOT_CANDIDATES;
   for (const p of candidates) {
     try {
       const entries = await readdir(p);
