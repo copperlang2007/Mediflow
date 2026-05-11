@@ -4,77 +4,108 @@
  * Verifies that the BEFORE UPDATE / BEFORE DELETE triggers installed by
  * migration `0002_audit_log_immutability.sql` reject any tampering attempt.
  *
- * Status: requires a real Postgres database (DATABASE_URL set). Skipped
- * automatically otherwise. The shared integration test infra (pglite-backed
- * `__tests__/helpers/testDb.ts`) is being added on a parallel branch — once
- * that lands, this file can switch to the helper for an in-memory run.
- *
- * TODO: migrate to `__tests__/helpers/testDb.ts` once available.
+ * Runs against the in-memory pglite harness (`__tests__/helpers/testDb.ts`).
+ * Recent pglite versions support `RAISE EXCEPTION` from a `LANGUAGE plpgsql`
+ * trigger function, which is what migration 0002 uses.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { auditLogTable, organizationsTable } from "@workspace/db/schema";
+import {
+  setupTestDb,
+  teardownTestDb,
+  type TestDbHandle,
+} from "../helpers/testDb";
 
-const hasDb = Boolean(process.env.DATABASE_URL);
-const d = hasDb ? describe : describe.skip;
+let handle: TestDbHandle;
+let orgId: string;
+let entryId: string;
 
-d("audit_log immutability triggers", () => {
-  // Lazy imports so the test file doesn't load @workspace/db (which throws if
-  // DATABASE_URL is missing) when the suite is skipped.
-  let db: typeof import("@workspace/db").db;
-  let auditLogTable: typeof import("@workspace/db").auditLogTable;
-  let organizationsTable: typeof import("@workspace/db").organizationsTable;
-  let eq: typeof import("drizzle-orm").eq;
+beforeAll(async () => {
+  handle = await setupTestDb();
 
-  let orgId: string;
-  let entryId: string;
-
-  beforeAll(async () => {
-    const dbMod = await import("@workspace/db");
-    const drizzleMod = await import("drizzle-orm");
-    db = dbMod.db;
-    auditLogTable = dbMod.auditLogTable;
-    organizationsTable = dbMod.organizationsTable;
-    eq = drizzleMod.eq;
-
-    // Provision an org for the FK constraint
-    orgId = `test-org-${randomUUID()}`;
-    await db.insert(organizationsTable).values({
-      id: orgId,
-      name: "Audit Immutability Test Org",
-      slug: `audit-immutability-${orgId.slice(-8)}`,
-    });
-
-    entryId = randomUUID();
-    await db.insert(auditLogTable).values({
-      id: entryId,
-      orgId,
-      userId: null,
-      action: "test",
-      resourceType: "test",
-      resourceId: null,
-    });
+  orgId = `org-audit-imm-${randomUUID().slice(0, 8)}`;
+  await handle.db.insert(organizationsTable).values({
+    id: orgId,
+    name: "Audit Immutability Test Org",
+    slug: `audit-imm-${orgId.slice(-8)}`,
   });
 
-  afterAll(async () => {
-    if (!orgId) return;
-    // Cleanup: deletes will fail on the audit row by design, so leave it.
-    // Drop org reference path only — audit row stays (which is correct).
+  entryId = randomUUID();
+  await handle.db.insert(auditLogTable).values({
+    id: entryId,
+    orgId,
+    userId: null,
+    action: "test",
+    resourceType: "test",
+    resourceId: null,
+  });
+});
+
+afterAll(async () => {
+  if (handle) await teardownTestDb(handle);
+});
+
+describe("audit_log immutability triggers", () => {
+  it("INSERT into audit_log succeeds (baseline)", async () => {
+    const id = randomUUID();
+    await expect(
+      handle.db.insert(auditLogTable).values({
+        id,
+        orgId,
+        userId: null,
+        action: "baseline-insert",
+        resourceType: "test",
+        resourceId: null,
+      }),
+    ).resolves.not.toThrow();
+
+    const rows = await handle.db
+      .select()
+      .from(auditLogTable)
+      .where(eq(auditLogTable.id, id));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("rejects UPDATE on audit_log rows with the immutability message", async () => {
+    let caught: Error | undefined;
     try {
-      await db.delete(organizationsTable).where(eq(organizationsTable.id, orgId));
-    } catch {
-      // Expected: FK from audit_log → organizations may prevent cleanup.
+      await handle.db
+        .update(auditLogTable)
+        .set({ action: "tampered" })
+        .where(eq(auditLogTable.id, entryId));
+    } catch (err) {
+      caught = err as Error;
     }
+    expect(caught).toBeDefined();
+    // Drizzle wraps the underlying pg error; the original message is on `.cause`.
+    const cause = (caught as Error & { cause?: { message?: string } }).cause;
+    const msg = cause?.message ?? caught?.message ?? "";
+    expect(msg).toMatch(/immutable|not permitted/i);
   });
 
-  it("rejects UPDATE on audit_log rows", async () => {
-    await expect(
-      db.update(auditLogTable).set({ action: "tampered" }).where(eq(auditLogTable.id, entryId)),
-    ).rejects.toThrow(/immutable|not permitted/i);
+  it("rejects DELETE on audit_log rows with the immutability message", async () => {
+    let caught: Error | undefined;
+    try {
+      await handle.db
+        .delete(auditLogTable)
+        .where(eq(auditLogTable.id, entryId));
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught).toBeDefined();
+    const cause = (caught as Error & { cause?: { message?: string } }).cause;
+    const msg = cause?.message ?? caught?.message ?? "";
+    expect(msg).toMatch(/immutable|not permitted/i);
   });
 
-  it("rejects DELETE on audit_log rows", async () => {
-    await expect(
-      db.delete(auditLogTable).where(eq(auditLogTable.id, entryId)),
-    ).rejects.toThrow(/immutable|not permitted/i);
+  it("the original row still exists after blocked tamper attempts", async () => {
+    const rows = await handle.db
+      .select()
+      .from(auditLogTable)
+      .where(eq(auditLogTable.id, entryId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.action).toBe("test");
   });
 });
