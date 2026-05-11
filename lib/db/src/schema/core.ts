@@ -17,6 +17,7 @@ export const userRoleEnum = pgEnum("user_role", [
   "agent_support",
   "viewer",
   "agent",
+  "developer",
 ]);
 
 export const organizationsTable = pgTable("organizations", {
