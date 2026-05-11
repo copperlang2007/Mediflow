@@ -8,15 +8,17 @@
 -- This migration brings the migration history in line with the Drizzle
 -- definitions: org_settings, session_activity, login_events,
 -- data_export_log, data_retention_policies, plus contacts.deleted_at.
+--
+-- Filename is 0002a_* (rather than 0004_*) so it sorts lexically before
+-- 0003_perf_partial_indexes.sql, which creates partial indexes that
+-- reference `contacts.deleted_at` and would otherwise fail on a fresh DB.
 
 ALTER TABLE "contacts" ADD COLUMN "deleted_at" timestamptz;
 --> statement-breakpoint
+ALTER TABLE "deals" ADD COLUMN "deleted_at" timestamptz;
+--> statement-breakpoint
 CREATE INDEX "contacts_org_id_deleted_at_idx"
   ON "contacts" ("org_id", "deleted_at");
---> statement-breakpoint
-
--- deals.deleted_at — referenced by 0003_perf_partial_indexes.sql.
-ALTER TABLE "deals" ADD COLUMN "deleted_at" timestamptz;
 --> statement-breakpoint
 
 -- Per-org configuration: AHIP season window, reminder cadence, session timeout.
