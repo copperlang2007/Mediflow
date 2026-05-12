@@ -678,14 +678,55 @@ router.get(
       });
     }
 
-    // 6. export_anomaly_alerting — partial until automation cron exists
-    controls.push({
-      id: "export_anomaly_alerting",
-      label: "Anomalous export volume alerting",
-      status: "partial",
-      note: "Export log captured; automated alerting cron not yet wired",
-      evidenceUrl: "/admin/export-log",
-    });
+    // 6. export_anomaly_alerting — PASS once the cron has demonstrably run.
+    // Proof of life is either (a) at least one breach_notifications row
+    // created by `export_anomaly_alert` in the last 30 days, OR (b) zero
+    // export traffic in the same window (nothing for the detector to
+    // analyze). Anything else degrades to WARN so an operator can verify
+    // the cron is alive.
+    try {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const [{ anomalies }] = await db
+        .select({ anomalies: count() })
+        .from(breachNotificationsTable)
+        .where(
+          and(
+            eq(breachNotificationsTable.orgId, orgId),
+            eq(breachNotificationsTable.detectedBySystem, "export_anomaly_alert"),
+            gte(breachNotificationsTable.detectedAt, thirtyDaysAgo),
+          ),
+        );
+      const [{ exports: exportCount }] = await db
+        .select({ exports: count() })
+        .from(dataExportLogTable)
+        .where(
+          and(
+            eq(dataExportLogTable.orgId, orgId),
+            gte(dataExportLogTable.createdAt, thirtyDaysAgo),
+          ),
+        );
+      const anomaliesN = Number(anomalies);
+      const exportsN = Number(exportCount);
+      const ok = anomaliesN > 0 || exportsN === 0;
+      controls.push({
+        id: "export_anomaly_alerting",
+        label: "Anomalous export volume alerting",
+        status: ok ? "pass" : "warn",
+        note: ok
+          ? anomaliesN > 0
+            ? `${anomaliesN} anomaly alert(s) recorded in last 30d (detector active)`
+            : "No export traffic in last 30d — nothing to alert on"
+          : `${exportsN} exports in last 30d but no anomaly alerts recorded — verify cron is running`,
+        evidenceUrl: "/admin/export-log",
+      });
+    } catch (err) {
+      controls.push({
+        id: "export_anomaly_alerting",
+        label: "Anomalous export volume alerting",
+        status: "fail",
+        note: `Export anomaly query failed: ${(err as Error).message}`,
+      });
+    }
 
     // Aggregate verdict
     const hasFail = controls.some((c) => c.status === "fail");
