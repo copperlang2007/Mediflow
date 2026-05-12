@@ -12,6 +12,7 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { requireMfa } from "../middlewares/requireMfa";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
@@ -118,6 +119,7 @@ router.get(
 router.post(
   "/automations/rules",
   requireAuth,
+  requireMfa,
   requirePermission("automation", "create"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -157,6 +159,7 @@ router.get(
 router.patch(
   "/automations/rules/:id",
   requireAuth,
+  requireMfa,
   requirePermission("automation", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -184,6 +187,7 @@ router.patch(
 router.delete(
   "/automations/rules/:id",
   requireAuth,
+  requireMfa,
   requirePermission("automation", "delete"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -199,6 +203,7 @@ router.delete(
 router.post(
   "/automations/rules/:id/toggle",
   requireAuth,
+  requireMfa,
   requirePermission("automation", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -326,6 +331,7 @@ router.get(
 router.post(
   "/automations/rules/:id/run",
   requireAuth,
+  requireMfa,
   requirePermission("automation", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;

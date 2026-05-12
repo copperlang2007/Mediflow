@@ -39,6 +39,7 @@ import {
   requireAuth,
   requirePermission,
 } from "../../middlewares/requireAuth";
+import { requireMfa } from "../../middlewares/requireMfa";
 import { auditMiddleware } from "../../middlewares/auditMiddleware";
 import {
   buildCodebaseContext,
@@ -56,8 +57,9 @@ const FEATURE_BUILDER_MODEL =
 
 // Every route here requires the caller hold dev_console:admin. The
 // parent /dev router already applies `devOnly`, so an unset env var
-// 404s before we get here.
-router.use(requireAuth, requirePermission("dev_console", "admin"));
+// 404s before we get here. MFA is required for the privileged role
+// (HIPAA technical safeguard).
+router.use(requireAuth, requireMfa, requirePermission("dev_console", "admin"));
 
 // ---------------------------------------------------------------------------
 // In-memory plan store (30 min TTL, bounded).

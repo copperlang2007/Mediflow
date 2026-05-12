@@ -21,12 +21,14 @@ import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { requireAuth, requirePermission } from "../../middlewares/requireAuth";
+import { requireMfa } from "../../middlewares/requireMfa";
 
 const router: IRouter = Router();
 
 // Match the pattern set by /dev/ops: even with the env-var gate open,
-// the caller must be authenticated and hold dev_console:read.
-router.use(requireAuth, requirePermission("dev_console", "read"));
+// the caller must be authenticated, hold dev_console:read, AND have MFA
+// enrolled (HIPAA technical safeguard for privileged dev surfaces).
+router.use(requireAuth, requireMfa, requirePermission("dev_console", "read"));
 
 type PgRow = Record<string, unknown>;
 type PgResult = { rows?: PgRow[] };

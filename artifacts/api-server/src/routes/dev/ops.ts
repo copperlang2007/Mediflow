@@ -16,13 +16,15 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../../middlewares/requireAuth";
+import { requireMfa } from "../../middlewares/requireMfa";
 import { getQueue, JOB_NAMES, type JobName } from "../../lib/jobs";
 import { logger } from "../../lib/logger";
 
 const router: IRouter = Router();
 
 // All dev endpoints require an authenticated user with dev_console read.
-router.use(requireAuth, requirePermission("dev_console", "read"));
+// MFA is also required (HIPAA technical safeguard for privileged roles).
+router.use(requireAuth, requireMfa, requirePermission("dev_console", "read"));
 
 // GET /dev/ops/build — process build metadata.
 router.get("/build", (_req: Request, res: Response): void => {

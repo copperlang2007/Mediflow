@@ -29,6 +29,7 @@ import {
   requireExportConfirm,
   requireDestructiveConfirm,
 } from "../middlewares/requireAuth";
+import { requireMfa } from "../middlewares/requireMfa";
 import { randomUUID } from "crypto";
 import PDFDocument from "pdfkit";
 import { ObjectStorageService } from "../lib/objectStorage";
@@ -48,6 +49,7 @@ function param(p: string | string[]): string {
 router.get(
   "/admin/audit-log",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -90,6 +92,7 @@ router.get(
 router.get(
   "/admin/audit-log/export",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
   requireExportConfirm,
   async (req: Request, res: Response): Promise<void> => {
@@ -130,6 +133,7 @@ router.get(
 router.get(
   "/admin/access-review",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -156,6 +160,7 @@ router.get(
 router.get(
   "/admin/access-review/export",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin"),
   requireExportConfirm,
   async (req: Request, res: Response): Promise<void> => {
@@ -183,6 +188,7 @@ router.get(
 router.post(
   "/admin/users/:userId/deactivate",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -212,6 +218,7 @@ router.post(
 router.post(
   "/admin/users/:userId/reactivate",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -229,6 +236,7 @@ router.post(
 router.get(
   "/admin/login-history",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -254,6 +262,7 @@ router.get(
 router.get(
   "/admin/login-history/export",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
   requireExportConfirm,
   async (req: Request, res: Response): Promise<void> => {
@@ -301,6 +310,7 @@ router.get(
 router.get(
   "/admin/export-log",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -335,6 +345,7 @@ router.get(
 router.get(
   "/admin/session-config",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -347,6 +358,7 @@ router.get(
 router.put(
   "/admin/session-config",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -369,6 +381,7 @@ router.put(
 router.get(
   "/admin/users/:userId/sessions",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -398,6 +411,7 @@ router.get(
 router.delete(
   "/admin/sessions/:sessionId",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -445,6 +459,7 @@ router.delete(
 router.post(
   "/admin/users/:userId/force-logout",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -482,6 +497,7 @@ const RETENTION_RECORD_TYPES = ["contacts", "deals", "agents", "audit_log", "com
 router.get(
   "/admin/data-retention",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -508,6 +524,7 @@ router.get(
 router.put(
   "/admin/data-retention",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -557,6 +574,7 @@ interface BaaControlResult {
 router.get(
   "/admin/baa-checklist",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin", "compliance_manager"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -704,6 +722,7 @@ router.get(
 router.post(
   "/admin/soc2-evidence-pack",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -863,6 +882,7 @@ router.post(
 router.delete(
   "/admin/retention/hard-delete/:recordType/:recordId",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin"),
   requireDestructiveConfirm,
   async (req: Request, res: Response): Promise<void> => {
@@ -971,6 +991,7 @@ router.delete(
 router.get(
   "/admin/retention/pending-hard-delete",
   requireAuth,
+  requireMfa,
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -1007,6 +1028,7 @@ type BatchResourceType = (typeof BATCH_RESOURCE_TYPES)[number];
 router.post(
   "/admin/retention/hard-delete-batch",
   requireAuth,
+  requireMfa,
   requireRole("super_admin"),
   requireDestructiveConfirm,
   async (req: Request, res: Response): Promise<void> => {
@@ -1136,6 +1158,7 @@ const BREACH_ROLES = ["super_admin", "compliance_manager"] as const;
 router.post(
   "/admin/breach-notifications",
   requireAuth,
+  requireMfa,
   requireRole(...BREACH_ROLES),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -1202,6 +1225,7 @@ router.post(
 router.get(
   "/admin/breach-notifications",
   requireAuth,
+  requireMfa,
   requireRole(...BREACH_ROLES),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -1233,6 +1257,7 @@ router.get(
 router.get(
   "/admin/breach-notifications/:id",
   requireAuth,
+  requireMfa,
   requireRole(...BREACH_ROLES),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -1256,6 +1281,7 @@ router.get(
 router.patch(
   "/admin/breach-notifications/:id",
   requireAuth,
+  requireMfa,
   requireRole(...BREACH_ROLES),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;

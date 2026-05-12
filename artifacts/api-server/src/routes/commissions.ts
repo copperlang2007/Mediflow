@@ -38,6 +38,7 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { requireMfa } from "../middlewares/requireMfa";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import {
@@ -102,6 +103,7 @@ const UpdateScheduleSchema = CreateScheduleSchema.partial().extend({
 router.post(
   "/commission-schedules",
   requireAuth,
+  requireMfa,
   requirePermission("commission", "create"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -162,6 +164,7 @@ router.get(
 router.patch(
   "/commission-schedules/:id",
   requireAuth,
+  requireMfa,
   requirePermission("commission", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -211,6 +214,7 @@ router.patch(
 router.delete(
   "/commission-schedules/:id",
   requireAuth,
+  requireMfa,
   // PR #49 caught the asymmetry: POST/PATCH allow agency_admin via
   // commission:create / commission:update, but DELETE required
   // commission:delete (super_admin only). An admin who can create a
@@ -250,6 +254,7 @@ const CreateHierarchySchema = z.object({
 router.post(
   "/commission-hierarchies",
   requireAuth,
+  requireMfa,
   requirePermission("commission", "create"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -310,6 +315,7 @@ const StatementMetaSchema = z.object({
 router.post(
   "/commissions/statements",
   requireAuth,
+  requireMfa,
   requirePermission("commission", "create"),
   upload.single("file"),
   async (req: Request, res: Response): Promise<void> => {
@@ -383,6 +389,7 @@ router.post(
 router.post(
   "/commissions/statements/:id/parse",
   requireAuth,
+  requireMfa,
   requirePermission("commission", "update"),
   upload.single("file"),
   async (req: Request, res: Response): Promise<void> => {
@@ -485,6 +492,7 @@ router.post(
 router.post(
   "/commissions/statements/:id/reconcile",
   requireAuth,
+  requireMfa,
   requirePermission("commission", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -582,6 +590,7 @@ const PatchLineItemSchema = z.object({
 router.patch(
   "/commissions/line-items/:id",
   requireAuth,
+  requireMfa,
   requirePermission("commission", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
@@ -687,6 +696,7 @@ const UpsertPayoutSchema = z.object({
 router.post(
   "/agents/:id/commissions/payouts",
   requireAuth,
+  requireMfa,
   requirePermission("commission", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
