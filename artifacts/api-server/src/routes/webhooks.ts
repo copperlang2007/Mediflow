@@ -9,7 +9,7 @@
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNotNull } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -171,24 +171,54 @@ router.post(
             .where(eq(messageThreadsTable.id, thread.id));
         }
 
-        await db.insert(messagesTable).values({
-          id: randomUUID(),
-          threadId: thread.id,
-          direction: "inbound",
-          body,
-          fromAddress: from,
-          toAddress: to,
-          providerMessageId: messageSid,
-          status: "received",
-          sentAt: new Date(),
-        });
+        // Dedupe on Twilio's MessageSid. Twilio retries any non-2xx response
+        // (and occasionally retries on success if their ACK times out), so
+        // without this guard the same inbound message would be inserted —
+        // and the SSE notification re-fired — on every retry.
+        //
+        // The partial unique index on (provider_message_id) WHERE NOT NULL
+        // (migration 0008) makes this an atomic insert-or-skip. If
+        // `inserted` is empty the row was already stored on a previous
+        // delivery and we must NOT broadcast again.
+        const inserted = await db
+          .insert(messagesTable)
+          .values({
+            id: randomUUID(),
+            threadId: thread.id,
+            direction: "inbound",
+            body,
+            fromAddress: from,
+            toAddress: to,
+            providerMessageId: messageSid,
+            status: "received",
+            sentAt: new Date(),
+          })
+          .onConflictDoNothing({
+            target: messagesTable.providerMessageId,
+            // Match the partial unique index predicate from migration 0008
+            // (`WHERE provider_message_id IS NOT NULL`) so Postgres can
+            // infer the right constraint.
+            where: isNotNull(messagesTable.providerMessageId),
+          })
+          .returning({ id: messagesTable.id });
+
+        if (inserted.length === 0) {
+          logger.info(
+            { contactId: contact.id, threadId: thread.id, messageSid },
+            "Inbound SMS duplicate retry — skipping SSE broadcast",
+          );
+          // Still ack 200 to Twilio so they stop retrying.
+          res.type("text/xml").send("<Response></Response>");
+          return;
+        }
 
         logger.info(
           { contactId: contact.id, threadId: thread.id },
           "Inbound SMS stored",
         );
 
-        // Notify the assigned agent (if any) via SSE
+        // Notify the assigned agent (if any) via SSE — only on the
+        // first delivery, since `inserted.length > 0` here.
         if (contact.assignedAgentId) {
           const [assignedAgent] = await db
             .select({ userId: agentsTable.userId })
