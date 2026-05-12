@@ -10,13 +10,15 @@
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import { requireAuth, requirePermission } from "../../middlewares/requireAuth";
+import { requireMfa } from "../../middlewares/requireMfa";
 
 const SECRET_KEY_RE = /SECRET|TOKEN|KEY|PASSWORD|DSN|URL/i;
 
 const router: IRouter = Router();
 
 // Mirror the auth gate that /dev/ops applies — env-var alone is not enough.
-router.use(requireAuth, requirePermission("dev_console", "read"));
+// MFA is additionally required for any dev-console surface (HIPAA).
+router.use(requireAuth, requireMfa, requirePermission("dev_console", "read"));
 
 export function maskValue(raw: string): string {
   // Below the safe-leakage threshold, replace the whole value. 12 chars is

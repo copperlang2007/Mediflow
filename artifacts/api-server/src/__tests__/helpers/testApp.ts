@@ -73,6 +73,23 @@ export function withAuth(
   };
 }
 
+/**
+ * Synthetic auth headers that also flag the session as MFA-enrolled, for
+ * tests of the requireMfa middleware. Real Clerk JWTs carry this in their
+ * session claims; the test stub reads it from a header to keep the harness
+ * dependency-free.
+ */
+export function withMfaAuth(
+  userId: string,
+  mfaEnrolled: boolean,
+  sessionId?: string,
+): Record<string, string> {
+  return {
+    ...withAuth(userId, sessionId),
+    "x-test-mfa-enrolled": mfaEnrolled ? "true" : "false",
+  };
+}
+
 // ---- vi.mock factories ------------------------------------------------------
 
 export const dbMockFactory = async (): Promise<Record<string, unknown>> => {
@@ -110,15 +127,19 @@ export const clerkMockFactory = async (): Promise<Record<string, unknown>> => {
     }): {
       userId: string | null;
       sessionId: string | null;
-      sessionClaims: { iat: number };
+      sessionClaims: { iat: number; two_factor?: boolean };
     } => {
       const userId = req.headers["x-test-user-id"];
       const sessionId = req.headers["x-test-session-id"];
+      const mfa = req.headers["x-test-mfa-enrolled"];
       return {
         userId: typeof userId === "string" ? userId : null,
         sessionId: typeof sessionId === "string" ? sessionId : null,
         // Always treat the synthetic JWT as freshly minted so requireRecentAuth passes.
-        sessionClaims: { iat: Math.floor(Date.now() / 1000) },
+        sessionClaims: {
+          iat: Math.floor(Date.now() / 1000),
+          two_factor: mfa === "true",
+        },
       };
     },
   };

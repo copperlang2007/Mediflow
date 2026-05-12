@@ -113,6 +113,7 @@ export type AuthenticatedRequest = Request & {
   userId: string;
   orgId: string;
   userRole: Role;
+  mfaEnrolled: boolean;
 };
 
 export const requireAuth = async (
@@ -151,10 +152,26 @@ export const requireAuth = async (
     }
   }
 
+  // HIPAA technical safeguard: surface MFA enrollment state from the Clerk
+  // session so downstream middleware (requireMfa) can gate privileged routes.
+  // Clerk exposes the user's MFA factor count as `two_factor` or
+  // `two_factor_authentication` in the JWT session claims; older SDKs put
+  // it on `auth.user.twoFactorEnabled`. We check all three so a deployment
+  // configured either way still flows through.
+  const claims = (auth.sessionClaims ?? {}) as Record<string, unknown>;
+  const mfaFromClaims =
+    claims.two_factor === true ||
+    claims.two_factor_authentication === true ||
+    claims.mfa === true;
+  const mfaFromUser =
+    (auth as { user?: { twoFactorEnabled?: boolean } }).user?.twoFactorEnabled === true;
+  const mfaEnrolled = Boolean(mfaFromClaims || mfaFromUser);
+
   const authReq = req as AuthenticatedRequest;
   authReq.userId = user.id;
   authReq.orgId = user.orgId;
   authReq.userRole = user.role as Role;
+  authReq.mfaEnrolled = mfaEnrolled;
   authReq.log = req.log.child({ userId: user.id, orgId: user.orgId, role: user.role });
 
   next();
