@@ -3,12 +3,17 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./backfill-payout-contributions": "./src/backfill-payout-contributions.ts"
+  },
   "scripts": {
     "hello": "tsx ./src/hello.ts",
     "backfill:medicare-id": "tsx ./src/backfill-medicare-id-encryption.ts",
+    "backfill:payout-contributions": "tsx ./src/backfill-payout-contributions.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@workspace/api-server": "workspace:*",
     "@workspace/db": "workspace:*",
     "drizzle-orm": "catalog:"
   },

@@ -300,6 +300,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 25.3.5
+      '@workspace/scripts':
+        specifier: workspace:*
+        version: link:../../scripts
       esbuild:
         specifier: 0.27.3
         version: 0.27.3
@@ -789,6 +792,9 @@ importers:
 
   scripts:
     dependencies:
+      '@workspace/api-server':
+        specifier: workspace:*
+        version: link:../artifacts/api-server
       '@workspace/db':
         specifier: workspace:*
         version: link:../lib/db
