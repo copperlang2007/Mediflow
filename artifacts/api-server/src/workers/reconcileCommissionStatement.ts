@@ -28,6 +28,8 @@ import {
   commissionStatementsTable,
   contactsTable,
   dealsTable,
+  hashMedicareId,
+  isMedicareIdEncryptionReadEnabled,
 } from "@workspace/db";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { logger } from "../lib/logger";
@@ -70,15 +72,20 @@ async function matchContact(
   orgId: string,
   item: { memberId: string | null; raw: unknown },
 ): Promise<string | null> {
-  // Member ID exact match first
+  // Member ID exact match first. When HIPAA-2 column-level encryption is
+  // enabled we compare against the deterministic HMAC hash; otherwise we
+  // fall through to the legacy plaintext column.
   if (item.memberId) {
+    const memberIdMatch = isMedicareIdEncryptionReadEnabled()
+      ? eq(contactsTable.medicareIdHash, hashMedicareId(item.memberId))
+      : eq(contactsTable.medicareId, item.memberId);
     const [hit] = await db
       .select({ id: contactsTable.id })
       .from(contactsTable)
       .where(
         and(
           eq(contactsTable.orgId, orgId),
-          eq(contactsTable.medicareId, item.memberId),
+          memberIdMatch,
           isNull(contactsTable.deletedAt),
         ),
       )

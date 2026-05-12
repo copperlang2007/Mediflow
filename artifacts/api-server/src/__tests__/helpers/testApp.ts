@@ -100,9 +100,11 @@ export const dbMockFactory = async (): Promise<Record<string, unknown>> => {
     );
   }
   const schema = await import("@workspace/db/schema");
+  const encryption = await import("@workspace/db/encryption/medicareId");
   const drizzleOrm = await import("drizzle-orm");
   return {
     ...schema,
+    ...encryption,
     db: handle.db,
     pool: { end: async () => undefined },
     sql: drizzleOrm.sql,

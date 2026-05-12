@@ -13,6 +13,9 @@ import {
   sequenceEnrollmentsTable,
   sequencesTable,
   retentionFlagsTable,
+  encryptMedicareId,
+  hashMedicareId,
+  isMedicareIdEncryptionReadEnabled,
 } from "@workspace/db";
 import {
   requireAuth,
@@ -92,15 +95,28 @@ router.get(
 
     if (search) {
       const q = `%${search}%`;
-      conditions.push(
-        or(
-          ilike(contactsTable.firstName, q),
-          ilike(contactsTable.lastName, q),
-          ilike(contactsTable.email, q),
-          ilike(contactsTable.phone, q),
-          ilike(contactsTable.medicareId, q),
-        ) as SQL,
-      );
+      // Medicare ID search behavior depends on the column-level encryption
+      // flag (HIPAA-2):
+      //   - flag OFF: legacy partial-match ilike on the plaintext column.
+      //   - flag ON:  the plaintext column has been retired; we can only
+      //     exact-match against the deterministic HMAC hash. Partial /
+      //     prefix matching is impossible by design — HMAC destroys order
+      //     — and was overkill for MBIs anyway, which are exact
+      //     identifiers. Documented as a user-facing change in the PR.
+      const searchClauses: SQL[] = [
+        ilike(contactsTable.firstName, q) as SQL,
+        ilike(contactsTable.lastName, q) as SQL,
+        ilike(contactsTable.email, q) as SQL,
+        ilike(contactsTable.phone, q) as SQL,
+      ];
+      if (isMedicareIdEncryptionReadEnabled()) {
+        searchClauses.push(
+          eq(contactsTable.medicareIdHash, hashMedicareId(search)) as SQL,
+        );
+      } else {
+        searchClauses.push(ilike(contactsTable.medicareId, q) as SQL);
+      }
+      conditions.push(or(...searchClauses) as SQL);
     }
     if (status && status !== "all") {
       conditions.push(eq(contactsTable.status, status as "lead" | "prospect" | "enrolled" | "retained" | "lost" | "do_not_contact"));
@@ -146,6 +162,13 @@ router.post(
       return;
     }
     const d = parsed.data;
+    // Dual-write the encrypted + hash columns alongside the plaintext for
+    // HIPAA-2 (column-level encryption). The plaintext column stays the
+    // source of truth until MEDICARE_ID_ENCRYPTION_ENABLED flips on after
+    // the backfill script runs.
+    const medicareEnc = d.medicareId
+      ? encryptMedicareId(d.medicareId)
+      : null;
     const [contact] = await db.insert(contactsTable).values({
       id: randomUUID(),
       orgId: authReq.orgId,
@@ -155,6 +178,8 @@ router.post(
       phone: d.phone ?? null,
       dob: d.dob ? new Date(d.dob) : null,
       medicareId: d.medicareId ?? null,
+      medicareIdEncrypted: medicareEnc?.encrypted ?? null,
+      medicareIdHash: medicareEnc?.hash ?? null,
       currentPlanType: d.currentPlanType ?? null,
       currentCarrierId: d.currentCarrierId ?? null,
       planYear: d.planYear ?? null,
@@ -223,7 +248,18 @@ router.patch(
     if (d.email !== undefined) updates.email = d.email;
     if (d.phone !== undefined) updates.phone = d.phone;
     if (d.dob !== undefined) updates.dob = d.dob ? new Date(d.dob) : null;
-    if (d.medicareId !== undefined) updates.medicareId = d.medicareId;
+    if (d.medicareId !== undefined) {
+      // Dual-write for HIPAA-2 column-level encryption.
+      updates.medicareId = d.medicareId;
+      if (d.medicareId === null || d.medicareId === "") {
+        updates.medicareIdEncrypted = null;
+        updates.medicareIdHash = null;
+      } else {
+        const enc = encryptMedicareId(d.medicareId);
+        updates.medicareIdEncrypted = enc.encrypted;
+        updates.medicareIdHash = enc.hash;
+      }
+    }
     if (d.currentPlanType !== undefined) updates.currentPlanType = d.currentPlanType;
     if (d.currentCarrierId !== undefined) updates.currentCarrierId = d.currentCarrierId;
     if (d.planYear !== undefined) updates.planYear = d.planYear;

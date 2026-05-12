@@ -8,6 +8,7 @@ import {
   real,
   pgEnum,
   index,
+  customType,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -34,6 +35,14 @@ export const leadStatusEnum = pgEnum("lead_status", [
 ]);
 
 export const dealStatusEnum = pgEnum("deal_status", ["open", "won", "lost"]);
+
+// `bytea` column type. Drizzle pg-core ships `text`/`integer`/etc. as
+// first-class, but bytea isn't built in yet — declare it once and reuse.
+// Reads return a Node Buffer (node-postgres) or Uint8Array (pglite); both
+// are accepted by the encryption helpers in lib/db/src/encryption/.
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => "bytea",
+});
 
 export const activityTypeEnum = pgEnum("activity_type", [
   "note",
@@ -64,6 +73,12 @@ export const contactsTable = pgTable(
     phone: text("phone"),
     dob: timestamp("dob", { withTimezone: true }),
     medicareId: text("medicare_id"),
+    // HIPAA-2: column-level encryption for medicare_id. Both new columns
+    // are populated alongside the plaintext during the dual-write window;
+    // reads switch to them once `MEDICARE_ID_ENCRYPTION_ENABLED=true` and
+    // the backfill script has run. See lib/db/src/encryption/medicareId.ts.
+    medicareIdEncrypted: bytea("medicare_id_encrypted"),
+    medicareIdHash: bytea("medicare_id_hash"),
     currentPlanType: planTypeEnum("current_plan_type"),
     currentCarrierId: text("current_carrier_id").references(
       () => carriersTable.id,

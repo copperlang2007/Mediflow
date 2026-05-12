@@ -17,6 +17,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import * as schema from "@workspace/db/schema";
+import { encryptMedicareId } from "@workspace/db/encryption/medicareId";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -171,6 +172,9 @@ export async function seedContact(
   opts: SeedContactOptions,
 ): Promise<schema.Contact> {
   const id = opts.id ?? `contact-${randomUUID()}`;
+  // Mirror the production dual-write behavior so flag-on tests can
+  // exercise the hash-column read path without manual setup.
+  const enc = opts.medicareId ? encryptMedicareId(opts.medicareId) : null;
   const [row] = await db
     .insert(schema.contactsTable)
     .values({
@@ -181,6 +185,8 @@ export async function seedContact(
       email: opts.email ?? null,
       dob: opts.dob ?? null,
       medicareId: opts.medicareId ?? null,
+      medicareIdEncrypted: enc?.encrypted ?? null,
+      medicareIdHash: enc?.hash ?? null,
       healthConditions: opts.healthConditions ?? null,
       status: opts.status ?? "lead",
       leadSource: opts.leadSource ?? null,
