@@ -226,3 +226,112 @@ describe("AI context PHI scrubbing", () => {
     expect(ctx).toMatch(/NPN on file:\s*(yes|missing)/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// HIPAA: Azure OpenAI provider dispatch
+//
+// `api.openai.com` is not in OpenAI's default BAA scope; Azure OpenAI is
+// HIPAA-eligible. The factory in `routes/ai.ts` and the one in
+// `routes/dev/feature-builder.ts` must both build an `AzureOpenAI` instance
+// when `AI_INTEGRATIONS_PROVIDER=azure` is set, and an `OpenAI` instance
+// otherwise. These tests don't make real network calls — they only assert
+// the constructed client type and (where exposed) its Azure-specific config.
+// ---------------------------------------------------------------------------
+
+describe("HIPAA provider dispatch (Azure OpenAI)", () => {
+  /**
+   * Save + restore env around each test so flips don't leak between cases.
+   */
+  const ENV_KEYS = [
+    "AI_INTEGRATIONS_PROVIDER",
+    "AI_INTEGRATIONS_OPENAI_API_KEY",
+    "AI_INTEGRATIONS_OPENAI_BASE_URL",
+    "AI_INTEGRATIONS_AZURE_RESOURCE",
+    "AI_INTEGRATIONS_AZURE_API_VERSION",
+    "AI_INTEGRATIONS_AZURE_DEPLOYMENT",
+  ];
+
+  function snapshotEnv(): Record<string, string | undefined> {
+    const snap: Record<string, string | undefined> = {};
+    for (const k of ENV_KEYS) snap[k] = process.env[k];
+    return snap;
+  }
+  function restoreEnv(snap: Record<string, string | undefined>): void {
+    for (const k of ENV_KEYS) {
+      if (snap[k] === undefined) delete process.env[k];
+      else process.env[k] = snap[k];
+    }
+  }
+
+  it("lib client builder constructs an AzureOpenAI when AI_INTEGRATIONS_PROVIDER=azure", async () => {
+    const snap = snapshotEnv();
+    try {
+      process.env.AI_INTEGRATIONS_PROVIDER = "azure";
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test-key";
+      process.env.AI_INTEGRATIONS_AZURE_RESOURCE = "mediflow-test";
+      process.env.AI_INTEGRATIONS_AZURE_API_VERSION = "2024-02-15-preview";
+      process.env.AI_INTEGRATIONS_AZURE_DEPLOYMENT = "test-deployment";
+      delete process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+
+      // Import the builder directly and call it. Doing it this way (vs
+      // re-importing the lib's top-level entrypoint) avoids the need to
+      // bust the module cache, which would break `instanceof` identity
+      // across re-imports of `openai`.
+      const { buildOpenAIClient } = (await import(
+        "../../../../../lib/integrations-openai-ai-server/src/buildClient"
+      )) as { buildOpenAIClient: () => unknown };
+
+      const client = buildOpenAIClient();
+      // Identity check via constructor name (the lib and the test may
+      // resolve different copies of the `openai` package because of
+      // pnpm peer-dep variants, so `instanceof` is unreliable here).
+      expect((client as { constructor: { name: string } }).constructor.name).toBe(
+        "AzureOpenAI",
+      );
+      // These public fields are what the SDK uses to build the Azure
+      // URL/headers — asserting them is the same as asserting the
+      // client will actually talk to Azure.
+      expect((client as { apiVersion: string }).apiVersion).toBe(
+        "2024-02-15-preview",
+      );
+      expect((client as { deploymentName: string | undefined }).deploymentName).toBe(
+        "test-deployment",
+      );
+      // Sanity-check the base URL points at the Azure resource. (The
+      // SDK splices the `deployments/<name>` segment in at request
+      // time, not into the stored baseURL.)
+      const baseURL = (client as { baseURL: string }).baseURL;
+      expect(baseURL).toContain("mediflow-test.openai.azure.com");
+    } finally {
+      restoreEnv(snap);
+    }
+  });
+
+  it("lib client builder builds a plain OpenAI (not AzureOpenAI) when provider is openai (default)", async () => {
+    const snap = snapshotEnv();
+    try {
+      delete process.env.AI_INTEGRATIONS_PROVIDER;
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "test-key";
+      process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://api.openai.com/v1";
+      delete process.env.AI_INTEGRATIONS_AZURE_RESOURCE;
+      delete process.env.AI_INTEGRATIONS_AZURE_DEPLOYMENT;
+
+      const { buildOpenAIClient } = (await import(
+        "../../../../../lib/integrations-openai-ai-server/src/buildClient"
+      )) as { buildOpenAIClient: () => unknown };
+
+      const client = buildOpenAIClient();
+      // Constructor name check (pnpm peer-dep variants mean `instanceof`
+      // across re-imports is unreliable — name-based identity isn't).
+      expect((client as { constructor: { name: string } }).constructor.name).toBe(
+        "OpenAI",
+      );
+      // Direct OpenAI doesn't tack on the Azure deployment URL segment.
+      const baseURL = (client as { baseURL: string }).baseURL;
+      expect(baseURL).toBe("https://api.openai.com/v1");
+      expect(baseURL).not.toContain("openai.azure.com");
+    } finally {
+      restoreEnv(snap);
+    }
+  });
+});

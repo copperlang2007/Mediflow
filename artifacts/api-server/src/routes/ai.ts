@@ -22,20 +22,42 @@ import {
   contactsTable,
   documentsTable,
 } from "@workspace/db";
-import OpenAI from "openai";
+import OpenAI, { AzureOpenAI } from "openai";
 
+// Provider dispatch — `azure` is the HIPAA-eligible path (default BAA
+// coverage), `openai` is the direct API for dev/staging. See
+// `lib/integrations-openai-ai-server/README.md`.
 let _openai: OpenAI | null = null;
 function getOpenAI(): OpenAI | null {
   if (_openai) return _openai;
   const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-  if (!apiKey || !baseURL) return null;
+  if (!apiKey) return null;
+  const provider = (process.env.AI_INTEGRATIONS_PROVIDER ?? "openai").toLowerCase();
   try {
+    if (provider === "azure") {
+      const resource = process.env.AI_INTEGRATIONS_AZURE_RESOURCE;
+      const endpoint =
+        process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ??
+        (resource ? `https://${resource}.openai.azure.com` : undefined);
+      if (!endpoint) return null;
+      const apiVersion =
+        process.env.AI_INTEGRATIONS_AZURE_API_VERSION ?? "2024-02-15-preview";
+      const deployment = process.env.AI_INTEGRATIONS_AZURE_DEPLOYMENT;
+      _openai = new AzureOpenAI({ apiKey, endpoint, apiVersion, deployment });
+      return _openai;
+    }
+    const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+    if (!baseURL) return null;
     _openai = new OpenAI({ apiKey, baseURL });
     return _openai;
   } catch {
     return null;
   }
+}
+
+/** Test-only — reset the memoized client between tests. */
+export function _resetOpenAIClient(): void {
+  _openai = null;
 }
 import {
   requireAuth,
