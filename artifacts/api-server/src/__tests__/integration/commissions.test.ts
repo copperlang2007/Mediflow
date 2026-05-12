@@ -159,11 +159,10 @@ const HUMANA_CSV_BUFFER = Buffer.from(
   [
     "POL-100|Smith|MEM-100|Jane|01/15/1955|FL|MAPD|2025|01/01/2025|01/31/2025|120.50|45.00|NEW",
     "POL-101|Doe|MEM-101|John|03/22/1948|TX|MAPD|2025|01/01/2025|01/31/2025|130.00|22.50|RENEWAL",
-    // BUG: humana.ts header docs list "CHGBK" as the chargeback type code,
-    // but toType() in commissionParsers/index.ts only matches "charge" /
-    // "recoup" / "reverse". Using the long form here so the parser registry
-    // test reflects what works today; reported in the bug summary.
-    "POL-102|Roe|MEM-102|Mary|07/04/1960|CA|MAPD|2025|01/01/2025|01/31/2025|100.00|-30.00|CHARGEBACK",
+    // Uses Humana's documented short code CHGBK — toType() now classifies
+    // this explicitly as 'chargeback' (fixed alongside this test in the
+    // same PR as the bug-fix batch).
+    "POL-102|Roe|MEM-102|Mary|07/04/1960|CA|MAPD|2025|01/01/2025|01/31/2025|100.00|-30.00|CHGBK",
   ].join("\n"),
   "utf8",
 );
@@ -235,8 +234,9 @@ describe("Commissions integration", () => {
     const del = await request(app)
       .delete(`/api/commission-schedules/${scheduleId}`)
       .set(withAuth(admin.id));
-    // delete is super_admin only; agency_admin should be 403
-    expect(del.status).toBe(403);
+    // PR #49 caught the asymmetry where agency_admin could create / patch
+    // but not delete a schedule. Aligned DELETE to commission:update.
+    expect(del.status).toBe(204);
   });
 
   it("rejects viewer on schedule create / delete (RBAC)", async () => {
@@ -614,13 +614,10 @@ describe("Commissions integration", () => {
     expect(after1[0].contactId).toBe(contact.id);
   });
 
-  // BUG: the unique index `missed_payment_alerts_unique` covers
-  // (org, contact, policy_number, expected_period). The cron always inserts
-  // policy_number = NULL, and Postgres treats NULLs as distinct in unique
-  // indexes, so the constraint never fires and a second run double-inserts.
-  // Skipping until the worker either (a) populates a stable policy key or
-  // (b) the index is recreated as `NULLS NOT DISTINCT`.
-  it.skip("missed-payment cron: idempotent on second run (BLOCKED by null policy_number bug)", async () => {
+  // Migration 0005 recreates the unique index with NULLS NOT DISTINCT
+  // so the cron's `.onConflictDoNothing()` actually fires on the second
+  // run even when policy_number is NULL.
+  it("missed-payment cron: idempotent on second run", async () => {
     const handle = await bootTestDb();
     const isoOrg = await seedOrg(handle.db, { id: `cron-org-${randomUUID()}` });
     const isoCarrier = await seedCarrier(handle.db, { orgId: isoOrg.id });

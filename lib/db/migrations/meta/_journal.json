@@ -36,6 +36,20 @@
       "when": 1778200000000,
       "tag": "0003_perf_partial_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778250000000,
+      "tag": "0004_developer_role_enum",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778260000000,
+      "tag": "0005_missed_payment_alerts_nulls_not_distinct",
+      "breakpoints": true
     }
   ]
 }
