@@ -8,6 +8,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { getQueue, startWorkers } from "./lib/jobs";
 import { captureWorkerError } from "./lib/sentry";
+import { markWorkersReady } from "./lib/readiness";
 
 const rawPort = process.env["PORT"];
 
@@ -24,12 +25,33 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 async function bootstrap(): Promise<void> {
-  // Start pg-boss job queue and register workers
+  // Start pg-boss job queue and register workers.
+  //
+  // Policy: in production we treat worker-start failure as FATAL. The
+  // previous "log and continue" path was the root cause of the readiness
+  // gap this endpoint split fixes: a pod with broken workers would silently
+  // accept traffic and never run scheduled jobs.
+  //
+  // In non-production we keep degraded mode so local dev iteration isn't
+  // blocked by transient infra issues — readiness will simply stay 503
+  // because `markWorkersReady()` won't be called.
   try {
     await getQueue();
     await startWorkers();
+    markWorkersReady();
   } catch (err) {
-    logger.error({ err }, "Failed to start job queue — continuing without background jobs");
+    logger.error({ err }, "Failed to start job queue");
+    captureWorkerError(err, { worker: "bootstrap", phase: "startup" });
+    if (process.env.NODE_ENV === "production") {
+      logger.fatal(
+        { err },
+        "Exiting: worker startup failure is fatal in production",
+      );
+      process.exit(1);
+    }
+    logger.warn(
+      "Continuing without background jobs (non-production); /readyz will report not_ready",
+    );
   }
 
   app.listen(port, (err) => {
