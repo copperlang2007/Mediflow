@@ -177,6 +177,20 @@ export const commissionLineItemsTable = pgTable(
     }),
     matchStatus: text("match_status").notNull().default("unmatched"),
     raw: jsonb("raw"),
+    /**
+     * Snapshot of the splits this line item has already contributed to
+     * `agent_commission_payouts.earned`. Used by the reconcile worker to
+     * stay idempotent across retries / re-runs and to apply only the
+     * per-agent delta when splits change between runs.
+     *
+     * Shape: { writingAgentId, periodStart, periodEnd, splits: [{ agentId, amount }] }
+     */
+    payoutContribution: jsonb("payout_contribution").$type<{
+      writingAgentId: string;
+      periodStart: string;
+      periodEnd: string;
+      splits: { agentId: string; amount: number }[];
+    } | null>(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
