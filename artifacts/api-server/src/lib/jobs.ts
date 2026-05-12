@@ -7,6 +7,7 @@
  *    cert-expiry-check           daily 08:05 UTC
  *    check-ahip-deadlines        weekly Monday 08:10 UTC
  *    automation-daily-sweep      nightly 01:00 UTC
+ *    export-anomaly-check        daily 02:15 UTC
  *
  *  Ad-hoc (enqueue via `enqueue(JOB_NAMES.X, data)`):
  *    task-auto-assign            on agent creation / status change
@@ -69,6 +70,7 @@ export const JOB_NAMES = {
   WEEKLY_COMPLIANCE_REPORT: "weekly-compliance-report",
   RETENTION_ENFORCEMENT: "retention-enforcement",
   COMMISSION_MISSED_PAYMENT_CHECK: "commission-missed-payment-check",
+  EXPORT_ANOMALY_CHECK: "export-anomaly-check",
   // Import workers (ad-hoc, enqueued from import routes)
   IMPORT_MONDAY: "import-monday",
   IMPORT_GHL: "import-ghl",
@@ -205,6 +207,9 @@ export async function startWorkers(): Promise<void> {
     {},
     { tz: "UTC" },
   );
+  // Daily export-volume anomaly check — 02:15 UTC (off-peak, after retention
+  // enforcement at 02:00 but before missed-payment at 02:30).
+  await boss.schedule(JOB_NAMES.EXPORT_ANOMALY_CHECK, "15 2 * * *", {}, { tz: "UTC" });
 
   // ---- Workers ----
 
@@ -415,6 +420,19 @@ export async function startWorkers(): Promise<void> {
   await boss.work<CommissionMissedPaymentCheckPayload>(
     JOB_NAMES.COMMISSION_MISSED_PAYMENT_CHECK,
     missedPaymentHandler,
+  );
+
+  const exportAnomalyHandler: WorkHandler<Record<string, never>> = async () => {
+    const { exportAnomalyCheckWorker } = await import(
+      "../workers/exportAnomalyCheck"
+    );
+    await exportAnomalyCheckWorker();
+  };
+  // Scheduled cron — singleton; one pass per node, no fan-out.
+  await boss.work<Record<string, never>>(
+    JOB_NAMES.EXPORT_ANOMALY_CHECK,
+    { batchSize: 1, localConcurrency: 1 },
+    exportAnomalyHandler,
   );
 
   logger.info("All background workers registered");
