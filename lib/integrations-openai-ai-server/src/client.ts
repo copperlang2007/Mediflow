@@ -1,18 +1,19 @@
-import OpenAI from "openai";
+/**
+ * AI client construction — supports both OpenAI direct and Azure OpenAI.
+ *
+ * Why two providers? `api.openai.com` is NOT covered by OpenAI's default
+ * BAA scope, so production environments handling PHI must use Azure
+ * OpenAI (HIPAA-eligible out of the box). Dev/staging can keep using
+ * OpenAI direct for convenience.
+ *
+ * Provider is selected by `AI_INTEGRATIONS_PROVIDER` (defaults to
+ * `openai`). When set to `azure`, this module constructs an
+ * `AzureOpenAI` from the official SDK, which transparently rewrites the
+ * URL/headers (api-key header, api-version query string,
+ * deployment-name-in-URL) so the rest of the codebase keeps calling
+ * `client.chat.completions.create(...)` unchanged.
+ */
+import type OpenAI from "openai";
+import { buildOpenAIClient } from "./buildClient";
 
-if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
-  throw new Error(
-    "AI_INTEGRATIONS_OPENAI_BASE_URL must be set. Did you forget to provision the OpenAI AI integration?",
-  );
-}
-
-if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
-  throw new Error(
-    "AI_INTEGRATIONS_OPENAI_API_KEY must be set. Did you forget to provision the OpenAI AI integration?",
-  );
-}
-
-export const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+export const openai: OpenAI = buildOpenAIClient();

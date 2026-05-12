@@ -34,7 +34,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import OpenAI from "openai";
+import OpenAI, { AzureOpenAI } from "openai";
 import {
   requireAuth,
   requirePermission,
@@ -145,9 +145,35 @@ export function setOpenAIClientFactory(
 function getOpenAI(): AiClient | null {
   if (_factory) return _factory();
   const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-  if (!apiKey || !baseURL) return null;
+  if (!apiKey) return null;
+  const provider = (process.env.AI_INTEGRATIONS_PROVIDER ?? "openai").toLowerCase();
   try {
+    if (provider === "azure") {
+      // Azure OpenAI is the HIPAA-eligible path. The deployment name in
+      // the URL (set on the client) overrides the `model` field sent in
+      // the request body, so callers can keep passing FEATURE_BUILDER_MODEL
+      // — we just route to the corresponding Azure deployment.
+      const resource = process.env.AI_INTEGRATIONS_AZURE_RESOURCE;
+      const endpoint =
+        process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ??
+        (resource ? `https://${resource}.openai.azure.com` : undefined);
+      if (!endpoint) return null;
+      const apiVersion =
+        process.env.AI_INTEGRATIONS_AZURE_API_VERSION ?? "2024-02-15-preview";
+      // Fall back to FEATURE_BUILDER_MODEL when no Azure-specific
+      // deployment is set — common when the Azure deployment was named
+      // after the model.
+      const deployment =
+        process.env.AI_INTEGRATIONS_AZURE_DEPLOYMENT ?? FEATURE_BUILDER_MODEL;
+      return new AzureOpenAI({
+        apiKey,
+        endpoint,
+        apiVersion,
+        deployment,
+      }) as unknown as AiClient;
+    }
+    const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+    if (!baseURL) return null;
     return new OpenAI({ apiKey, baseURL }) as unknown as AiClient;
   } catch {
     return null;
