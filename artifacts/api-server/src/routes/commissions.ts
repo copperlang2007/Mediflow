@@ -211,7 +211,12 @@ router.patch(
 router.delete(
   "/commission-schedules/:id",
   requireAuth,
-  requirePermission("commission", "delete"),
+  // PR #49 caught the asymmetry: POST/PATCH allow agency_admin via
+  // commission:create / commission:update, but DELETE required
+  // commission:delete (super_admin only). An admin who can create a
+  // bad rate card should be able to delete it themselves without
+  // flagging super-admin attention. Aligning DELETE to commission:update.
+  requirePermission("commission", "update"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

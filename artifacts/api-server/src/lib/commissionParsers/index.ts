@@ -93,6 +93,11 @@ export function toIsoDate(raw: unknown): string | null {
 
 export function toType(raw: unknown): CommissionLineItemType {
   const s = String(raw ?? "").toLowerCase();
+  // PR #49 caught that Humana's documented CHGBK code (and the common
+  // "CB" abbreviation) didn't match "charge" / "recoup" / "reverse"
+  // substrings, so chargebacks were silently classified as 'initial'
+  // and miscredited. Match those explicit short codes too.
+  if (s === "chgbk" || s === "cb") return "chargeback";
   if (s.includes("charge") || s.includes("recoup") || s.includes("reverse")) return "chargeback";
   if (s.includes("bonus") || s.includes("override")) return "bonus";
   if (s.includes("renew")) return "renewal";
