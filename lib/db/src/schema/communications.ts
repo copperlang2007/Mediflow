@@ -4,6 +4,7 @@ import {
   timestamp,
   boolean,
   pgEnum,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -107,17 +108,34 @@ export const smsTemplatesTable = pgTable("sms_templates", {
 
 export type SmsTemplate = typeof smsTemplatesTable.$inferSelect;
 
-export const optOutsTable = pgTable("opt_outs", {
-  id: text("id").primaryKey(),
-  orgId: text("org_id")
-    .notNull()
-    .references(() => organizationsTable.id),
-  phone: text("phone"),
-  email: text("email"),
-  channel: channelEnum("channel").notNull(),
-  optedOutAt: timestamp("opted_out_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const optOutsTable = pgTable(
+  "opt_outs",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizationsTable.id),
+    phone: text("phone"),
+    email: text("email"),
+    channel: channelEnum("channel").notNull(),
+    optedOutAt: timestamp("opted_out_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Compliance audit-log dedup. Two concurrent STOP messages from the
+    // same phone in the same org must collapse to a single opt_outs row
+    // (matches migration 0013). The PK is a random UUID, so without this
+    // index `onConflictDoNothing()` has no real conflict target. NULL
+    // phone rows (e.g. email-channel opt-outs) are excluded by Postgres'
+    // default NULLS-DISTINCT behavior, so this only enforces uniqueness
+    // for SMS-style rows.
+    uniqueIndex("opt_outs_org_phone_channel_unique").on(
+      t.orgId,
+      t.phone,
+      t.channel,
+    ),
+  ],
+);
 
 export type OptOut = typeof optOutsTable.$inferSelect;

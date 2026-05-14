@@ -72,30 +72,49 @@ router.post(
     try {
       // --- TCPA Opt-out ---
       if (isOptOut) {
-        // Set flag on contact record
-        await db
-          .update(contactsTable)
-          .set({ optOutSms: true })
-          .where(eq(contactsTable.phone, from));
+        // Wrap update -> select -> audit insert in a single transaction
+        // so the audit row is never lost if the SELECT or INSERT fails
+        // after the contact flag has already been flipped. The audit
+        // dedup itself is enforced by the partial unique index
+        // `opt_outs_org_phone_channel_unique` (migration 0013) — the
+        // conflict target below tells Postgres to use it.
+        await db.transaction(async (tx) => {
+          // Set flag on contact record (idempotent on retries)
+          await tx
+            .update(contactsTable)
+            .set({ optOutSms: true })
+            .where(eq(contactsTable.phone, from));
 
-        // Record in opt_outs log (find orgId via contact)
-        const [contact] = await db
-          .select({ orgId: contactsTable.orgId })
-          .from(contactsTable)
-          .where(eq(contactsTable.phone, from))
-          .limit(1);
+          // Record in opt_outs log (find orgId via contact)
+          const [contact] = await tx
+            .select({ orgId: contactsTable.orgId })
+            .from(contactsTable)
+            .where(eq(contactsTable.phone, from))
+            .limit(1);
 
-        if (contact) {
-          await db
-            .insert(optOutsTable)
-            .values({
-              id: randomUUID(),
-              orgId: contact.orgId,
-              phone: from,
-              channel: "sms",
-            })
-            .onConflictDoNothing();
-        }
+          if (contact) {
+            // Use the (org_id, phone, channel) unique index as the
+            // conflict target. Without an explicit target, drizzle would
+            // fall back to the PK (`id`), which is a random UUID and
+            // never collides — so concurrent STOPs would each insert a
+            // distinct audit row.
+            await tx
+              .insert(optOutsTable)
+              .values({
+                id: randomUUID(),
+                orgId: contact.orgId,
+                phone: from,
+                channel: "sms",
+              })
+              .onConflictDoNothing({
+                target: [
+                  optOutsTable.orgId,
+                  optOutsTable.phone,
+                  optOutsTable.channel,
+                ],
+              });
+          }
+        });
 
         logger.info({ from }, "Contact opted out of SMS");
         res
