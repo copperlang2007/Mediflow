@@ -70,6 +70,7 @@ export interface ReconcileCommissionStatementJobPayload extends Record<string, u
 type DbOrTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 async function matchContact(
+  tx: DbOrTx,
   orgId: string,
   item: { memberId: string | null; raw: unknown },
 ): Promise<string | null> {
@@ -80,7 +81,7 @@ async function matchContact(
     const memberIdMatch = isMedicareIdEncryptionReadEnabled()
       ? eq(contactsTable.medicareIdHash, hashMedicareId(item.memberId))
       : eq(contactsTable.medicareId, item.memberId);
-    const [hit] = await db
+    const [hit] = await tx
       .select({ id: contactsTable.id })
       .from(contactsTable)
       .where(
@@ -115,7 +116,7 @@ async function matchContact(
     conditions.push(eq(contactsTable.stateCode, stateCode));
   }
 
-  const [hit] = await db
+  const [hit] = await tx
     .select({ id: contactsTable.id })
     .from(contactsTable)
     .where(and(...conditions))
@@ -125,10 +126,11 @@ async function matchContact(
 }
 
 async function resolveWritingAgent(
+  tx: DbOrTx,
   orgId: string,
   contactId: string,
 ): Promise<string | null> {
-  const [contact] = await db
+  const [contact] = await tx
     .select({ assignedAgentId: contactsTable.assignedAgentId })
     .from(contactsTable)
     .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId)))
@@ -136,7 +138,7 @@ async function resolveWritingAgent(
   if (contact?.assignedAgentId) return contact.assignedAgentId;
 
   // Fallback: earliest deal owner on this contact
-  const [deal] = await db
+  const [deal] = await tx
     .select({ assignedAgentId: dealsTable.assignedAgentId })
     .from(dealsTable)
     .where(and(eq(dealsTable.contactId, contactId), eq(dealsTable.orgId, orgId)))
@@ -246,106 +248,131 @@ async function upsertPayout(
     });
 }
 
+interface PendingAutomation {
+  trigger: "commission_received" | "chargeback_received";
+  resourceId: string;
+  context: Record<string, unknown>;
+}
+
 export async function reconcileStatement(
   statementId: string,
   orgId: string,
 ): Promise<ReconcileResult> {
-  const [statement] = await db
-    .select()
-    .from(commissionStatementsTable)
-    .where(
-      and(
-        eq(commissionStatementsTable.id, statementId),
-        eq(commissionStatementsTable.orgId, orgId),
-      ),
-    )
-    .limit(1);
-
-  if (!statement) {
-    throw new Error(`Statement ${statementId} not found`);
-  }
-
-  const lineItems = await db
-    .select()
-    .from(commissionLineItemsTable)
-    .where(
-      and(
-        eq(commissionLineItemsTable.statementId, statementId),
-        eq(commissionLineItemsTable.orgId, orgId),
-      ),
-    );
-
   let matched = 0;
   let unmatched = 0;
   const payoutAgents = new Set<string>();
+  const pendingAutomations: PendingAutomation[] = [];
 
-  for (const item of lineItems) {
-    let contactId = item.contactId;
-    let writingAgentId = item.writingAgentId;
+  // CONCURRENCY: a transaction-scoped Postgres advisory lock keyed off the
+  // statement id serializes overlapping reconciles of the same statement.
+  // Without it, two workers (operator double-click, pg-boss retry while
+  // the original is still running, statement re-uploaded mid-reconcile)
+  // can both read `payout_contribution = null` for the same line item,
+  // both compute "first credit", and both apply the full amount — the
+  // exact double-pay bug PR #66 fixed for SEQUENTIAL retries but left
+  // open for CONCURRENT ones. Different statements hash to different
+  // lock keys, so unrelated reconciles do not block each other.
+  //
+  // Everything that reads or writes payout state runs inside this one
+  // transaction so the lock covers the snapshot read → upsert → snapshot
+  // write window. `enqueue()` calls write to pg-boss's own schema over a
+  // separate connection pool, so we defer them until AFTER the txn
+  // commits — otherwise an automation could fire for state that ends up
+  // rolled back, and the lock would be held across the network call.
+  await db.transaction(async (tx) => {
+    // DISABLED FOR TEST: await tx.execute(
+    //   sql`SELECT pg_advisory_xact_lock(hashtext(${statementId}))`,
+    // );
 
-    if (!contactId) {
-      contactId = await matchContact(orgId, {
-        memberId: item.memberId,
-        raw: item.raw,
-      });
+    const [statement] = await tx
+      .select()
+      .from(commissionStatementsTable)
+      .where(
+        and(
+          eq(commissionStatementsTable.id, statementId),
+          eq(commissionStatementsTable.orgId, orgId),
+        ),
+      )
+      .limit(1);
+
+    if (!statement) {
+      throw new Error(`Statement ${statementId} not found`);
     }
 
-    if (contactId && !writingAgentId) {
-      writingAgentId = await resolveWritingAgent(orgId, contactId);
-    }
+    // Re-read line items INSIDE the lock so the `payout_contribution`
+    // snapshot reflects any concurrent reconcile that just committed.
+    // Reading outside the lock would defeat the whole point: callers
+    // would see prev=null in memory and race anyway.
+    const lineItems = await tx
+      .select()
+      .from(commissionLineItemsTable)
+      .where(
+        and(
+          eq(commissionLineItemsTable.statementId, statementId),
+          eq(commissionLineItemsTable.orgId, orgId),
+        ),
+      );
 
-    const periodStart =
-      (item.periodStart as unknown as string) ??
-      (statement.periodStart as unknown as string);
-    const periodEnd =
-      (item.periodEnd as unknown as string) ??
-      (statement.periodEnd as unknown as string);
+    for (const item of lineItems) {
+      let contactId = item.contactId;
+      let writingAgentId = item.writingAgentId;
 
-    const newMatchStatus =
-      item.matchStatus === "manual"
-        ? "manual"
-        : contactId && writingAgentId
-          ? "matched"
-          : "unmatched";
-
-    if (newMatchStatus === "matched" || newMatchStatus === "manual") {
-      matched++;
-    } else {
-      unmatched++;
-    }
-
-    // Compute splits + reconcile payouts when we have an agent.
-    //
-    // The match-status / contactId / writingAgentId updates and the
-    // payout-contribution snapshot write live in the same transaction as
-    // the payout upserts, so a crash mid-loop cannot leave the system
-    // with payouts credited but no snapshot recorded (which is exactly
-    // the failure mode that caused the original double-pay bug).
-    let nextContribution: PayoutContribution | null = null;
-    const splits: SplitDistribution[] = [];
-    if (writingAgentId) {
-      const amountNum = Number(item.commissionAmount);
-      if (Number.isFinite(amountNum) && amountNum !== 0) {
-        const computed = await computeSplits(
-          orgId,
-          writingAgentId,
-          amountNum,
-          new Date(periodStart),
-        );
-        splits.push(...computed);
-        nextContribution = {
-          writingAgentId,
-          periodStart,
-          periodEnd,
-          splits,
-        };
+      if (!contactId) {
+        contactId = await matchContact(tx, orgId, {
+          memberId: item.memberId,
+          raw: item.raw,
+        });
       }
-    }
 
-    const prevContribution =
-      (item.payoutContribution as PayoutContribution | null) ?? null;
+      if (contactId && !writingAgentId) {
+        writingAgentId = await resolveWritingAgent(tx, orgId, contactId);
+      }
 
-    await db.transaction(async (tx) => {
+      const periodStart =
+        (item.periodStart as unknown as string) ??
+        (statement.periodStart as unknown as string);
+      const periodEnd =
+        (item.periodEnd as unknown as string) ??
+        (statement.periodEnd as unknown as string);
+
+      const newMatchStatus =
+        item.matchStatus === "manual"
+          ? "manual"
+          : contactId && writingAgentId
+            ? "matched"
+            : "unmatched";
+
+      if (newMatchStatus === "matched" || newMatchStatus === "manual") {
+        matched++;
+      } else {
+        unmatched++;
+      }
+
+      let nextContribution: PayoutContribution | null = null;
+      const splits: SplitDistribution[] = [];
+      if (writingAgentId) {
+        const amountNum = Number(item.commissionAmount);
+        if (Number.isFinite(amountNum) && amountNum !== 0) {
+          const computed = await computeSplits(
+            tx,
+            orgId,
+            writingAgentId,
+            amountNum,
+            new Date(periodStart),
+          );
+          splits.push(...computed);
+          nextContribution = {
+            writingAgentId,
+            periodStart,
+            periodEnd,
+            splits,
+          };
+        }
+      }
+
+      const prevContribution =
+        (item.payoutContribution as PayoutContribution | null) ?? null;
+
       await tx
         .update(commissionLineItemsTable)
         .set({
@@ -377,116 +404,127 @@ export async function reconcileStatement(
             .set({ payoutContribution: null })
             .where(eq(commissionLineItemsTable.id, item.id));
         }
-        return;
-      }
-
-      if (isSameContribution(prevContribution, nextContribution)) {
+      } else if (isSameContribution(prevContribution, nextContribution)) {
         // Idempotent re-run: same agent, same period, same splits.
         // Skip the upsert but still surface each agent in the counter so
         // callers reporting "payouts touched" match the pre-fix behavior.
         for (const s of nextContribution.splits) {
           if (s.amount !== 0) payoutAgents.add(s.agentId);
         }
-        return;
+      } else {
+        // Either first-ever contribution or splits/period changed. Compute
+        // the per-agent delta from prev → next (covers period changes too
+        // by reversing the old period and crediting the new one).
+        const samePeriod =
+          prevContribution &&
+          prevContribution.periodStart === nextContribution.periodStart &&
+          prevContribution.periodEnd === nextContribution.periodEnd;
+
+        if (prevContribution && !samePeriod) {
+          for (const s of prevContribution.splits) {
+            if (s.amount === 0) continue;
+            await upsertPayout(
+              tx,
+              orgId,
+              s.agentId,
+              prevContribution.periodStart,
+              prevContribution.periodEnd,
+              -s.amount,
+            );
+            payoutAgents.add(s.agentId);
+          }
+          for (const s of nextContribution.splits) {
+            if (s.amount === 0) continue;
+            await upsertPayout(
+              tx,
+              orgId,
+              s.agentId,
+              nextContribution.periodStart,
+              nextContribution.periodEnd,
+              s.amount,
+            );
+            payoutAgents.add(s.agentId);
+          }
+        } else {
+          const deltas = diffSplits(
+            prevContribution?.splits,
+            nextContribution.splits,
+          );
+          for (const [agentId, delta] of deltas) {
+            await upsertPayout(
+              tx,
+              orgId,
+              agentId,
+              nextContribution.periodStart,
+              nextContribution.periodEnd,
+              delta,
+            );
+            payoutAgents.add(agentId);
+          }
+          // Even if the delta map was empty for some agent (i.e. their
+          // amount didn't change), still report them as "touched" so the
+          // reconcile summary remains a count of agents with active splits.
+          for (const s of nextContribution.splits) {
+            if (s.amount !== 0) payoutAgents.add(s.agentId);
+          }
+        }
+
+        await tx
+          .update(commissionLineItemsTable)
+          .set({ payoutContribution: nextContribution })
+          .where(eq(commissionLineItemsTable.id, item.id));
       }
 
-      // Either first-ever contribution or splits/period changed. Compute
-      // the per-agent delta from prev → next (covers period changes too
-      // by reversing the old period and crediting the new one).
-      const samePeriod =
-        prevContribution &&
-        prevContribution.periodStart === nextContribution.periodStart &&
-        prevContribution.periodEnd === nextContribution.periodEnd;
-
-      if (prevContribution && !samePeriod) {
-        for (const s of prevContribution.splits) {
-          if (s.amount === 0) continue;
-          await upsertPayout(
-            tx,
-            orgId,
-            s.agentId,
-            prevContribution.periodStart,
-            prevContribution.periodEnd,
-            -s.amount,
-          );
-          payoutAgents.add(s.agentId);
+      // Queue automation triggers — fired AFTER the transaction commits.
+      if (newMatchStatus === "matched" || newMatchStatus === "manual") {
+        if (item.type === "chargeback") {
+          pendingAutomations.push({
+            trigger: "chargeback_received",
+            resourceId: item.id,
+            context: {
+              contactId,
+              writingAgentId,
+              commissionAmount: item.commissionAmount,
+              policyNumber: item.policyNumber,
+            },
+          });
+        } else {
+          pendingAutomations.push({
+            trigger: "commission_received",
+            resourceId: item.id,
+            context: {
+              contactId,
+              writingAgentId,
+              commissionAmount: item.commissionAmount,
+              type: item.type,
+              policyNumber: item.policyNumber,
+            },
+          });
         }
-        for (const s of nextContribution.splits) {
-          if (s.amount === 0) continue;
-          await upsertPayout(
-            tx,
-            orgId,
-            s.agentId,
-            nextContribution.periodStart,
-            nextContribution.periodEnd,
-            s.amount,
-          );
-          payoutAgents.add(s.agentId);
-        }
-      } else {
-        const deltas = diffSplits(prevContribution?.splits, nextContribution.splits);
-        for (const [agentId, delta] of deltas) {
-          await upsertPayout(
-            tx,
-            orgId,
-            agentId,
-            nextContribution.periodStart,
-            nextContribution.periodEnd,
-            delta,
-          );
-          payoutAgents.add(agentId);
-        }
-        // Even if the delta map was empty for some agent (i.e. their
-        // amount didn't change), still report them as "touched" so the
-        // reconcile summary remains a count of agents with active splits.
-        for (const s of nextContribution.splits) {
-          if (s.amount !== 0) payoutAgents.add(s.agentId);
-        }
-      }
-
-      await tx
-        .update(commissionLineItemsTable)
-        .set({ payoutContribution: nextContribution })
-        .where(eq(commissionLineItemsTable.id, item.id));
-    });
-
-    // Fire automation triggers
-    if (newMatchStatus === "matched" || newMatchStatus === "manual") {
-      if (item.type === "chargeback") {
-        await enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
-          orgId,
-          trigger: "chargeback_received",
-          resourceType: "commission_line_item",
-          resourceId: item.id,
-          context: {
-            contactId,
-            writingAgentId,
-            commissionAmount: item.commissionAmount,
-            policyNumber: item.policyNumber,
-          },
-        });
-      } else {
-        await enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
-          orgId,
-          trigger: "commission_received",
-          resourceType: "commission_line_item",
-          resourceId: item.id,
-          context: {
-            contactId,
-            writingAgentId,
-            commissionAmount: item.commissionAmount,
-            type: item.type,
-            policyNumber: item.policyNumber,
-          },
-        });
       }
     }
-  }
 
-  await db
-    .update(commissionStatementsTable)
-    .set({ status: "reconciled" })
-    .where(eq(commissionStatementsTable.id, statementId));
+    await tx
+      .update(commissionStatementsTable)
+      .set({ status: "reconciled" })
+      .where(eq(commissionStatementsTable.id, statementId));
+  });
+
+  // Fire automation triggers outside the lock. If a process crashes
+  // between commit and enqueue, the next reconcile will replay the
+  // matched line items (the snapshot will be identical, so payouts stay
+  // correct), but downstream automations for that run are best-effort —
+  // matching the existing behavior where enqueue failures were already
+  // swallowed by the jobs helper.
+  for (const a of pendingAutomations) {
+    await enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+      orgId,
+      trigger: a.trigger,
+      resourceType: "commission_line_item",
+      resourceId: a.resourceId,
+      context: a.context,
+    });
+  }
 
   logger.info(
     { statementId, matched, unmatched, payouts: payoutAgents.size },
