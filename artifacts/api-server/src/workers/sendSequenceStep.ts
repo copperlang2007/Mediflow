@@ -19,6 +19,7 @@ import {
   sequencesTable,
   sequenceStepsTable,
   sequenceEnrollmentsTable,
+  sequenceStepExecutionsTable,
   contactsTable,
   taskInstancesTable,
 } from "@workspace/db";
@@ -93,60 +94,101 @@ export async function sendSequenceStepWorker(
   const cfg = (step.config ?? {}) as Record<string, unknown>;
   const contactName = `${contact.firstName} ${contact.lastName}`.trim();
 
-  // Execute step
-  switch (step.stepType) {
-    case "email": {
-      const to = contact.email;
-      if (!to) {
-        logger.warn({ contactId, stepIndex }, "Contact has no email — skipping email step");
-        break;
-      }
-      const subject = String(cfg.subject ?? "");
-      const html = String(cfg.html ?? cfg.body ?? `Hello ${contactName}`);
-      await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, { to, subject, html });
-      logger.info({ contactId, stepIndex }, "Sequence email step enqueued");
-      break;
-    }
+  // ---- Idempotency claim ---------------------------------------------------
+  //
+  // Claim the (enrollment_id, step_index) slot in the execution log BEFORE
+  // firing any external side effect. If pg-boss retries this job (worker
+  // crash / timeout between side effect and pointer advance), the PK
+  // conflict makes this insert return zero rows and we skip the side
+  // effect — preventing duplicate Twilio SMS, Resend emails, and duplicate
+  // follow-up task instances.
+  //
+  // We claim for "wait" too, so the ledger reflects every step that
+  // advanced (cheap audit trail) and so the PK is the single source of
+  // truth for "did this step ever run".
+  const claimed = await db
+    .insert(sequenceStepExecutionsTable)
+    .values({
+      enrollmentId: enrollment.id,
+      stepIndex,
+      sideEffect: step.stepType,
+    })
+    .onConflictDoNothing()
+    .returning({ enrollmentId: sequenceStepExecutionsTable.enrollmentId });
 
-    case "sms": {
-      const to = contact.phone;
-      if (!to || contact.optOutSms) {
-        logger.warn(
-          { contactId, stepIndex, optOut: contact.optOutSms },
-          "Contact has no phone or opted out — skipping SMS step",
+  if (claimed.length === 0) {
+    logger.info(
+      { sequenceId, contactId, stepIndex, stepType: step.stepType },
+      "Sequence step already executed on prior attempt — skipping side effect on retry",
+    );
+  } else {
+    // Execute step
+    switch (step.stepType) {
+      case "email": {
+        const to = contact.email;
+        if (!to) {
+          logger.warn({ contactId, stepIndex }, "Contact has no email — skipping email step");
+          break;
+        }
+        const subject = String(cfg.subject ?? "");
+        const html = String(cfg.html ?? cfg.body ?? `Hello ${contactName}`);
+        // Belt-and-braces: pg-boss singletonKey collapses any duplicate
+        // job that slips past the ledger (e.g. concurrent worker on a
+        // different node racing the same step). The ledger is the
+        // primary guard; this is defense in depth.
+        await enqueue(
+          JOB_NAMES.SEND_SCHEDULED_EMAIL,
+          { to, subject, html },
+          { singletonKey: `seq:${enrollment.id}:${stepIndex}` },
         );
+        logger.info({ contactId, stepIndex }, "Sequence email step enqueued");
         break;
       }
-      const body = String(cfg.body ?? `Hi ${contactName}, this is a message from your Medicare advisor.`);
-      await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { to, body });
-      logger.info({ contactId, stepIndex }, "Sequence SMS step enqueued");
-      break;
-    }
 
-    case "task": {
-      const title = String(cfg.title ?? `Follow up with ${contactName}`);
-      await db.insert(taskInstancesTable).values({
-        id: randomUUID(),
-        orgId: contact.orgId,
-        templateId: null,
-        agentId: contact.assignedAgentId ?? null,
-        title,
-        description: String(cfg.description ?? ""),
-        status: "open",
-        priority: (String(cfg.priority ?? "medium")) as "low" | "medium" | "high" | "urgent",
-        dueDate: cfg.dueDays
-          ? new Date(Date.now() + Number(cfg.dueDays) * 86_400_000)
-          : null,
-      });
-      logger.info({ contactId, stepIndex }, "Sequence task step created");
-      break;
-    }
+      case "sms": {
+        const to = contact.phone;
+        if (!to || contact.optOutSms) {
+          logger.warn(
+            { contactId, stepIndex, optOut: contact.optOutSms },
+            "Contact has no phone or opted out — skipping SMS step",
+          );
+          break;
+        }
+        const body = String(cfg.body ?? `Hi ${contactName}, this is a message from your Medicare advisor.`);
+        await enqueue(
+          JOB_NAMES.SEND_SCHEDULED_SMS,
+          { to, body },
+          { singletonKey: `seq:${enrollment.id}:${stepIndex}` },
+        );
+        logger.info({ contactId, stepIndex }, "Sequence SMS step enqueued");
+        break;
+      }
 
-    case "wait":
-    default:
-      // Pure delay — just advance pointer
-      logger.debug({ contactId, stepIndex }, "Sequence wait step — advancing pointer");
-      break;
+      case "task": {
+        const title = String(cfg.title ?? `Follow up with ${contactName}`);
+        await db.insert(taskInstancesTable).values({
+          id: randomUUID(),
+          orgId: contact.orgId,
+          templateId: null,
+          agentId: contact.assignedAgentId ?? null,
+          title,
+          description: String(cfg.description ?? ""),
+          status: "open",
+          priority: (String(cfg.priority ?? "medium")) as "low" | "medium" | "high" | "urgent",
+          dueDate: cfg.dueDays
+            ? new Date(Date.now() + Number(cfg.dueDays) * 86_400_000)
+            : null,
+        });
+        logger.info({ contactId, stepIndex }, "Sequence task step created");
+        break;
+      }
+
+      case "wait":
+      default:
+        // Pure delay — just advance pointer
+        logger.debug({ contactId, stepIndex }, "Sequence wait step — advancing pointer");
+        break;
+    }
   }
 
   // Advance enrollment to next step

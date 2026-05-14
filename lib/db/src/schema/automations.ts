@@ -6,6 +6,7 @@ import {
   integer,
   jsonb,
   pgEnum,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -102,6 +103,35 @@ export const sequenceEnrollmentsTable = pgTable("sequence_enrollments", {
 });
 
 export type SequenceEnrollment = typeof sequenceEnrollmentsTable.$inferSelect;
+
+/**
+ * Side-effect execution log for sequence steps. Acts as an idempotency
+ * ledger for the `sendSequenceStep` worker: the worker claims a
+ * (enrollment_id, step_index) row inside an `INSERT ... ON CONFLICT DO
+ * NOTHING` before firing any external side effect (email/sms enqueue,
+ * task insert). On pg-boss retry after a side effect has run but before
+ * the enrollment pointer advance committed, the conflict makes the
+ * worker skip the side effect — preventing duplicate Twilio sends,
+ * Resend emails, and duplicate follow-up task rows.
+ *
+ * DELETE CASCADE on enrollment_id so purging an enrollment drops its
+ * ledger entries too.
+ */
+export const sequenceStepExecutionsTable = pgTable("sequence_step_executions", {
+  enrollmentId: text("enrollment_id")
+    .notNull()
+    .references(() => sequenceEnrollmentsTable.id, { onDelete: "cascade" }),
+  stepIndex: integer("step_index").notNull(),
+  sideEffect: text("side_effect").notNull(),
+  executedAt: timestamp("executed_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.enrollmentId, t.stepIndex] }),
+]);
+
+export type SequenceStepExecution =
+  typeof sequenceStepExecutionsTable.$inferSelect;
 
 export const automationRulesTable = pgTable("automation_rules", {
   id: text("id").primaryKey(),
