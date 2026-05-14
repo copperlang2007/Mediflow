@@ -116,10 +116,21 @@ export interface RunAutomationRulesPayload {
   context?: Record<string, unknown>;
 }
 
+/**
+ * Payload for the SEND_SEQUENCE_STEP job.
+ *
+ * `stepId` is the authoritative pointer at which step to run. New
+ * enqueues set it. `stepIndex` is the legacy positional pointer; it is
+ * still accepted for in-flight jobs whose payload was written before
+ * the stepId migration (see migration 0014 and
+ * `workers/sendSequenceStep.ts`). After one deploy cycle, drop the
+ * fallback and make `stepId` required.
+ */
 export interface SendSequenceStepPayload {
   sequenceId: string;
   contactId: string;
-  stepIndex: number;
+  stepId?: string;
+  stepIndex?: number;
   channel: "email" | "sms";
 }
 

@@ -22,6 +22,7 @@ import {
   stateLicensesTable,
   carrierCertificationsTable,
   sequenceEnrollmentsTable,
+  sequenceStepsTable,
   taskInstancesTable,
   usersTable,
   agentsTable,
@@ -306,6 +307,18 @@ async function executeAction(
         )
         .limit(1);
 
+      // Resolve the first step's stable id so the enrollment carries
+      // it from the moment it's created (and the enqueued job carries
+      // it too). If the sequence has no steps at all, leave the
+      // pointer null and let the worker complete the enrollment
+      // gracefully on its first run.
+      const [firstStep] = await db
+        .select({ id: sequenceStepsTable.id })
+        .from(sequenceStepsTable)
+        .where(eq(sequenceStepsTable.sequenceId, sequenceId))
+        .orderBy(sequenceStepsTable.orderIndex)
+        .limit(1);
+
       if (!existing.length) {
         await db.insert(sequenceEnrollmentsTable).values({
           id: randomUUID(),
@@ -313,12 +326,14 @@ async function executeAction(
           contactId: targetContactId,
           status: "active",
           nextStepIndex: 0,
+          nextStepId: firstStep?.id ?? null,
         });
       }
 
       await enqueue(JOB_NAMES.SEND_SEQUENCE_STEP, {
         sequenceId,
         contactId: targetContactId,
+        stepId: firstStep?.id,
         stepIndex: 0,
         channel: channel ?? "sms",
       });
