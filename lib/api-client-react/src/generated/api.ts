@@ -91,6 +91,7 @@ import type {
   ExportAdminAuditLogParams,
   ExportAgentPerformanceReportParams,
   GetAdminAuditLogParams,
+  GetAgentLicensesParams,
   GetAgentPerformanceReportParams,
   GetAgentsParams,
   GetAhipDashboardParams,
@@ -188,6 +189,7 @@ import type {
   SmsTemplate,
   SnoozeRenewalBody,
   StateLicense,
+  StateLicenseListResponse,
   SuccessResponse,
   Task,
   TaskListResponse,
@@ -226,6 +228,7 @@ import type {
   UploadMondayImportBody,
   User,
   UserAccessReviewRow,
+  UserListResponse,
   ValidateGhlImportBody,
   ValidateMondayImportBody,
 } from "./api.schemas";
@@ -485,8 +488,8 @@ export const getGetUsersUrl = (params?: GetUsersParams) => {
 export const getUsers = async (
   params?: GetUsersParams,
   options?: RequestInit,
-): Promise<User[]> => {
-  return customFetch<User[]>(getGetUsersUrl(params), {
+): Promise<UserListResponse> => {
+  return customFetch<UserListResponse>(getGetUsersUrl(params), {
     ...options,
     method: "GET",
   });
@@ -1684,22 +1687,44 @@ export const useOffboardAgent = <
 /**
  * @summary List licenses for an agent
  */
-export const getGetAgentLicensesUrl = (id: string) => {
-  return `/api/agents/${id}/licenses`;
+export const getGetAgentLicensesUrl = (
+  id: string,
+  params?: GetAgentLicensesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/agents/${id}/licenses?${stringifiedParams}`
+    : `/api/agents/${id}/licenses`;
 };
 
 export const getAgentLicenses = async (
   id: string,
+  params?: GetAgentLicensesParams,
   options?: RequestInit,
-): Promise<StateLicense[]> => {
-  return customFetch<StateLicense[]>(getGetAgentLicensesUrl(id), {
-    ...options,
-    method: "GET",
-  });
+): Promise<StateLicenseListResponse> => {
+  return customFetch<StateLicenseListResponse>(
+    getGetAgentLicensesUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
 
-export const getGetAgentLicensesQueryKey = (id: string) => {
-  return [`/api/agents/${id}/licenses`] as const;
+export const getGetAgentLicensesQueryKey = (
+  id: string,
+  params?: GetAgentLicensesParams,
+) => {
+  return [`/api/agents/${id}/licenses`, ...(params ? [params] : [])] as const;
 };
 
 export const getGetAgentLicensesQueryOptions = <
@@ -1707,6 +1732,7 @@ export const getGetAgentLicensesQueryOptions = <
   TError = ErrorType<unknown>,
 >(
   id: string,
+  params?: GetAgentLicensesParams,
   options?: {
     query?: UseQueryOptions<
       Awaited<ReturnType<typeof getAgentLicenses>>,
@@ -1718,11 +1744,13 @@ export const getGetAgentLicensesQueryOptions = <
 ) => {
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getGetAgentLicensesQueryKey(id);
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAgentLicensesQueryKey(id, params);
 
   const queryFn: QueryFunction<
     Awaited<ReturnType<typeof getAgentLicenses>>
-  > = ({ signal }) => getAgentLicenses(id, { signal, ...requestOptions });
+  > = ({ signal }) =>
+    getAgentLicenses(id, params, { signal, ...requestOptions });
 
   return {
     queryKey,
@@ -1750,6 +1778,7 @@ export function useGetAgentLicenses<
   TError = ErrorType<unknown>,
 >(
   id: string,
+  params?: GetAgentLicensesParams,
   options?: {
     query?: UseQueryOptions<
       Awaited<ReturnType<typeof getAgentLicenses>>,
@@ -1759,7 +1788,7 @@ export function useGetAgentLicenses<
     request?: SecondParameter<typeof customFetch>;
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetAgentLicensesQueryOptions(id, options);
+  const queryOptions = getGetAgentLicensesQueryOptions(id, params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

@@ -108,7 +108,7 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
   const [form, setForm] = useState(BLANK_FORM);
 
   const { data: usersData } = useGetUsers();
-  const managerOptions = (usersData ?? []).filter(
+  const managerOptions = (usersData?.data ?? []).filter(
     (u) => u.role !== "viewer" && u.role !== "agent",
   );
 

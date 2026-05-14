@@ -349,7 +349,8 @@ function AgentLicenseRow({
   agentEmail: string;
   onNavigate: () => void;
 }) {
-  const { data: licenses } = useGetAgentLicenses(agentId);
+  const { data: licensesData } = useGetAgentLicenses(agentId);
+  const licenses = licensesData?.data;
   const activeLicenses = (licenses ?? []).filter((l) => l.status === "active").length;
   const totalLicenses = (licenses ?? []).length;
 

@@ -35,7 +35,8 @@ import { LICENSE_STATUS_STYLES } from "./shared";
 
 export default function LicensesTab({ agentId }: { agentId: string }) {
   const qc = useQueryClient();
-  const { data: licenses, isLoading } = useGetAgentLicenses(agentId);
+  const { data: licensesData, isLoading } = useGetAgentLicenses(agentId);
+  const licenses = licensesData?.data;
   const { mutateAsync: createLicense } = useCreateAgentLicense();
   const { mutateAsync: updateLicense } = useUpdateAgentLicense();
   const { mutateAsync: deleteLicense } = useDeleteAgentLicense();

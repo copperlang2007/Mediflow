@@ -1262,6 +1262,20 @@ export interface ContactListResponse {
   total: number;
 }
 
+export interface UserListResponse {
+  data: User[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface StateLicenseListResponse {
+  data: StateLicense[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export type BulkContactActionBodyAction =
   (typeof BulkContactActionBodyAction)[keyof typeof BulkContactActionBodyAction];
 
@@ -2228,6 +2242,8 @@ export interface ImportJob {
 export type GetUsersParams = {
   role?: string;
   isActive?: boolean;
+  limit?: number;
+  offset?: number;
 };
 
 export type GetDashboardActivityParams = {
@@ -2263,6 +2279,11 @@ export const GetAgentsSortDir = {
   asc: "asc",
   desc: "desc",
 } as const;
+
+export type GetAgentLicensesParams = {
+  limit?: number;
+  offset?: number;
+};
 
 export type GetCertificationMatrixParams = {
   year?: number;
