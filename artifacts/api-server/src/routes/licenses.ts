@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { db, agentsTable, stateLicensesTable, licenseRenewalAlertsTable } from "@workspace/db";
@@ -282,13 +282,33 @@ router.post(
       errors: [],
     };
 
-    // Validate all org agents upfront
-    const agentIds = [...new Set(rows.map((r: unknown) => (r as Record<string, unknown>).agentId as string))];
-    const validAgents = await db
-      .select({ id: agentsTable.id })
-      .from(agentsTable)
-      .where(and(eq(agentsTable.orgId, authReq.orgId)));
-    const validAgentIdSet = new Set(validAgents.map((a) => a.id));
+    // Validate only the agentIds actually referenced in the import payload.
+    // The previous implementation fetched every agent row in the org and
+    // built a Set in memory — that OOMs on orgs with tens of thousands of
+    // agents. The CSV is already bounded to 500 rows above, so the IN-list
+    // is at worst 500 ids; Postgres handles that comfortably as an
+    // indexed PK lookup. Any agentId from another org is dropped because
+    // the WHERE clause also pins orgId.
+    const requestedAgentIds = [
+      ...new Set(
+        rows
+          .map((r: unknown) => (r as Record<string, unknown>).agentId)
+          .filter((v): v is string => typeof v === "string" && v.length > 0),
+      ),
+    ];
+    const validAgentIdSet = new Set<string>();
+    if (requestedAgentIds.length > 0) {
+      const validAgents = await db
+        .select({ id: agentsTable.id })
+        .from(agentsTable)
+        .where(
+          and(
+            eq(agentsTable.orgId, authReq.orgId),
+            inArray(agentsTable.id, requestedAgentIds),
+          ),
+        );
+      for (const a of validAgents) validAgentIdSet.add(a.id);
+    }
 
     for (let i = 0; i < rows.length; i++) {
       const parsed = CsvLicenseRowSchema.safeParse(rows[i]);

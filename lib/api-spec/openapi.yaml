@@ -1279,22 +1279,30 @@ paths:
     get:
       operationId: getAgentTasks
       tags: [tasks]
-      summary: List tasks for an agent
+      summary: List tasks for an agent (paginated)
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
       responses:
         "200":
-          description: List of tasks
+          description: Paginated task list for an agent
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Task"
+                $ref: "#/components/schemas/AgentTaskListResponse"
 
   /task-templates:
     get:
@@ -1934,18 +1942,26 @@ paths:
     get:
       operationId: getContactThreads
       tags: [contacts]
-      summary: Get message threads for a contact
+      summary: Get message threads for a contact (paginated)
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
       responses:
         "200":
-          description: Thread list
+          description: Paginated thread list for a contact
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/MessageThread"
+                $ref: "#/components/schemas/ContactThreadListResponse"
 
   /contacts/{id}/tasks:
     get:
@@ -5907,6 +5923,36 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/StateLicense"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [data, total, limit, offset]
+
+    AgentTaskListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [data, total, limit, offset]
+
+    ContactThreadListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageThread"
         total:
           type: integer
         limit:

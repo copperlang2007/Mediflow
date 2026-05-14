@@ -30,7 +30,8 @@ import { toast } from "sonner";
 
 export default function TasksTab({ agentId }: { agentId: string }) {
   const qc = useQueryClient();
-  const { data: tasks, isLoading } = useGetAgentTasks(agentId);
+  const { data: tasksData, isLoading } = useGetAgentTasks(agentId);
+  const tasks = tasksData?.data;
   const { mutateAsync: createTask, isPending: creating } = useCreateTask();
 
   const [addOpen, setAddOpen] = useState(false);

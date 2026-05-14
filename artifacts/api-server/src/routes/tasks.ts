@@ -109,13 +109,38 @@ router.get(
       return;
     }
 
-    const tasks = await db
-      .select()
-      .from(taskInstancesTable)
-      .where(and(eq(taskInstancesTable.agentId, agentId), eq(taskInstancesTable.orgId, authReq.orgId)))
-      .orderBy(desc(taskInstancesTable.createdAt));
+    // Match the per-route ceiling used by the sibling /users and
+    // /agents/:id/licenses endpoints (PR #70): default 50, hard cap 200.
+    // High-volume agents could otherwise return thousands of historical task
+    // rows in a single response.
+    const limitNum = safeLimit(req.query.limit, 50, 200);
+    const offsetNum = safeOffset(req.query.offset);
 
-    res.json(tasks);
+    const whereClause = and(
+      eq(taskInstancesTable.agentId, agentId),
+      eq(taskInstancesTable.orgId, authReq.orgId),
+    );
+
+    const [tasks, totalRes] = await Promise.all([
+      db
+        .select()
+        .from(taskInstancesTable)
+        .where(whereClause)
+        .orderBy(desc(taskInstancesTable.createdAt))
+        .limit(limitNum)
+        .offset(offsetNum),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(taskInstancesTable)
+        .where(whereClause),
+    ]);
+
+    res.json({
+      data: tasks,
+      total: Number(totalRes[0]?.count ?? 0),
+      limit: limitNum,
+      offset: offsetNum,
+    });
   },
 );
 

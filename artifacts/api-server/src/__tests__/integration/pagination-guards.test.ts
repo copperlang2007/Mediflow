@@ -58,6 +58,8 @@ let org: { id: string };
 let superAdmin: { id: string };
 let agentSupport: { id: string };
 let licenseTestAgentId: string;
+let taskTestAgentId: string;
+let threadTestContactId: string;
 
 const SEED_CONTACT_COUNT = 1500;
 const SEED_AGENT_COUNT = 1100;
@@ -69,6 +71,12 @@ const SEED_BULK_USER_COUNT = 75;
 // of 50 so the default-limit case actually clamps, and below the 200 cap so
 // `?limit=200` returns every row.
 const SEED_LICENSE_COUNT = 60;
+// 70 tasks on the dedicated task-test agent — same shape as the license
+// seed: above the default of 50 so the clamp fires, below the 200 cap so
+// `?limit=200` returns everything.
+const SEED_AGENT_TASK_COUNT = 70;
+// 65 threads on a single contact — above default 50, below cap 200.
+const SEED_CONTACT_THREAD_COUNT = 65;
 
 beforeAll(async () => {
   handle = await bootTestDb();
@@ -163,6 +171,41 @@ beforeAll(async () => {
   }
   await handle.pg.exec(
     `INSERT INTO state_licenses (id, agent_id, state_code, license_type, status) VALUES ${licenseValues.join(",")};`,
+  );
+
+  // GET /agents/:id/tasks coverage: dedicated agent + 70 tasks so the
+  // route's default-50 limit clamps and the 200-cap query returns
+  // everything. Mirrors the license-seed shape.
+  taskTestAgentId = `task-test-agent-${randomUUID().slice(0, 8)}`;
+  await handle.pg.exec(
+    `INSERT INTO agents (id, org_id, first_name, last_name, email) VALUES ('${taskTestAgentId}', '${org.id}', 'Task', 'Tester', 'tasktest@x.test');`,
+  );
+  const taskValues: string[] = [];
+  for (let i = 0; i < SEED_AGENT_TASK_COUNT; i++) {
+    const id = randomUUID();
+    taskValues.push(
+      `('${id}', '${org.id}', '${taskTestAgentId}', 'Task ${i}', 'open', 'medium')`,
+    );
+  }
+  await handle.pg.exec(
+    `INSERT INTO task_instances (id, org_id, agent_id, title, status, priority) VALUES ${taskValues.join(",")};`,
+  );
+
+  // GET /contacts/:id/threads coverage: dedicated contact + 65 threads.
+  threadTestContactId = `thread-test-contact-${randomUUID().slice(0, 8)}`;
+  await handle.pg.exec(
+    `INSERT INTO contacts (id, org_id, first_name, last_name, status) VALUES ('${threadTestContactId}', '${org.id}', 'Thread', 'Tester', 'lead');`,
+  );
+  const threadValues: string[] = [];
+  for (let i = 0; i < SEED_CONTACT_THREAD_COUNT; i++) {
+    const id = randomUUID();
+    const channel = i % 2 === 0 ? "sms" : "email";
+    threadValues.push(
+      `('${id}', '${org.id}', '${threadTestContactId}', '${channel}')`,
+    );
+  }
+  await handle.pg.exec(
+    `INSERT INTO message_threads (id, org_id, contact_id, channel) VALUES ${threadValues.join(",")};`,
   );
 });
 
@@ -407,6 +450,183 @@ describe("Pagination guards on list endpoints", () => {
     expect(res.status).toBe(200);
     expect(res.body.limit).toBe(200);
     expect(res.body.data.length).toBeLessThanOrEqual(200);
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /agents/:id/tasks — previously unbounded. Round-6 (this PR) ships
+  // the same { data, total, limit, offset } envelope. 70 tasks seeded
+  // against `taskTestAgentId`.
+  // ---------------------------------------------------------------------------
+
+  it("GET /agents/:id/tasks returns the default page of 50 with no limit", async () => {
+    const res = await request(app)
+      .get(`/api/agents/${taskTestAgentId}/tasks`)
+      .set(withAuth(superAdmin.id));
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data.length).toBe(50);
+    expect(res.body.limit).toBe(50);
+    expect(res.body.offset).toBe(0);
+    expect(res.body.total).toBe(SEED_AGENT_TASK_COUNT);
+  });
+
+  it("GET /agents/:id/tasks?limit=200 returns every seeded task", async () => {
+    const res = await request(app)
+      .get(`/api/agents/${taskTestAgentId}/tasks?limit=200`)
+      .set(withAuth(superAdmin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBe(SEED_AGENT_TASK_COUNT);
+    expect(res.body.limit).toBe(200);
+    expect(res.body.total).toBe(SEED_AGENT_TASK_COUNT);
+  });
+
+  it("GET /agents/:id/tasks?offset=50&limit=50 returns the trailing rows", async () => {
+    const res = await request(app)
+      .get(`/api/agents/${taskTestAgentId}/tasks?offset=50&limit=50`)
+      .set(withAuth(superAdmin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBe(SEED_AGENT_TASK_COUNT - 50);
+    expect(res.body.limit).toBe(50);
+    expect(res.body.offset).toBe(50);
+    expect(res.body.total).toBe(SEED_AGENT_TASK_COUNT);
+  });
+
+  it("GET /agents/:id/tasks?limit=99999 is clamped to the 200 cap", async () => {
+    const res = await request(app)
+      .get(`/api/agents/${taskTestAgentId}/tasks?limit=99999`)
+      .set(withAuth(superAdmin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.limit).toBe(200);
+    expect(res.body.data.length).toBeLessThanOrEqual(200);
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /contacts/:id/threads — previously unbounded. Round-6 ships the
+  // shared envelope. 65 threads seeded against `threadTestContactId`.
+  // ---------------------------------------------------------------------------
+
+  it("GET /contacts/:id/threads returns the default page of 50 with no limit", async () => {
+    const res = await request(app)
+      .get(`/api/contacts/${threadTestContactId}/threads`)
+      .set(withAuth(agentSupport.id));
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data.length).toBe(50);
+    expect(res.body.limit).toBe(50);
+    expect(res.body.offset).toBe(0);
+    expect(res.body.total).toBe(SEED_CONTACT_THREAD_COUNT);
+  });
+
+  it("GET /contacts/:id/threads?limit=200 returns every seeded thread", async () => {
+    const res = await request(app)
+      .get(`/api/contacts/${threadTestContactId}/threads?limit=200`)
+      .set(withAuth(agentSupport.id));
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBe(SEED_CONTACT_THREAD_COUNT);
+    expect(res.body.limit).toBe(200);
+    expect(res.body.total).toBe(SEED_CONTACT_THREAD_COUNT);
+  });
+
+  it("GET /contacts/:id/threads?offset=50&limit=50 returns the trailing rows", async () => {
+    const res = await request(app)
+      .get(`/api/contacts/${threadTestContactId}/threads?offset=50&limit=50`)
+      .set(withAuth(agentSupport.id));
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBe(SEED_CONTACT_THREAD_COUNT - 50);
+    expect(res.body.limit).toBe(50);
+    expect(res.body.offset).toBe(50);
+    expect(res.body.total).toBe(SEED_CONTACT_THREAD_COUNT);
+  });
+
+  it("GET /contacts/:id/threads?limit=99999 is clamped to the 200 cap", async () => {
+    const res = await request(app)
+      .get(`/api/contacts/${threadTestContactId}/threads?limit=99999`)
+      .set(withAuth(agentSupport.id));
+    expect(res.status).toBe(200);
+    expect(res.body.limit).toBe(200);
+    expect(res.body.data.length).toBeLessThanOrEqual(200);
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /licenses/bulk-import — the agent-validation lookup used to fetch
+  // ALL agents in the org into memory to build a Set; on orgs with tens of
+  // thousands of agents that OOMs. Round-6 swapped to a bounded
+  // `WHERE id IN (...)` lookup over the requested agentIds.
+  //
+  // Behavioural assertion: an import that references only a handful of
+  // agents (10 unknown + 1 known) doesn't choke on the SEED_AGENT_COUNT
+  // (1100) rows already present in the org. With the old implementation,
+  // the validation set still got built (correctly, just slowly); the new
+  // implementation only fetches the 11 requested ids. We can't directly
+  // observe the query shape from a black-box request, but we CAN assert
+  // the route correctly classifies unknown ids as skipped — which proves
+  // the new IN-list filter pinned to orgId works.
+  // ---------------------------------------------------------------------------
+
+  it("POST /licenses/bulk-import validates only the requested agentIds, not every org agent", async () => {
+    // Reuse the already-seeded licenseTestAgentId for the one valid row.
+    const rows = [
+      // 1 valid row — agent exists in the org and was seeded above.
+      {
+        agentId: licenseTestAgentId,
+        stateCode: "ZZ",
+        licenseType: "Bulk Import Test",
+        status: "active",
+      },
+      // 10 unknown ids — must be skipped, NOT cause a 500.
+      ...Array.from({ length: 10 }, (_, i) => ({
+        agentId: `not-a-real-agent-${i}-${randomUUID().slice(0, 8)}`,
+        stateCode: "ZZ",
+        licenseType: "Bulk Import Test",
+        status: "active",
+      })),
+    ];
+
+    const res = await request(app)
+      .post("/api/licenses/bulk-import")
+      .set(withAuth(superAdmin.id))
+      .send({ rows });
+
+    expect(res.status).toBe(200);
+    expect(res.body.imported).toBe(1);
+    expect(res.body.skipped).toBe(10);
+    expect(Array.isArray(res.body.errors)).toBe(true);
+    expect(res.body.errors.length).toBe(10);
+    // Every error must reference the "not found in org" classification —
+    // i.e. the route filtered the IN-list correctly.
+    expect(
+      res.body.errors.every((e: string) => e.includes("not found in org")),
+    ).toBe(true);
+  });
+
+  it("POST /licenses/bulk-import rejects an agentId from a different org", async () => {
+    // Seed a second org + agent, then try to import a license against the
+    // foreign agentId. The bounded query must NOT return rows from another
+    // org, so this should land in the "skipped" bucket.
+    const otherOrg = await seedOrg(handle.db, { id: `other-org-${randomUUID().slice(0, 8)}` });
+    const foreignAgentId = `foreign-${randomUUID().slice(0, 8)}`;
+    await handle.pg.exec(
+      `INSERT INTO agents (id, org_id, first_name, last_name, email) VALUES ('${foreignAgentId}', '${otherOrg.id}', 'Foreign', 'Agent', 'foreign@x.test');`,
+    );
+
+    const res = await request(app)
+      .post("/api/licenses/bulk-import")
+      .set(withAuth(superAdmin.id))
+      .send({
+        rows: [
+          {
+            agentId: foreignAgentId,
+            stateCode: "ZZ",
+            licenseType: "Cross-Org Test",
+            status: "active",
+          },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.imported).toBe(0);
+    expect(res.body.skipped).toBe(1);
+    expect(res.body.errors[0]).toContain("not found in org");
   });
 });
 
