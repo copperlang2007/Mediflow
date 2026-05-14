@@ -7,7 +7,9 @@ import {
   jsonb,
   pgEnum,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { organizationsTable } from "./core";
@@ -89,6 +91,11 @@ export const taskInstancesTable = pgTable(
     priority: taskPriorityEnum("priority").notNull().default("medium"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdBy: text("created_by"),
+    // Deterministic dedup key for retention-enforcement review tasks.
+    // Shape: `${entityType}:${entityId}:${phase}` (e.g. `agent:abc:soft-delete-review`).
+    // NULL for non-retention tasks; the partial unique index below ignores NULL rows
+    // so only retention review tasks are deduplicated.
+    retentionReviewKey: text("retention_review_key"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -101,6 +108,9 @@ export const taskInstancesTable = pgTable(
     index("task_instances_org_id_status_idx").on(t.orgId, t.status),
     index("task_instances_org_id_due_date_idx").on(t.orgId, t.dueDate),
     index("task_instances_assigned_to_user_idx").on(t.assignedToUserId),
+    uniqueIndex("task_instances_retention_review_key_unique")
+      .on(t.orgId, t.retentionReviewKey)
+      .where(sql`${t.retentionReviewKey} IS NOT NULL`),
   ],
 );
 

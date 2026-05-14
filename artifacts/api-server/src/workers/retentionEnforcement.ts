@@ -12,7 +12,7 @@
  * Supported record types: contacts, deals
  */
 
-import { and, count, eq, isNull, isNotNull, lt } from "drizzle-orm";
+import { and, count, eq, isNull, isNotNull, lt, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -27,6 +27,29 @@ import {
   taskInstancesTable,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
+
+/**
+ * Build the deterministic dedup key for a retention review task.
+ *
+ * Shape: `${entityType}:${entityId}:${phase}`. Persisted in
+ * `task_instances.retention_review_key` and backed by a partial unique
+ * index on `(org_id, retention_review_key) WHERE retention_review_key
+ * IS NOT NULL` (migration 0011). The worker inserts with
+ * `ON CONFLICT DO NOTHING` against that index, so two entities with
+ * identical human-rendered titles (e.g. two agents named "John Smith")
+ * each get their own review task and a sweep re-run never piles on
+ * duplicates.
+ */
+function retentionReviewKey(
+  entityType: "agent" | "contact" | "deal" | "communication" | "document" | "audit_log",
+  entityId: string,
+  phase:
+    | "soft-delete-review"
+    | "hard-delete-review"
+    | "review",
+): string {
+  return `${entityType}:${entityId}:${phase}`;
+}
 
 // Full set of retention policy types configured in the admin UI
 const SUPPORTED_RECORD_TYPES = ["contacts", "deals", "agents", "communications", "documents", "audit_log"] as const;
@@ -75,16 +98,23 @@ export async function retentionEnforcementWorker(): Promise<void> {
             .set({ deletedAt: new Date() })
             .where(eq(contactsTable.id, contact.id));
 
-          await db.insert(taskInstancesTable).values({
-            id: randomUUID(),
-            orgId: org.id,
-            title: `Retention review: contact ${contact.firstName} ${contact.lastName}`,
-            description: `Contact soft-deleted by automated retention policy (${policy.retentionDays} days). Review and confirm hard delete or restore.`,
-            status: "open",
-            priority: "medium",
-            dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-            createdBy: "system",
-          });
+          await db
+            .insert(taskInstancesTable)
+            .values({
+              id: randomUUID(),
+              orgId: org.id,
+              title: `Retention review: contact ${contact.firstName} ${contact.lastName}`,
+              description: `Contact soft-deleted by automated retention policy (${policy.retentionDays} days). Review and confirm hard delete or restore.`,
+              status: "open",
+              priority: "medium",
+              dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+              createdBy: "system",
+              retentionReviewKey: retentionReviewKey("contact", contact.id, "soft-delete-review"),
+            })
+            .onConflictDoNothing({
+              target: [taskInstancesTable.orgId, taskInstancesTable.retentionReviewKey],
+              where: sql`${taskInstancesTable.retentionReviewKey} IS NOT NULL`,
+            });
 
           await db.insert(auditLogTable).values({
             id: randomUUID(),
@@ -114,23 +144,31 @@ export async function retentionEnforcementWorker(): Promise<void> {
 
         for (const contact of softDeleted) {
           const taskTitle = `Hard-delete approval required: contact ${contact.firstName} ${contact.lastName}`;
-          const [existingTask] = await db
-            .select({ id: taskInstancesTable.id })
-            .from(taskInstancesTable)
-            .where(and(eq(taskInstancesTable.orgId, org.id), eq(taskInstancesTable.title, taskTitle), eq(taskInstancesTable.status, "open")))
-            .limit(1);
-          if (existingTask) continue;
+          const key = retentionReviewKey("contact", contact.id, "hard-delete-review");
 
-          await db.insert(taskInstancesTable).values({
-            id: randomUUID(),
-            orgId: org.id,
-            title: taskTitle,
-            description: `Contact was soft-deleted and has now exceeded the ${policy.retentionDays}-day retention window. Approve permanent deletion via Admin > Compliance > Data Retention.`,
-            status: "open",
-            priority: "high",
-            dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-            createdBy: "system",
-          });
+          // Dedup by (orgId, retentionReviewKey) — NOT by title. Two contacts
+          // with the same name no longer collide, and a worker re-run does
+          // not pile on duplicates for the same contact in the same phase.
+          const inserted = await db
+            .insert(taskInstancesTable)
+            .values({
+              id: randomUUID(),
+              orgId: org.id,
+              title: taskTitle,
+              description: `Contact was soft-deleted and has now exceeded the ${policy.retentionDays}-day retention window. Approve permanent deletion via Admin > Compliance > Data Retention.`,
+              status: "open",
+              priority: "high",
+              dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+              createdBy: "system",
+              retentionReviewKey: key,
+            })
+            .onConflictDoNothing({
+              target: [taskInstancesTable.orgId, taskInstancesTable.retentionReviewKey],
+              where: sql`${taskInstancesTable.retentionReviewKey} IS NOT NULL`,
+            })
+            .returning({ id: taskInstancesTable.id });
+
+          if (inserted.length === 0) continue;
 
           await db.insert(auditLogTable).values({
             id: randomUUID(),
@@ -165,16 +203,23 @@ export async function retentionEnforcementWorker(): Promise<void> {
             .set({ deletedAt: new Date() })
             .where(eq(dealsTable.id, deal.id));
 
-          await db.insert(taskInstancesTable).values({
-            id: randomUUID(),
-            orgId: org.id,
-            title: `Retention review: deal "${deal.title}"`,
-            description: `Deal soft-deleted by automated retention policy (${policy.retentionDays} days). Review and confirm hard delete or restore.`,
-            status: "open",
-            priority: "medium",
-            dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-            createdBy: "system",
-          });
+          await db
+            .insert(taskInstancesTable)
+            .values({
+              id: randomUUID(),
+              orgId: org.id,
+              title: `Retention review: deal "${deal.title}"`,
+              description: `Deal soft-deleted by automated retention policy (${policy.retentionDays} days). Review and confirm hard delete or restore.`,
+              status: "open",
+              priority: "medium",
+              dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+              createdBy: "system",
+              retentionReviewKey: retentionReviewKey("deal", deal.id, "soft-delete-review"),
+            })
+            .onConflictDoNothing({
+              target: [taskInstancesTable.orgId, taskInstancesTable.retentionReviewKey],
+              where: sql`${taskInstancesTable.retentionReviewKey} IS NOT NULL`,
+            });
 
           await db.insert(auditLogTable).values({
             id: randomUUID(),
@@ -204,23 +249,28 @@ export async function retentionEnforcementWorker(): Promise<void> {
 
         for (const deal of softDeletedDeals) {
           const taskTitle = `Hard-delete approval required: deal "${deal.title}"`;
-          const [existingTask] = await db
-            .select({ id: taskInstancesTable.id })
-            .from(taskInstancesTable)
-            .where(and(eq(taskInstancesTable.orgId, org.id), eq(taskInstancesTable.title, taskTitle), eq(taskInstancesTable.status, "open")))
-            .limit(1);
-          if (existingTask) continue;
+          const key = retentionReviewKey("deal", deal.id, "hard-delete-review");
 
-          await db.insert(taskInstancesTable).values({
-            id: randomUUID(),
-            orgId: org.id,
-            title: taskTitle,
-            description: `Deal was soft-deleted and has now exceeded the ${policy.retentionDays}-day retention window. Approve permanent deletion via Admin > Compliance > Data Retention.`,
-            status: "open",
-            priority: "high",
-            dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-            createdBy: "system",
-          });
+          const inserted = await db
+            .insert(taskInstancesTable)
+            .values({
+              id: randomUUID(),
+              orgId: org.id,
+              title: taskTitle,
+              description: `Deal was soft-deleted and has now exceeded the ${policy.retentionDays}-day retention window. Approve permanent deletion via Admin > Compliance > Data Retention.`,
+              status: "open",
+              priority: "high",
+              dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+              createdBy: "system",
+              retentionReviewKey: key,
+            })
+            .onConflictDoNothing({
+              target: [taskInstancesTable.orgId, taskInstancesTable.retentionReviewKey],
+              where: sql`${taskInstancesTable.retentionReviewKey} IS NOT NULL`,
+            })
+            .returning({ id: taskInstancesTable.id });
+
+          if (inserted.length === 0) continue;
 
           await db.insert(auditLogTable).values({
             id: randomUUID(),
@@ -248,23 +298,34 @@ export async function retentionEnforcementWorker(): Promise<void> {
 
         for (const agent of expiredAgents) {
           const taskTitle = `Retention review required: agent "${agent.firstName} ${agent.lastName}"`;
-          const [existing] = await db
-            .select({ id: taskInstancesTable.id })
-            .from(taskInstancesTable)
-            .where(and(eq(taskInstancesTable.orgId, org.id), eq(taskInstancesTable.title, taskTitle), eq(taskInstancesTable.status, "open")))
-            .limit(1);
-          if (existing) continue;
+          // Dedup by (orgId, entityType, entityId, phase) — NOT by title.
+          // Two agents in the same org with identical names previously
+          // collided on `taskTitle` and the second never got a review task,
+          // which let the next sweep proceed to delete BOTH on the basis
+          // of a review that only ever covered one. Keying by `agent.id`
+          // closes that compliance gap.
+          const key = retentionReviewKey("agent", agent.id, "soft-delete-review");
 
-          await db.insert(taskInstancesTable).values({
-            id: randomUUID(),
-            orgId: org.id,
-            title: taskTitle,
-            description: `Agent record has existed for more than ${policy.retentionDays} days. Review per data retention policy and determine if the record should be purged, anonymised, or retained.`,
-            status: "open",
-            priority: "medium",
-            dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-            createdBy: "system",
-          });
+          const inserted = await db
+            .insert(taskInstancesTable)
+            .values({
+              id: randomUUID(),
+              orgId: org.id,
+              title: taskTitle,
+              description: `Agent record has existed for more than ${policy.retentionDays} days. Review per data retention policy and determine if the record should be purged, anonymised, or retained.`,
+              status: "open",
+              priority: "medium",
+              dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+              createdBy: "system",
+              retentionReviewKey: key,
+            })
+            .onConflictDoNothing({
+              target: [taskInstancesTable.orgId, taskInstancesTable.retentionReviewKey],
+              where: sql`${taskInstancesTable.retentionReviewKey} IS NOT NULL`,
+            })
+            .returning({ id: taskInstancesTable.id });
+
+          if (inserted.length === 0) continue;
 
           await db.insert(auditLogTable).values({
             id: randomUUID(),
@@ -291,23 +352,28 @@ export async function retentionEnforcementWorker(): Promise<void> {
 
         for (const thread of expiredThreads) {
           const taskTitle = `Retention review: ${thread.channel} thread (contact ${thread.contactId})`;
-          const [existing] = await db
-            .select({ id: taskInstancesTable.id })
-            .from(taskInstancesTable)
-            .where(and(eq(taskInstancesTable.orgId, org.id), eq(taskInstancesTable.title, taskTitle), eq(taskInstancesTable.status, "open")))
-            .limit(1);
-          if (existing) continue;
+          const key = retentionReviewKey("communication", thread.id, "review");
 
-          await db.insert(taskInstancesTable).values({
-            id: randomUUID(),
-            orgId: org.id,
-            title: taskTitle,
-            description: `Communication thread has exceeded the ${policy.retentionDays}-day retention window. Review and purge if required by policy.`,
-            status: "open",
-            priority: "medium",
-            dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-            createdBy: "system",
-          });
+          const inserted = await db
+            .insert(taskInstancesTable)
+            .values({
+              id: randomUUID(),
+              orgId: org.id,
+              title: taskTitle,
+              description: `Communication thread has exceeded the ${policy.retentionDays}-day retention window. Review and purge if required by policy.`,
+              status: "open",
+              priority: "medium",
+              dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+              createdBy: "system",
+              retentionReviewKey: key,
+            })
+            .onConflictDoNothing({
+              target: [taskInstancesTable.orgId, taskInstancesTable.retentionReviewKey],
+              where: sql`${taskInstancesTable.retentionReviewKey} IS NOT NULL`,
+            })
+            .returning({ id: taskInstancesTable.id });
+
+          if (inserted.length === 0) continue;
 
           await db.insert(auditLogTable).values({
             id: randomUUID(),
@@ -334,23 +400,28 @@ export async function retentionEnforcementWorker(): Promise<void> {
 
         for (const doc of expiredDocs) {
           const taskTitle = `Retention review: document "${doc.name}"`;
-          const [existing] = await db
-            .select({ id: taskInstancesTable.id })
-            .from(taskInstancesTable)
-            .where(and(eq(taskInstancesTable.orgId, org.id), eq(taskInstancesTable.title, taskTitle), eq(taskInstancesTable.status, "open")))
-            .limit(1);
-          if (existing) continue;
+          const key = retentionReviewKey("document", doc.id, "review");
 
-          await db.insert(taskInstancesTable).values({
-            id: randomUUID(),
-            orgId: org.id,
-            title: taskTitle,
-            description: `Document "${doc.name}" (${doc.category}) has exceeded the ${policy.retentionDays}-day retention window. Review and purge if required by policy.`,
-            status: "open",
-            priority: "medium",
-            dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-            createdBy: "system",
-          });
+          const inserted = await db
+            .insert(taskInstancesTable)
+            .values({
+              id: randomUUID(),
+              orgId: org.id,
+              title: taskTitle,
+              description: `Document "${doc.name}" (${doc.category}) has exceeded the ${policy.retentionDays}-day retention window. Review and purge if required by policy.`,
+              status: "open",
+              priority: "medium",
+              dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+              createdBy: "system",
+              retentionReviewKey: key,
+            })
+            .onConflictDoNothing({
+              target: [taskInstancesTable.orgId, taskInstancesTable.retentionReviewKey],
+              where: sql`${taskInstancesTable.retentionReviewKey} IS NOT NULL`,
+            })
+            .returning({ id: taskInstancesTable.id });
+
+          if (inserted.length === 0) continue;
 
           await db.insert(auditLogTable).values({
             id: randomUUID(),
@@ -379,14 +450,13 @@ export async function retentionEnforcementWorker(): Promise<void> {
         const rowsOverWindow = Number(auditCount?.cnt ?? 0);
         if (rowsOverWindow > 0) {
           const taskTitle = `Audit log retention review: ${rowsOverWindow} records past ${policy.retentionDays}-day window`;
-          const [existing] = await db
-            .select({ id: taskInstancesTable.id })
-            .from(taskInstancesTable)
-            .where(and(eq(taskInstancesTable.orgId, org.id), eq(taskInstancesTable.title, taskTitle), eq(taskInstancesTable.status, "open")))
-            .limit(1);
+          // Audit log review is rolled up per org (one task per org), so the
+          // entity id in the dedup key is the org id itself.
+          const key = retentionReviewKey("audit_log", org.id, "review");
 
-          if (!existing) {
-            await db.insert(taskInstancesTable).values({
+          const inserted = await db
+            .insert(taskInstancesTable)
+            .values({
               id: randomUUID(),
               orgId: org.id,
               title: taskTitle,
@@ -395,8 +465,15 @@ export async function retentionEnforcementWorker(): Promise<void> {
               priority: "high",
               dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
               createdBy: "system",
-            });
+              retentionReviewKey: key,
+            })
+            .onConflictDoNothing({
+              target: [taskInstancesTable.orgId, taskInstancesTable.retentionReviewKey],
+              where: sql`${taskInstancesTable.retentionReviewKey} IS NOT NULL`,
+            })
+            .returning({ id: taskInstancesTable.id });
 
+          if (inserted.length > 0) {
             totalHardDeleteTasksCreated++;
           }
         }
