@@ -34,7 +34,6 @@ import { randomUUID } from "crypto";
 import {
   db,
   agentCommissionPayoutsTable,
-  commissionHierarchiesTable,
   commissionLineItemsTable,
   commissionStatementsTable,
   contactsTable,
@@ -44,6 +43,12 @@ import {
 } from "@workspace/db";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { logger } from "../lib/logger";
+import {
+  computeSplits,
+  round2,
+  type PayoutContribution,
+  type SplitDistribution,
+} from "./commissionSplits";
 
 export interface ReconcileResult {
   matched: number;
@@ -56,18 +61,6 @@ export interface ReconcileCommissionStatementJobPayload extends Record<string, u
   orgId: string;
 }
 
-interface SplitDistribution {
-  agentId: string;
-  amount: number; // dollars
-}
-
-interface PayoutContribution {
-  writingAgentId: string;
-  periodStart: string;
-  periodEnd: string;
-  splits: SplitDistribution[];
-}
-
 /**
  * Anything that exposes the drizzle query builders we use (top-level `db`
  * or a transaction handle from `db.transaction`). We accept the
@@ -75,24 +68,6 @@ interface PayoutContribution {
  * `db.transaction(tx => ...)` is assignable.
  */
 type DbOrTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-function dateOnly(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
-
-function isWithin(
-  effectiveFrom: string | Date,
-  effectiveTo: string | Date | null,
-  on: Date,
-): boolean {
-  const from = new Date(effectiveFrom);
-  if (on < dateOnly(from)) return false;
-  if (effectiveTo) {
-    const to = new Date(effectiveTo);
-    if (on > dateOnly(to)) return false;
-  }
-  return true;
-}
 
 async function matchContact(
   tx: DbOrTx,
@@ -170,61 +145,6 @@ async function resolveWritingAgent(
     .orderBy(asc(dealsTable.createdAt))
     .limit(1);
   return deal?.assignedAgentId ?? null;
-}
-
-async function computeSplits(
-  tx: DbOrTx,
-  orgId: string,
-  writingAgentId: string,
-  amount: number,
-  on: Date,
-): Promise<SplitDistribution[]> {
-  // Pull every effective hierarchy row for the writing agent at `on`
-  const rows = await tx
-    .select()
-    .from(commissionHierarchiesTable)
-    .where(
-      and(
-        eq(commissionHierarchiesTable.orgId, orgId),
-        eq(commissionHierarchiesTable.writingAgentId, writingAgentId),
-      ),
-    );
-
-  const effective = rows.filter((r) =>
-    isWithin(r.effectiveFrom, r.effectiveTo, on),
-  );
-
-  if (effective.length === 0) {
-    // No hierarchy → entire amount to the writing agent
-    return [{ agentId: writingAgentId, amount }];
-  }
-
-  // Sum split percentages — anything left over stays with the writing agent
-  let allocatedPct = 0;
-  const splits: SplitDistribution[] = [];
-  for (const r of effective) {
-    const pct = Number(r.splitPct);
-    if (!Number.isFinite(pct) || pct <= 0) continue;
-    allocatedPct += pct;
-    if (r.uplineAgentId) {
-      splits.push({
-        agentId: r.uplineAgentId,
-        amount: round2(amount * (pct / 100)),
-      });
-    }
-  }
-
-  const writingPct = Math.max(0, 100 - allocatedPct);
-  splits.push({
-    agentId: writingAgentId,
-    amount: round2(amount * (writingPct / 100)),
-  });
-
-  return splits.filter((s) => s.amount !== 0);
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }
 
 /**
