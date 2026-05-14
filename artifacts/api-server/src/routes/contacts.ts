@@ -25,6 +25,8 @@ import {
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
+import { logger } from "../lib/logger";
+import { captureWorkerError } from "../lib/sentry";
 
 const router: IRouter = Router();
 
@@ -196,7 +198,7 @@ router.post(
       assignedAgentId: d.assignedAgentId ?? null,
     }).returning();
 
-    void enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+    enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
       orgId: authReq.orgId,
       trigger: "contact_created",
       resourceType: "contact",
@@ -207,6 +209,25 @@ router.post(
         source: contact.leadSource,
         assignedAgentId: contact.assignedAgentId,
       },
+    }).catch((err) => {
+      logger.warn(
+        {
+          err,
+          jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+          trigger: "contact_created",
+          orgId: authReq.orgId,
+          contactId: contact.id,
+        },
+        "Failed to enqueue automation job",
+      );
+      captureWorkerError(err, {
+        worker: "contacts",
+        route: "POST /contacts",
+        jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+        trigger: "contact_created",
+        orgId: authReq.orgId,
+        contactId: contact.id,
+      });
     });
 
     res.status(201).json(maskContact(contact, authReq.userRole));
@@ -284,12 +305,31 @@ router.patch(
     const [updated] = await db.update(contactsTable).set(updates).where(eq(contactsTable.id, id)).returning();
 
     if (d.status !== undefined && existingContact && d.status !== existingContact.status) {
-      void enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+      enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
         orgId: authReq.orgId,
         trigger: "contact_status_changed",
         resourceType: "contact",
         resourceId: id,
         context: { oldStatus: existingContact.status, newStatus: d.status },
+      }).catch((err) => {
+        logger.warn(
+          {
+            err,
+            jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+            trigger: "contact_status_changed",
+            orgId: authReq.orgId,
+            contactId: id,
+          },
+          "Failed to enqueue automation job",
+        );
+        captureWorkerError(err, {
+          worker: "contacts",
+          route: "PATCH /contacts/:id",
+          jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+          trigger: "contact_status_changed",
+          orgId: authReq.orgId,
+          contactId: id,
+        });
       });
     }
 

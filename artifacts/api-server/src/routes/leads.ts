@@ -16,6 +16,8 @@ import {
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
+import { logger } from "../lib/logger";
+import { captureWorkerError } from "../lib/sentry";
 
 const router: IRouter = Router();
 
@@ -108,12 +110,33 @@ router.post(
     }).returning();
 
     // Fire event-triggered automation rules for "lead_created"
-    void enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+    enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
       orgId: authReq.orgId,
       trigger: "lead_created",
       resourceType: "lead",
       resourceId: lead.id,
       context: { contactId: parsed.data.contactId, source: parsed.data.source ?? null },
+    }).catch((err) => {
+      logger.warn(
+        {
+          err,
+          jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+          trigger: "lead_created",
+          orgId: authReq.orgId,
+          leadId: lead.id,
+          contactId: parsed.data.contactId,
+        },
+        "Failed to enqueue automation job",
+      );
+      captureWorkerError(err, {
+        worker: "leads",
+        route: "POST /leads",
+        jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+        trigger: "lead_created",
+        orgId: authReq.orgId,
+        leadId: lead.id,
+        contactId: parsed.data.contactId,
+      });
     });
 
     res.status(201).json(lead);
@@ -188,12 +211,31 @@ router.patch(
 
     // Fire lead_status_changed automation hook when status changes
     if (d.status !== undefined && existing2 && d.status !== existing2.status) {
-      void enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+      enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
         orgId: authReq.orgId,
         trigger: "lead_status_changed",
         resourceType: "lead",
         resourceId: id,
         context: { oldStatus: existing2.status, newStatus: d.status },
+      }).catch((err) => {
+        logger.warn(
+          {
+            err,
+            jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+            trigger: "lead_status_changed",
+            orgId: authReq.orgId,
+            leadId: id,
+          },
+          "Failed to enqueue automation job",
+        );
+        captureWorkerError(err, {
+          worker: "leads",
+          route: "PATCH /leads/:id",
+          jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+          trigger: "lead_status_changed",
+          orgId: authReq.orgId,
+          leadId: id,
+        });
       });
     }
 

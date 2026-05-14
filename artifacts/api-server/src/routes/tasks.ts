@@ -11,6 +11,8 @@ import {
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
+import { logger } from "../lib/logger";
+import { captureWorkerError } from "../lib/sentry";
 
 const router: IRouter = Router();
 
@@ -213,7 +215,7 @@ router.patch(
 
     // Fire `task_completed` automation trigger when status transitions to completed.
     if (data.status === "completed") {
-      void enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+      enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
         orgId: authReq.orgId,
         trigger: "task_completed",
         resourceType: "task",
@@ -225,6 +227,26 @@ router.patch(
           templateId: task.templateId ?? null,
           completedBy: authReq.userId,
         },
+      }).catch((err) => {
+        logger.warn(
+          {
+            err,
+            jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+            trigger: "task_completed",
+            orgId: authReq.orgId,
+            taskId: task.id,
+            contactId: task.contactId ?? null,
+          },
+          "Failed to enqueue automation job",
+        );
+        captureWorkerError(err, {
+          worker: "tasks",
+          route: "PATCH /tasks/:id",
+          jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+          trigger: "task_completed",
+          orgId: authReq.orgId,
+          taskId: task.id,
+        });
       });
     }
 

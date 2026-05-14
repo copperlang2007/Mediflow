@@ -19,6 +19,8 @@ import {
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
+import { logger } from "../lib/logger";
+import { captureWorkerError } from "../lib/sentry";
 
 const router: IRouter = Router();
 
@@ -263,12 +265,32 @@ router.patch("/deals/:id", requireAuth, requirePermission("contact", "update"), 
     // Log activity on contact
     await db.insert(activitiesTable).values({ id: randomUUID(), orgId: authReq.orgId, contactId: existing.contactId, dealId: id, type: "status_change", body: `Deal moved to new stage`, createdBy: authReq.userId });
     // Fire event-triggered automation rules for "deal_stage_changed"
-    void enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+    enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
       orgId: authReq.orgId,
       trigger: "deal_stage_changed",
       resourceType: "deal",
       resourceId: id,
       context: { fromStageId: existing.stageId, toStageId: d.stageId, contactId: existing.contactId },
+    }).catch((err) => {
+      logger.warn(
+        {
+          err,
+          jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+          trigger: "deal_stage_changed",
+          orgId: authReq.orgId,
+          dealId: id,
+          contactId: existing.contactId,
+        },
+        "Failed to enqueue automation job",
+      );
+      captureWorkerError(err, {
+        worker: "pipelines",
+        route: "PATCH /deals/:id",
+        jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+        trigger: "deal_stage_changed",
+        orgId: authReq.orgId,
+        dealId: id,
+      });
     });
   }
 
