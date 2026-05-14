@@ -113,6 +113,13 @@
       "when": 1778360000000,
       "tag": "0012_contacts_phone_index",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1778370000000,
+      "tag": "0013_opt_outs_unique",
+      "breakpoints": true
     }
   ]
 }
