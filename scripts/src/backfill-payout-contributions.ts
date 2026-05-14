@@ -162,6 +162,7 @@ async function backfillStatement(
     }
 
     const splits = await computeSplits(
+      db,
       orgId,
       writingAgentId,
       amountNum,

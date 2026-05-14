@@ -21,6 +21,8 @@
 import { and, eq } from "drizzle-orm";
 import { db, commissionHierarchiesTable } from "@workspace/db";
 
+export type DbOrTx = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
+
 export interface SplitDistribution {
   agentId: string;
   amount: number; // dollars
@@ -65,12 +67,13 @@ export function round2(n: number): number {
  *   zero.
  */
 export async function computeSplits(
+  executor: DbOrTx,
   orgId: string,
   writingAgentId: string,
   amount: number,
   on: Date,
 ): Promise<SplitDistribution[]> {
-  const rows = await db
+  const rows = await executor
     .select()
     .from(commissionHierarchiesTable)
     .where(
