@@ -4,11 +4,14 @@ import { initSentry } from "./lib/sentry";
 // app/jobs/workers boot are captured. No-op when SENTRY_DSN is unset.
 initSentry();
 
+import type { Server } from "node:http";
+
 import app from "./app";
 import { logger } from "./lib/logger";
 import { getQueue, startWorkers } from "./lib/jobs";
 import { captureWorkerError } from "./lib/sentry";
 import { markWorkersReady } from "./lib/readiness";
+import { shutdown } from "./lib/shutdown";
 
 const rawPort = process.env["PORT"];
 
@@ -23,6 +26,11 @@ const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
+
+// Hoisted so SIGTERM/SIGINT handlers (registered below) can close the
+// listening server during graceful shutdown. Stays `let` rather than a
+// module-level mutable export — only this file mutates it.
+let server: Server | undefined;
 
 async function bootstrap(): Promise<void> {
   // Start pg-boss job queue and register workers.
@@ -54,7 +62,7 @@ async function bootstrap(): Promise<void> {
     );
   }
 
-  app.listen(port, (err) => {
+  server = app.listen(port, (err) => {
     if (err) {
       logger.error({ err }, "Error listening on port");
       process.exit(1);
@@ -68,19 +76,34 @@ bootstrap().catch((err) => {
   process.exit(1);
 });
 
-// Graceful shutdown
-const shutdown = async (signal: string): Promise<void> => {
-  logger.info({ signal }, "Shutdown signal received");
-  try {
-    const { getQueue: q } = await import("./lib/jobs");
-    const boss = await q();
-    await boss.stop({ graceful: true });
-  } catch (err) {
-    logger.error({ err, signal }, "Error stopping job queue during shutdown");
-    captureWorkerError(err, { worker: "bootstrap", phase: "shutdown", signal });
+// Graceful shutdown wiring. The actual sequence lives in `./lib/shutdown` so
+// it can be unit-tested without real signals or sockets.
+//
+// `getBoss` is lazy because pg-boss may have failed to start (degraded mode
+// in non-prod). In that case `getQueue()` would throw and we want to skip
+// the boss-stop step rather than block exit.
+const onSignal = (signal: string): void => {
+  if (!server) {
+    // bootstrap hasn't finished listening yet — nothing to drain.
+    logger.info({ signal }, "Shutdown signal received before server started");
+    process.exit(0);
+    return;
   }
-  process.exit(0);
+  shutdown(signal, {
+    server,
+    getBoss: async () => {
+      try {
+        return await getQueue();
+      } catch {
+        return null;
+      }
+    },
+    exit: (code) => process.exit(code),
+  }).catch((err) => {
+    logger.error({ err, signal }, "Unhandled error in shutdown handler");
+    process.exit(1);
+  });
 };
 
-process.on("SIGTERM", () => { shutdown("SIGTERM").catch(() => process.exit(1)); });
-process.on("SIGINT", () => { shutdown("SIGINT").catch(() => process.exit(1)); });
+process.on("SIGTERM", () => onSignal("SIGTERM"));
+process.on("SIGINT", () => onSignal("SIGINT"));
