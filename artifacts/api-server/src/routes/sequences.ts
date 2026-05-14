@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, inArray, isNull, sql, desc, asc } from "drizzle-orm";
+import { eq, and, inArray, isNull, notInArray, sql, desc, asc } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import {
@@ -344,6 +344,19 @@ router.get(
 );
 
 // PATCH /sequences/:id/enrollments/:eid — pause/cancel
+//
+// Concurrency note: the previous handler unconditionally set
+// `completedAt = now()` whenever the payload requested `cancelled`,
+// without checking the prior status. A second cancel call after a real
+// cancellation would overwrite the original `completedAt`, losing the
+// genuine first-cancellation timestamp. (For non-cancel transitions, the
+// `completedAt` field is left untouched.)
+//
+// The fix is to gate the cancel transition on a conditional UPDATE that
+// excludes already-terminal statuses (`cancelled`, `completed`). Only the
+// caller whose UPDATE actually performs the transition writes the
+// `completedAt` timestamp; later cancel calls fall through to a no-op
+// 200 with the original timestamp preserved.
 router.patch(
   "/sequences/:id/enrollments/:eid",
   requireAuth,
@@ -352,17 +365,64 @@ router.patch(
     const authReq = req as AuthenticatedRequest;
     const seqId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const eid = Array.isArray(req.params.eid) ? req.params.eid[0] : req.params.eid;
-    const [seq] = await db.select({ id: sequencesTable.id }).from(sequencesTable).where(and(eq(sequencesTable.id, seqId), eq(sequencesTable.orgId, authReq.orgId))).limit(1);
-    if (!seq) { res.status(404).json({ error: "Sequence not found" }); return; }
-    const [enrollment] = await db.select().from(sequenceEnrollmentsTable).where(and(eq(sequenceEnrollmentsTable.id, eid), eq(sequenceEnrollmentsTable.sequenceId, seqId))).limit(1);
-    if (!enrollment) { res.status(404).json({ error: "Enrollment not found" }); return; }
     const Schema = z.object({ status: z.enum(["active", "paused", "cancelled"]) });
     const parsed = Schema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
-    const updates: Record<string, unknown> = { status: parsed.data.status };
-    if (parsed.data.status === "cancelled") updates.completedAt = new Date();
-    const [updated] = await db.update(sequenceEnrollmentsTable).set(updates).where(eq(sequenceEnrollmentsTable.id, eid)).returning();
-    res.json(updated);
+
+    const result = await db.transaction(async (tx) => {
+      const [seq] = await tx
+        .select({ id: sequencesTable.id })
+        .from(sequencesTable)
+        .where(and(eq(sequencesTable.id, seqId), eq(sequencesTable.orgId, authReq.orgId)))
+        .limit(1);
+      if (!seq) { return { kind: "seq-not-found" as const }; }
+
+      if (parsed.data.status === "cancelled") {
+        // Conditional UPDATE — only transition to cancelled if not
+        // already in a terminal state. The `completedAt` timestamp is
+        // only written by the caller that actually performs the
+        // transition, so subsequent cancel calls cannot overwrite it.
+        const [updated] = await tx
+          .update(sequenceEnrollmentsTable)
+          .set({ status: "cancelled", completedAt: new Date() })
+          .where(
+            and(
+              eq(sequenceEnrollmentsTable.id, eid),
+              eq(sequenceEnrollmentsTable.sequenceId, seqId),
+              notInArray(sequenceEnrollmentsTable.status, ["cancelled", "completed"]),
+            ),
+          )
+          .returning();
+
+        if (updated) {
+          return { kind: "ok" as const, row: updated };
+        }
+
+        // Either the enrollment doesn't exist (-> 404) or it's already
+        // terminal (-> 200 idempotent, preserve original completedAt).
+        const [existing] = await tx
+          .select()
+          .from(sequenceEnrollmentsTable)
+          .where(and(eq(sequenceEnrollmentsTable.id, eid), eq(sequenceEnrollmentsTable.sequenceId, seqId)))
+          .limit(1);
+        if (!existing) { return { kind: "enrollment-not-found" as const }; }
+        return { kind: "ok" as const, row: existing };
+      }
+
+      // Non-cancel transitions: just update status, don't touch
+      // completedAt. We still want to 404 if the row doesn't exist.
+      const [updated] = await tx
+        .update(sequenceEnrollmentsTable)
+        .set({ status: parsed.data.status })
+        .where(and(eq(sequenceEnrollmentsTable.id, eid), eq(sequenceEnrollmentsTable.sequenceId, seqId)))
+        .returning();
+      if (!updated) { return { kind: "enrollment-not-found" as const }; }
+      return { kind: "ok" as const, row: updated };
+    });
+
+    if (result.kind === "seq-not-found") { res.status(404).json({ error: "Sequence not found" }); return; }
+    if (result.kind === "enrollment-not-found") { res.status(404).json({ error: "Enrollment not found" }); return; }
+    res.json(result.row);
   },
 );
 
