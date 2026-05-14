@@ -302,7 +302,7 @@ router.patch(
       ? await db.select({ status: contactsTable.status }).from(contactsTable).where(eq(contactsTable.id, id)).limit(1)
       : [null];
 
-    const [updated] = await db.update(contactsTable).set(updates).where(eq(contactsTable.id, id)).returning();
+    const [updated] = await db.update(contactsTable).set(updates).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId))).returning();
 
     if (d.status !== undefined && existingContact && d.status !== existingContact.status) {
       enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
@@ -347,7 +347,7 @@ router.delete(
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const [existing] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!existing) { res.status(404).json({ error: "Contact not found" }); return; }
-    await db.update(contactsTable).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(contactsTable.id, id));
+    await db.update(contactsTable).set({ deletedAt: new Date(), updatedAt: new Date() }).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId)));
     res.status(204).send();
   },
 );
@@ -442,7 +442,7 @@ router.post(
     await db.insert(activitiesTable).values({ id: randomUUID(), orgId: authReq.orgId, contactId: id, type: "sms", body: parsed.data.body, createdBy: authReq.userId });
 
     // Update thread lastMessageAt
-    await db.update(messageThreadsTable).set({ lastMessageAt: new Date() }).where(eq(messageThreadsTable.id, thread.id));
+    await db.update(messageThreadsTable).set({ lastMessageAt: new Date() }).where(and(eq(messageThreadsTable.id, thread.id), eq(messageThreadsTable.orgId, authReq.orgId)));
 
     res.status(201).json({ messageId: msgId, threadId: thread.id });
   },
@@ -488,7 +488,7 @@ router.post(
 
     // Log to activity timeline
     await db.insert(activitiesTable).values({ id: randomUUID(), orgId: authReq.orgId, contactId: id, type: "email", body: parsed.data.subject, metadata: { subject: parsed.data.subject }, createdBy: authReq.userId });
-    await db.update(messageThreadsTable).set({ lastMessageAt: new Date() }).where(eq(messageThreadsTable.id, thread.id));
+    await db.update(messageThreadsTable).set({ lastMessageAt: new Date() }).where(and(eq(messageThreadsTable.id, thread.id), eq(messageThreadsTable.orgId, authReq.orgId)));
 
     res.status(201).json({ messageId: msgId, threadId: thread.id });
   },
@@ -656,7 +656,7 @@ router.post(
       case "assign_agent": {
         const agentId = String(payload?.agentId ?? "");
         if (!agentId) { res.status(400).json({ error: "agentId required" }); return; }
-        await db.update(contactsTable).set({ assignedAgentId: agentId }).where(inArray(contactsTable.id, ids));
+        await db.update(contactsTable).set({ assignedAgentId: agentId }).where(and(inArray(contactsTable.id, ids), eq(contactsTable.orgId, authReq.orgId)));
         break;
       }
       case "add_tag": {
@@ -664,7 +664,7 @@ router.post(
         if (!tag) { res.status(400).json({ error: "tag required" }); return; }
         for (const c of contacts) {
           const newTags = [...new Set([...(c.tags ?? []), tag])];
-          await db.update(contactsTable).set({ tags: newTags }).where(eq(contactsTable.id, c.id));
+          await db.update(contactsTable).set({ tags: newTags }).where(and(eq(contactsTable.id, c.id), eq(contactsTable.orgId, authReq.orgId)));
         }
         break;
       }
@@ -672,13 +672,13 @@ router.post(
         const tag = String(payload?.tag ?? "");
         for (const c of contacts) {
           const newTags = (c.tags ?? []).filter((t) => t !== tag);
-          await db.update(contactsTable).set({ tags: newTags }).where(eq(contactsTable.id, c.id));
+          await db.update(contactsTable).set({ tags: newTags }).where(and(eq(contactsTable.id, c.id), eq(contactsTable.orgId, authReq.orgId)));
         }
         break;
       }
       case "set_status": {
         const status = String(payload?.status ?? "") as "lead" | "prospect" | "enrolled" | "retained" | "lost" | "do_not_contact";
-        await db.update(contactsTable).set({ status }).where(inArray(contactsTable.id, ids));
+        await db.update(contactsTable).set({ status }).where(and(inArray(contactsTable.id, ids), eq(contactsTable.orgId, authReq.orgId)));
         break;
       }
       case "export_csv": {

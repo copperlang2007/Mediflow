@@ -238,7 +238,7 @@ router.post(
       await createChecklistRun(authReq.orgId, agent!.id, "onboarding", authReq.userId, checklistTemplateId);
     } catch (err: unknown) {
       req.log?.error({ err }, "Failed to auto-create onboarding checklist; rolling back agent");
-      await db.delete(agentsTable).where(eq(agentsTable.id, agent!.id));
+      await db.delete(agentsTable).where(and(eq(agentsTable.id, agent!.id), eq(agentsTable.orgId, authReq.orgId)));
       res.status(500).json({ error: "Failed to initialise onboarding checklist; agent not created" });
       return;
     }

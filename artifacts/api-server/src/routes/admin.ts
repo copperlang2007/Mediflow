@@ -197,7 +197,7 @@ router.post(
     const [user] = await db.select().from(usersTable).where(and(eq(usersTable.id, userId), eq(usersTable.orgId, authReq.orgId)));
     if (!user) { res.status(404).json({ error: "User not found" }); return; }
 
-    await db.update(usersTable).set({ isActive: false }).where(eq(usersTable.id, userId));
+    await db.update(usersTable).set({ isActive: false }).where(and(eq(usersTable.id, userId), eq(usersTable.orgId, authReq.orgId)));
 
     await db.insert(auditLogTable).values({
       id: randomUUID(),
@@ -227,7 +227,7 @@ router.post(
     const [user] = await db.select().from(usersTable).where(and(eq(usersTable.id, userId), eq(usersTable.orgId, authReq.orgId)));
     if (!user) { res.status(404).json({ error: "User not found" }); return; }
 
-    await db.update(usersTable).set({ isActive: true }).where(eq(usersTable.id, userId));
+    await db.update(usersTable).set({ isActive: true }).where(and(eq(usersTable.id, userId), eq(usersTable.orgId, authReq.orgId)));
     res.json({ success: true });
   },
 );
@@ -540,7 +540,7 @@ router.put(
     if (existing) {
       await db.update(dataRetentionPoliciesTable)
         .set({ retentionDays, isEnabled, updatedAt: new Date(), updatedByUserId: authReq.userId })
-        .where(eq(dataRetentionPoliciesTable.id, existing.id));
+        .where(and(eq(dataRetentionPoliciesTable.id, existing.id), eq(dataRetentionPoliciesTable.orgId, authReq.orgId)));
     } else {
       await db.insert(dataRetentionPoliciesTable).values({
         id: randomUUID(), orgId: authReq.orgId, recordType, retentionDays, isEnabled, updatedByUserId: authReq.userId,

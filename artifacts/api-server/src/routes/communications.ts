@@ -134,7 +134,7 @@ router.post(
       toAddress: thread.channel === "sms" ? (contact.phone ?? undefined) : (contact.email ?? undefined),
     }).returning();
 
-    await db.update(messageThreadsTable).set({ lastMessageAt: new Date() }).where(eq(messageThreadsTable.id, threadId));
+    await db.update(messageThreadsTable).set({ lastMessageAt: new Date() }).where(and(eq(messageThreadsTable.id, threadId), eq(messageThreadsTable.orgId, authReq.orgId)));
 
     res.status(201).json(msg);
   },

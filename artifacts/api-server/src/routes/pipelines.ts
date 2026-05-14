@@ -90,7 +90,7 @@ router.patch("/pipelines/:id", requireAuth, requirePermission("contact", "update
   const Schema = z.object({ name: z.string().min(1).max(100).optional(), description: z.string().nullable().optional(), isDefault: z.boolean().optional() });
   const parsed = Schema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
-  const [updated] = await db.update(pipelinesTable).set({ ...parsed.data }).where(eq(pipelinesTable.id, id)).returning();
+  const [updated] = await db.update(pipelinesTable).set({ ...parsed.data }).where(and(eq(pipelinesTable.id, id), eq(pipelinesTable.orgId, authReq.orgId))).returning();
   res.json(updated);
 });
 
@@ -99,7 +99,7 @@ router.delete("/pipelines/:id", requireAuth, requirePermission("contact", "delet
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const [existing] = await db.select({ id: pipelinesTable.id }).from(pipelinesTable).where(and(eq(pipelinesTable.id, id), eq(pipelinesTable.orgId, authReq.orgId))).limit(1);
   if (!existing) { res.status(404).json({ error: "Pipeline not found" }); return; }
-  await db.delete(pipelinesTable).where(eq(pipelinesTable.id, id));
+  await db.delete(pipelinesTable).where(and(eq(pipelinesTable.id, id), eq(pipelinesTable.orgId, authReq.orgId)));
   res.status(204).send();
 });
 
@@ -413,7 +413,7 @@ router.delete("/deals/:id", requireAuth, requirePermission("contact", "delete"),
     .where(and(eq(dealsTable.id, id), eq(dealsTable.orgId, authReq.orgId), isNull(dealsTable.deletedAt)))
     .limit(1);
   if (!existing) { res.status(404).json({ error: "Deal not found" }); return; }
-  await db.update(dealsTable).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(dealsTable.id, id));
+  await db.update(dealsTable).set({ deletedAt: new Date(), updatedAt: new Date() }).where(and(eq(dealsTable.id, id), eq(dealsTable.orgId, authReq.orgId)));
   res.sendStatus(204);
 });
 

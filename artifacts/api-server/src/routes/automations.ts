@@ -178,7 +178,7 @@ router.patch(
     if (parsed.data.actions !== undefined) updates.actions = parsed.data.actions;
     if (parsed.data.isActive !== undefined) updates.isActive = parsed.data.isActive;
 
-    const [updated] = await db.update(automationRulesTable).set(updates).where(eq(automationRulesTable.id, id)).returning();
+    const [updated] = await db.update(automationRulesTable).set(updates).where(and(eq(automationRulesTable.id, id), eq(automationRulesTable.orgId, authReq.orgId))).returning();
     res.json(updated);
   },
 );
@@ -194,7 +194,7 @@ router.delete(
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const [existing] = await db.select({ id: automationRulesTable.id }).from(automationRulesTable).where(and(eq(automationRulesTable.id, id), eq(automationRulesTable.orgId, authReq.orgId))).limit(1);
     if (!existing) { res.status(404).json({ error: "Automation rule not found" }); return; }
-    await db.delete(automationRulesTable).where(eq(automationRulesTable.id, id));
+    await db.delete(automationRulesTable).where(and(eq(automationRulesTable.id, id), eq(automationRulesTable.orgId, authReq.orgId)));
     res.status(204).send();
   },
 );
@@ -210,7 +210,7 @@ router.post(
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const [existing] = await db.select().from(automationRulesTable).where(and(eq(automationRulesTable.id, id), eq(automationRulesTable.orgId, authReq.orgId))).limit(1);
     if (!existing) { res.status(404).json({ error: "Automation rule not found" }); return; }
-    const [updated] = await db.update(automationRulesTable).set({ isActive: !existing.isActive }).where(eq(automationRulesTable.id, id)).returning();
+    const [updated] = await db.update(automationRulesTable).set({ isActive: !existing.isActive }).where(and(eq(automationRulesTable.id, id), eq(automationRulesTable.orgId, authReq.orgId))).returning();
     res.json(updated);
   },
 );

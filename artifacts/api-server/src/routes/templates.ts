@@ -83,7 +83,7 @@ router.patch(
     const Schema = z.object({ name: z.string().min(1).max(200).optional(), body: z.string().min(1).max(1600).optional(), category: z.string().max(50).optional(), mergeFields: z.string().array().optional() });
     const parsed = Schema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
-    const [updated] = await db.update(smsTemplatesTable).set({ ...parsed.data }).where(eq(smsTemplatesTable.id, id)).returning();
+    const [updated] = await db.update(smsTemplatesTable).set({ ...parsed.data }).where(and(eq(smsTemplatesTable.id, id), eq(smsTemplatesTable.orgId, authReq.orgId))).returning();
     res.json(updated);
   },
 );
@@ -97,7 +97,7 @@ router.delete(
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const [existing] = await db.select({ id: smsTemplatesTable.id }).from(smsTemplatesTable).where(and(eq(smsTemplatesTable.id, id), eq(smsTemplatesTable.orgId, authReq.orgId))).limit(1);
     if (!existing) { res.status(404).json({ error: "SMS template not found" }); return; }
-    await db.delete(smsTemplatesTable).where(eq(smsTemplatesTable.id, id));
+    await db.delete(smsTemplatesTable).where(and(eq(smsTemplatesTable.id, id), eq(smsTemplatesTable.orgId, authReq.orgId)));
     res.status(204).send();
   },
 );
@@ -174,7 +174,7 @@ router.patch(
     const Schema = z.object({ name: z.string().min(1).max(200).optional(), subject: z.string().min(1).max(500).optional(), bodyHtml: z.string().min(1).optional(), bodyText: z.string().nullable().optional(), category: z.string().max(50).optional(), mergeFields: z.string().array().optional() });
     const parsed = Schema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
-    const [updated] = await db.update(emailTemplatesTable).set({ ...parsed.data }).where(eq(emailTemplatesTable.id, id)).returning();
+    const [updated] = await db.update(emailTemplatesTable).set({ ...parsed.data }).where(and(eq(emailTemplatesTable.id, id), eq(emailTemplatesTable.orgId, authReq.orgId))).returning();
     res.json(updated);
   },
 );
@@ -188,7 +188,7 @@ router.delete(
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const [existing] = await db.select({ id: emailTemplatesTable.id }).from(emailTemplatesTable).where(and(eq(emailTemplatesTable.id, id), eq(emailTemplatesTable.orgId, authReq.orgId))).limit(1);
     if (!existing) { res.status(404).json({ error: "Email template not found" }); return; }
-    await db.delete(emailTemplatesTable).where(eq(emailTemplatesTable.id, id));
+    await db.delete(emailTemplatesTable).where(and(eq(emailTemplatesTable.id, id), eq(emailTemplatesTable.orgId, authReq.orgId)));
     res.status(204).send();
   },
 );
