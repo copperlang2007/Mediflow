@@ -274,3 +274,43 @@ describe("Twilio inbound SMS webhook — idempotency on retries", () => {
     expect(outboundRows.every((r) => r.providerMessageId === null)).toBe(true);
   });
 });
+
+describe("Twilio inbound SMS webhook — phone-lookup performance", () => {
+  // Regression guard for the `contacts_phone_idx` partial index
+  // (migration 0012). The webhook does multiple `WHERE phone = ?`
+  // lookups per inbound SMS. Without the index, a 100k-contact org
+  // would seq-scan on every request and breach Twilio's 10s timeout.
+  //
+  // We seed 1000 extra rows (in addition to the one already created
+  // in the file's `beforeAll`) — large enough that a seq scan would
+  // visibly cost more than the indexed lookup, small enough that the
+  // test stays fast. The threshold is intentionally loose; this test
+  // is not a microbenchmark, it's a smoke check that nobody dropped
+  // the index.
+  it("processes inbound SMS in well under 100ms with 1000 seeded contacts", async () => {
+    // Insert 1000 contacts with unique phones in the same org. We
+    // don't go through seedContact for each because that's slow and
+    // its options are richer than we need — a bulk insert is plenty.
+    const filler = Array.from({ length: 1000 }, (_, i) => ({
+      id: `perf-contact-${i}-${randomUUID()}`,
+      orgId,
+      firstName: "Perf",
+      lastName: `Contact${i}`,
+      phone: `+1555${String(1000000 + i).padStart(7, "0")}`,
+      status: "lead" as const,
+    }));
+    await db.insert(contactsTable).values(filler);
+
+    const sid = `SM${randomUUID().replace(/-/g, "")}`;
+    const start = Date.now();
+    const res = await request(app)
+      .post("/webhooks/twilio/sms")
+      .type("form")
+      .set("x-twilio-signature", "dummy")
+      .send(twilioPayload(sid, "perf check"));
+    const elapsed = Date.now() - start;
+
+    expect(res.status).toBe(200);
+    expect(elapsed).toBeLessThan(100);
+  });
+});

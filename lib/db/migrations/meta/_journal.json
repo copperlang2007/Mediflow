@@ -33,36 +33,85 @@
     {
       "idx": 4,
       "version": "7",
+      "when": 1778180000000,
+      "tag": "0003_breach_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778190000000,
+      "tag": "0003_commissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
       "when": 1778200000000,
       "tag": "0003_perf_partial_indexes",
       "breakpoints": true
     },
     {
-      "idx": 5,
+      "idx": 7,
       "version": "7",
       "when": 1778250000000,
       "tag": "0004_developer_role_enum",
       "breakpoints": true
     },
     {
-      "idx": 6,
+      "idx": 8,
       "version": "7",
       "when": 1778260000000,
       "tag": "0005_missed_payment_alerts_nulls_not_distinct",
       "breakpoints": true
     },
     {
-      "idx": 7,
+      "idx": 9,
       "version": "7",
       "when": 1778300000000,
       "tag": "0006_encrypt_medicare_id",
       "breakpoints": true
     },
     {
-      "idx": 8,
+      "idx": 10,
+      "version": "7",
+      "when": 1778310000000,
+      "tag": "0007_line_item_payout_contribution",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1778320000000,
+      "tag": "0008_messages_provider_id_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1778330000000,
+      "tag": "0009_sequence_step_executions",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1778340000000,
+      "tag": "0010_task_instances_auto_assign_dedup",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
       "version": "7",
       "when": 1778350000000,
       "tag": "0011_task_retention_review_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1778360000000,
+      "tag": "0012_contacts_phone_index",
       "breakpoints": true
     }
   ]
