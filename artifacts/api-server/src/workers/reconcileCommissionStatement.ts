@@ -280,9 +280,9 @@ export async function reconcileStatement(
   // commits — otherwise an automation could fire for state that ends up
   // rolled back, and the lock would be held across the network call.
   await db.transaction(async (tx) => {
-    // DISABLED FOR TEST: await tx.execute(
-    //   sql`SELECT pg_advisory_xact_lock(hashtext(${statementId}))`,
-    // );
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${statementId}))`,
+    );
 
     const [statement] = await tx
       .select()
