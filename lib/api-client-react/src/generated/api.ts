@@ -24,6 +24,7 @@ import type {
   AgentDocument,
   AgentListResponse,
   AgentPerformanceRow,
+  AgentTaskListResponse,
   AhipDashboard,
   AhipRecord,
   AiChatBody,
@@ -56,6 +57,7 @@ import type {
   ConfirmMondayImportBody,
   Contact,
   ContactListResponse,
+  ContactThreadListResponse,
   ConvertLead200,
   CreateAgentBody,
   CreateAhipBody,
@@ -93,6 +95,7 @@ import type {
   GetAdminAuditLogParams,
   GetAgentLicensesParams,
   GetAgentPerformanceReportParams,
+  GetAgentTasksParams,
   GetAgentsParams,
   GetAhipDashboardParams,
   GetAuditLogParams,
@@ -103,6 +106,7 @@ import type {
   GetContactActivitiesParams,
   GetContactEnrollments200Item,
   GetContactTasks200Item,
+  GetContactThreadsParams,
   GetContactsParams,
   GetDashboardActivityParams,
   GetDeal200,
@@ -145,7 +149,6 @@ import type {
   LogActivityBody,
   MarkMessageRead200,
   Message,
-  MessageThread,
   Notification,
   NotificationCount,
   OffboardResponse,
@@ -5043,24 +5046,43 @@ export const useBulkAssignTasksFromTemplate = <
 };
 
 /**
- * @summary List tasks for an agent
+ * @summary List tasks for an agent (paginated)
  */
-export const getGetAgentTasksUrl = (id: string) => {
-  return `/api/agents/${id}/tasks`;
+export const getGetAgentTasksUrl = (
+  id: string,
+  params?: GetAgentTasksParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/agents/${id}/tasks?${stringifiedParams}`
+    : `/api/agents/${id}/tasks`;
 };
 
 export const getAgentTasks = async (
   id: string,
+  params?: GetAgentTasksParams,
   options?: RequestInit,
-): Promise<Task[]> => {
-  return customFetch<Task[]>(getGetAgentTasksUrl(id), {
+): Promise<AgentTaskListResponse> => {
+  return customFetch<AgentTaskListResponse>(getGetAgentTasksUrl(id, params), {
     ...options,
     method: "GET",
   });
 };
 
-export const getGetAgentTasksQueryKey = (id: string) => {
-  return [`/api/agents/${id}/tasks`] as const;
+export const getGetAgentTasksQueryKey = (
+  id: string,
+  params?: GetAgentTasksParams,
+) => {
+  return [`/api/agents/${id}/tasks`, ...(params ? [params] : [])] as const;
 };
 
 export const getGetAgentTasksQueryOptions = <
@@ -5068,6 +5090,7 @@ export const getGetAgentTasksQueryOptions = <
   TError = ErrorType<unknown>,
 >(
   id: string,
+  params?: GetAgentTasksParams,
   options?: {
     query?: UseQueryOptions<
       Awaited<ReturnType<typeof getAgentTasks>>,
@@ -5079,11 +5102,12 @@ export const getGetAgentTasksQueryOptions = <
 ) => {
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getGetAgentTasksQueryKey(id);
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAgentTasksQueryKey(id, params);
 
   const queryFn: QueryFunction<Awaited<ReturnType<typeof getAgentTasks>>> = ({
     signal,
-  }) => getAgentTasks(id, { signal, ...requestOptions });
+  }) => getAgentTasks(id, params, { signal, ...requestOptions });
 
   return {
     queryKey,
@@ -5103,7 +5127,7 @@ export type GetAgentTasksQueryResult = NonNullable<
 export type GetAgentTasksQueryError = ErrorType<unknown>;
 
 /**
- * @summary List tasks for an agent
+ * @summary List tasks for an agent (paginated)
  */
 
 export function useGetAgentTasks<
@@ -5111,6 +5135,7 @@ export function useGetAgentTasks<
   TError = ErrorType<unknown>,
 >(
   id: string,
+  params?: GetAgentTasksParams,
   options?: {
     query?: UseQueryOptions<
       Awaited<ReturnType<typeof getAgentTasks>>,
@@ -5120,7 +5145,7 @@ export function useGetAgentTasks<
     request?: SecondParameter<typeof customFetch>;
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetAgentTasksQueryOptions(id, options);
+  const queryOptions = getGetAgentTasksQueryOptions(id, params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
@@ -7776,24 +7801,46 @@ export const useSendContactEmail = <
 };
 
 /**
- * @summary Get message threads for a contact
+ * @summary Get message threads for a contact (paginated)
  */
-export const getGetContactThreadsUrl = (id: string) => {
-  return `/api/contacts/${id}/threads`;
+export const getGetContactThreadsUrl = (
+  id: string,
+  params?: GetContactThreadsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/contacts/${id}/threads?${stringifiedParams}`
+    : `/api/contacts/${id}/threads`;
 };
 
 export const getContactThreads = async (
   id: string,
+  params?: GetContactThreadsParams,
   options?: RequestInit,
-): Promise<MessageThread[]> => {
-  return customFetch<MessageThread[]>(getGetContactThreadsUrl(id), {
-    ...options,
-    method: "GET",
-  });
+): Promise<ContactThreadListResponse> => {
+  return customFetch<ContactThreadListResponse>(
+    getGetContactThreadsUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
 
-export const getGetContactThreadsQueryKey = (id: string) => {
-  return [`/api/contacts/${id}/threads`] as const;
+export const getGetContactThreadsQueryKey = (
+  id: string,
+  params?: GetContactThreadsParams,
+) => {
+  return [`/api/contacts/${id}/threads`, ...(params ? [params] : [])] as const;
 };
 
 export const getGetContactThreadsQueryOptions = <
@@ -7801,6 +7848,7 @@ export const getGetContactThreadsQueryOptions = <
   TError = ErrorType<unknown>,
 >(
   id: string,
+  params?: GetContactThreadsParams,
   options?: {
     query?: UseQueryOptions<
       Awaited<ReturnType<typeof getContactThreads>>,
@@ -7812,11 +7860,13 @@ export const getGetContactThreadsQueryOptions = <
 ) => {
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getGetContactThreadsQueryKey(id);
+  const queryKey =
+    queryOptions?.queryKey ?? getGetContactThreadsQueryKey(id, params);
 
   const queryFn: QueryFunction<
     Awaited<ReturnType<typeof getContactThreads>>
-  > = ({ signal }) => getContactThreads(id, { signal, ...requestOptions });
+  > = ({ signal }) =>
+    getContactThreads(id, params, { signal, ...requestOptions });
 
   return {
     queryKey,
@@ -7836,7 +7886,7 @@ export type GetContactThreadsQueryResult = NonNullable<
 export type GetContactThreadsQueryError = ErrorType<unknown>;
 
 /**
- * @summary Get message threads for a contact
+ * @summary Get message threads for a contact (paginated)
  */
 
 export function useGetContactThreads<
@@ -7844,6 +7894,7 @@ export function useGetContactThreads<
   TError = ErrorType<unknown>,
 >(
   id: string,
+  params?: GetContactThreadsParams,
   options?: {
     query?: UseQueryOptions<
       Awaited<ReturnType<typeof getContactThreads>>,
@@ -7853,7 +7904,7 @@ export function useGetContactThreads<
     request?: SecondParameter<typeof customFetch>;
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetContactThreadsQueryOptions(id, options);
+  const queryOptions = getGetContactThreadsQueryOptions(id, params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

@@ -1362,31 +1362,45 @@ export const BulkAssignTasksFromTemplateBody = zod.object({
 });
 
 /**
- * @summary List tasks for an agent
+ * @summary List tasks for an agent (paginated)
  */
 export const GetAgentTasksParams = zod.object({
   id: zod.coerce.string(),
 });
 
-export const GetAgentTasksResponseItem = zod.object({
-  id: zod.string(),
-  orgId: zod.string(),
-  templateId: zod.string().nullish(),
-  agentId: zod.string().nullish(),
-  contactId: zod.string().nullish(),
-  title: zod.string(),
-  description: zod.string().nullish(),
-  dueDate: zod.coerce.date().nullish(),
-  assignedTo: zod.string().nullish(),
-  assignedToUserId: zod.string().nullish(),
-  status: zod.enum(["open", "in_progress", "completed", "cancelled"]),
-  priority: zod.enum(["low", "medium", "high", "urgent"]),
-  completedAt: zod.coerce.date().nullish(),
-  createdBy: zod.string().nullish(),
-  createdAt: zod.coerce.date(),
-  updatedAt: zod.coerce.date(),
+export const getAgentTasksQueryLimitDefault = 50;
+export const getAgentTasksQueryOffsetDefault = 0;
+
+export const GetAgentTasksQueryParams = zod.object({
+  limit: zod.coerce.number().default(getAgentTasksQueryLimitDefault),
+  offset: zod.coerce.number().default(getAgentTasksQueryOffsetDefault),
 });
-export const GetAgentTasksResponse = zod.array(GetAgentTasksResponseItem);
+
+export const GetAgentTasksResponse = zod.object({
+  data: zod.array(
+    zod.object({
+      id: zod.string(),
+      orgId: zod.string(),
+      templateId: zod.string().nullish(),
+      agentId: zod.string().nullish(),
+      contactId: zod.string().nullish(),
+      title: zod.string(),
+      description: zod.string().nullish(),
+      dueDate: zod.coerce.date().nullish(),
+      assignedTo: zod.string().nullish(),
+      assignedToUserId: zod.string().nullish(),
+      status: zod.enum(["open", "in_progress", "completed", "cancelled"]),
+      priority: zod.enum(["low", "medium", "high", "urgent"]),
+      completedAt: zod.coerce.date().nullish(),
+      createdBy: zod.string().nullish(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+    }),
+  ),
+  total: zod.number(),
+  limit: zod.number(),
+  offset: zod.number(),
+});
 
 /**
  * @summary List task templates for the organization
@@ -2133,23 +2147,35 @@ export const SendContactEmailBody = zod.object({
 });
 
 /**
- * @summary Get message threads for a contact
+ * @summary Get message threads for a contact (paginated)
  */
 export const GetContactThreadsParams = zod.object({
   id: zod.coerce.string(),
 });
 
-export const GetContactThreadsResponseItem = zod.object({
-  id: zod.string(),
-  orgId: zod.string(),
-  contactId: zod.string(),
-  channel: zod.enum(["sms", "email"]),
-  lastMessageAt: zod.coerce.date().nullish(),
-  createdAt: zod.coerce.date(),
+export const getContactThreadsQueryLimitDefault = 50;
+export const getContactThreadsQueryOffsetDefault = 0;
+
+export const GetContactThreadsQueryParams = zod.object({
+  limit: zod.coerce.number().default(getContactThreadsQueryLimitDefault),
+  offset: zod.coerce.number().default(getContactThreadsQueryOffsetDefault),
 });
-export const GetContactThreadsResponse = zod.array(
-  GetContactThreadsResponseItem,
-);
+
+export const GetContactThreadsResponse = zod.object({
+  data: zod.array(
+    zod.object({
+      id: zod.string(),
+      orgId: zod.string(),
+      contactId: zod.string(),
+      channel: zod.enum(["sms", "email"]),
+      lastMessageAt: zod.coerce.date().nullish(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+  total: zod.number(),
+  limit: zod.number(),
+  offset: zod.number(),
+});
 
 /**
  * @summary Get tasks for a contact

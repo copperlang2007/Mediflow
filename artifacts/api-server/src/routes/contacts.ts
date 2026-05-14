@@ -494,7 +494,11 @@ router.post(
   },
 );
 
-// GET /contacts/:id/threads
+// GET /contacts/:id/threads — paginated thread list for a contact.
+// Default 50, hard cap 200 — same shape as /users + /agents/:id/licenses
+// after PR #70 so the web app can read a consistent { data, total, limit,
+// offset } envelope. Adjacent /contacts/:id/messages already uses
+// safeLimit (line ~520) — this brings /threads in line.
 router.get(
   "/contacts/:id/threads",
   requireAuth,
@@ -504,8 +508,35 @@ router.get(
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
-    const threads = await db.select().from(messageThreadsTable).where(and(eq(messageThreadsTable.contactId, id), eq(messageThreadsTable.orgId, authReq.orgId))).orderBy(desc(messageThreadsTable.lastMessageAt));
-    res.json(threads);
+
+    const limitNum = safeLimit(req.query.limit, 50, 200);
+    const offsetNum = safeOffset(req.query.offset);
+
+    const whereClause = and(
+      eq(messageThreadsTable.contactId, id),
+      eq(messageThreadsTable.orgId, authReq.orgId),
+    );
+
+    const [threads, totalRes] = await Promise.all([
+      db
+        .select()
+        .from(messageThreadsTable)
+        .where(whereClause)
+        .orderBy(desc(messageThreadsTable.lastMessageAt))
+        .limit(limitNum)
+        .offset(offsetNum),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(messageThreadsTable)
+        .where(whereClause),
+    ]);
+
+    res.json({
+      data: threads,
+      total: Number(totalRes[0]?.count ?? 0),
+      limit: limitNum,
+      offset: offsetNum,
+    });
   },
 );
 

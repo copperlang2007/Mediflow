@@ -1276,6 +1276,37 @@ export interface StateLicenseListResponse {
   offset: number;
 }
 
+export interface AgentTaskListResponse {
+  data: Task[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export type MessageThreadChannel =
+  (typeof MessageThreadChannel)[keyof typeof MessageThreadChannel];
+
+export const MessageThreadChannel = {
+  sms: "sms",
+  email: "email",
+} as const;
+
+export interface MessageThread {
+  id: string;
+  orgId: string;
+  contactId: string;
+  channel: MessageThreadChannel;
+  lastMessageAt?: string | null;
+  createdAt: string;
+}
+
+export interface ContactThreadListResponse {
+  data: MessageThread[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export type BulkContactActionBodyAction =
   (typeof BulkContactActionBodyAction)[keyof typeof BulkContactActionBodyAction];
 
@@ -1509,23 +1540,6 @@ export interface PipelineAnalytics {
   totalDeals: number;
   wonDeals: number;
   conversionRate: number;
-}
-
-export type MessageThreadChannel =
-  (typeof MessageThreadChannel)[keyof typeof MessageThreadChannel];
-
-export const MessageThreadChannel = {
-  sms: "sms",
-  email: "email",
-} as const;
-
-export interface MessageThread {
-  id: string;
-  orgId: string;
-  contactId: string;
-  channel: MessageThreadChannel;
-  lastMessageAt?: string | null;
-  createdAt: string;
 }
 
 export interface ThreadWithContact {
@@ -2305,6 +2319,11 @@ export type GetTasksParams = {
   offset?: number;
 };
 
+export type GetAgentTasksParams = {
+  limit?: number;
+  offset?: number;
+};
+
 export type GetRenewalsParams = {
   days?: number;
 };
@@ -2385,6 +2404,11 @@ export type SendContactEmailBody = {
 export type SendContactEmail201 = {
   messageId: string;
   threadId: string;
+};
+
+export type GetContactThreadsParams = {
+  limit?: number;
+  offset?: number;
 };
 
 export type GetContactTasks200Item = { [key: string]: unknown };
