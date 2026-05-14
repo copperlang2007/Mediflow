@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, sql, desc, asc, isNull } from "drizzle-orm";
+import { eq, ne, and, sql, desc, asc, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import {
@@ -219,11 +219,26 @@ router.get("/deals/:id", requireAuth, requirePermission("contact", "read"), asyn
   res.json({ ...row, history });
 });
 
+// PATCH /deals/:id
+//
+// Concurrency note: the previous handler read the row, computed
+// `d.stageId !== existing.stageId` in JS, then wrote the new stage and
+// inserted the history row + activity row + fired `deal_stage_changed`
+// based on that JS comparison. Two concurrent callers each moving the
+// deal from stage A to stage B would both observe `existing.stageId = A`
+// in their pre-write read, both write `stage = B`, and both insert
+// duplicate history + activity rows and double-fire the trigger.
+//
+// The fix performs the stage transition with a conditional UPDATE
+// (`WHERE stage_id != newStageId`). Only the caller whose UPDATE actually
+// flipped the stage sees `returning()` non-empty, and only that caller
+// writes the history row, the activity row, and enqueues the trigger.
+// All three side effects + the conditional UPDATE run in a single
+// `db.transaction` so a crash partway through cannot leave a history
+// entry pointing at a transition the deal didn't actually take.
 router.patch("/deals/:id", requireAuth, requirePermission("contact", "update"), async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthenticatedRequest;
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const [existing] = await db.select().from(dealsTable).where(and(eq(dealsTable.id, id), eq(dealsTable.orgId, authReq.orgId), isNull(dealsTable.deletedAt))).limit(1);
-  if (!existing) { res.status(404).json({ error: "Deal not found" }); return; }
 
   const Schema = z.object({
     stageId: z.string().optional(),
@@ -238,39 +253,132 @@ router.patch("/deals/:id", requireAuth, requirePermission("contact", "update"), 
   if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
   const d = parsed.data;
 
-  // If moving to a new stage, verify it belongs to the deal's pipeline (prevents cross-pipeline injection)
-  if (d.stageId !== undefined && d.stageId !== existing.stageId) {
-    const [stageCheck] = await db.select({ id: pipelineStagesTable.id }).from(pipelineStagesTable).where(and(eq(pipelineStagesTable.id, d.stageId), eq(pipelineStagesTable.pipelineId, existing.pipelineId))).limit(1);
-    if (!stageCheck) { res.status(400).json({ error: "Stage not found in deal's pipeline" }); return; }
-  }
+  const result = await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(dealsTable)
+      .where(and(eq(dealsTable.id, id), eq(dealsTable.orgId, authReq.orgId), isNull(dealsTable.deletedAt)))
+      .limit(1);
+    if (!existing) { return { kind: "not-found" as const }; }
 
-  const updates: Record<string, unknown> = {};
-  if (d.stageId !== undefined) updates.stageId = d.stageId;
-  if (d.title !== undefined) updates.title = d.title;
-  if (d.valueEst !== undefined) updates.valueEst = d.valueEst;
-  if (d.lostReason !== undefined) updates.lostReason = d.lostReason;
-  if (d.closeDateEst !== undefined) updates.closeDateEst = d.closeDateEst ? new Date(d.closeDateEst) : null;
-  if (d.assignedAgentId !== undefined) updates.assignedAgentId = d.assignedAgentId;
-  if (d.status !== undefined) {
-    updates.status = d.status;
-    if (d.status === "won") updates.wonAt = new Date();
-    if (d.status === "lost") updates.lostAt = new Date();
-  }
+    // If moving to a new stage, verify it belongs to the deal's pipeline (prevents cross-pipeline injection)
+    if (d.stageId !== undefined && d.stageId !== existing.stageId) {
+      const [stageCheck] = await tx
+        .select({ id: pipelineStagesTable.id })
+        .from(pipelineStagesTable)
+        .where(and(eq(pipelineStagesTable.id, d.stageId), eq(pipelineStagesTable.pipelineId, existing.pipelineId)))
+        .limit(1);
+      if (!stageCheck) { return { kind: "bad-stage" as const }; }
+    }
 
-  const [updated] = await db.update(dealsTable).set(updates).where(eq(dealsTable.id, id)).returning();
+    const baseUpdates: Record<string, unknown> = {};
+    if (d.title !== undefined) baseUpdates.title = d.title;
+    if (d.valueEst !== undefined) baseUpdates.valueEst = d.valueEst;
+    if (d.lostReason !== undefined) baseUpdates.lostReason = d.lostReason;
+    if (d.closeDateEst !== undefined) baseUpdates.closeDateEst = d.closeDateEst ? new Date(d.closeDateEst) : null;
+    if (d.assignedAgentId !== undefined) baseUpdates.assignedAgentId = d.assignedAgentId;
+    if (d.status !== undefined) {
+      baseUpdates.status = d.status;
+      if (d.status === "won") baseUpdates.wonAt = new Date();
+      if (d.status === "lost") baseUpdates.lostAt = new Date();
+    }
 
-  // Log stage change history
-  if (d.stageId && d.stageId !== existing.stageId) {
-    await db.insert(dealStageHistoryTable).values({ id: randomUUID(), dealId: id, fromStageId: existing.stageId, toStageId: d.stageId, changedByUserId: authReq.userId });
-    // Log activity on contact
-    await db.insert(activitiesTable).values({ id: randomUUID(), orgId: authReq.orgId, contactId: existing.contactId, dealId: id, type: "status_change", body: `Deal moved to new stage`, createdBy: authReq.userId });
-    // Fire event-triggered automation rules for "deal_stage_changed"
+    let transitioned = false;
+    let fromStageId: string | null = null;
+    let updatedRow: typeof dealsTable.$inferSelect | undefined;
+
+    if (d.stageId !== undefined) {
+      // Conditional UPDATE gated on stage actually changing. Postgres
+      // serializes concurrent UPDATEs against the same row, so at most
+      // one caller will see a non-empty `returning()` for this clause.
+      const [updated] = await tx
+        .update(dealsTable)
+        .set({ ...baseUpdates, stageId: d.stageId })
+        .where(
+          and(
+            eq(dealsTable.id, id),
+            eq(dealsTable.orgId, authReq.orgId),
+            isNull(dealsTable.deletedAt),
+            ne(dealsTable.stageId, d.stageId),
+          ),
+        )
+        .returning();
+
+      if (updated) {
+        transitioned = true;
+        fromStageId = existing.stageId;
+        updatedRow = updated;
+      } else {
+        // Stage already == d.stageId. Still apply any non-stage fields
+        // in the payload (keeps existing semantics where PATCH always
+        // commits the rest of the payload).
+        if (Object.keys(baseUpdates).length > 0) {
+          const [updated2] = await tx
+            .update(dealsTable)
+            .set(baseUpdates)
+            .where(and(eq(dealsTable.id, id), eq(dealsTable.orgId, authReq.orgId), isNull(dealsTable.deletedAt)))
+            .returning();
+          updatedRow = updated2;
+        } else {
+          updatedRow = existing;
+        }
+      }
+    } else if (Object.keys(baseUpdates).length > 0) {
+      const [updated] = await tx
+        .update(dealsTable)
+        .set(baseUpdates)
+        .where(and(eq(dealsTable.id, id), eq(dealsTable.orgId, authReq.orgId), isNull(dealsTable.deletedAt)))
+        .returning();
+      updatedRow = updated;
+    } else {
+      updatedRow = existing;
+    }
+
+    // Only the caller whose conditional UPDATE actually moved the deal
+    // writes the history + activity rows here. Two concurrent same-stage
+    // PATCHes cannot both reach this branch.
+    if (transitioned && d.stageId) {
+      await tx.insert(dealStageHistoryTable).values({
+        id: randomUUID(),
+        dealId: id,
+        fromStageId,
+        toStageId: d.stageId,
+        changedByUserId: authReq.userId,
+      });
+      await tx.insert(activitiesTable).values({
+        id: randomUUID(),
+        orgId: authReq.orgId,
+        contactId: existing.contactId,
+        dealId: id,
+        type: "status_change",
+        body: `Deal moved to new stage`,
+        createdBy: authReq.userId,
+      });
+    }
+
+    return {
+      kind: "ok" as const,
+      row: updatedRow,
+      transitioned,
+      fromStageId,
+      toStageId: d.stageId ?? null,
+      contactId: existing.contactId,
+    };
+  });
+
+  if (result.kind === "not-found") { res.status(404).json({ error: "Deal not found" }); return; }
+  if (result.kind === "bad-stage") { res.status(400).json({ error: "Stage not found in deal's pipeline" }); return; }
+
+  // Enqueue the automation trigger OUTSIDE the transaction, only on a
+  // real transition. The transaction has already committed the history
+  // row + activity row; the worker is a best-effort follow-up.
+  if (result.transitioned && result.toStageId) {
     enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
       orgId: authReq.orgId,
       trigger: "deal_stage_changed",
       resourceType: "deal",
       resourceId: id,
-      context: { fromStageId: existing.stageId, toStageId: d.stageId, contactId: existing.contactId },
+      context: { fromStageId: result.fromStageId, toStageId: result.toStageId, contactId: result.contactId },
     }).catch((err) => {
       logger.warn(
         {
@@ -279,7 +387,7 @@ router.patch("/deals/:id", requireAuth, requirePermission("contact", "update"), 
           trigger: "deal_stage_changed",
           orgId: authReq.orgId,
           dealId: id,
-          contactId: existing.contactId,
+          contactId: result.contactId,
         },
         "Failed to enqueue automation job",
       );
@@ -294,7 +402,7 @@ router.patch("/deals/:id", requireAuth, requirePermission("contact", "update"), 
     });
   }
 
-  res.json(updated);
+  res.json(result.row);
 });
 
 // DELETE /deals/:id — soft-delete (sets deletedAt; hard-delete requires admin retention confirmation)

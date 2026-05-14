@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, sql, desc, inArray, type SQL } from "drizzle-orm";
+import { eq, ne, and, sql, desc, inArray, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { db, agentsTable, taskInstancesTable, taskTemplatesTable } from "@workspace/db";
@@ -170,6 +170,21 @@ router.post(
   },
 );
 
+// PATCH /tasks/:id
+//
+// Concurrency note: the previous handler unconditionally wrote
+// `completedAt = now()` whenever `status: "completed"` was in the
+// payload and unconditionally fired `task_completed` — regardless of
+// whether the task was already completed. Two concurrent "complete this
+// task" PATCHes would both overwrite `completedAt` and BOTH fire the
+// trigger, doubling any downstream automation side effects.
+//
+// The fix performs the completion via a conditional UPDATE gated on
+// `status != "completed"`. Only the caller whose UPDATE actually
+// transitioned the row sees a non-empty `returning()` and only that
+// caller fires the trigger. Same-completion no-ops return 200 with the
+// current task row (idempotent contract preserved) and a stable
+// `completedAt`.
 router.patch(
   "/tasks/:id",
   requireAuth,
@@ -191,30 +206,91 @@ router.patch(
     if (data.dueDate !== undefined) updates.dueDate = data.dueDate ? new Date(data.dueDate) : null;
     if (data.assignedTo !== undefined) updates.assignedTo = data.assignedTo;
     if (data.assignedToUserId !== undefined) updates.assignedToUserId = data.assignedToUserId;
-    if (data.status !== undefined) {
-      updates.status = data.status;
-      if (data.status === "completed") updates.completedAt = new Date();
-    }
     if (data.priority !== undefined) updates.priority = data.priority;
+    if (data.status !== undefined && data.status !== "completed") {
+      updates.status = data.status;
+    }
 
-    if (Object.keys(updates).length === 0) {
+    if (Object.keys(updates).length === 0 && data.status !== "completed") {
       res.status(400).json({ error: "No fields to update" });
       return;
     }
 
-    const [task] = await db
-      .update(taskInstancesTable)
-      .set(updates)
-      .where(and(eq(taskInstancesTable.id, taskId), eq(taskInstancesTable.orgId, authReq.orgId)))
-      .returning();
+    const result = await db.transaction(async (tx) => {
+      let transitionedToCompleted = false;
+      let row: typeof taskInstancesTable.$inferSelect | undefined;
 
+      if (data.status === "completed") {
+        // Conditional UPDATE — only callers that actually transition the
+        // task from non-completed to completed see a returned row.
+        const [updated] = await tx
+          .update(taskInstancesTable)
+          .set({ ...updates, status: "completed", completedAt: new Date() })
+          .where(
+            and(
+              eq(taskInstancesTable.id, taskId),
+              eq(taskInstancesTable.orgId, authReq.orgId),
+              ne(taskInstancesTable.status, "completed"),
+            ),
+          )
+          .returning();
+
+        if (updated) {
+          transitionedToCompleted = true;
+          row = updated;
+        } else {
+          // Either the task doesn't exist (-> 404) or it's already
+          // completed (-> 200 idempotent). Disambiguate. Don't bump
+          // `completedAt` and don't fire the trigger.
+          const [existing] = await tx
+            .select()
+            .from(taskInstancesTable)
+            .where(and(eq(taskInstancesTable.id, taskId), eq(taskInstancesTable.orgId, authReq.orgId)))
+            .limit(1);
+          if (!existing) {
+            return { kind: "not-found" as const };
+          }
+          // Still apply any non-status fields the caller bundled in.
+          if (Object.keys(updates).length > 0) {
+            const [updated2] = await tx
+              .update(taskInstancesTable)
+              .set(updates)
+              .where(and(eq(taskInstancesTable.id, taskId), eq(taskInstancesTable.orgId, authReq.orgId)))
+              .returning();
+            row = updated2;
+          } else {
+            row = existing;
+          }
+        }
+      } else {
+        const [updated] = await tx
+          .update(taskInstancesTable)
+          .set(updates)
+          .where(and(eq(taskInstancesTable.id, taskId), eq(taskInstancesTable.orgId, authReq.orgId)))
+          .returning();
+        if (!updated) {
+          return { kind: "not-found" as const };
+        }
+        row = updated;
+      }
+
+      return { kind: "ok" as const, row, transitionedToCompleted };
+    });
+
+    if (result.kind === "not-found") {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    const task = result.row;
     if (!task) {
       res.status(404).json({ error: "Task not found" });
       return;
     }
 
-    // Fire `task_completed` automation trigger when status transitions to completed.
-    if (data.status === "completed") {
+    // Fire `task_completed` automation trigger ONLY when the conditional
+    // UPDATE actually transitioned the task to completed.
+    if (result.transitionedToCompleted) {
       enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
         orgId: authReq.orgId,
         trigger: "task_completed",

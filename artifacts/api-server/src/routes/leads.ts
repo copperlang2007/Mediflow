@@ -184,6 +184,22 @@ router.get(
 );
 
 // PATCH /leads/:id
+//
+// Concurrency note: the previous handler read the row, computed
+// `existing2.status !== newStatus` in JS, then issued the UPDATE
+// unconditionally and fired the `lead_status_changed` automation trigger
+// whenever the JS-side compare reported a difference. Two concurrent
+// PATCHes both setting the lead to (say) "qualified" would both observe
+// the original status "new" in their pre-write read, both write the same
+// new status, and both fire the trigger — yielding a duplicate automation
+// run for a single logical transition.
+//
+// The fix performs a conditional UPDATE — `WHERE status != newStatus` —
+// so only the caller whose UPDATE actually transitioned the row sees a
+// non-empty `returning()`, and only that caller fires the trigger. A
+// no-op same-status PATCH still returns 200 with the current row (the
+// existing idempotent contract), and PATCHes that only touch non-status
+// fields skip the conditional entirely.
 router.patch(
   "/leads/:id",
   requireAuth,
@@ -191,8 +207,6 @@ router.patch(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const [existing] = await db.select({ id: leadsTable.id }).from(leadsTable).where(and(eq(leadsTable.id, id), eq(leadsTable.orgId, authReq.orgId))).limit(1);
-    if (!existing) { res.status(404).json({ error: "Lead not found" }); return; }
 
     const parsed = UpdateLeadSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
@@ -206,17 +220,97 @@ router.patch(
     if (d.assignedAgentId !== undefined) updates.assignedAgentId = d.assignedAgentId;
     if (Object.keys(updates).length === 0) { res.status(400).json({ error: "No fields to update" }); return; }
 
-    const [existing2] = await db.select({ status: leadsTable.status }).from(leadsTable).where(eq(leadsTable.id, id)).limit(1);
-    const [updated] = await db.update(leadsTable).set(updates).where(eq(leadsTable.id, id)).returning();
+    const result = await db.transaction(async (tx) => {
+      // When the payload requests a status change, attempt a conditional
+      // UPDATE gated on `status != newStatus`. If exactly one of N
+      // concurrent same-status requests transitions the row, the others
+      // see `returning()` empty and skip the automation trigger.
+      let transitioned = false;
+      let oldStatus: typeof leadsTable.$inferSelect["status"] | null = null;
 
-    // Fire lead_status_changed automation hook when status changes
-    if (d.status !== undefined && existing2 && d.status !== existing2.status) {
+      if (d.status !== undefined) {
+        // Read the prior status inside the transaction so we can report
+        // an accurate oldStatus on the trigger payload, AND distinguish
+        // 404 from no-op-200.
+        const [prior] = await tx
+          .select({ status: leadsTable.status })
+          .from(leadsTable)
+          .where(and(eq(leadsTable.id, id), eq(leadsTable.orgId, authReq.orgId)))
+          .limit(1);
+
+        if (!prior) {
+          return { kind: "not-found" as const };
+        }
+        oldStatus = prior.status;
+
+        const [updated] = await tx
+          .update(leadsTable)
+          .set(updates)
+          .where(
+            and(
+              eq(leadsTable.id, id),
+              eq(leadsTable.orgId, authReq.orgId),
+              ne(leadsTable.status, d.status),
+            ),
+          )
+          .returning();
+
+        if (updated) {
+          transitioned = true;
+          return { kind: "updated" as const, row: updated, transitioned, oldStatus };
+        }
+
+        // Status was already `d.status` — apply any *other* fields that
+        // were in the payload (e.g. score/source bump alongside a no-op
+        // status set) and return the row. No trigger fires.
+        const otherUpdates = { ...updates };
+        delete (otherUpdates as Record<string, unknown>).status;
+        if (Object.keys(otherUpdates).length > 0) {
+          const [updated2] = await tx
+            .update(leadsTable)
+            .set(otherUpdates)
+            .where(and(eq(leadsTable.id, id), eq(leadsTable.orgId, authReq.orgId)))
+            .returning();
+          return { kind: "updated" as const, row: updated2, transitioned: false, oldStatus };
+        }
+
+        // Pure no-op: read the row back so the response shape matches.
+        const [current] = await tx
+          .select()
+          .from(leadsTable)
+          .where(and(eq(leadsTable.id, id), eq(leadsTable.orgId, authReq.orgId)))
+          .limit(1);
+        return { kind: "updated" as const, row: current, transitioned: false, oldStatus };
+      }
+
+      // No status field on the payload — update other fields only and
+      // do not fire the transition trigger.
+      const [updated] = await tx
+        .update(leadsTable)
+        .set(updates)
+        .where(and(eq(leadsTable.id, id), eq(leadsTable.orgId, authReq.orgId)))
+        .returning();
+      if (!updated) {
+        return { kind: "not-found" as const };
+      }
+      return { kind: "updated" as const, row: updated, transitioned: false, oldStatus };
+    });
+
+    if (result.kind === "not-found") {
+      res.status(404).json({ error: "Lead not found" });
+      return;
+    }
+
+    // Fire lead_status_changed automation hook ONLY when the conditional
+    // UPDATE actually performed the transition. Two concurrent callers
+    // requesting the same target status cannot both arrive here.
+    if (result.transitioned && d.status !== undefined && result.oldStatus !== null) {
       enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
         orgId: authReq.orgId,
         trigger: "lead_status_changed",
         resourceType: "lead",
         resourceId: id,
-        context: { oldStatus: existing2.status, newStatus: d.status },
+        context: { oldStatus: result.oldStatus, newStatus: d.status },
       }).catch((err) => {
         logger.warn(
           {
@@ -239,7 +333,7 @@ router.patch(
       });
     }
 
-    res.json(updated);
+    res.json(result.row);
   },
 );
 
