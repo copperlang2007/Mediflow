@@ -97,6 +97,13 @@ export const taskInstancesTable = pgTable(
     // the partial unique index `task_instances_auto_assign_unique` to
     // make worker retries idempotent on (agent_id, template_id, trigger).
     autoAssignTrigger: text("auto_assign_trigger"),
+    // Deterministic dedup key for retention-enforcement review tasks.
+    // Format: `${entityType}:${entityId}:${phase}`. NULL for non-retention
+    // tasks. Used by the partial unique index
+    // `task_instances_retention_review_key_unique` to keep retention
+    // reviews keyed per-entity rather than per-title (which collided when
+    // two entities shared a name).
+    retentionReviewKey: text("retention_review_key"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -114,6 +121,9 @@ export const taskInstancesTable = pgTable(
       .where(
         sql`${t.templateId} IS NOT NULL AND ${t.agentId} IS NOT NULL AND ${t.autoAssignTrigger} IS NOT NULL`,
       ),
+    uniqueIndex("task_instances_retention_review_key_unique")
+      .on(t.orgId, t.retentionReviewKey)
+      .where(sql`${t.retentionReviewKey} IS NOT NULL`),
   ],
 );
 
