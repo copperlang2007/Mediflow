@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, sql, desc, type SQL } from "drizzle-orm";
+import { eq, ne, and, sql, desc, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import {
@@ -244,6 +244,20 @@ router.patch(
 );
 
 // POST /leads/:id/convert — convert lead to enrolled contact
+//
+// Concurrency note: this used to be a read-check-write — SELECT the lead,
+// check `status !== "converted"`, then UPDATE/UPDATE/INSERT. Two concurrent
+// callers could both pass the check before either wrote, then each would
+// insert a duplicate "Lead converted to prospect" activity row and
+// double-fire any downstream automations attached to the status change.
+//
+// The fix is a conditional UPDATE — `WHERE status != 'converted'` — that
+// returns the row only when THIS caller is the one that actually performed
+// the transition. The contact-status update and activity insert (the
+// non-idempotent side effects) then run exactly once per real conversion.
+// The conditional update, contact update, and activity insert are wrapped
+// in a single transaction so a crash between them cannot leave the system
+// half-converted.
 router.post(
   "/leads/:id/convert",
   requireAuth,
@@ -251,23 +265,63 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const [row] = await db
-      .select({ lead: leadsTable, contact: contactsTable })
-      .from(leadsTable)
-      .innerJoin(contactsTable, eq(leadsTable.contactId, contactsTable.id))
-      .where(and(eq(leadsTable.id, id), eq(leadsTable.orgId, authReq.orgId)))
-      .limit(1);
-    if (!row) { res.status(404).json({ error: "Lead not found" }); return; }
-    if (row.lead.status === "converted") { res.status(409).json({ error: "Lead already converted" }); return; }
 
-    // Mark lead as converted
-    await db.update(leadsTable).set({ status: "converted", convertedAt: new Date() }).where(eq(leadsTable.id, id));
-    // Update contact status to prospect/enrolled
-    await db.update(contactsTable).set({ status: "prospect" }).where(eq(contactsTable.id, row.lead.contactId));
-    // Log activity
-    await db.insert(activitiesTable).values({ id: randomUUID(), orgId: authReq.orgId, contactId: row.lead.contactId, type: "status_change", body: "Lead converted to prospect", createdBy: authReq.userId });
+    const result = await db.transaction(async (tx) => {
+      // Conditional UPDATE — only transitions the row if it is not already
+      // converted. Postgres serializes concurrent UPDATEs against the same
+      // row, so at most one caller will see a non-empty `returning()`.
+      const [updated] = await tx
+        .update(leadsTable)
+        .set({ status: "converted", convertedAt: new Date() })
+        .where(
+          and(
+            eq(leadsTable.id, id),
+            eq(leadsTable.orgId, authReq.orgId),
+            ne(leadsTable.status, "converted"),
+          ),
+        )
+        .returning();
 
-    res.json({ success: true, contactId: row.lead.contactId });
+      if (!updated) {
+        // Either the lead does not exist / belongs to another org (404) or
+        // it was already converted (409). Disambiguate with a follow-up
+        // read inside the same transaction.
+        const [existing] = await tx
+          .select({ status: leadsTable.status })
+          .from(leadsTable)
+          .where(and(eq(leadsTable.id, id), eq(leadsTable.orgId, authReq.orgId)))
+          .limit(1);
+        return { kind: "not-transitioned" as const, existed: Boolean(existing) };
+      }
+
+      // Update contact status and write the activity row only for the
+      // single caller whose conditional UPDATE was the real transition.
+      await tx
+        .update(contactsTable)
+        .set({ status: "prospect" })
+        .where(eq(contactsTable.id, updated.contactId));
+      await tx.insert(activitiesTable).values({
+        id: randomUUID(),
+        orgId: authReq.orgId,
+        contactId: updated.contactId,
+        type: "status_change",
+        body: "Lead converted to prospect",
+        createdBy: authReq.userId,
+      });
+
+      return { kind: "converted" as const, contactId: updated.contactId };
+    });
+
+    if (result.kind === "not-transitioned") {
+      if (!result.existed) {
+        res.status(404).json({ error: "Lead not found" });
+      } else {
+        res.status(409).json({ error: "Lead already converted" });
+      }
+      return;
+    }
+
+    res.json({ success: true, contactId: result.contactId });
   },
 );
 
