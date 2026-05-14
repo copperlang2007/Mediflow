@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   text,
@@ -110,6 +111,14 @@ export const contactsTable = pgTable(
     index("contacts_org_id_status_idx").on(t.orgId, t.status),
     index("contacts_org_id_assigned_agent_idx").on(t.orgId, t.assignedAgentId),
     index("contacts_org_id_deleted_at_idx").on(t.orgId, t.deletedAt),
+    // Twilio inbound SMS hot path: webhooks.ts looks up contacts by
+    // phone ALONE (no org filter — phone is how we resolve the org). A
+    // composite `(org_id, phone)` index wouldn't help those queries.
+    // Partial predicate keeps the index small for email-only contacts
+    // with NULL phone. See migration 0012_contacts_phone_index.sql.
+    index("contacts_phone_idx")
+      .on(t.phone)
+      .where(sql`${t.phone} IS NOT NULL`),
   ],
 );
 
