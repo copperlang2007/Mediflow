@@ -102,7 +102,7 @@ router.patch(
     });
     const parsed = Schema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
-    const [updated] = await db.update(sequencesTable).set({ ...parsed.data }).where(eq(sequencesTable.id, id)).returning();
+    const [updated] = await db.update(sequencesTable).set({ ...parsed.data }).where(and(eq(sequencesTable.id, id), eq(sequencesTable.orgId, authReq.orgId))).returning();
     res.json(updated);
   },
 );
@@ -117,7 +117,7 @@ router.delete(
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const [existing] = await db.select({ id: sequencesTable.id }).from(sequencesTable).where(and(eq(sequencesTable.id, id), eq(sequencesTable.orgId, authReq.orgId))).limit(1);
     if (!existing) { res.status(404).json({ error: "Sequence not found" }); return; }
-    await db.delete(sequencesTable).where(eq(sequencesTable.id, id));
+    await db.delete(sequencesTable).where(and(eq(sequencesTable.id, id), eq(sequencesTable.orgId, authReq.orgId)));
     res.status(204).send();
   },
 );

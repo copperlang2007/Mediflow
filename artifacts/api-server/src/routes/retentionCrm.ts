@@ -203,7 +203,7 @@ router.patch(
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const [flag] = await db.select({ id: retentionFlagsTable.id, contactId: retentionFlagsTable.contactId }).from(retentionFlagsTable).where(and(eq(retentionFlagsTable.id, id), eq(retentionFlagsTable.orgId, authReq.orgId))).limit(1);
     if (!flag) { res.status(404).json({ error: "Flag not found" }); return; }
-    await db.update(retentionFlagsTable).set({ resolvedAt: new Date() }).where(eq(retentionFlagsTable.id, id));
+    await db.update(retentionFlagsTable).set({ resolvedAt: new Date() }).where(and(eq(retentionFlagsTable.id, id), eq(retentionFlagsTable.orgId, authReq.orgId)));
     res.json({ success: true });
   },
 );
