@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, usersTable } from "@workspace/db";
 import {
@@ -10,6 +10,7 @@ import {
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { type Role } from "../lib/permissions";
+import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const UpdateMeSchema = z.object({
   fullName: z.string().min(1).max(100).optional(),
@@ -106,9 +107,11 @@ router.get(
   requirePermission("user", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const { role, isActive } = req.query as {
+    const { role, isActive, limit, offset } = req.query as {
       role?: string;
       isActive?: string;
+      limit?: string;
+      offset?: string;
     };
 
     const conditions = [eq(usersTable.orgId, authReq.orgId)];
@@ -120,12 +123,30 @@ router.get(
       conditions.push(eq(usersTable.isActive, isActive === "true"));
     }
 
-    const users = await db
-      .select()
-      .from(usersTable)
-      .where(and(...conditions));
+    // Per-route cap of 200 (default 50). Matches the contract documented in
+    // the PR — list endpoints must never return unbounded result sets.
+    const limitNum = safeLimit(limit, 50, 200);
+    const offsetNum = safeOffset(offset);
 
-    res.json(users);
+    const [users, totalRes] = await Promise.all([
+      db
+        .select()
+        .from(usersTable)
+        .where(and(...conditions))
+        .limit(limitNum)
+        .offset(offsetNum),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(usersTable)
+        .where(and(...conditions)),
+    ]);
+
+    res.json({
+      data: users,
+      total: Number(totalRes[0]?.count ?? 0),
+      limit: limitNum,
+      offset: offsetNum,
+    });
   },
 );
 

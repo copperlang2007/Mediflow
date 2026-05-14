@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { db, agentsTable, stateLicensesTable, licenseRenewalAlertsTable } from "@workspace/db";
@@ -9,6 +9,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const router: IRouter = Router({ mergeParams: true });
 
@@ -69,13 +70,37 @@ router.get(
 
     if (!(await getAgentOrFail(agentId, authReq.orgId, res))) return;
 
-    const licenses = await db
-      .select()
-      .from(stateLicensesTable)
-      .where(eq(stateLicensesTable.agentId, agentId))
-      .orderBy(stateLicensesTable.stateCode);
+    const { limit, offset } = req.query as {
+      limit?: string;
+      offset?: string;
+    };
 
-    res.json(licenses);
+    // Bounded in practice (~50 US states per agent) but we still apply the
+    // shared guard for consistency with other list endpoints. Per-route cap
+    // of 200 leaves headroom for territories / multi-license-type rows.
+    const limitNum = safeLimit(limit, 50, 200);
+    const offsetNum = safeOffset(offset);
+
+    const [licenses, totalRes] = await Promise.all([
+      db
+        .select()
+        .from(stateLicensesTable)
+        .where(eq(stateLicensesTable.agentId, agentId))
+        .orderBy(stateLicensesTable.stateCode)
+        .limit(limitNum)
+        .offset(offsetNum),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(stateLicensesTable)
+        .where(eq(stateLicensesTable.agentId, agentId)),
+    ]);
+
+    res.json({
+      data: licenses,
+      total: Number(totalRes[0]?.count ?? 0),
+      limit: limitNum,
+      offset: offsetNum,
+    });
   },
 );
 

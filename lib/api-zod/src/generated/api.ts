@@ -68,31 +68,42 @@ export const UpdateMeResponse = zod.object({
 /**
  * @summary List all users (admin only)
  */
+export const getUsersQueryLimitDefault = 50;
+export const getUsersQueryOffsetDefault = 0;
+
 export const GetUsersQueryParams = zod.object({
   role: zod.coerce.string().optional(),
   isActive: zod.coerce.boolean().optional(),
+  limit: zod.coerce.number().default(getUsersQueryLimitDefault),
+  offset: zod.coerce.number().default(getUsersQueryOffsetDefault),
 });
 
-export const GetUsersResponseItem = zod.object({
-  id: zod.string(),
-  orgId: zod.string(),
-  email: zod.string(),
-  fullName: zod.string(),
-  role: zod.enum([
-    "super_admin",
-    "agency_admin",
-    "compliance_manager",
-    "agent_support",
-    "viewer",
-    "agent",
-  ]),
-  avatarUrl: zod.string().nullish(),
-  isActive: zod.boolean(),
-  lastLoginAt: zod.coerce.date().nullish(),
-  createdAt: zod.coerce.date(),
-  updatedAt: zod.coerce.date(),
+export const GetUsersResponse = zod.object({
+  data: zod.array(
+    zod.object({
+      id: zod.string(),
+      orgId: zod.string(),
+      email: zod.string(),
+      fullName: zod.string(),
+      role: zod.enum([
+        "super_admin",
+        "agency_admin",
+        "compliance_manager",
+        "agent_support",
+        "viewer",
+        "agent",
+      ]),
+      avatarUrl: zod.string().nullish(),
+      isActive: zod.boolean(),
+      lastLoginAt: zod.coerce.date().nullish(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+    }),
+  ),
+  total: zod.number(),
+  limit: zod.number(),
+  offset: zod.number(),
 });
-export const GetUsersResponse = zod.array(GetUsersResponseItem);
 
 /**
  * @summary Update a user's role (admin only)
@@ -526,27 +537,41 @@ export const GetAgentLicensesParams = zod.object({
   id: zod.coerce.string(),
 });
 
-export const GetAgentLicensesResponseItem = zod.object({
-  id: zod.string(),
-  agentId: zod.string(),
-  stateCode: zod.string(),
-  licenseType: zod.string(),
-  licenseNumber: zod.string().nullish(),
-  issueDate: zod.coerce.date().nullish(),
-  expiryDate: zod.coerce.date().nullish(),
-  status: zod.enum([
-    "active",
-    "pending",
-    "expired",
-    "suspended",
-    "not_appointed",
-  ]),
-  renewalSubmittedAt: zod.coerce.date().nullish(),
-  documentKey: zod.string().nullish(),
-  createdAt: zod.coerce.date(),
-  updatedAt: zod.coerce.date(),
+export const getAgentLicensesQueryLimitDefault = 50;
+export const getAgentLicensesQueryOffsetDefault = 0;
+
+export const GetAgentLicensesQueryParams = zod.object({
+  limit: zod.coerce.number().default(getAgentLicensesQueryLimitDefault),
+  offset: zod.coerce.number().default(getAgentLicensesQueryOffsetDefault),
 });
-export const GetAgentLicensesResponse = zod.array(GetAgentLicensesResponseItem);
+
+export const GetAgentLicensesResponse = zod.object({
+  data: zod.array(
+    zod.object({
+      id: zod.string(),
+      agentId: zod.string(),
+      stateCode: zod.string(),
+      licenseType: zod.string(),
+      licenseNumber: zod.string().nullish(),
+      issueDate: zod.coerce.date().nullish(),
+      expiryDate: zod.coerce.date().nullish(),
+      status: zod.enum([
+        "active",
+        "pending",
+        "expired",
+        "suspended",
+        "not_appointed",
+      ]),
+      renewalSubmittedAt: zod.coerce.date().nullish(),
+      documentKey: zod.string().nullish(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+    }),
+  ),
+  total: zod.number(),
+  limit: zod.number(),
+  offset: zod.number(),
+});
 
 /**
  * @summary Add a state license to an agent

@@ -132,15 +132,23 @@ paths:
           in: query
           schema:
             type: boolean
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
       responses:
         "200":
-          description: List of users
+          description: Paginated user list
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/User"
+                $ref: "#/components/schemas/UserListResponse"
 
   /users/{userId}/role:
     patch:
@@ -442,15 +450,23 @@ paths:
           required: true
           schema:
             type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
       responses:
         "200":
-          description: List of licenses
+          description: Paginated license list for an agent
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/StateLicense"
+                $ref: "#/components/schemas/StateLicenseListResponse"
     post:
       operationId: createAgentLicense
       tags: [licenses]
@@ -5868,6 +5884,36 @@ components:
         total:
           type: integer
       required: [data, total]
+
+    UserListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [data, total, limit, offset]
+
+    StateLicenseListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/StateLicense"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [data, total, limit, offset]
 
     BulkContactActionBody:
       type: object

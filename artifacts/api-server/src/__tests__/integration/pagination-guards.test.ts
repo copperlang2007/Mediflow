@@ -57,10 +57,18 @@ let handle: Awaited<ReturnType<typeof bootTestDb>>;
 let org: { id: string };
 let superAdmin: { id: string };
 let agentSupport: { id: string };
+let licenseTestAgentId: string;
 
 const SEED_CONTACT_COUNT = 1500;
 const SEED_AGENT_COUNT = 1100;
 const SEED_AUDIT_COUNT = 600;
+// 75 extra users on top of the two real test fixtures (superAdmin + agentSupport)
+// so we can exercise the GET /users default / offset / explicit-limit behaviour.
+const SEED_BULK_USER_COUNT = 75;
+// 60 licenses on the dedicated license-test agent — above the route's default
+// of 50 so the default-limit case actually clamps, and below the 200 cap so
+// `?limit=200` returns every row.
+const SEED_LICENSE_COUNT = 60;
 
 beforeAll(async () => {
   handle = await bootTestDb();
@@ -114,6 +122,47 @@ beforeAll(async () => {
   }
   await handle.pg.exec(
     `INSERT INTO audit_log (id, org_id, user_id, action, resource_type, resource_id) VALUES ${auditValues.join(",")};`,
+  );
+
+  // GET /users coverage: seed 75 extra rows so the org has > the default
+  // limit of 50 but < the 200 cap. This lets us assert each of:
+  //   - default request          → 50 rows
+  //   - ?limit=200               → all rows
+  //   - ?offset=50 (+ ?limit=50) → the remaining tail
+  const userValues: string[] = [];
+  for (let i = 0; i < SEED_BULK_USER_COUNT; i++) {
+    const id = `pgu-${i}-${randomUUID().slice(0, 8)}`;
+    userValues.push(
+      `('${id}', '${org.id}', 'pgu${i}@x.test', 'Bulk User ${i}', 'agent', true)`,
+    );
+  }
+  await handle.pg.exec(
+    `INSERT INTO users (id, org_id, email, full_name, role, is_active) VALUES ${userValues.join(",")};`,
+  );
+
+  // GET /agents/:id/licenses coverage: a dedicated agent with 60 licenses.
+  // In production a real US-state agent caps around 50 rows, but the route's
+  // guard is sized for 200 — seeding above the default exercises the clamp.
+  // Each license needs a unique (agentId, stateCode, licenseType) combination
+  // in practice, but the table has no such constraint, so synthetic codes are
+  // fine for an integration test.
+  licenseTestAgentId = `lic-test-agent-${randomUUID().slice(0, 8)}`;
+  await handle.pg.exec(
+    `INSERT INTO agents (id, org_id, first_name, last_name, email) VALUES ('${licenseTestAgentId}', '${org.id}', 'License', 'Tester', 'lic@x.test');`,
+  );
+  const licenseValues: string[] = [];
+  for (let i = 0; i < SEED_LICENSE_COUNT; i++) {
+    const id = randomUUID();
+    // Synthetic 2-char state code: padStart keeps the column-length=2
+    // assumption from `CreateLicenseSchema` happy if any other layer reads
+    // it; for the GET path the value is opaque.
+    const stateCode = i.toString(36).padStart(2, "0").toUpperCase();
+    licenseValues.push(
+      `('${id}', '${licenseTestAgentId}', '${stateCode}', 'Life & Health', 'active')`,
+    );
+  }
+  await handle.pg.exec(
+    `INSERT INTO state_licenses (id, agent_id, state_code, license_type, status) VALUES ${licenseValues.join(",")};`,
   );
 });
 
@@ -261,6 +310,103 @@ describe("Pagination guards on list endpoints", () => {
       .set(withAuth(superAdmin.id));
     expect(res.status).toBe(200);
     expect(res.body.offset).toBe(0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /users — previously unbounded. New contract: { data, total, limit,
+  // offset } with default limit 50 and a hard cap of 200. We seed 75 bulk
+  // users on top of two fixture users (superAdmin + agentSupport) ⇒ 77 total
+  // in the org.
+  // ---------------------------------------------------------------------------
+  const TOTAL_USERS_IN_ORG = SEED_BULK_USER_COUNT + 2;
+
+  it("GET /users returns the default page of 50 when no limit is specified", async () => {
+    const res = await request(app)
+      .get("/api/users")
+      .set(withAuth(superAdmin.id));
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data.length).toBe(50);
+    expect(res.body.limit).toBe(50);
+    expect(res.body.offset).toBe(0);
+    expect(res.body.total).toBe(TOTAL_USERS_IN_ORG);
+  });
+
+  it("GET /users?limit=200 returns every user in the org (75 seeded + 2 fixtures)", async () => {
+    const res = await request(app)
+      .get("/api/users?limit=200")
+      .set(withAuth(superAdmin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBe(TOTAL_USERS_IN_ORG);
+    expect(res.body.limit).toBe(200);
+    expect(res.body.total).toBe(TOTAL_USERS_IN_ORG);
+  });
+
+  it("GET /users?offset=50&limit=50 returns the remaining 27 rows", async () => {
+    const res = await request(app)
+      .get("/api/users?offset=50&limit=50")
+      .set(withAuth(superAdmin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBe(TOTAL_USERS_IN_ORG - 50);
+    expect(res.body.limit).toBe(50);
+    expect(res.body.offset).toBe(50);
+    expect(res.body.total).toBe(TOTAL_USERS_IN_ORG);
+  });
+
+  it("GET /users?limit=99999 is clamped to the 200 cap, not echoed back", async () => {
+    const res = await request(app)
+      .get("/api/users?limit=99999")
+      .set(withAuth(superAdmin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.limit).toBe(200);
+    expect(res.body.data.length).toBeLessThanOrEqual(200);
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /agents/:id/licenses — previously unbounded. New contract is the
+  // same shape as /users. 60 licenses seeded against `licenseTestAgentId`.
+  // ---------------------------------------------------------------------------
+
+  it("GET /agents/:id/licenses returns the default page of 50 with no limit", async () => {
+    const res = await request(app)
+      .get(`/api/agents/${licenseTestAgentId}/licenses`)
+      .set(withAuth(superAdmin.id));
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data.length).toBe(50);
+    expect(res.body.limit).toBe(50);
+    expect(res.body.offset).toBe(0);
+    expect(res.body.total).toBe(SEED_LICENSE_COUNT);
+  });
+
+  it("GET /agents/:id/licenses?limit=200 returns all 60 seeded licenses", async () => {
+    const res = await request(app)
+      .get(`/api/agents/${licenseTestAgentId}/licenses?limit=200`)
+      .set(withAuth(superAdmin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBe(SEED_LICENSE_COUNT);
+    expect(res.body.limit).toBe(200);
+    expect(res.body.total).toBe(SEED_LICENSE_COUNT);
+  });
+
+  it("GET /agents/:id/licenses?offset=50&limit=50 returns the trailing 10 rows", async () => {
+    const res = await request(app)
+      .get(`/api/agents/${licenseTestAgentId}/licenses?offset=50&limit=50`)
+      .set(withAuth(superAdmin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBe(SEED_LICENSE_COUNT - 50);
+    expect(res.body.limit).toBe(50);
+    expect(res.body.offset).toBe(50);
+    expect(res.body.total).toBe(SEED_LICENSE_COUNT);
+  });
+
+  it("GET /agents/:id/licenses?limit=99999 is clamped to the 200 cap", async () => {
+    const res = await request(app)
+      .get(`/api/agents/${licenseTestAgentId}/licenses?limit=99999`)
+      .set(withAuth(superAdmin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.limit).toBe(200);
+    expect(res.body.data.length).toBeLessThanOrEqual(200);
   });
 });
 
