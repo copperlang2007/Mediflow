@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, sql, desc, asc } from "drizzle-orm";
+import { eq, and, inArray, isNull, sql, desc, asc } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import {
@@ -220,31 +220,106 @@ router.post(
     if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
 
     const steps = await db.select().from(sequenceStepsTable).where(eq(sequenceStepsTable.sequenceId, seqId)).orderBy(asc(sequenceStepsTable.orderIndex));
-    const enrolled: string[] = [];
+
+    // ---- Set-based bulk enroll ------------------------------------------------
+    // Previously this loop did up to 5 round-trips per contact (~5N + 1). We
+    // now collapse it to a fixed number of queries: 1 contact lookup, 1
+    // active-enrollment lookup, 1 batch enrollment insert, 1 batch activity
+    // insert, and N parallel enqueue calls (pg-boss `send` is per-job).
+    const contactIds = parsed.data.contactIds;
     const skipped: string[] = [];
 
-    for (const contactId of parsed.data.contactIds) {
-      // Verify contact belongs to org
-      const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, authReq.orgId))).limit(1);
-      if (!contact) { skipped.push(contactId); continue; }
+    // 1) Verify contacts in one query.
+    const foundContactRows = await db
+      .select({ id: contactsTable.id })
+      .from(contactsTable)
+      .where(
+        and(
+          inArray(contactsTable.id, contactIds),
+          eq(contactsTable.orgId, authReq.orgId),
+          isNull(contactsTable.deletedAt),
+        ),
+      );
+    const foundIds = new Set(foundContactRows.map((r) => r.id));
 
-      // Check not already actively enrolled
-      const [existing] = await db.select({ id: sequenceEnrollmentsTable.id }).from(sequenceEnrollmentsTable).where(and(eq(sequenceEnrollmentsTable.sequenceId, seqId), eq(sequenceEnrollmentsTable.contactId, contactId), eq(sequenceEnrollmentsTable.status, "active"))).limit(1);
-      if (existing) { skipped.push(contactId); continue; }
+    // 2) Check existing active enrollments in one query (only among found
+    //    contacts — saves bandwidth and avoids leaking non-org rows even if
+    //    the FK index were ever loose).
+    const foundIdsArr = [...foundIds];
+    const existingActiveRows = foundIdsArr.length
+      ? await db
+          .select({ contactId: sequenceEnrollmentsTable.contactId })
+          .from(sequenceEnrollmentsTable)
+          .where(
+            and(
+              eq(sequenceEnrollmentsTable.sequenceId, seqId),
+              inArray(sequenceEnrollmentsTable.contactId, foundIdsArr),
+              eq(sequenceEnrollmentsTable.status, "active"),
+            ),
+          )
+      : [];
+    const alreadyEnrolled = new Set(existingActiveRows.map((r) => r.contactId));
 
-      const enrollmentId = randomUUID();
-      await db.insert(sequenceEnrollmentsTable).values({ id: enrollmentId, sequenceId: seqId, contactId, status: "active", nextStepIndex: 0, nextStepAt: new Date() });
-      await db.insert(activitiesTable).values({ id: randomUUID(), orgId: authReq.orgId, contactId, type: "sequence_enrolled", body: `Enrolled in sequence: ${seq.name}`, createdBy: authReq.userId });
-
-      // Kick off first step immediately only for actionable step types (sms/email).
-      // wait and task steps are handled by the scheduler on their delay schedule, not immediately.
-      if (steps.length > 0 && (steps[0].stepType === "sms" || steps[0].stepType === "email")) {
-        await enqueue(JOB_NAMES.SEND_SEQUENCE_STEP, { sequenceId: seqId, contactId, stepIndex: 0, channel: steps[0].stepType });
+    // 3) Compute final enroll-list. Preserve original input order so any
+    //    downstream consumers that iterate the response see deterministic
+    //    ordering.
+    const enrollList: string[] = [];
+    for (const id of contactIds) {
+      if (!foundIds.has(id) || alreadyEnrolled.has(id)) {
+        skipped.push(id);
+      } else {
+        enrollList.push(id);
       }
-      enrolled.push(contactId);
     }
 
-    res.json({ enrolled: enrolled.length, skipped: skipped.length });
+    if (enrollList.length > 0) {
+      const now = new Date();
+
+      // 4) Batch insert enrollments.
+      await db.insert(sequenceEnrollmentsTable).values(
+        enrollList.map((contactId) => ({
+          id: randomUUID(),
+          sequenceId: seqId,
+          contactId,
+          status: "active" as const,
+          nextStepIndex: 0,
+          nextStepAt: now,
+        })),
+      );
+
+      // 5) Batch insert activities.
+      await db.insert(activitiesTable).values(
+        enrollList.map((contactId) => ({
+          id: randomUUID(),
+          orgId: authReq.orgId,
+          contactId,
+          type: "sequence_enrolled" as const,
+          body: `Enrolled in sequence: ${seq.name}`,
+          createdBy: authReq.userId,
+        })),
+      );
+
+      // 6) Kick off first step immediately only for actionable step types
+      //    (sms/email). wait and task steps are handled by the scheduler on
+      //    their delay schedule, not immediately. pg-boss `send` is per-job;
+      //    parallelize so the wall-clock cost is one RTT, not N.
+      const firstStep = steps[0];
+      if (firstStep && (firstStep.stepType === "sms" || firstStep.stepType === "email")) {
+        const channel = firstStep.stepType;
+        await Promise.all(
+          enrollList.map((contactId) =>
+            enqueue(JOB_NAMES.SEND_SEQUENCE_STEP, {
+              sequenceId: seqId,
+              contactId,
+              stepIndex: 0,
+              channel,
+            }),
+          ),
+        );
+      }
+    }
+
+    res.json({ enrolled: enrollList.length, skipped: skipped.length });
   },
 );
 
