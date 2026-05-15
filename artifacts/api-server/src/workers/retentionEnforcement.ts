@@ -64,6 +64,62 @@ export async function retentionEnforcementWorker(): Promise<void> {
   let totalHardDeleteTasksCreated = 0;
 
   for (const org of orgs) {
+    // Serialize the whole per-org sweep behind a Postgres advisory lock.
+    //
+    // Without this, two concurrent runs (clock-skewed cron double-fire, a
+    // manual re-trigger overlapping the scheduled run, or two pg-boss
+    // workers both claiming the job) race in the soft-delete phase: both
+    // SELECT `deleted_at IS NULL` for the same record before either
+    // commits, then both proceed. The retention-review TASK is deduped by
+    // `task_instances.retention_review_key` (PR #77), but the
+    // `retention_soft_delete` audit-log row is NOT — it inserts with a
+    // fresh `randomUUID()` and no `ON CONFLICT`, so a concurrent run writes
+    // a DUPLICATE audit row for a single logical soft-delete. A duplicated
+    // audit trail is a HIPAA integrity problem.
+    //
+    // `pg_advisory_xact_lock` is transaction-scoped: a second concurrent
+    // run for the SAME org blocks here until the first transaction
+    // commits, then sees the already-applied state (`deleted_at` set,
+    // review task present) and no-ops. The lock key is hashed per-org, so
+    // different orgs' sweeps still run concurrently. The lock is released
+    // automatically on commit/rollback — no try/finally cleanup needed.
+    //
+    // The per-org sweep is a bounded batch (a handful of SELECT/UPDATE/
+    // INSERT loops over expired rows, no external network calls), so
+    // holding one transaction for its duration is acceptable; this mirrors
+    // the commission-reconcile lock from PR #69.
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext('retention_enforcement:' || ${org.id}))`,
+      );
+
+      const result = await runOrgSweep(tx, org.id);
+      totalSoftDeleted += result.softDeleted;
+      totalHardDeleteTasksCreated += result.hardDeleteTasksCreated;
+    });
+  }
+
+  logger.info(
+    { totalSoftDeleted, totalHardDeleteTasksCreated },
+    "retention-enforcement: run complete",
+  );
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Run the retention sweep for a single org inside the caller's
+ * transaction (which holds the per-org advisory lock).
+ */
+async function runOrgSweep(
+  db: Tx,
+  orgId: string,
+): Promise<{ softDeleted: number; hardDeleteTasksCreated: number }> {
+  let totalSoftDeleted = 0;
+  let totalHardDeleteTasksCreated = 0;
+  const org = { id: orgId };
+
+  {
     const policies = await db
       .select()
       .from(dataRetentionPoliciesTable)
@@ -481,8 +537,5 @@ export async function retentionEnforcementWorker(): Promise<void> {
     }
   }
 
-  logger.info(
-    { totalSoftDeleted, totalHardDeleteTasksCreated },
-    "retention-enforcement: run complete",
-  );
+  return { softDeleted: totalSoftDeleted, hardDeleteTasksCreated: totalHardDeleteTasksCreated };
 }
