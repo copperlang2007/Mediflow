@@ -662,18 +662,31 @@ router.post(
       case "add_tag": {
         const tag = String(payload?.tag ?? "");
         if (!tag) { res.status(400).json({ error: "tag required" }); return; }
-        for (const c of contacts) {
-          const newTags = [...new Set([...(c.tags ?? []), tag])];
-          await db.update(contactsTable).set({ tags: newTags }).where(and(eq(contactsTable.id, c.id), eq(contactsTable.orgId, authReq.orgId)));
-        }
+        // Set-based update: append `tag` to each row's array and de-duplicate
+        // entirely in Postgres. This collapses the previous per-row UPDATE
+        // loop (up to 200 round-trips) into a single round-trip. The orgId
+        // predicate is defense-in-depth — the earlier length check already
+        // proved every id belongs to the caller's org (and isn't soft-deleted).
+        await db
+          .update(contactsTable)
+          .set({
+            tags: sql`(SELECT array_agg(DISTINCT elem) FROM unnest(coalesce(${contactsTable.tags}, ARRAY[]::text[]) || ARRAY[${tag}]::text[]) AS elem)`,
+          })
+          .where(and(inArray(contactsTable.id, ids), eq(contactsTable.orgId, authReq.orgId)));
         break;
       }
       case "remove_tag": {
         const tag = String(payload?.tag ?? "");
-        for (const c of contacts) {
-          const newTags = (c.tags ?? []).filter((t) => t !== tag);
-          await db.update(contactsTable).set({ tags: newTags }).where(and(eq(contactsTable.id, c.id), eq(contactsTable.orgId, authReq.orgId)));
-        }
+        // Set-based update: array_remove() drops every occurrence of `tag`
+        // from each row's tags column in a single round-trip. coalesce()
+        // guards against NULL tag columns since array_remove(NULL, _) is
+        // NULL in Postgres; we normalize to an empty text[] instead.
+        await db
+          .update(contactsTable)
+          .set({
+            tags: sql`array_remove(coalesce(${contactsTable.tags}, ARRAY[]::text[]), ${tag}::text)`,
+          })
+          .where(and(inArray(contactsTable.id, ids), eq(contactsTable.orgId, authReq.orgId)));
         break;
       }
       case "set_status": {
