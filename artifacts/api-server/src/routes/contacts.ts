@@ -13,6 +13,7 @@ import {
   sequenceEnrollmentsTable,
   sequencesTable,
   retentionFlagsTable,
+  contactStatusEnum,
   encryptMedicareId,
   hashMedicareId,
   isMedicareIdEncryptionReadEnabled,
@@ -20,9 +21,11 @@ import {
 import {
   requireAuth,
   requirePermission,
+  requireExportConfirm,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { logExport } from "./reports/shared";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import { logger } from "../lib/logger";
@@ -45,6 +48,22 @@ function maskContact<T extends { dob?: Date | null; medicareId?: string | null; 
     healthConditions: contact.healthConditions != null ? [] : null,
   };
 }
+
+// M1 — confirm an agent belongs to the caller's org before assigning a
+// contact to them. Prevents cross-org agent assignment via a forged
+// assignedAgentId in the request body.
+async function isAgentInOrg(agentId: string, orgId: string): Promise<boolean> {
+  const [agent] = await db
+    .select({ id: agentsTable.id })
+    .from(agentsTable)
+    .where(and(eq(agentsTable.id, agentId), eq(agentsTable.orgId, orgId)))
+    .limit(1);
+  return Boolean(agent);
+}
+
+// M2 — canonical contact-status enum, sourced from the shared db schema so
+// it cannot drift from the column definition.
+const ContactStatusSchema = z.enum(contactStatusEnum.enumValues);
 
 router.use(
   auditMiddleware("contact", undefined, {
@@ -164,6 +183,11 @@ router.post(
       return;
     }
     const d = parsed.data;
+    // M1 — reject an assignedAgentId that doesn't belong to the caller's org.
+    if (d.assignedAgentId && !(await isAgentInOrg(d.assignedAgentId, authReq.orgId))) {
+      res.status(400).json({ error: "Assigned agent not found" });
+      return;
+    }
     // Dual-write the encrypted + hash columns alongside the plaintext for
     // HIPAA-2 (column-level encryption). The plaintext column stays the
     // source of truth until MEDICARE_ID_ENCRYPTION_ENABLED flips on after
@@ -262,6 +286,12 @@ router.patch(
     const parsed = UpdateContactSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
     const d = parsed.data;
+
+    // M1 — reject an assignedAgentId that doesn't belong to the caller's org.
+    if (d.assignedAgentId && !(await isAgentInOrg(d.assignedAgentId, authReq.orgId))) {
+      res.status(400).json({ error: "Assigned agent not found" });
+      return;
+    }
 
     const updates: Record<string, unknown> = {};
     if (d.firstName !== undefined) updates.firstName = d.firstName;
@@ -656,6 +686,11 @@ router.post(
       case "assign_agent": {
         const agentId = String(payload?.agentId ?? "");
         if (!agentId) { res.status(400).json({ error: "agentId required" }); return; }
+        // M1 — reject an agentId that doesn't belong to the caller's org.
+        if (!(await isAgentInOrg(agentId, authReq.orgId))) {
+          res.status(400).json({ error: "Assigned agent not found" });
+          return;
+        }
         await db.update(contactsTable).set({ assignedAgentId: agentId }).where(and(inArray(contactsTable.id, ids), eq(contactsTable.orgId, authReq.orgId)));
         break;
       }
@@ -690,11 +725,27 @@ router.post(
         break;
       }
       case "set_status": {
-        const status = String(payload?.status ?? "") as "lead" | "prospect" | "enrolled" | "retained" | "lost" | "do_not_contact";
+        // M2 — validate against the canonical contact-status enum.
+        const statusParsed = ContactStatusSchema.safeParse(payload?.status);
+        if (!statusParsed.success) {
+          res.status(400).json({ error: "Invalid status", details: statusParsed.error.issues });
+          return;
+        }
+        const status = statusParsed.data;
         await db.update(contactsTable).set({ status }).where(and(inArray(contactsTable.id, ids), eq(contactsTable.orgId, authReq.orgId)));
         break;
       }
       case "export_csv": {
+        // H1 — this is the largest PHI egress path in the app. Apply the same
+        // step-up confirmation gate as the report/admin CSV exports. We can't
+        // mount `requireExportConfirm` as route-level middleware because this
+        // endpoint is multi-action, so we invoke it in-handler: it sends the
+        // (identical) 401/428 response itself if the gate fails, in which case
+        // `next` is never called and we bail out without exporting.
+        let confirmed = false;
+        requireExportConfirm(req, res, () => { confirmed = true; });
+        if (!confirmed) return;
+
         const headers = ["id","firstName","lastName","email","phone","status","medicareId","currentPlanType","stateCode","zipCode","leadSource","createdAt"];
         const maskedContacts = contacts.map((c) => maskContact(c, authReq.userRole));
         const rows = maskedContacts.map((c) => headers.map((h) => {
@@ -702,6 +753,17 @@ router.post(
           return `"${String(v ?? "").replace(/"/g, '""')}"`;
         }).join(","));
         const csv = [headers.join(","), ...rows].join("\n");
+
+        // H1 — record the export in data_export_log so the export-anomaly
+        // detection worker (workers/exportAnomalyCheck.ts) can see it.
+        await logExport(
+          authReq.orgId,
+          authReq.userId,
+          "contacts_csv",
+          { contactIds: ids },
+          maskedContacts.length,
+        );
+
         res.setHeader("Content-Type", "text/csv");
         res.setHeader("Content-Disposition", "attachment; filename=contacts.csv");
         res.send(csv);
