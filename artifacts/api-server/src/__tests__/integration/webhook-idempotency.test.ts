@@ -21,7 +21,7 @@
  */
 import { vi, describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 const { dbF, clerkF, jobsF, smsF, sseF } = vi.hoisted(() => ({
   dbF: async (): Promise<Record<string, unknown>> => {
@@ -275,19 +275,19 @@ describe("Twilio inbound SMS webhook — idempotency on retries", () => {
   });
 });
 
-describe("Twilio inbound SMS webhook — phone-lookup performance", () => {
+describe("Twilio inbound SMS webhook — phone-lookup index guard", () => {
   // Regression guard for the `contacts_phone_idx` partial index
-  // (migration 0012). The webhook does multiple `WHERE phone = ?`
-  // lookups per inbound SMS. Without the index, a 100k-contact org
-  // would seq-scan on every request and breach Twilio's 10s timeout.
+  // (migration 0012). The webhook does `WHERE phone = ?` lookups per
+  // inbound SMS. Without the index, a 100k-contact org would seq-scan
+  // on every request and breach Twilio's 10s timeout.
   //
-  // We seed 1000 extra rows (in addition to the one already created
-  // in the file's `beforeAll`) — large enough that a seq scan would
-  // visibly cost more than the indexed lookup, small enough that the
-  // test stays fast. The threshold is intentionally loose; this test
-  // is not a microbenchmark, it's a smoke check that nobody dropped
-  // the index.
-  it("processes inbound SMS in well under 100ms with 1000 seeded contacts", async () => {
+  // This used to be a wall-clock micro-benchmark (`elapsed < 100ms`),
+  // which flaked under runner load. The test's real intent is "nobody
+  // dropped the phone index", so we assert that *functionally*: seed
+  // enough rows that the planner would choose a seq scan if no index
+  // existed, then check the query plan actually uses `contacts_phone_idx`.
+  // That is deterministic — no timing dependence.
+  it("plans phone lookups via contacts_phone_idx, not a seq scan", async () => {
     // Insert 1000 contacts with unique phones in the same org. We
     // don't go through seedContact for each because that's slow and
     // its options are richer than we need — a bulk insert is plenty.
@@ -301,16 +301,33 @@ describe("Twilio inbound SMS webhook — phone-lookup performance", () => {
     }));
     await db.insert(contactsTable).values(filler);
 
+    // ANALYZE so the planner has fresh row-count stats for this table,
+    // then inspect the plan for the exact lookup the webhook performs.
+    await db.execute(sql`ANALYZE contacts`);
+    const plan = await db.execute(
+      sql`EXPLAIN SELECT * FROM contacts WHERE phone = ${contactPhone}`,
+    );
+    const planText = (plan.rows as Array<Record<string, unknown>>)
+      .map((r) => String(Object.values(r)[0]))
+      .join("\n");
+
+    expect(planText).toContain("contacts_phone_idx");
+    expect(planText).not.toContain("Seq Scan");
+
+    // And the webhook itself still functions correctly at this row count:
+    // the inbound SMS lands as exactly one message row.
     const sid = `SM${randomUUID().replace(/-/g, "")}`;
-    const start = Date.now();
     const res = await request(app)
       .post("/webhooks/twilio/sms")
       .type("form")
       .set("x-twilio-signature", "dummy")
-      .send(twilioPayload(sid, "perf check"));
-    const elapsed = Date.now() - start;
-
+      .send(twilioPayload(sid, "index guard check"));
     expect(res.status).toBe(200);
-    expect(elapsed).toBeLessThan(100);
+
+    const rows = await db
+      .select()
+      .from(messagesTable)
+      .where(eq(messagesTable.providerMessageId, sid));
+    expect(rows).toHaveLength(1);
   });
 });

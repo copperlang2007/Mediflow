@@ -140,11 +140,14 @@ describe("POST /api/sequences/:id/enroll — bulk enrollment", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ enrolled: 100, skipped: 10 });
 
-    // Loose wall-clock budget. Under the old per-contact pattern this would
-    // be ~5 * 110 = 550 sequential pglite queries; the set-based version
-    // does ~5 fixed queries + N parallel enqueues. 5s is generous to keep
-    // CI noise from causing flakes.
-    expect(elapsed).toBeLessThan(5000);
+    // Coarse wall-clock backstop only. The real assertions are the status
+    // and `{ enrolled, skipped }` body above; this just catches a gross
+    // regression back to the old per-contact pattern (~550 sequential
+    // pglite queries) vs. the set-based version (~5 fixed queries + N
+    // parallel enqueues). The bound is deliberately huge — a loaded CI
+    // runner can stall an HTTP round-trip for seconds — so it cannot flake
+    // while still failing if someone reintroduces O(N) sequential queries.
+    expect(elapsed).toBeLessThan(15000);
 
     const enrolls = await handle.db
       .select()
