@@ -1,13 +1,34 @@
 /**
  * In-process Postgres test harness backed by `@electric-sql/pglite`.
  *
- * - `setupTestDb()` boots a fresh PGlite instance, runs every migration in
- *   `lib/db/migrations/*.sql` (in lexical order, splitting on the
- *   drizzle-emitted `--> statement-breakpoint` marker) and returns a
- *   drizzle handle plus the raw client.
+ * - `setupTestDb()` boots a PGlite instance with the full schema applied and
+ *   returns a drizzle handle plus the raw client.
  * - `seedOrg() / seedUser() / seedAgent() / seedContact()` insert the
  *   minimum-viable rows needed for integration tests against the API.
  * - `teardownTestDb()` closes the PGlite handle.
+ *
+ * ## Migration snapshot (why this file is not just "replay 16 SQL files")
+ *
+ * Replaying every drizzle migration against a fresh pglite costs ~3s of
+ * single-threaded work. With `pnpm test` fanning ~35 integration files out
+ * across forked workers, CPU is heavily oversubscribed and that 3s job can
+ * stretch past the 30s `beforeAll` hook timeout — flakily, on whichever
+ * files happened to lose the CPU lottery.
+ *
+ * The fix removes the cost rather than masking it: we replay the migrations
+ * exactly ONCE, `dumpDataDir()` the resulting database to an (uncompressed)
+ * tarball, and every subsequent `setupTestDb()` boots a fresh pglite by
+ * `loadDataDir`-ing that snapshot. A restore is ~0.5s vs ~3s for a replay,
+ * and — crucially — it is a bulk in-memory load rather than 200+ tiny
+ * `exec()` round-trips, so it degrades far more gracefully under contention.
+ *
+ * The snapshot is built lazily on first use and cached two ways:
+ *   1. In-process, via a module-level promise (one build per worker at most).
+ *   2. On disk, in the OS temp dir keyed by a hash of the migration files,
+ *      so sibling workers reuse the first worker's build instead of each
+ *      paying the ~3s replay. The file is written atomically (write to a
+ *      unique temp name, then `rename`) so a half-written snapshot is never
+ *      observed.
  *
  * We intentionally keep this file dependency-free of `@workspace/db`'s `db`
  * export so the vi.mock factories that wire it in can import it without
@@ -19,9 +40,10 @@ import { drizzle } from "drizzle-orm/pglite";
 import * as schema from "@workspace/db/schema";
 import { encryptMedicareId } from "@workspace/db/encryption/medicareId";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -61,10 +83,11 @@ function splitStatements(sql: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-export async function setupTestDb(): Promise<TestDbHandle> {
-  const pg = new PGlite();
-  await pg.query("SELECT 1"); // wait for ready
-
+/**
+ * Replay every migration against a fresh pglite. This is the slow path —
+ * only the snapshot builder calls it, exactly once per migration revision.
+ */
+async function migrateFresh(pg: PGlite): Promise<void> {
   for (const sql of loadMigrationSql()) {
     for (const stmt of splitStatements(sql)) {
       try {
@@ -77,6 +100,92 @@ export async function setupTestDb(): Promise<TestDbHandle> {
       }
     }
   }
+}
+
+/**
+ * Content hash of all migration files — used to key the on-disk snapshot so
+ * a stale snapshot is never reused after a migration is added or edited.
+ */
+function migrationsRevision(): string {
+  const h = createHash("sha256");
+  const files = fs
+    .readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith(".sql") && !f.endsWith("_down.sql"))
+    .sort();
+  for (const f of files) {
+    h.update(f);
+    h.update(fs.readFileSync(path.join(MIGRATIONS_DIR, f)));
+  }
+  return h.digest("hex").slice(0, 16);
+}
+
+// In-process cache: at most one snapshot build per worker, even if many
+// test files in the same worker call setupTestDb(). The snapshot is held as
+// an ArrayBuffer so each boot can wrap it in a fresh Blob without copying.
+let snapshotPromise: Promise<ArrayBuffer> | undefined;
+
+function snapshotPath(): string {
+  return path.join(
+    os.tmpdir(),
+    `mediflow-pglite-snapshot-${migrationsRevision()}.tar`,
+  );
+}
+
+/**
+ * Build (or load) the migrated-database snapshot. The result is a tarball
+ * produced by `pglite.dumpDataDir("none")` — uncompressed, because the
+ * tarball is short-lived in the OS temp dir and skipping gzip makes both
+ * the dump and every subsequent restore meaningfully faster.
+ */
+async function getMigrationSnapshot(): Promise<ArrayBuffer> {
+  if (snapshotPromise) return snapshotPromise;
+  snapshotPromise = (async (): Promise<ArrayBuffer> => {
+    const file = snapshotPath();
+
+    // Fast path: a sibling worker already built it.
+    try {
+      const cached = fs.readFileSync(file);
+      return cached.buffer.slice(
+        cached.byteOffset,
+        cached.byteOffset + cached.byteLength,
+      );
+    } catch {
+      // Not there yet — fall through and build it ourselves.
+    }
+
+    const pg = new PGlite();
+    await pg.query("SELECT 1"); // wait for ready
+    await migrateFresh(pg);
+    const dump = await pg.dumpDataDir("none");
+    await pg.close();
+    const bytes = await dump.arrayBuffer();
+
+    // Atomic publish: write to a unique temp name then rename into place so
+    // no worker ever reads a half-written snapshot. A losing race just
+    // overwrites with byte-identical content, which is harmless.
+    const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(tmp, Buffer.from(bytes));
+      fs.renameSync(tmp, file);
+    } catch {
+      // Disk caching is best-effort; an in-process cache still applies.
+      try {
+        fs.unlinkSync(tmp);
+      } catch {
+        /* ignore */
+      }
+    }
+    return bytes;
+  })();
+  return snapshotPromise;
+}
+
+export async function setupTestDb(): Promise<TestDbHandle> {
+  const snapshot = await getMigrationSnapshot();
+  // `loadDataDir` wants a Blob/File; wrap the cached bytes (a fresh Blob per
+  // boot so concurrent boots don't share a consumed stream).
+  const pg = new PGlite({ loadDataDir: new Blob([snapshot]) });
+  await pg.query("SELECT 1"); // wait for ready
 
   const db = drizzle(pg, { schema });
   return { db, pg };

@@ -42,9 +42,22 @@ export default defineConfig({
     // for any test file that opts into the jsdom environment. The setup file
     // is a no-op for node-environment tests since it only extends `expect`.
     setupFiles: ["artifacts/web-app/src/__tests__/setup.ts"],
-    // Integration tests boot a pglite instance and run every drizzle
-    // migration against it, which can take a few seconds on first run.
+    // Integration tests boot a pglite instance per file. The boot restores a
+    // pre-migrated snapshot (see __tests__/helpers/testDb.ts) rather than
+    // replaying every migration, so a boot is ~0.5s of bulk in-memory load.
+    // 30s is already generous; the snapshot is the real flake fix. The 60s
+    // hookTimeout is only a backstop for a pathologically loaded CI runner.
     testTimeout: 30000,
-    hookTimeout: 30000,
+    hookTimeout: 60000,
+    pool: "forks",
+    poolOptions: {
+      forks: {
+        // Bound worker count so a CI box with few cores can't oversubscribe
+        // the CPU badly enough to starve a boot hook. The snapshot restore is
+        // cheap, but capping fan-out keeps the safety margin wide.
+        maxForks: 4,
+        minForks: 1,
+      },
+    },
   },
 });
