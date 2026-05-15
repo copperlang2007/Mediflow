@@ -2,8 +2,18 @@
  * Shared client builder for both the top-level `client`, the image
  * client, and the audio client. See `./client.ts` for the rationale on
  * why we dispatch by `AI_INTEGRATIONS_PROVIDER`.
+ *
+ * HIPAA guard: MediFlow sends PHI to the LLM provider. Only Azure OpenAI
+ * is BAA-covered. In production (`NODE_ENV === "production"`) this builder
+ * hard-fails unless `AI_INTEGRATIONS_PROVIDER=azure`, so a misconfigured
+ * deploy cannot silently route PHI to the standard OpenAI API (no BAA).
+ * In dev/test the standard API is allowed. This mirrors the guard in
+ * `artifacts/api-server/src/lib/aiProvider.ts`.
  */
 import OpenAI, { AzureOpenAI } from "openai";
+
+/** The HIPAA-eligible provider value. Azure OpenAI is BAA-covered. */
+export const HIPAA_ELIGIBLE_PROVIDER = "azure" as const;
 
 export function buildOpenAIClient(): OpenAI {
   if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
@@ -13,6 +23,14 @@ export function buildOpenAIClient(): OpenAI {
   }
 
   const provider = (process.env.AI_INTEGRATIONS_PROVIDER ?? "openai").toLowerCase();
+
+  if (process.env.NODE_ENV === "production" && provider !== HIPAA_ELIGIBLE_PROVIDER) {
+    throw new Error(
+      "FATAL: AI_INTEGRATIONS_PROVIDER must be 'azure' in production — " +
+        "the standard OpenAI API has no HIPAA BAA and must not receive PHI. " +
+        `Got: ${process.env.AI_INTEGRATIONS_PROVIDER ?? "<unset>"}`,
+    );
+  }
 
   if (provider === "azure") {
     const resource = process.env.AI_INTEGRATIONS_AZURE_RESOURCE;
