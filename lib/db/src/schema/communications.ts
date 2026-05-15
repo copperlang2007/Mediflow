@@ -4,6 +4,7 @@ import {
   timestamp,
   boolean,
   pgEnum,
+  index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
@@ -24,20 +25,35 @@ export const messageStatusEnum = pgEnum("message_status", [
   "received",
 ]);
 
-export const messageThreadsTable = pgTable("message_threads", {
-  id: text("id").primaryKey(),
-  orgId: text("org_id")
-    .notNull()
-    .references(() => organizationsTable.id),
-  contactId: text("contact_id")
-    .notNull()
-    .references(() => contactsTable.id, { onDelete: "cascade" }),
-  channel: channelEnum("channel").notNull(),
-  lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const messageThreadsTable = pgTable(
+  "message_threads",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizationsTable.id),
+    contactId: text("contact_id")
+      .notNull()
+      .references(() => contactsTable.id, { onDelete: "cascade" }),
+    channel: channelEnum("channel").notNull(),
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Hot-path index for the contact-detail page and the Twilio inbound SMS
+    // webhook, both of which look up threads by `contact_id` (the webhook
+    // also by `channel`, with no org filter; the contacts routes also by
+    // `org_id`). `contact_id` leads as the common, highly-selective
+    // predicate. See migration 0016_scale_indexes.sql.
+    index("message_threads_contact_id_org_channel_idx").on(
+      t.contactId,
+      t.orgId,
+      t.channel,
+    ),
+  ],
+);
 
 export type MessageThread = typeof messageThreadsTable.$inferSelect;
 

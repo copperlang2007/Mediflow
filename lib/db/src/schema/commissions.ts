@@ -201,6 +201,15 @@ export const commissionLineItemsTable = pgTable(
       t.orgId,
       t.writingAgentId,
     ),
+    // Covers the per-agent commission report (GET /agents/:id/commissions):
+    // equality on org_id + writing_agent_id, range on period_start.
+    // Equality columns lead, range column last. See migration
+    // 0016_scale_indexes.sql.
+    index("commission_line_items_org_agent_period_idx").on(
+      t.orgId,
+      t.writingAgentId,
+      t.periodStart,
+    ),
   ],
 );
 

@@ -134,6 +134,13 @@
       "when": 1778390000000,
       "tag": "0015_automation_sweep_log",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778400000000,
+      "tag": "0016_scale_indexes",
+      "breakpoints": true
     }
   ]
 }
