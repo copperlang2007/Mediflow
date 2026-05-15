@@ -107,9 +107,11 @@ describe("Contact PHI masking", () => {
   });
 
   it("POST /contacts/bulk export_csv as agent_support emits MASKED medicareId in the CSV body", async () => {
+    // export_csv requires step-up confirmation (H1) — send the confirm header.
     const res = await request(app)
       .post("/api/contacts/bulk")
       .set(withAuth(agentSupport.id))
+      .set("X-Confirm-Export", "true")
       .send({ ids: [contactWithPhi.id], action: "export_csv" });
     expect(res.status).toBe(200);
     const body = String(res.text ?? res.body ?? "");
@@ -118,9 +120,11 @@ describe("Contact PHI masking", () => {
   });
 
   it("POST /contacts/bulk export_csv as super_admin emits the REAL medicareId", async () => {
+    // export_csv requires step-up confirmation (H1) — send the confirm header.
     const res = await request(app)
       .post("/api/contacts/bulk")
       .set(withAuth(superAdmin.id))
+      .set("X-Confirm-Export", "true")
       .send({ ids: [contactWithPhi.id], action: "export_csv" });
     expect(res.status).toBe(200);
     const body = String(res.text ?? res.body ?? "");
