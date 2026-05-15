@@ -24,15 +24,36 @@ import {
   notificationsTable,
   usersTable,
 } from "@workspace/db";
-import OpenAI from "openai";
+import OpenAI, { AzureOpenAI } from "openai";
+import { resolveAiProvider } from "../lib/aiProvider";
 
+// Provider dispatch — `azure` is the HIPAA-eligible (BAA-covered) path.
+// This worker drafts compliance reports from agent PHI, so it MUST go
+// through the same guarded provider selection as `routes/ai.ts`.
+// `resolveAiProvider()` hard-fails in production unless the provider is
+// `azure` — see `lib/aiProvider.ts`.
 let _openai: OpenAI | null = null;
 function getOpenAI(): OpenAI | null {
   if (_openai) return _openai;
   const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-  if (!apiKey || !baseURL) return null;
+  if (!apiKey) return null;
+  // Throws in production if the provider is not the HIPAA-eligible value.
+  const provider = resolveAiProvider();
   try {
+    if (provider === "azure") {
+      const resource = process.env.AI_INTEGRATIONS_AZURE_RESOURCE;
+      const endpoint =
+        process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ??
+        (resource ? `https://${resource}.openai.azure.com` : undefined);
+      if (!endpoint) return null;
+      const apiVersion =
+        process.env.AI_INTEGRATIONS_AZURE_API_VERSION ?? "2024-02-15-preview";
+      const deployment = process.env.AI_INTEGRATIONS_AZURE_DEPLOYMENT;
+      _openai = new AzureOpenAI({ apiKey, endpoint, apiVersion, deployment });
+      return _openai;
+    }
+    const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+    if (!baseURL) return null;
     _openai = new OpenAI({ apiKey, baseURL });
     return _openai;
   } catch {

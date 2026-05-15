@@ -35,6 +35,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import OpenAI, { AzureOpenAI } from "openai";
+import { resolveAiProvider } from "../../lib/aiProvider";
 import {
   requireAuth,
   requirePermission,
@@ -148,7 +149,9 @@ function getOpenAI(): AiClient | null {
   if (_factory) return _factory();
   const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
   if (!apiKey) return null;
-  const provider = (process.env.AI_INTEGRATIONS_PROVIDER ?? "openai").toLowerCase();
+  // Throws in production if the provider is not the HIPAA-eligible value
+  // — see `lib/aiProvider.ts`.
+  const provider = resolveAiProvider();
   try {
     if (provider === "azure") {
       // Azure OpenAI is the HIPAA-eligible path. The deployment name in

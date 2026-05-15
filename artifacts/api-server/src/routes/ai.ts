@@ -23,16 +23,19 @@ import {
   documentsTable,
 } from "@workspace/db";
 import OpenAI, { AzureOpenAI } from "openai";
+import { resolveAiProvider } from "../lib/aiProvider";
 
-// Provider dispatch — `azure` is the HIPAA-eligible path (default BAA
-// coverage), `openai` is the direct API for dev/staging. See
-// `lib/integrations-openai-ai-server/README.md`.
+// Provider dispatch — `azure` is the HIPAA-eligible path (BAA coverage),
+// `openai` is the direct API for dev/staging only. The provider is
+// resolved through `resolveAiProvider()`, which hard-fails in production
+// unless `AI_INTEGRATIONS_PROVIDER=azure` — see `lib/aiProvider.ts`.
 let _openai: OpenAI | null = null;
 function getOpenAI(): OpenAI | null {
   if (_openai) return _openai;
   const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
   if (!apiKey) return null;
-  const provider = (process.env.AI_INTEGRATIONS_PROVIDER ?? "openai").toLowerCase();
+  // Throws in production if the provider is not the HIPAA-eligible value.
+  const provider = resolveAiProvider();
   try {
     if (provider === "azure") {
       const resource = process.env.AI_INTEGRATIONS_AZURE_RESOURCE;

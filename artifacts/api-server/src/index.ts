@@ -12,6 +12,7 @@ import { getQueue, startWorkers } from "./lib/jobs";
 import { captureWorkerError } from "./lib/sentry";
 import { markWorkersReady } from "./lib/readiness";
 import { shutdown } from "./lib/shutdown";
+import { assertAiProviderHipaaCompliant } from "./lib/aiProvider";
 
 const rawPort = process.env["PORT"];
 
@@ -33,6 +34,13 @@ if (Number.isNaN(port) || port <= 0) {
 let server: Server | undefined;
 
 async function bootstrap(): Promise<void> {
+  // HIPAA guard: PHI flows to the AI provider in system prompts. In
+  // production the provider MUST be Azure OpenAI (the only BAA-covered
+  // path). Fail fast and visibly here so a misconfigured prod deploy
+  // dies at boot rather than leaking PHI on the first patient
+  // interaction. Mirrors the PHI_ENCRYPTION_KEY boot check (PR #64).
+  assertAiProviderHipaaCompliant();
+
   // Start pg-boss job queue and register workers.
   //
   // Policy: in production we treat worker-start failure as FATAL. The
