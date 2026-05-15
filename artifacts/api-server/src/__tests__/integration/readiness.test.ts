@@ -70,6 +70,7 @@ afterAll(async () => {
 beforeEach(() => {
   readiness.__resetReadinessForTests();
   globalThis.__READYZ_DB_EXECUTE_OVERRIDE__ = undefined;
+  globalThis.__READYZ_WIP_OVERRIDE__ = undefined;
 });
 
 describe("liveness — /api/healthz", () => {
@@ -127,5 +128,41 @@ describe("readiness — /api/readyz", () => {
     const res = await request(app).get("/api/readyz");
     expect(res.status).toBe(503);
     expect(res.body.checks.db).toBe("failed");
+  });
+
+  it("returns 503 with checks.workers='dead' when every worker is stopped", async () => {
+    // Boot-time `markWorkersReady()` fired, but pg-boss now reports every
+    // worker loop as stopped — the worker-liveness gap this fix closes.
+    readiness.markWorkersReady();
+    globalThis.__READYZ_WIP_OVERRIDE__ = [
+      { name: "send-scheduled-sms", state: "stopped" },
+      { name: "send-scheduled-email", state: "stopped" },
+    ];
+    const res = await request(app).get("/api/readyz");
+    expect(res.status).toBe(503);
+    expect(res.body.status).toBe("unhealthy");
+    expect(res.body.checks.workers).toBe("dead");
+  });
+
+  it("returns 503 with checks.workers='dead' when pg-boss has zero workers", async () => {
+    readiness.markWorkersReady();
+    globalThis.__READYZ_WIP_OVERRIDE__ = [];
+    const res = await request(app).get("/api/readyz");
+    expect(res.status).toBe(503);
+    expect(res.body.checks.workers).toBe("dead");
+  });
+
+  it("returns 200 when at least one worker is live and DB is reachable", async () => {
+    readiness.markWorkersReady();
+    globalThis.__READYZ_WIP_OVERRIDE__ = [
+      { name: "send-scheduled-sms", state: "stopped" },
+      { name: "run-automation-rules", state: "active" },
+    ];
+    const res = await request(app).get("/api/readyz");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      status: "ok",
+      checks: { db: "ok", workers: "ok" },
+    });
   });
 });

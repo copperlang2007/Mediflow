@@ -34,6 +34,12 @@ declare global {
   var __TEST_DB__: TestDbHandle | undefined;
   // eslint-disable-next-line no-var
   var __TEST_ENQUEUED__: Array<{ name: string; data: unknown }> | undefined;
+  // Per-test override for the `/readyz` worker-liveness probe: a fake
+  // `getWipData()` result. Unset = a single live worker (see jobsMockFactory).
+  // eslint-disable-next-line no-var
+  var __READYZ_WIP_OVERRIDE__:
+    | Array<{ name: string; state: string }>
+    | undefined;
 }
 
 export function getEnqueuedJobs(): Array<{ name: string; data: unknown }> {
@@ -173,5 +179,16 @@ export const jobsMockFactory = (): Record<string, unknown> => ({
     send: async (): Promise<string> => "job-id",
     on: (): undefined => undefined,
   }),
+  // `/readyz` worker-liveness probe calls `peekQueue()`. Tests that exercise
+  // readiness override `globalThis.__READYZ_WIP_OVERRIDE__` to simulate live
+  // vs. dead workers; default is a single live ("active") worker.
+  peekQueue: (): Record<string, unknown> | null => {
+    const override = globalThis.__READYZ_WIP_OVERRIDE__;
+    return {
+      getWipData: (): Array<{ name: string; state: string }> =>
+        override ?? [{ name: "send-scheduled-sms", state: "active" }],
+    };
+  },
   startWorkers: async (): Promise<void> => undefined,
+  DEAD_LETTER_QUEUE: "dead-letter",
 });
