@@ -127,6 +127,13 @@
       "when": 1778380000000,
       "tag": "0014_sequence_enrollments_next_step_id",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778390000000,
+      "tag": "0015_automation_sweep_log",
+      "breakpoints": true
     }
   ]
 }
