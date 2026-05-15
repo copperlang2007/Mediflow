@@ -183,12 +183,10 @@ export function hashMedicareId(plain: string): Buffer {
   return createHmac("sha256", hmacKey).update(normalized, "utf8").digest();
 }
 
-/**
- * Feature flag for the dual-write → read-from-new-columns rollout. Default
- * OFF: writes populate both old and new columns but reads still use the
- * plaintext column. Flip to "true" after the backfill script has
- * populated every row.
- */
-export function isMedicareIdEncryptionReadEnabled(): boolean {
-  return process.env.MEDICARE_ID_ENCRYPTION_ENABLED === "true";
-}
+// NOTE: `isMedicareIdEncryptionReadEnabled()` (the MEDICARE_ID_ENCRYPTION_ENABLED
+// feature flag) was removed in the HIPAA-2 final cutover (migration 0016).
+// The flag previously gated whether reads used the plaintext `medicare_id`
+// column or the encrypted/hash columns. Once the plaintext column is
+// dropped, the encrypted path is the ONLY path — there is nothing left to
+// gate, so the flag is dead code. Search + commission reconcile now
+// unconditionally match on `medicare_id_hash`.

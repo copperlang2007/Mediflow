@@ -192,17 +192,12 @@ describe("reconcileStatement concurrency", () => {
       periodStart,
       periodEnd,
     });
-    // Resolve the (possibly encrypted-roundtripped) memberId actually
-    // stored on the contact so the line item's memberId matches whatever
-    // matchContact() looks up.
-    const [{ m: storedMemberId }] = await handle.db
-      .select({ m: contactsTable.medicareId })
-      .from(contactsTable)
-      .where(eq(contactsTable.id, contact.id));
+    // The line item's memberId is the plaintext MBI; matchContact()
+    // hashes it and looks up the contact via the HMAC blind index.
     await insertLineItem(handle.db, {
       statementId: stmt.id,
       orgId: org.id,
-      memberId: storedMemberId!,
+      memberId: contact.medicareId!,
       commissionAmount: "100.00",
       periodStart,
       periodEnd,
@@ -289,14 +284,8 @@ describe("reconcileStatement concurrency", () => {
       periodEnd,
     });
 
-    const [{ m: memA }] = await handle.db
-      .select({ m: contactsTable.medicareId })
-      .from(contactsTable)
-      .where(eq(contactsTable.id, contactA.id));
-    const [{ m: memB }] = await handle.db
-      .select({ m: contactsTable.medicareId })
-      .from(contactsTable)
-      .where(eq(contactsTable.id, contactB.id));
+    const memA = contactA.medicareId;
+    const memB = contactB.medicareId;
 
     await insertLineItem(handle.db, {
       statementId: stmtA.id,

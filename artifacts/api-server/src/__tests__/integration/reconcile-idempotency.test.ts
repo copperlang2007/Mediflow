@@ -191,12 +191,7 @@ describe("reconcileStatement idempotency", () => {
     await insertLineItem(handle.db, {
       statementId: stmt.id,
       orgId: org.id,
-      memberId: (
-        await handle.db
-          .select({ m: contactsTable.medicareId })
-          .from(contactsTable)
-          .where(eq(contactsTable.id, contact.id))
-      )[0].m!,
+      memberId: contact.medicareId!,
       commissionAmount: "100.00",
       periodStart,
       periodEnd,
@@ -362,12 +357,7 @@ describe("reconcileStatement idempotency", () => {
     await insertLineItem(handle.db, {
       statementId: stmt.id,
       orgId: org.id,
-      memberId: (
-        await handle.db
-          .select({ m: contactsTable.medicareId })
-          .from(contactsTable)
-          .where(eq(contactsTable.id, contact.id))
-      )[0].m!,
+      memberId: contact.medicareId!,
       commissionAmount: "200.00",
       periodStart,
       periodEnd,
@@ -453,12 +443,7 @@ describe("reconcileStatement idempotency", () => {
       periodStart,
       periodEnd,
     });
-    const memberId = (
-      await handle.db
-        .select({ m: contactsTable.medicareId })
-        .from(contactsTable)
-        .where(eq(contactsTable.id, contact.id))
-    )[0].m!;
+    const memberId = contact.medicareId!;
     await insertLineItem(handle.db, {
       statementId: stmt.id,
       orgId: org.id,

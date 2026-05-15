@@ -73,11 +73,14 @@ export const contactsTable = pgTable(
     email: text("email"),
     phone: text("phone"),
     dob: timestamp("dob", { withTimezone: true }),
-    medicareId: text("medicare_id"),
-    // HIPAA-2: column-level encryption for medicare_id. Both new columns
-    // are populated alongside the plaintext during the dual-write window;
-    // reads switch to them once `MEDICARE_ID_ENCRYPTION_ENABLED=true` and
-    // the backfill script has run. See lib/db/src/encryption/medicareId.ts.
+    // HIPAA-2: column-level encryption for the Medicare Beneficiary
+    // Identifier (MBI), direct PHI. The plaintext `medicare_id` column was
+    // dropped in migration 0016 after the prod cutover — the MBI is now
+    // ONLY stored as AES-256-GCM ciphertext. `medicare_id_hash` is the
+    // deterministic HMAC-SHA256 blind index used for exact-match lookup
+    // (contact search + commission reconcile). See
+    // lib/db/src/encryption/medicareId.ts for the encrypt/decrypt/hash
+    // helpers.
     medicareIdEncrypted: bytea("medicare_id_encrypted"),
     medicareIdHash: bytea("medicare_id_hash"),
     currentPlanType: planTypeEnum("current_plan_type"),

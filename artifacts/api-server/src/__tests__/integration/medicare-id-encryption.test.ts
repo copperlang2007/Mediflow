@@ -1,13 +1,16 @@
 /**
- * HIPAA-2: column-level encryption for `contacts.medicare_id`.
+ * HIPAA-2: column-level encryption for the Medicare Beneficiary
+ * Identifier (MBI). The plaintext `medicare_id` column was dropped in
+ * migration 0017 — the MBI is now stored ONLY as AES-256-GCM ciphertext
+ * plus an HMAC-SHA256 blind index.
  *
  * Covers:
  *   - helper round-trip (encrypt → decrypt yields the original plaintext)
  *   - helper normalization (whitespace + case-insensitive)
  *   - helper key-loading error in production when env vars are missing
- *   - dual-write: POST /contacts populates both old + new columns
- *   - flag-on exact-match search returns the contact via the hash column
- *   - flag-on commission reconcile matches via the hash column
+ *   - POST /contacts writes ONLY the encrypted + hash columns
+ *   - exact-match search returns the contact via the hash column
+ *   - commission reconcile matches via the hash column
  */
 import { vi, describe, it, expect, beforeAll, afterAll } from "vitest";
 
@@ -136,8 +139,8 @@ describe("medicare_id encryption helper", () => {
   });
 });
 
-describe("medicare_id encryption — POST /contacts dual-writes both columns", () => {
-  it("populates medicare_id_encrypted + medicare_id_hash alongside the plaintext", async () => {
+describe("medicare_id encryption — POST /contacts writes only the encrypted columns", () => {
+  it("populates medicare_id_encrypted + medicare_id_hash and stores NO plaintext column", async () => {
     const plain = "1QQ-WW-EE99";
     const res = await request(app)
       .post("/api/contacts")
@@ -155,7 +158,8 @@ describe("medicare_id encryption — POST /contacts dual-writes both columns", (
       .where(eq(contactsTable.id, res.body.id))
       .limit(1);
 
-    expect(row.medicareId).toBe(plain);
+    // The plaintext `medicare_id` column no longer exists on the row.
+    expect("medicareId" in row).toBe(false);
     expect(row.medicareIdEncrypted).toBeTruthy();
     expect(row.medicareIdHash).toBeTruthy();
 
@@ -165,11 +169,14 @@ describe("medicare_id encryption — POST /contacts dual-writes both columns", (
 
     // Encrypted bytes must decrypt back to the plaintext.
     expect(decryptMedicareId(Buffer.from(row.medicareIdEncrypted!))).toBe(plain);
+
+    // A privileged caller sees the decrypted MBI echoed back in the response.
+    expect(res.body.medicareId).toBe(plain);
   });
 });
 
-describe("medicare_id encryption — flag-on read paths", () => {
-  it("GET /contacts?search=<medicareId> returns the contact via hash lookup (flag on)", async () => {
+describe("medicare_id encryption — read paths use the hash column", () => {
+  it("GET /contacts?search=<medicareId> returns the contact via hash lookup", async () => {
     const plain = "2RR-SS-TT88";
     await seedContact(handleDb, {
       orgId: org.id,
@@ -178,25 +185,15 @@ describe("medicare_id encryption — flag-on read paths", () => {
       medicareId: plain,
     });
 
-    const prev = process.env.MEDICARE_ID_ENCRYPTION_ENABLED;
-    process.env.MEDICARE_ID_ENCRYPTION_ENABLED = "true";
-    try {
-      const res = await request(app)
-        .get(`/api/contacts?search=${encodeURIComponent(plain)}`)
-        .set(withAuth(admin.id));
-      expect(res.status).toBe(200);
-      const ids = res.body.data.map((c: { firstName: string }) => c.firstName);
-      expect(ids).toContain("Searchable");
-    } finally {
-      if (prev === undefined) {
-        delete process.env.MEDICARE_ID_ENCRYPTION_ENABLED;
-      } else {
-        process.env.MEDICARE_ID_ENCRYPTION_ENABLED = prev;
-      }
-    }
+    const res = await request(app)
+      .get(`/api/contacts?search=${encodeURIComponent(plain)}`)
+      .set(withAuth(admin.id));
+    expect(res.status).toBe(200);
+    const ids = res.body.data.map((c: { firstName: string }) => c.firstName);
+    expect(ids).toContain("Searchable");
   });
 
-  it("reconcile worker matches a line item to a contact via the hash column (flag on)", async () => {
+  it("reconcile worker matches a line item to a contact via the hash column", async () => {
     const memberId = "MBI-ENC-RECON-1";
     const agent = await seedAgent(handleDb, { orgId: org.id });
     const contact = await seedContact(handleDb, {
@@ -241,18 +238,8 @@ describe("medicare_id encryption — flag-on read paths", () => {
       matchStatus: "unmatched",
     });
 
-    const prev = process.env.MEDICARE_ID_ENCRYPTION_ENABLED;
-    process.env.MEDICARE_ID_ENCRYPTION_ENABLED = "true";
-    try {
-      const result = await reconcileStatement(statementId, org.id);
-      expect(result.matched).toBeGreaterThanOrEqual(1);
-    } finally {
-      if (prev === undefined) {
-        delete process.env.MEDICARE_ID_ENCRYPTION_ENABLED;
-      } else {
-        process.env.MEDICARE_ID_ENCRYPTION_ENABLED = prev;
-      }
-    }
+    const result = await reconcileStatement(statementId, org.id);
+    expect(result.matched).toBeGreaterThanOrEqual(1);
 
     const [updated] = await handleDb
       .select({ contactId: commissionLineItemsTable.contactId })

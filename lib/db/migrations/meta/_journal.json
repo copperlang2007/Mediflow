@@ -141,6 +141,13 @@
       "when": 1778400000000,
       "tag": "0016_scale_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1778410000000,
+      "tag": "0017_drop_plaintext_medicare_id",
+      "breakpoints": true
     }
   ]
 }
