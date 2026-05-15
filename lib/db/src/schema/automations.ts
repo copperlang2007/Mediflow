@@ -95,7 +95,19 @@ export const sequenceEnrollmentsTable = pgTable("sequence_enrollments", {
     .notNull()
     .defaultNow(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
+  // `next_step_index` is the legacy positional pointer; retained for one
+  // deploy cycle for rollback safety. The worker now routes via
+  // `next_step_id`; positional lookup is only used as a back-compat
+  // fallback for in-flight pg-boss jobs whose payload predates the
+  // stepId field. See migration 0014.
   nextStepIndex: integer("next_step_index").notNull().default(0),
+  // Authoritative pointer at the next step to execute. FK with
+  // ON DELETE SET NULL so that operator-deleting a step leaves the
+  // enrollment in a known-broken state (the worker completes it
+  // gracefully on the next run) rather than dangling.
+  nextStepId: text("next_step_id").references(() => sequenceStepsTable.id, {
+    onDelete: "set null",
+  }),
   nextStepAt: timestamp("next_step_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()

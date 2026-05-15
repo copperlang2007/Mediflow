@@ -274,6 +274,12 @@ router.post(
 
     if (enrollList.length > 0) {
       const now = new Date();
+      // The authoritative pointer for "what step runs next" is the
+      // FIRST step's stable id (sorted by order_index). If the
+      // sequence is empty (no steps configured), nextStepId stays
+      // null and the worker will gracefully complete the enrollment
+      // on first run.
+      const firstStepId = steps[0]?.id ?? null;
 
       // 4) Batch insert enrollments.
       await db.insert(sequenceEnrollmentsTable).values(
@@ -283,6 +289,7 @@ router.post(
           contactId,
           status: "active" as const,
           nextStepIndex: 0,
+          nextStepId: firstStepId,
           nextStepAt: now,
         })),
       );
@@ -311,6 +318,7 @@ router.post(
             enqueue(JOB_NAMES.SEND_SEQUENCE_STEP, {
               sequenceId: seqId,
               contactId,
+              stepId: firstStep.id,
               stepIndex: 0,
               channel,
             }),
