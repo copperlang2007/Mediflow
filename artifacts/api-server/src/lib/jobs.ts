@@ -19,6 +19,14 @@
  *
  * IMPORTANT: pg-boss v12 requires createQueue() before schedule()/work().
  *
+ * Retry & dead-letter:
+ *   Every queue is registered with a retry policy (see `DEFAULT_RETRY` /
+ *   `RETRY_OVERRIDES`) and a shared `dead-letter` queue. A transient failure
+ *   is retried with exponential backoff; a job that exhausts its retries is
+ *   copied to the dead-letter queue, where `deadLetterHandler` logs it at
+ *   ERROR level and captures it to Sentry. Non-idempotent jobs opt out of
+ *   retries via `NO_RETRY`.
+ *
  * Concurrency:
  *   pg-boss v12 dropped `teamSize` / `teamConcurrency` (the v9-era names) in
  *   favor of `batchSize` (jobs fetched per poll) and `localConcurrency`
@@ -29,8 +37,9 @@
  *   Scheduled crons stay at the pg-boss default (1) since they're singletons.
  */
 
-import { PgBoss, type Job, type WorkHandler } from "pg-boss";
+import { PgBoss, type Job, type Queue, type WorkHandler } from "pg-boss";
 import { logger } from "./logger";
+import { captureWorkerError } from "./sentry";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
@@ -56,6 +65,16 @@ export async function getQueue(): Promise<PgBoss> {
   await _boss.start();
   logger.info("pg-boss job queue started");
 
+  return _boss;
+}
+
+/**
+ * Returns the already-started pg-boss instance, or `null` if the queue has
+ * not been started yet. Unlike `getQueue()` this NEVER starts pg-boss — it is
+ * for read-only callers (e.g. the `/readyz` worker-liveness probe) that must
+ * not have a side effect of booting the queue.
+ */
+export function peekQueue(): PgBoss | null {
   return _boss;
 }
 
@@ -86,6 +105,72 @@ export const JOB_NAMES = {
 } as const;
 
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
+
+/**
+ * Shared dead-letter queue. When ANY job above exhausts its retries, pg-boss
+ * copies the failed job's payload here (see the `deadLetter` queue option set
+ * at registration). A single worker on this queue logs the permanent failure
+ * at ERROR level and reports it to Sentry, so an exhausted-retry failure can
+ * never disappear into a single log line again.
+ *
+ * Not part of `JOB_NAMES` because it is infrastructure, not an enqueue target
+ * for application code.
+ */
+export const DEAD_LETTER_QUEUE = "dead-letter" as const;
+
+// ---- Retry configuration ---------------------------------------------------
+
+/**
+ * Default retry policy applied to every job queue at registration.
+ *
+ * pg-boss support: `retryLimit` (attempts after the first), `retryDelay`
+ * (seconds), `retryBackoff` (exponential). 3 retries with a 30s base and
+ * exponential backoff rides out transient failures (network blips, provider
+ * 503s) without hammering a struggling dependency.
+ *
+ * SAFETY: aggressive retries are only correct for IDEMPOTENT handlers — a
+ * non-idempotent handler retried after a partial success double-applies its
+ * side effects. The key workers were made idempotent in prior PRs (reconcile
+ * #66/#69, sendSequenceStep #76, taskAutoAssign #75, the sweep #89), and the
+ * scheduled checks dedup via DB constraints. Jobs that are NOT safe to retry
+ * get `NO_RETRY` instead (see `RETRY_OVERRIDES`).
+ */
+const DEFAULT_RETRY: Pick<Queue, "retryLimit" | "retryDelay" | "retryBackoff"> = {
+  retryLimit: 3,
+  retryDelay: 30,
+  retryBackoff: true,
+};
+
+/** Retry policy for non-idempotent jobs: fail fast, never auto-retry. */
+const NO_RETRY: Pick<Queue, "retryLimit" | "retryDelay" | "retryBackoff"> = {
+  retryLimit: 0,
+};
+
+/**
+ * Per-job retry overrides. Anything not listed here uses `DEFAULT_RETRY`.
+ *
+ *  - GENERATE_OFFBOARDING_PDF is NOT idempotent: each run mints a fresh
+ *    `randomUUID()` document id and writes a new object-storage blob + a new
+ *    `documents` row. A retry after a partial success would leave duplicate
+ *    PDFs and document records. It gets `NO_RETRY` — a failed offboarding PDF
+ *    surfaces via the dead-letter handler for manual re-trigger instead.
+ */
+const RETRY_OVERRIDES: Partial<
+  Record<JobName, Pick<Queue, "retryLimit" | "retryDelay" | "retryBackoff">>
+> = {
+  [JOB_NAMES.GENERATE_OFFBOARDING_PDF]: NO_RETRY,
+};
+
+/**
+ * Builds the `createQueue()` options for a job: its retry policy plus the
+ * shared dead-letter queue so exhausted-retry failures are captured.
+ */
+function queueOptions(name: JobName): Omit<Queue, "name"> {
+  return {
+    ...(RETRY_OVERRIDES[name] ?? DEFAULT_RETRY),
+    deadLetter: DEAD_LETTER_QUEUE,
+  };
+}
 
 // ---- Typed job payloads ----
 
@@ -182,20 +267,65 @@ export async function enqueue<T extends Record<string, unknown>>(
   }
 }
 
+// ---- Dead-letter handler ----
+
+/**
+ * Shape of a job that landed in the dead-letter queue. pg-boss copies the
+ * original job's payload (and metadata when `includeMetadata` is set) here
+ * after retries are exhausted.
+ */
+interface DeadLetterPayload extends Record<string, unknown> {
+  /** Name of the queue the job originally failed on, if recoverable. */
+  name?: string;
+}
+
+/**
+ * Handles every permanently-failed job. A job reaches this queue ONLY after
+ * exhausting all retries, so each entry is a real, operator-actionable
+ * failure: it is logged at ERROR level with full context AND captured to
+ * Sentry via `captureWorkerError`.
+ *
+ * Exported for unit testing.
+ */
+export async function deadLetterHandler(
+  jobs: Job<DeadLetterPayload>[],
+): Promise<void> {
+  for (const job of jobs) {
+    const originalQueue =
+      typeof job.data?.name === "string" ? job.data.name : "unknown";
+    const context = {
+      deadLetterJobId: job.id,
+      originalQueue,
+      job: DEAD_LETTER_QUEUE,
+    };
+    logger.error(
+      { ...context, payload: job.data },
+      "Job exhausted all retries and was dead-lettered",
+    );
+    captureWorkerError(
+      new Error(`Job permanently failed after retries: ${originalQueue}`),
+      context,
+    );
+  }
+}
+
 // ---- Worker registration ----
 
 export async function startWorkers(): Promise<void> {
   const boss = await getQueue();
 
-  // Create all queues first (pg-boss v12 requirement)
+  // Create all job queues first (pg-boss v12 requirement). Every queue gets a
+  // retry policy and the shared dead-letter queue — see `queueOptions()`.
   for (const name of Object.values(JOB_NAMES)) {
-    if (name === JOB_NAMES.RUN_AUTOMATION_RULES) {
-      // Automation rule jobs get 3 retries with 60s exponential backoff
-      await boss.createQueue(name, { retryLimit: 3, retryDelay: 60, retryBackoff: true });
-    } else {
-      await boss.createQueue(name);
-    }
+    await boss.createQueue(name, queueOptions(name));
   }
+
+  // The dead-letter queue itself: no retries (a permanently-failed job must
+  // not loop), no further dead-letter target.
+  await boss.createQueue(DEAD_LETTER_QUEUE, { retryLimit: 0 });
+  // One worker drains the dead-letter queue, logging + Sentry-capturing every
+  // exhausted-retry failure across all job types.
+  await boss.work<DeadLetterPayload>(DEAD_LETTER_QUEUE, deadLetterHandler);
 
   // ---- Scheduled jobs ----
 

@@ -2,12 +2,16 @@ import { Router, type IRouter } from "express";
 import { HealthCheckResponse } from "@workspace/api-zod";
 import { db, sql } from "@workspace/db";
 import {
+  checkWorkerLiveness,
   getReadinessState,
   isReadinessCacheFresh,
   markReadinessOk,
   pingDb,
   type DbCheckResult,
+  type WorkerCheckResult,
+  type WorkerLivenessSource,
 } from "../lib/readiness";
+import { peekQueue } from "../lib/jobs";
 
 const router: IRouter = Router();
 
@@ -27,6 +31,10 @@ router.get("/healthz", (_req, res) => {
 /**
  * Readiness probe — process is ready to serve traffic. Returns 200 only if:
  *  - background workers finished startup (see `markWorkersReady()`),
+ *  - background workers are still LIVE — pg-boss reports at least one worker
+ *    loop that is not stopped (see `checkWorkerLiveness()`). This catches the
+ *    case where every worker dies after boot: the boot-time flag stays `true`
+ *    but the node would silently run no background jobs.
  *  - the database responds to `SELECT 1` within ~500ms.
  *
  * Successful results are cached briefly (~2s) to avoid hammering the DB from
@@ -34,18 +42,19 @@ router.get("/healthz", (_req, res) => {
  */
 router.get("/readyz", async (_req, res) => {
   const { workersReady } = getReadinessState();
-  const workersCheck: "ok" | "not_ready" = workersReady ? "ok" : "not_ready";
 
-  // Fast path: workers haven't started — no point pinging DB.
+  // Fast path: workers never finished boot startup — no point checking
+  // anything else.
   if (!workersReady) {
     res.status(503).json({
       status: "unhealthy",
-      checks: { db: "unknown", workers: workersCheck },
+      checks: { db: "unknown", workers: "not_ready" },
     });
     return;
   }
 
-  // Cached OK path: within 2s of the last successful check, skip the DB ping.
+  // Cached OK path: within 2s of the last successful check, skip the DB ping
+  // and the worker-liveness check.
   if (isReadinessCacheFresh()) {
     res.status(200).json({
       status: "ok",
@@ -54,11 +63,24 @@ router.get("/readyz", async (_req, res) => {
     return;
   }
 
+  // Live worker-liveness check: boot-time success is not enough — verify the
+  // pg-boss worker loops are still running.
+  const workerLiveness: WorkerCheckResult = await checkWorkerLiveness(
+    async (): Promise<WorkerLivenessSource | null> => peekQueue(),
+  );
+  if (workerLiveness !== "ok") {
+    res.status(503).json({
+      status: "unhealthy",
+      checks: { db: "unknown", workers: workerLiveness },
+    });
+    return;
+  }
+
   const dbCheck: DbCheckResult = await pingDb(() => db.execute(sql`SELECT 1`));
   if (dbCheck !== "ok") {
     res.status(503).json({
       status: "unhealthy",
-      checks: { db: dbCheck, workers: workersCheck },
+      checks: { db: dbCheck, workers: "ok" },
     });
     return;
   }
