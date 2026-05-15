@@ -7,6 +7,7 @@ import {
   jsonb,
   pgEnum,
   primaryKey,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -190,3 +191,46 @@ export const automationRuleLogsTable = pgTable("automation_rule_logs", {
 });
 
 export type AutomationRuleLog = typeof automationRuleLogsTable.$inferSelect;
+
+/**
+ * Replay-guard / audit ledger for the daily automation sweep worker
+ * (`weeklyAutomationSweep.ts`). The sweep scans every org for time-based
+ * triggers and enqueues a `run-automation-rules` job per matching
+ * record; pg-boss redelivers the whole sweep job on any non-success
+ * outcome, which (pre-fix) replayed the entire batch and re-fired
+ * non-idempotent downstream side effects (duplicate notifications,
+ * auto-created tasks, automation_rule_logs rows, emails/SMS).
+ *
+ * Before enqueuing for a record the sweep does an
+ * `INSERT ... ON CONFLICT DO NOTHING` here and only enqueues when it
+ * claimed the row. The dedup key is
+ * (org_id, sweep_type, resource_id, sweep_run_date); `sweepRunDate` is
+ * the UTC calendar date the sweep runs, so a same-day retry collapses
+ * onto the existing claim while the next day's run is a distinct key.
+ * See migration 0015.
+ */
+export const automationSweepLogTable = pgTable(
+  "automation_sweep_log",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizationsTable.id, { onDelete: "cascade" }),
+    sweepType: text("sweep_type").notNull(),
+    resourceId: text("resource_id").notNull(),
+    sweepRunDate: text("sweep_run_date").notNull(),
+    sweptAt: timestamp("swept_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("automation_sweep_log_claim_unique").on(
+      t.orgId,
+      t.sweepType,
+      t.resourceId,
+      t.sweepRunDate,
+    ),
+  ],
+);
+
+export type AutomationSweepLog = typeof automationSweepLogTable.$inferSelect;
