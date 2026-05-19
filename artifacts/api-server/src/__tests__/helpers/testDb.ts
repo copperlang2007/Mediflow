@@ -279,10 +279,11 @@ export interface SeedContactOptions {
 export async function seedContact(
   db: TestDb,
   opts: SeedContactOptions,
-): Promise<schema.Contact> {
+): Promise<schema.Contact & { medicareId: string | null }> {
   const id = opts.id ?? `contact-${randomUUID()}`;
-  // Mirror the production dual-write behavior so flag-on tests can
-  // exercise the hash-column read path without manual setup.
+  // HIPAA-2: the plaintext `medicare_id` column was dropped in migration
+  // 0017. We store the MBI ONLY as AES-256-GCM ciphertext + HMAC blind
+  // index — exactly what production does on every write.
   const enc = opts.medicareId ? encryptMedicareId(opts.medicareId) : null;
   const [row] = await db
     .insert(schema.contactsTable)
@@ -293,7 +294,6 @@ export async function seedContact(
       lastName: opts.lastName ?? "Doe",
       email: opts.email ?? null,
       dob: opts.dob ?? null,
-      medicareId: opts.medicareId ?? null,
       medicareIdEncrypted: enc?.encrypted ?? null,
       medicareIdHash: enc?.hash ?? null,
       healthConditions: opts.healthConditions ?? null,
@@ -301,7 +301,11 @@ export async function seedContact(
       leadSource: opts.leadSource ?? null,
     })
     .returning();
-  return row;
+  // Echo back the plaintext MBI the caller supplied as a convenience
+  // (it is NOT a database column). Tests that need to feed the same MBI
+  // into a commission line item / search query read it from here instead
+  // of selecting a column that no longer exists.
+  return { ...row, medicareId: opts.medicareId ?? null };
 }
 
 export async function seedAutomationRule(

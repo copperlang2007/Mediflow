@@ -412,12 +412,7 @@ describe("backfill payout_contribution", () => {
       periodStart,
       periodEnd,
     });
-    const memberId = (
-      await handle.db
-        .select({ m: contactsTable.medicareId })
-        .from(contactsTable)
-        .where(eq(contactsTable.id, contact.id))
-    )[0].m!;
+    const memberId = contact.medicareId!;
 
     // Simulate a "legacy" line item: matched, has writing agent, payouts
     // already credited, but payout_contribution IS NULL because it was

@@ -2,8 +2,8 @@
  * Reconcile Commission Statement worker.
  *
  * Walks every line item on a statement and:
- *   1. Matches member_id → contacts.medicareId; falls back to fuzzy
- *      match on (last name + DOB + state).
+ *   1. Matches member_id → contacts.medicareIdHash (HMAC blind index);
+ *      falls back to fuzzy match on (last name + DOB + state).
  *   2. Resolves the writing agent from the matched contact's
  *      assignedAgentId, or from the earliest deal owner if assigned is
  *      null.
@@ -39,7 +39,6 @@ import {
   contactsTable,
   dealsTable,
   hashMedicareId,
-  isMedicareIdEncryptionReadEnabled,
 } from "@workspace/db";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { logger } from "../lib/logger";
@@ -74,20 +73,17 @@ async function matchContact(
   orgId: string,
   item: { memberId: string | null; raw: unknown },
 ): Promise<string | null> {
-  // Member ID exact match first. When HIPAA-2 column-level encryption is
-  // enabled we compare against the deterministic HMAC hash; otherwise we
-  // fall through to the legacy plaintext column.
+  // Member ID exact match first. HIPAA-2: the plaintext `medicare_id`
+  // column was dropped in migration 0017, so we match against the
+  // deterministic HMAC blind index (`medicare_id_hash`) only.
   if (item.memberId) {
-    const memberIdMatch = isMedicareIdEncryptionReadEnabled()
-      ? eq(contactsTable.medicareIdHash, hashMedicareId(item.memberId))
-      : eq(contactsTable.medicareId, item.memberId);
     const [hit] = await tx
       .select({ id: contactsTable.id })
       .from(contactsTable)
       .where(
         and(
           eq(contactsTable.orgId, orgId),
-          memberIdMatch,
+          eq(contactsTable.medicareIdHash, hashMedicareId(item.memberId)),
           isNull(contactsTable.deletedAt),
         ),
       )

@@ -16,7 +16,7 @@ import {
   contactStatusEnum,
   encryptMedicareId,
   hashMedicareId,
-  isMedicareIdEncryptionReadEnabled,
+  decryptMedicareId,
 } from "@workspace/db";
 import {
   requireAuth,
@@ -36,16 +36,53 @@ const router: IRouter = Router();
 // PHI masking — roles that may see full DOB and Medicare ID
 const PHI_PRIVILEGED_ROLES = new Set(["super_admin", "agency_admin", "compliance_manager"]);
 
-function maskContact<T extends { dob?: Date | null; medicareId?: string | null; healthConditions?: string[] | null }>(
-  contact: T,
-  userRole: string,
-): T {
-  if (PHI_PRIVILEGED_ROLES.has(userRole)) return contact;
+const MASKED_MEDICARE_ID = "***-**-****";
+
+/**
+ * Serialize a contact row for an API response (HIPAA-2).
+ *
+ * The plaintext `medicare_id` column was dropped in migration 0017, so the
+ * MBI lives only as AES-256-GCM ciphertext in `medicareIdEncrypted`. The
+ * API contract still exposes a `medicareId` string field, so we DERIVE it
+ * here:
+ *   - privileged roles: decrypt the ciphertext back to plaintext.
+ *   - everyone else: a fixed masked sentinel when an MBI is on file.
+ * The raw bytea columns (`medicareIdEncrypted` / `medicareIdHash`) are
+ * never sent to clients — they are stripped from every response.
+ *
+ * `dob` and `healthConditions` are masked for non-privileged roles exactly
+ * as before.
+ */
+function serializeContact<
+  T extends {
+    dob?: Date | null;
+    medicareIdEncrypted?: Buffer | Uint8Array | null;
+    medicareIdHash?: Buffer | Uint8Array | null;
+    healthConditions?: string[] | null;
+  },
+>(contact: T, userRole: string): Omit<T, "medicareIdEncrypted" | "medicareIdHash"> & {
+  medicareId: string | null;
+} {
+  const { medicareIdEncrypted, medicareIdHash: _hash, ...rest } = contact;
+  const hasMbi = medicareIdEncrypted != null;
+  const privileged = PHI_PRIVILEGED_ROLES.has(userRole);
+
+  let medicareId: string | null = null;
+  if (hasMbi) {
+    medicareId = privileged
+      ? decryptMedicareId(medicareIdEncrypted as Buffer | Uint8Array)
+      : MASKED_MEDICARE_ID;
+  }
+
   return {
-    ...contact,
-    dob: null,
-    medicareId: contact.medicareId != null ? "***-**-****" : null,
-    healthConditions: contact.healthConditions != null ? [] : null,
+    ...rest,
+    medicareId,
+    dob: privileged ? (rest.dob ?? null) : null,
+    healthConditions: privileged
+      ? (rest.healthConditions ?? null)
+      : rest.healthConditions != null
+        ? []
+        : null,
   };
 }
 
@@ -116,27 +153,20 @@ router.get(
 
     if (search) {
       const q = `%${search}%`;
-      // Medicare ID search behavior depends on the column-level encryption
-      // flag (HIPAA-2):
-      //   - flag OFF: legacy partial-match ilike on the plaintext column.
-      //   - flag ON:  the plaintext column has been retired; we can only
-      //     exact-match against the deterministic HMAC hash. Partial /
-      //     prefix matching is impossible by design — HMAC destroys order
-      //     — and was overkill for MBIs anyway, which are exact
-      //     identifiers. Documented as a user-facing change in the PR.
+      // Medicare ID search (HIPAA-2): the plaintext `medicare_id` column
+      // was dropped in migration 0017, so MBI search is an exact match
+      // against the deterministic HMAC blind index (`medicare_id_hash`).
+      // Partial / prefix matching is impossible by design — HMAC destroys
+      // ordering — and was overkill for MBIs anyway, which are exact
+      // identifiers. The remaining name/email/phone fields keep partial
+      // ilike matching.
       const searchClauses: SQL[] = [
         ilike(contactsTable.firstName, q) as SQL,
         ilike(contactsTable.lastName, q) as SQL,
         ilike(contactsTable.email, q) as SQL,
         ilike(contactsTable.phone, q) as SQL,
+        eq(contactsTable.medicareIdHash, hashMedicareId(search)) as SQL,
       ];
-      if (isMedicareIdEncryptionReadEnabled()) {
-        searchClauses.push(
-          eq(contactsTable.medicareIdHash, hashMedicareId(search)) as SQL,
-        );
-      } else {
-        searchClauses.push(ilike(contactsTable.medicareId, q) as SQL);
-      }
       conditions.push(or(...searchClauses) as SQL);
     }
     if (status && status !== "all") {
@@ -166,7 +196,7 @@ router.get(
       db.select({ count: sql<number>`count(*)` }).from(contactsTable).where(and(...conditions)),
     ]);
 
-    res.json({ data: contacts.map((c) => maskContact(c, authReq.userRole)), total: Number(totalRes[0]?.count ?? 0) });
+    res.json({ data: contacts.map((c) => serializeContact(c, authReq.userRole)), total: Number(totalRes[0]?.count ?? 0) });
   },
 );
 
@@ -188,10 +218,10 @@ router.post(
       res.status(400).json({ error: "Assigned agent not found" });
       return;
     }
-    // Dual-write the encrypted + hash columns alongside the plaintext for
-    // HIPAA-2 (column-level encryption). The plaintext column stays the
-    // source of truth until MEDICARE_ID_ENCRYPTION_ENABLED flips on after
-    // the backfill script runs.
+    // HIPAA-2: the MBI is stored ONLY as AES-256-GCM ciphertext +
+    // deterministic HMAC blind index. The plaintext `medicare_id` column
+    // was dropped in migration 0017 — there is no longer a plaintext
+    // column to write.
     const medicareEnc = d.medicareId
       ? encryptMedicareId(d.medicareId)
       : null;
@@ -203,7 +233,6 @@ router.post(
       email: d.email ?? null,
       phone: d.phone ?? null,
       dob: d.dob ? new Date(d.dob) : null,
-      medicareId: d.medicareId ?? null,
       medicareIdEncrypted: medicareEnc?.encrypted ?? null,
       medicareIdHash: medicareEnc?.hash ?? null,
       currentPlanType: d.currentPlanType ?? null,
@@ -254,7 +283,7 @@ router.post(
       });
     });
 
-    res.status(201).json(maskContact(contact, authReq.userRole));
+    res.status(201).json(serializeContact(contact, authReq.userRole));
   },
 );
 
@@ -268,7 +297,7 @@ router.get(
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const [contact] = await db.select().from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
-    res.json(maskContact(contact, authReq.userRole));
+    res.json(serializeContact(contact, authReq.userRole));
   },
 );
 
@@ -300,8 +329,8 @@ router.patch(
     if (d.phone !== undefined) updates.phone = d.phone;
     if (d.dob !== undefined) updates.dob = d.dob ? new Date(d.dob) : null;
     if (d.medicareId !== undefined) {
-      // Dual-write for HIPAA-2 column-level encryption.
-      updates.medicareId = d.medicareId;
+      // HIPAA-2: write ONLY the encrypted + hash columns. The plaintext
+      // `medicare_id` column was dropped in migration 0017.
       if (d.medicareId === null || d.medicareId === "") {
         updates.medicareIdEncrypted = null;
         updates.medicareIdHash = null;
@@ -363,7 +392,7 @@ router.patch(
       });
     }
 
-    res.json(updated);
+    res.json(serializeContact(updated, authReq.userRole));
   },
 );
 
@@ -747,7 +776,7 @@ router.post(
         if (!confirmed) return;
 
         const headers = ["id","firstName","lastName","email","phone","status","medicareId","currentPlanType","stateCode","zipCode","leadSource","createdAt"];
-        const maskedContacts = contacts.map((c) => maskContact(c, authReq.userRole));
+        const maskedContacts = contacts.map((c) => serializeContact(c, authReq.userRole));
         const rows = maskedContacts.map((c) => headers.map((h) => {
           const v = (c as Record<string, unknown>)[h];
           return `"${String(v ?? "").replace(/"/g, '""')}"`;
