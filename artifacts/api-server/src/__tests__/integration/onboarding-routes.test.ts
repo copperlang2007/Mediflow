@@ -220,13 +220,7 @@ describe("PATCH /onboarding/:agentId/profile", () => {
         ),
       );
     expect(row.ssnEncrypted).toBeTruthy();
-    const buf = Buffer.isBuffer(row.ssnEncrypted)
-      ? row.ssnEncrypted
-      : Buffer.from(
-          (row.ssnEncrypted as Uint8Array).buffer,
-          (row.ssnEncrypted as Uint8Array).byteOffset,
-          (row.ssnEncrypted as Uint8Array).byteLength,
-        );
+    const buf = row.ssnEncrypted!;
     // The bytea must NOT contain the plaintext digits anywhere.
     expect(buf.toString("utf8")).not.toContain("987654321");
     // Hash blind-index matches the normalized digits-only form.
