@@ -1424,17 +1424,171 @@ router.post(
   },
 );
 
+/**
+ * PATCH /admin/contracting/:requestId
+ *
+ * Admin-facing writing-number / status entry. The carrier appointment desk
+ * emails back a writing number + status decision (appointed / rejected /
+ * under_review); a compliance manager records it here. When the LAST
+ * outstanding request flips to `appointed`, `maybeAdvanceRunForRequests`
+ * rolls the onboarding run forward to `complete`.
+ *
+ * Body (zod-validated): at least one of:
+ *   - writingNumber  (string, ≤64 chars)
+ *   - status         ("appointed" | "rejected" | "submitted" | "under_review")
+ *   - notes          (string — overwrites; we replace rather than append so
+ *                     the column stays a single concise carrier-desk note.
+ *                     If a richer history is needed later, the audit_log
+ *                     already records every transition.)
+ *
+ * Behaviour:
+ *   - If `writingNumber` is set AND `status` is NOT explicitly provided,
+ *     the request is transitioned to `appointed` (writing-number is the
+ *     terminal data point of a successful appointment) and `appointed_at`
+ *     is set to now().
+ *   - If `status` is explicitly provided, transition via the contracting
+ *     state machine. Forbidden transitions → 400.
+ *   - Idempotent: a re-PATCH with the same body is a no-op (the state
+ *     machine treats same-state as a no-op-allowed transition) and returns
+ *     200 with the current row rather than 400.
+ *
+ * Permission: agency_admin / super_admin / compliance_manager.
+ * Audit-log: a dedicated `auditMiddleware("carrier_contracting")` is
+ *   wired on this route (the router-level middleware audits
+ *   `agent_onboarding`).
+ */
+const AdminContractingPatchSchema = z
+  .object({
+    writingNumber: z.string().max(64).optional(),
+    status: z
+      .enum(["appointed", "rejected", "submitted", "under_review"])
+      .optional(),
+    notes: z.string().max(2000).optional(),
+  })
+  .refine(
+    (d) =>
+      d.writingNumber !== undefined ||
+      d.status !== undefined ||
+      d.notes !== undefined,
+    { message: "At least one of writingNumber, status, or notes is required" },
+  );
+
 router.patch(
-  "/onboarding/:agentId/carriers/:requestId/admin-status",
+  "/admin/contracting/:requestId",
   requireAuth,
-  requireRole("super_admin", "agency_admin"),
-  async (_req: Request, res: Response): Promise<void> => {
-    // TODO(day-6): admin status-override for a stuck carrier_contracting_request.
-    // Validates the transition via canTransitionContracting and records the
-    // override in the audit log.
-    res.status(501).json({
-      error: "Not yet implemented — Day 6 (admin status override)",
-    });
+  requireRole("super_admin", "agency_admin", "compliance_manager"),
+  auditMiddleware("carrier_contracting", undefined, {
+    getResourceId: (req) => {
+      const raw = req.params.requestId;
+      return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
+    },
+  }),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const requestId = String(req.params.requestId);
+
+    const parsed = AdminContractingPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Invalid request body",
+        details: parsed.error.issues,
+      });
+      return;
+    }
+    const body = parsed.data;
+
+    // Org-scoped lookup. A missing row OR a row in another org collapses
+    // into the same 404 — neither leaks existence.
+    const [current] = await db
+      .select()
+      .from(carrierContractingRequestsTable)
+      .where(
+        and(
+          eq(carrierContractingRequestsTable.id, requestId),
+          eq(carrierContractingRequestsTable.orgId, authReq.orgId),
+        ),
+      )
+      .limit(1);
+    if (!current) {
+      res.status(404).json({ error: "Contracting request not found" });
+      return;
+    }
+
+    // Decide the target status:
+    //   - explicit `status` → use it (validated against the state machine)
+    //   - implicit (only writingNumber provided) → "appointed"
+    //   - notes-only update → keep the current status
+    const explicitStatus = body.status;
+    const wantsAppointed =
+      body.writingNumber !== undefined && explicitStatus === undefined;
+    const targetStatus: ContractingStatus = explicitStatus
+      ? explicitStatus
+      : wantsAppointed
+        ? "appointed"
+        : (current.status as ContractingStatus);
+
+    if (!isContractingStatus(targetStatus)) {
+      res.status(400).json({ error: "Invalid target status" });
+      return;
+    }
+
+    // Build the column patch. We replace `notes` rather than append — the
+    // audit_log already preserves the (from, to) trail for every PATCH, so
+    // a richer "comment thread" would be redundant here. Replace also
+    // makes the route idempotent for the no-op case.
+    const extra: Partial<typeof carrierContractingRequestsTable.$inferInsert> =
+      {};
+    if (body.writingNumber !== undefined) extra.writingNumber = body.writingNumber;
+    if (body.notes !== undefined) extra.notes = body.notes;
+    if (targetStatus === "appointed") extra.appointedAt = new Date();
+    if (targetStatus === "submitted" && !current.submittedAt) {
+      extra.submittedAt = new Date();
+    }
+
+    // Idempotency: same status + same writingNumber + same notes → no-op,
+    // return current row with 200 (no audit-log transition is emitted
+    // because nothing changed at the column level).
+    const isNoop =
+      targetStatus === current.status &&
+      (body.writingNumber === undefined ||
+        body.writingNumber === current.writingNumber) &&
+      (body.notes === undefined || body.notes === current.notes);
+
+    if (isNoop) {
+      res.status(200).json({ request: current, idempotent: true });
+      return;
+    }
+
+    let updated: CarrierContractingRequest | null;
+    try {
+      updated = await transitionContractingRequest(
+        current.id,
+        authReq.orgId,
+        targetStatus,
+        extra,
+      );
+    } catch (err) {
+      if (err instanceof ForbiddenContractingTransitionError) {
+        res.status(400).json({
+          error: "Invalid state transition",
+          from: err.from,
+          to: err.to,
+        });
+        return;
+      }
+      throw err;
+    }
+    if (!updated) {
+      res.status(404).json({ error: "Contracting request vanished" });
+      return;
+    }
+
+    // Roll the run forward if the aggregate state warrants it. This is
+    // where the LAST request → appointed flips the whole run → complete +
+    // writes the notification row.
+    await maybeAdvanceRunForRequests(updated.onboardingRunId, authReq.orgId);
+
+    res.status(200).json({ request: updated, idempotent: false });
   },
 );
 

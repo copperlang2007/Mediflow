@@ -447,20 +447,9 @@ describe("501 stubs for Days 5+ (regression guard)", () => {
     expect(res.status).toBe(501);
   });
 
-  it("PATCH admin-status returns 501 (and is admin-only)", async () => {
-    // First confirm admin-only is enforced (support → 403).
-    const r1 = await request(app)
-      .patch(`/api/onboarding/${agent.id}/carriers/some-req/admin-status`)
-      .set(withAuth(support.id))
-      .send({});
-    expect(r1.status).toBe(403);
-
-    // Then confirm admin reaches the 501.
-    const r2 = await request(app)
-      .patch(`/api/onboarding/${agent.id}/carriers/some-req/admin-status`)
-      .set(withAuth(admin.id))
-      .send({});
-    expect(r2.status).toBe(501);
-  });
+  // The legacy `/onboarding/:agentId/carriers/:requestId/admin-status` 501
+  // stub was superseded by the real `PATCH /admin/contracting/:requestId`
+  // route. Per-route behavior is exercised in
+  // `admin-contracting-writing-number.test.ts`.
 });
 
