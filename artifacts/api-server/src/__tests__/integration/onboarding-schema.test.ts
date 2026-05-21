@@ -86,3 +86,36 @@ describe("migration 0018 — onboarding schema", () => {
     expect(r.rows.length).toBe(1);
   });
 });
+
+describe("migration 0019 — onboarding started_by + contracting task dedup", () => {
+  it("adds agent_onboarding_runs.started_by_user_id", async () => {
+    const handle = (await bootTestDb()).pg;
+    const r = await handle.query<{ column_name: string; data_type: string }>(
+      "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'agent_onboarding_runs' AND column_name = 'started_by_user_id'",
+    );
+    expect(r.rows.length).toBe(1);
+    expect(r.rows[0].data_type).toBe("text");
+  });
+
+  it("adds task_instances.contracting_task_key", async () => {
+    const handle = (await bootTestDb()).pg;
+    const r = await handle.query<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'task_instances' AND column_name = 'contracting_task_key'",
+    );
+    expect(r.rows.length).toBe(1);
+  });
+
+  it("creates the partial-unique index for contracting_task_key", async () => {
+    const handle = (await bootTestDb()).pg;
+    const r = await handle.query<{ indexname: string; indexdef: string }>(
+      "SELECT indexname, indexdef FROM pg_indexes WHERE indexname = 'task_instances_contracting_task_key_unique'",
+    );
+    expect(r.rows.length).toBe(1);
+    // Confirm it's partial — only fires when key IS NOT NULL — same idiom
+    // as the auto_assign / retention_review_key indexes (migrations 0010,
+    // 0011) so the orchestration tasks don't collide with manually-
+    // created tasks that have a NULL key.
+    expect(r.rows[0].indexdef).toMatch(/contracting_task_key/);
+    expect(r.rows[0].indexdef.toLowerCase()).toMatch(/where.*not null/);
+  });
+});

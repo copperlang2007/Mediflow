@@ -425,16 +425,7 @@ describe("GET /onboarding (admin list)", () => {
   });
 });
 
-describe("501 stubs for Days 3+ (regression guard)", () => {
-  it("POST /onboarding/:agentId/carriers/:requestId/generate-paperwork returns 501", async () => {
-    const res = await request(app)
-      .post(`/api/onboarding/${agent.id}/carriers/some-req/generate-paperwork`)
-      .set(withAuth(admin.id))
-      .send({});
-    expect(res.status).toBe(501);
-    expect(res.body.error).toMatch(/Day/);
-  });
-
+describe("501 stubs for Days 5+ (regression guard)", () => {
   it("POST /onboarding/:agentId/signing/start returns 501", async () => {
     const res = await request(app)
       .post(`/api/onboarding/${agent.id}/signing/start`)
@@ -472,3 +463,4 @@ describe("501 stubs for Days 3+ (regression guard)", () => {
     expect(r2.status).toBe(501);
   });
 });
+
