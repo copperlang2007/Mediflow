@@ -64,4 +64,5 @@ export const db = drizzle(pool, { schema });
 
 export * from "./schema";
 export * from "./encryption/medicareId";
+export * from "./encryption/pii";
 export { sql } from "drizzle-orm";

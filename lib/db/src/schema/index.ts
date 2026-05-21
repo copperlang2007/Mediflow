@@ -13,3 +13,4 @@ export * from "./conversations";
 export * from "./messages";
 export * from "./admin";
 export * from "./commissions";
+export * from "./onboarding";

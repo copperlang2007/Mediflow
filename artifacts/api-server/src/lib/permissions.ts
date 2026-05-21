@@ -37,6 +37,8 @@ export type Resource =
   | "retention_alert"
   | "dashboard"
   | "commission"
+  | "agent_onboarding"
+  | "carrier_contracting"
   | "dev_console";
 
 export type Action = "read" | "create" | "update" | "delete" | "admin";
@@ -178,6 +180,21 @@ const MATRIX: PermissionMatrix = {
     create: ["super_admin", "agency_admin"],
     update: ["super_admin", "agency_admin"],
     delete: ["super_admin"],
+  },
+  // Onboarding runs are an admin/compliance concern and the agent themselves;
+  // we still gate route-level access via `agent` permissions, but expose
+  // these resource types for audit-log entries.
+  agent_onboarding: {
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "agent", "developer"],
+    create: ["super_admin", "agency_admin", "compliance_manager"],
+    update: ["super_admin", "agency_admin", "compliance_manager", "agent"],
+    delete: ["super_admin", "agency_admin"],
+  },
+  carrier_contracting: {
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "agent", "developer"],
+    create: ["super_admin", "agency_admin", "compliance_manager", "agent"],
+    update: ["super_admin", "agency_admin", "compliance_manager"],
+    delete: ["super_admin", "agency_admin"],
   },
   dev_console: {
     read: ["super_admin", "developer"],
