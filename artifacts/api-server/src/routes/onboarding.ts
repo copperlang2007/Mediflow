@@ -24,15 +24,30 @@ import {
   agentOnboardingRunsTable,
   agentContractingProfilesTable,
   carrierContractingRequestsTable,
+  taskInstancesTable,
+  documentsTable,
+  notificationsTable,
   encryptSsn,
   decryptSsn,
   encryptEin,
   decryptEin,
   hashSsn,
+  type Agent,
   type AgentContractingProfile,
   type AgentOnboardingRun,
   type CarrierContractingRequest,
 } from "@workspace/db";
+import {
+  createCompleteProfileTask,
+  createAdminReviewTask,
+  createCarrierSignTask,
+  createCarrierSubmitTask,
+  closeContractingTask,
+  completeProfileTaskKey,
+  adminReviewTaskKey,
+  carrierSignTaskKey,
+} from "../workers/contractingTasks";
+import { buildDummyTemplate, fillTemplateFromBytes } from "../lib/contractingPdf/pdfFiller";
 import {
   requireAuth,
   requirePermission,
@@ -43,9 +58,12 @@ import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import {
   canTransitionOnboarding,
+  canTransitionContracting,
   isOnboardingStatus,
+  isContractingStatus,
   ONBOARDING_STATUSES,
   ONBOARDING_STEP_ON_ENTER,
+  type ContractingStatus,
   type OnboardingStatus,
 } from "../workers/contractingStateMachine";
 
@@ -141,6 +159,30 @@ async function ensureAgentInOrg(
     .where(and(eq(agentsTable.id, agentId), eq(agentsTable.orgId, orgId)))
     .limit(1);
   return Boolean(row);
+}
+
+/**
+ * Org-scoped lookup of the columns the contracting orchestration cares
+ * about — agent's linked user (for task assignment) and first/last name
+ * (for task titles). Returns null if the agent isn't in the org so
+ * callers can 404 consistently.
+ */
+async function loadAgentForOrchestration(
+  agentId: string,
+  orgId: string,
+): Promise<Pick<Agent, "id" | "orgId" | "userId" | "firstName" | "lastName"> | null> {
+  const [row] = await db
+    .select({
+      id: agentsTable.id,
+      orgId: agentsTable.orgId,
+      userId: agentsTable.userId,
+      firstName: agentsTable.firstName,
+      lastName: agentsTable.lastName,
+    })
+    .from(agentsTable)
+    .where(and(eq(agentsTable.id, agentId), eq(agentsTable.orgId, orgId)))
+    .limit(1);
+  return row ?? null;
 }
 
 async function loadActiveOnboarding(
@@ -315,7 +357,8 @@ router.post(
     }
     const { agentId } = parsed.data;
 
-    if (!(await ensureAgentInOrg(agentId, authReq.orgId))) {
+    const agent = await loadAgentForOrchestration(agentId, authReq.orgId);
+    if (!agent) {
       res.status(404).json({ error: "Agent not found" });
       return;
     }
@@ -333,6 +376,12 @@ router.post(
           ),
         )
         .limit(1);
+      // Idempotency for the task too: createCompleteProfileTask is keyed
+      // by run.id, so re-calling /onboarding/start returns the existing
+      // run + the existing task (or upserts if a prior call somehow
+      // skipped task creation — i.e. a Day-1/2 run that pre-existed this
+      // PR's task wiring).
+      await createCompleteProfileTask(existing, agent);
       res.status(200).json({
         run: existing,
         profile: profile ? serializeProfile(profile, authReq.userRole) : null,
@@ -348,6 +397,7 @@ router.post(
         id: runId,
         orgId: authReq.orgId,
         agentId,
+        startedByUserId: authReq.userId,
         status: "draft",
       })
       .returning();
@@ -373,6 +423,13 @@ router.post(
         ),
       )
       .limit(1);
+
+    // Agent-facing task — "fill out your contracting profile". Assigned
+    // to the agent's linked user when present (`agents.user_id`). The
+    // task is keyed on `${run.id}:complete-profile`, so any retry of
+    // /onboarding/start (network blip, double-click) collapses to a
+    // no-op via the contracting_task_key partial unique index.
+    await createCompleteProfileTask(run, agent);
 
     res.status(201).json({
       run,
@@ -668,8 +725,9 @@ router.post(
       }
     }
 
+    let advanced: AgentOnboardingRun | null = null;
     try {
-      await transitionOnboarding(
+      advanced = await transitionOnboarding(
         run.id,
         authReq.orgId,
         "carriers_selected",
@@ -678,6 +736,28 @@ router.post(
       // Forbidden transition (e.g. caller selected carriers from a state
       // already past carriers_selected) — keep the inserts but skip the
       // status bump rather than rolling back.
+    }
+
+    // On reaching `carriers_selected` for the first time the orchestration
+    // hands off from the agent (who finished selecting) to the admin (who
+    // reviews + fires `request-contracting`):
+    //   - close the agent's complete-profile task
+    //   - create the admin review task assigned to whoever started the run
+    // The dedup key on the admin task makes this idempotent against
+    // duplicate /carriers/select calls.
+    if (advanced && advanced.status === "carriers_selected") {
+      const agent = await loadAgentForOrchestration(agentId, authReq.orgId);
+      if (agent) {
+        await closeContractingTask(
+          authReq.orgId,
+          completeProfileTaskKey(run.id),
+        );
+        await createAdminReviewTask(
+          advanced,
+          agent,
+          advanced.startedByUserId ?? null,
+        );
+      }
     }
 
     res.status(201).json({ carrierRequests: inserted });
@@ -788,7 +868,505 @@ router.get(
   },
 );
 
-// ---- 501 stubs for Days 3+ -------------------------------------------------
+// ---- Helpers for Day-3 contracting orchestration ---------------------------
+
+/**
+ * Generate a placeholder PDF for a carrier_contracting_request and persist
+ * a `documents` row pointing at a synthetic storage key.
+ *
+ * Day 3 behavior: the dummy template from `pdfFiller.buildDummyTemplate()`
+ * is filled with the agent's name + a generated request id. Day 4 swaps
+ * the real per-carrier INSUREitALL template in at the same call site;
+ * the function shape is intentionally identical so that swap is one-file.
+ *
+ * Idempotent: callers gate on `request.status === 'draft'`, so a second
+ * `request-contracting` call on an already-paperwork-generated request
+ * never lands here.
+ */
+async function generatePlaceholderPaperwork(
+  orgId: string,
+  agentName: string,
+  carrierName: string,
+  requestId: string,
+  uploadedByUserId: string | null,
+): Promise<string> {
+  const template = await buildDummyTemplate();
+  // The dummy template ships two text fields and a checkbox. Day 4 will
+  // replace this with the per-carrier field map; for Day 3 we just prove
+  // the plumbing executes.
+  await fillTemplateFromBytes(
+    template,
+    {
+      fullName: agentName,
+      ssn: "(see encrypted profile)",
+      consent: true,
+    },
+    { flatten: true },
+  );
+
+  // Synthetic storage key — Day 3 doesn't yet wire object storage for
+  // contracting PDFs (Day 4 task). The `documents` row exists so the
+  // foreign key on `carrier_contracting_requests.paperwork_document_id`
+  // is satisfied and admin UIs can show "paperwork generated".
+  const docId = randomUUID();
+  const storageKey = `contracting/${orgId}/${requestId}/placeholder.pdf`;
+  await db.insert(documentsTable).values({
+    id: docId,
+    orgId,
+    name: `${carrierName} contracting packet (placeholder)`,
+    category: "contracting",
+    storageKey,
+    mimeType: "application/pdf",
+    uploadedBy: uploadedByUserId,
+  });
+  return docId;
+}
+
+/**
+ * Apply a contracting-request status transition with state-machine
+ * validation. Mirrors `transitionOnboarding` for the per-carrier sub-flow.
+ * Returns the updated row, or null if no matching org-scoped row exists.
+ * Throws `ForbiddenContractingTransitionError` on a forbidden transition.
+ */
+async function transitionContractingRequest(
+  requestId: string,
+  orgId: string,
+  next: ContractingStatus,
+  extra: Partial<typeof carrierContractingRequestsTable.$inferInsert> = {},
+): Promise<CarrierContractingRequest | null> {
+  const [current] = await db
+    .select()
+    .from(carrierContractingRequestsTable)
+    .where(
+      and(
+        eq(carrierContractingRequestsTable.id, requestId),
+        eq(carrierContractingRequestsTable.orgId, orgId),
+      ),
+    )
+    .limit(1);
+  if (!current) return null;
+
+  const currentStatus = current.status as ContractingStatus;
+  if (!canTransitionContracting(currentStatus, next)) {
+    throw new ForbiddenContractingTransitionError(currentStatus, next);
+  }
+  if (currentStatus === next && Object.keys(extra).length === 0) return current;
+
+  const [updated] = await db
+    .update(carrierContractingRequestsTable)
+    .set({
+      status: next,
+      lastStatusChangeAt: new Date(),
+      updatedAt: new Date(),
+      ...extra,
+    })
+    .where(
+      and(
+        eq(carrierContractingRequestsTable.id, requestId),
+        eq(carrierContractingRequestsTable.orgId, orgId),
+      ),
+    )
+    .returning();
+  return updated ?? null;
+}
+
+class ForbiddenContractingTransitionError extends Error {
+  constructor(public from: string, public to: string) {
+    super(`Forbidden contracting transition: ${from} -> ${to}`);
+    this.name = "ForbiddenContractingTransitionError";
+  }
+}
+
+/**
+ * Inspect every carrier_contracting_request on the run and roll the
+ * onboarding_run status forward if the aggregate state warrants it:
+ *
+ *   - all requests in `submitted` (or beyond) → run → `submitted`
+ *   - all requests in `appointed`             → run → `complete`,
+ *                                               admin tasks closed,
+ *                                               notification row written
+ *
+ * Called from:
+ *   - `POST /carriers/:carrierId/sign` (advances individual requests)
+ *   - `POST /carriers/:carrierId/submit` (Day 6 — also calls this)
+ *   - admin status override + Day-6 worker that records carrier
+ *     appointment decisions
+ *
+ * Designed to be called multiple times: every advance is gated by the
+ * state machine, so a no-op call (e.g. run already complete) is safe.
+ */
+async function maybeAdvanceRunForRequests(runId: string, orgId: string): Promise<void> {
+  const [run] = await db
+    .select()
+    .from(agentOnboardingRunsTable)
+    .where(
+      and(
+        eq(agentOnboardingRunsTable.id, runId),
+        eq(agentOnboardingRunsTable.orgId, orgId),
+      ),
+    )
+    .limit(1);
+  if (!run) return;
+
+  const requests = await db
+    .select()
+    .from(carrierContractingRequestsTable)
+    .where(
+      and(
+        eq(carrierContractingRequestsTable.onboardingRunId, runId),
+        eq(carrierContractingRequestsTable.orgId, orgId),
+        sql`${carrierContractingRequestsTable.status} != 'cancelled'`,
+      ),
+    );
+  if (requests.length === 0) return;
+
+  const allSubmitted = requests.every((r) =>
+    ["submitted", "under_review", "appointed", "rejected"].includes(r.status),
+  );
+  const allAppointed = requests.every((r) => r.status === "appointed");
+
+  if (allAppointed && run.status !== "complete") {
+    try {
+      // Walk: signing -> submitted -> complete OR submitted -> complete.
+      // The state machine forbids skipping; call transitionOnboarding
+      // sequentially and rely on the same-status no-op return for already-
+      // submitted runs.
+      if (run.status === "signing") {
+        await transitionOnboarding(run.id, orgId, "submitted");
+      }
+      await transitionOnboarding(run.id, orgId, "complete");
+    } catch {
+      // Forbidden — the run is in a terminal state we can't move out of.
+      return;
+    }
+
+    // Close any outstanding admin tasks for the run.
+    await closeContractingTask(orgId, adminReviewTaskKey(run.id));
+
+    // Write a single notification row for the admin who started the run.
+    if (run.startedByUserId) {
+      await db.insert(notificationsTable).values({
+        id: randomUUID(),
+        orgId,
+        userId: run.startedByUserId,
+        type: "onboarding_complete",
+        title: "Agent onboarding complete",
+        body: "All carrier appointments have been recorded — the agent is fully onboarded.",
+        priority: "normal",
+        resourceType: "agent_onboarding",
+        resourceId: run.id,
+      });
+    }
+    return;
+  }
+
+  if (allSubmitted && run.status === "signing") {
+    try {
+      await transitionOnboarding(run.id, orgId, "submitted");
+    } catch {
+      // Forbidden — leave as-is.
+    }
+  }
+}
+
+// ---- Day-3 routes ----------------------------------------------------------
+
+const RequestContractingSchema = z.object({}).strict().optional().or(z.undefined());
+
+/**
+ * POST /onboarding/:agentId/request-contracting (admin)
+ *
+ * Admin fires this after the agent finishes profile + carrier selection.
+ * For every carrier_contracting_request in `draft`:
+ *   - generate a placeholder PDF (Day 4 will swap real templates in here)
+ *   - link the documents row via `paperwork_document_id`
+ *   - transition the request to `paperwork_generated`
+ *   - create the agent's "Sign contracting paperwork for {carrierName}" task
+ * Then close the admin review task and roll the onboarding run forward
+ * into `signing`.
+ *
+ * Idempotent: a second call only acts on requests still in `draft`; the
+ * admin task close + run transition are gated by their own state checks
+ * so duplicates collapse to a no-op.
+ */
+router.post(
+  "/onboarding/:agentId/request-contracting",
+  requireAuth,
+  requireRole("super_admin", "agency_admin"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const agentId = String(req.params.agentId);
+
+    const parsed = RequestContractingSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body" });
+      return;
+    }
+
+    const agent = await loadAgentForOrchestration(agentId, authReq.orgId);
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    const run = await loadActiveOnboarding(agentId, authReq.orgId);
+    if (!run) {
+      res.status(404).json({ error: "No active onboarding run for agent" });
+      return;
+    }
+
+    // Load every carrier_contracting_request for the run + the carrier
+    // name in one go. We join in JS so the test harness (PGlite) doesn't
+    // get tripped up by drizzle's join syntax variants.
+    const requests = await db
+      .select()
+      .from(carrierContractingRequestsTable)
+      .where(
+        and(
+          eq(carrierContractingRequestsTable.onboardingRunId, run.id),
+          eq(carrierContractingRequestsTable.orgId, authReq.orgId),
+        ),
+      );
+
+    if (requests.length === 0) {
+      res.status(409).json({
+        error:
+          "No carrier requests on this run yet — call /carriers/select first",
+      });
+      return;
+    }
+
+    const carrierRows = await db
+      .select({ id: carriersTable.id, name: carriersTable.name })
+      .from(carriersTable)
+      .where(eq(carriersTable.orgId, authReq.orgId));
+    const carrierNameById = new Map(carrierRows.map((c) => [c.id, c.name]));
+
+    const agentName = `${agent.firstName} ${agent.lastName}`.trim() || "agent";
+
+    const advanced: CarrierContractingRequest[] = [];
+    const signTasks: Array<{ requestId: string; taskId: string }> = [];
+    for (const r of requests) {
+      if (r.status !== "draft") {
+        // Either already processed (paperwork_generated and beyond) or
+        // cancelled. Re-call idempotency: skip — but we DON'T skip the
+        // sign-task create below for `paperwork_generated` rows, in case
+        // a prior call crashed between PDF gen and task create.
+        if (r.status === "paperwork_generated") {
+          const t = await createCarrierSignTask(
+            run,
+            r,
+            carrierNameById.get(r.carrierId) ?? "the carrier",
+            agent,
+          );
+          signTasks.push({ requestId: r.id, taskId: t.id });
+        }
+        continue;
+      }
+
+      const carrierName = carrierNameById.get(r.carrierId) ?? "the carrier";
+      const docId = await generatePlaceholderPaperwork(
+        authReq.orgId,
+        agentName,
+        carrierName,
+        r.id,
+        authReq.userId,
+      );
+
+      let updated: CarrierContractingRequest | null;
+      try {
+        updated = await transitionContractingRequest(
+          r.id,
+          authReq.orgId,
+          "paperwork_generated",
+          { paperworkDocumentId: docId },
+        );
+      } catch (err) {
+        if (err instanceof ForbiddenContractingTransitionError) continue;
+        throw err;
+      }
+      if (!updated) continue;
+      advanced.push(updated);
+
+      const t = await createCarrierSignTask(run, updated, carrierName, agent);
+      signTasks.push({ requestId: updated.id, taskId: t.id });
+    }
+
+    // Close the admin review task — idempotent.
+    await closeContractingTask(authReq.orgId, adminReviewTaskKey(run.id));
+
+    // Run transition: carriers_selected → signing. Same-status no-op if
+    // we're re-running on a run that already advanced.
+    try {
+      await transitionOnboarding(run.id, authReq.orgId, "signing");
+    } catch {
+      // Forbidden — likely the run is already past signing. Keep going,
+      // the partial-success status is reported back to the caller.
+    }
+
+    const [refreshed] = await db
+      .select()
+      .from(agentOnboardingRunsTable)
+      .where(
+        and(
+          eq(agentOnboardingRunsTable.id, run.id),
+          eq(agentOnboardingRunsTable.orgId, authReq.orgId),
+        ),
+      )
+      .limit(1);
+
+    res.status(200).json({
+      run: refreshed ?? run,
+      paperworkGenerated: advanced.length,
+      signTasks,
+    });
+  },
+);
+
+/**
+ * POST /onboarding/:agentId/carriers/:carrierId/sign
+ *
+ * Day 3 stand-in for the Dropbox-Sign webhook (Day 5). The agent (or an
+ * admin on their behalf) confirms the contracting packet was signed —
+ * we transition the request `paperwork_generated → signed` and create
+ * the SYSTEM "Submit signed packet to {carrierName} appointment desk"
+ * task (Day 6 worker drains those).
+ *
+ * Permission: the agent themselves OR an admin. We narrow the check by
+ * loading the agent's linked user_id and comparing against the caller.
+ * `agent_support` (whose `agent` permission is `read`-only) is rejected
+ * because they don't own the workflow handoff.
+ */
+router.post(
+  "/onboarding/:agentId/carriers/:carrierId/sign",
+  requireAuth,
+  // Permission check happens inline — the `agent:update` matrix doesn't
+  // include the `agent` role, but an agent IS allowed to sign their own
+  // paperwork. We narrow on (agent-self OR admin/compliance) below.
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const agentId = String(req.params.agentId);
+    const carrierId = String(req.params.carrierId);
+
+    const agent = await loadAgentForOrchestration(agentId, authReq.orgId);
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    // Permission narrowing: only the agent themselves OR an admin role
+    // can confirm a signature. agent_support reads everything but cannot
+    // own this handoff.
+    const isAdmin =
+      authReq.userRole === "super_admin" ||
+      authReq.userRole === "agency_admin" ||
+      authReq.userRole === "compliance_manager";
+    const isOwningAgent =
+      authReq.userRole === "agent" && agent.userId === authReq.userId;
+    if (!isAdmin && !isOwningAgent) {
+      res.status(403).json({
+        error: "Only the agent themselves or an admin can confirm signing",
+      });
+      return;
+    }
+
+    const run = await loadActiveOnboarding(agentId, authReq.orgId);
+    if (!run) {
+      res.status(404).json({ error: "No active onboarding run for agent" });
+      return;
+    }
+
+    // Find the (singular) active carrier_contracting_request for this
+    // (agent, carrier) pair. The partial-unique on the table guarantees
+    // at most one non-cancelled row.
+    const [request] = await db
+      .select()
+      .from(carrierContractingRequestsTable)
+      .where(
+        and(
+          eq(carrierContractingRequestsTable.orgId, authReq.orgId),
+          eq(carrierContractingRequestsTable.onboardingRunId, run.id),
+          eq(carrierContractingRequestsTable.carrierId, carrierId),
+          sql`${carrierContractingRequestsTable.status} != 'cancelled'`,
+        ),
+      )
+      .limit(1);
+    if (!request) {
+      res.status(404).json({
+        error: "No contracting request for this agent + carrier pair",
+      });
+      return;
+    }
+
+    // Idempotency: if already signed (or beyond), report the current
+    // state and don't double-create the submit task.
+    const alreadySigned = isContractingStatus(request.status)
+      ? ["signed", "submitted", "under_review", "appointed", "rejected"].includes(
+          request.status,
+        )
+      : false;
+
+    const [carrier] = await db
+      .select({ id: carriersTable.id, name: carriersTable.name })
+      .from(carriersTable)
+      .where(
+        and(
+          eq(carriersTable.id, carrierId),
+          eq(carriersTable.orgId, authReq.orgId),
+        ),
+      )
+      .limit(1);
+    const carrierName = carrier?.name ?? "the carrier";
+
+    let signedRequest = request;
+    if (!alreadySigned) {
+      try {
+        const updated = await transitionContractingRequest(
+          request.id,
+          authReq.orgId,
+          "signed",
+          { signatureCompletedAt: new Date() },
+        );
+        if (!updated) {
+          res.status(404).json({ error: "Contracting request vanished" });
+          return;
+        }
+        signedRequest = updated;
+      } catch (err) {
+        if (err instanceof ForbiddenContractingTransitionError) {
+          res.status(409).json({
+            error: "Cannot sign — invalid state transition",
+            from: err.from,
+            to: err.to,
+          });
+          return;
+        }
+        throw err;
+      }
+    }
+
+    // Close the agent's sign task + create the SYSTEM submit task.
+    await closeContractingTask(
+      authReq.orgId,
+      carrierSignTaskKey(run.id, request.id),
+    );
+    const submitTask = await createCarrierSubmitTask(signedRequest, carrierName);
+
+    // Day-6 worker will flip the request to `submitted` and (eventually)
+    // `appointed`. We still call maybeAdvanceRunForRequests here in case
+    // a test or admin override has already pushed every request past
+    // `signed`.
+    await maybeAdvanceRunForRequests(run.id, authReq.orgId);
+
+    res.status(200).json({
+      request: signedRequest,
+      submitTaskId: submitTask.id,
+      idempotent: alreadySigned,
+    });
+  },
+);
+
+// ---- 501 stubs for Days 5+ -------------------------------------------------
 //
 // Listing these explicitly (vs. leaving them unimplemented) gives anyone
 // picking up Days 3+ a clear "fill this in" target. Each route uses the
@@ -796,20 +1374,11 @@ router.get(
 // unauthorized — which means the 501 is a true "endpoint exists, behavior
 // not yet implemented" signal, not a routing miss.
 
-router.post(
-  "/onboarding/:agentId/carriers/:requestId/generate-paperwork",
-  requireAuth,
-  requirePermission("agent", "update"),
-  async (_req: Request, res: Response): Promise<void> => {
-    // TODO(day-3/4): load profile + state-machine-validate (draft →
-    // paperwork_generated), call pdfFiller.fillTemplate with the carrier's
-    // template, store the PDF in objectStorage, link via documentsTable, and
-    // update the carrier_contracting_requests row.
-    res.status(501).json({
-      error: "Not yet implemented — Day 3-4 (depends on INSUREitALL templates)",
-    });
-  },
-);
+// NOTE: the legacy `POST /onboarding/:agentId/carriers/:requestId/generate-paperwork`
+// stub was superseded by `POST /onboarding/:agentId/request-contracting`
+// (Day 3) — the new endpoint generates paperwork for ALL draft requests
+// on the run in a single admin click, which matches the INSUREitALL
+// workflow better than the per-request stub did.
 
 router.post(
   "/onboarding/:agentId/signing/start",

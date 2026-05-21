@@ -60,6 +60,12 @@ export const agentOnboardingRunsTable = pgTable(
     agentId: text("agent_id")
       .notNull()
       .references(() => agentsTable.id, { onDelete: "cascade" }),
+    // Admin (or compliance manager) who fired POST /onboarding/start. We
+    // route the "Review and request contracting" admin task back to this
+    // user once the agent finishes selecting carriers, so they can flip
+    // the run into `signing` themselves. NULL is permitted for legacy /
+    // imported runs but every new row populates it.
+    startedByUserId: text("started_by_user_id"),
     // String-enum (not pgEnum) so we can add new states via app-side
     // validation without a follow-up migration on every workflow tweak. Each
     // route validates against the allowlist via the state machine helper.

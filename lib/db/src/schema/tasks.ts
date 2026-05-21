@@ -104,6 +104,15 @@ export const taskInstancesTable = pgTable(
     // reviews keyed per-entity rather than per-title (which collided when
     // two entities shared a name).
     retentionReviewKey: text("retention_review_key"),
+    // Deterministic dedup key for the contracting-orchestration tasks
+    // created inline by routes in routes/onboarding.ts (the Day-3 task-
+    // creation idiom — see workers/contractingTasks.ts). Format:
+    // `${runId}:complete-profile` | `${runId}:admin-review` |
+    // `${runId}:sign:${carrierRequestId}` | `${carrierRequestId}:submit`.
+    // NULL for non-contracting tasks. Backed by the partial unique index
+    // `task_instances_contracting_task_key_unique` so double-clicks /
+    // retries collapse to a no-op via `onConflictDoNothing`.
+    contractingTaskKey: text("contracting_task_key"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -124,6 +133,9 @@ export const taskInstancesTable = pgTable(
     uniqueIndex("task_instances_retention_review_key_unique")
       .on(t.orgId, t.retentionReviewKey)
       .where(sql`${t.retentionReviewKey} IS NOT NULL`),
+    uniqueIndex("task_instances_contracting_task_key_unique")
+      .on(t.orgId, t.contractingTaskKey)
+      .where(sql`${t.contractingTaskKey} IS NOT NULL`),
   ],
 );
 
