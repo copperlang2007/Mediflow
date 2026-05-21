@@ -86,6 +86,8 @@ import {
   DollarSign,
   Wrench,
   KeyRound,
+  Handshake,
+  ClipboardCheck,
 } from "lucide-react";
 import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
 import NotificationPanel from "@/components/notifications/NotificationPanel";
@@ -109,6 +111,14 @@ const navItems: NavGroup[] = [
       {
         href: "/agents", label: "Agents", icon: Users,
         roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
+      },
+      {
+        href: "/onboarding", label: "My onboarding", icon: ClipboardCheck,
+        roles: ["agent"],
+      },
+      {
+        href: "/admin-onboarding", label: "Contracting", icon: Handshake,
+        roles: ["super_admin", "agency_admin", "compliance_manager"],
       },
     ],
   },
