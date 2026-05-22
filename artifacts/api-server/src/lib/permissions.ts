@@ -39,6 +39,7 @@ export type Resource =
   | "commission"
   | "agent_onboarding"
   | "carrier_contracting"
+  | "esign"
   | "dev_console";
 
 export type Action = "read" | "create" | "update" | "delete" | "admin";
@@ -194,6 +195,16 @@ const MATRIX: PermissionMatrix = {
     read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "agent", "developer"],
     create: ["super_admin", "agency_admin", "compliance_manager", "agent"],
     update: ["super_admin", "agency_admin", "compliance_manager"],
+    delete: ["super_admin", "agency_admin"],
+  },
+  // Native e-signature envelopes (Beta). Mirrors `carrier_contracting`'s
+  // matrix — an agent can create/sign their own envelope; admins can act
+  // on behalf. Route-level handlers do an additional narrowing check that
+  // ties the caller to the envelope's signer-userId.
+  esign: {
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "agent", "developer"],
+    create: ["super_admin", "agency_admin", "compliance_manager", "agent"],
+    update: ["super_admin", "agency_admin", "compliance_manager", "agent"],
     delete: ["super_admin", "agency_admin"],
   },
   dev_console: {
