@@ -471,7 +471,12 @@ describe("POST /onboarding/:agentId/request-contracting", () => {
   });
 });
 
-describe("POST /onboarding/:agentId/carriers/:carrierId/sign", () => {
+describe("POST /onboarding/:agentId/carriers/:carrierId/sign — envelope creation", () => {
+  // Day-5 e-signature change: the route now creates an `esign_envelopes`
+  // row and returns the signing URL instead of synchronously transitioning
+  // the request to `signed`. The actual transition happens in the
+  // envelope-completion path (covered by the dedicated esign tests).
+
   async function setupSigning(): Promise<{
     org: { id: string };
     admin: { id: string };
@@ -499,78 +504,44 @@ describe("POST /onboarding/:agentId/carriers/:carrierId/sign", () => {
     return { ...ctx, runId, requestId: req.id };
   }
 
-  it("happy path: agent signs → request → 'signed', sign task closed, submit task created", async () => {
-    const { org, agent, agentUser, carrierA, runId, requestId } =
-      await setupSigning();
+  it("happy path: agent starts signing → envelope is created in `pending`, signingUrl returned", async () => {
+    const { agent, agentUser, carrierA, requestId } = await setupSigning();
 
     const res = await request(app)
       .post(`/api/onboarding/${agent.id}/carriers/${carrierA.id}/sign`)
       .set(withAuth(agentUser.id))
       .send({});
     expect(res.status).toBe(200);
-    expect(res.body.request.status).toBe("signed");
-    expect(res.body.submitTaskId).toBeTruthy();
-    expect(res.body.idempotent).toBe(false);
-
-    const handle = await bootTestDb();
-
-    // Sign task is closed.
-    const [signTask] = await handle.db
-      .select()
-      .from(taskInstancesTable)
-      .where(
-        eq(
-          taskInstancesTable.contractingTaskKey,
-          `${runId}:sign:${requestId}`,
-        ),
-      );
-    expect(signTask.status).toBe("completed");
-
-    // SYSTEM submit task created, no assignee.
-    const [submitTask] = await handle.db
-      .select()
-      .from(taskInstancesTable)
-      .where(
-        eq(taskInstancesTable.contractingTaskKey, `${requestId}:submit`),
-      );
-    expect(submitTask).toBeTruthy();
-    expect(submitTask.assignedToUserId).toBeNull();
-    expect(submitTask.title).toMatch(/Submit signed packet to /);
-    expect(submitTask.status).toBe("open");
+    expect(res.body.envelopeId).toBeTruthy();
+    expect(res.body.status).toBe("pending");
+    expect(res.body.signingUrl).toBe(`/sign/${res.body.envelopeId}`);
+    expect(res.body.carrierContractingRequestId).toBe(requestId);
   });
 
-  it("admin can sign on behalf", async () => {
+  it("admin can start signing on behalf", async () => {
     const { admin, agent, carrierA } = await setupSigning();
     const res = await request(app)
       .post(`/api/onboarding/${agent.id}/carriers/${carrierA.id}/sign`)
       .set(withAuth(admin.id))
       .send({});
     expect(res.status).toBe(200);
-    expect(res.body.request.status).toBe("signed");
+    expect(res.body.envelopeId).toBeTruthy();
   });
 
-  it("is idempotent: re-call returns idempotent=true, no duplicate submit task", async () => {
-    const { agent, agentUser, carrierA, requestId } = await setupSigning();
-    await request(app)
+  it("is idempotent: re-calling returns the same envelope, no duplicate row", async () => {
+    const { agent, agentUser, carrierA } = await setupSigning();
+    const first = await request(app)
       .post(`/api/onboarding/${agent.id}/carriers/${carrierA.id}/sign`)
       .set(withAuth(agentUser.id))
       .send({});
+    expect(first.status).toBe(200);
 
     const second = await request(app)
       .post(`/api/onboarding/${agent.id}/carriers/${carrierA.id}/sign`)
       .set(withAuth(agentUser.id))
       .send({});
     expect(second.status).toBe(200);
-    expect(second.body.idempotent).toBe(true);
-
-    const handle = await bootTestDb();
-    const submitTasks = await handle.db
-      .select()
-      .from(taskInstancesTable)
-      .where(
-        eq(taskInstancesTable.contractingTaskKey, `${requestId}:submit`),
-      );
-    expect(submitTasks).toHaveLength(1);
+    expect(second.body.envelopeId).toBe(first.body.envelopeId);
   });
 
   it("agent_support cannot sign (not the agent + not admin)", async () => {
@@ -677,7 +648,7 @@ describe("contractingTasks key + idempotency helpers", () => {
 });
 
 describe("carrier_contracting_requests lifecycle on /sign", () => {
-  it("records signatureCompletedAt when transitioning to signed", async () => {
+  it("records signatureCompletedAt after the e-sign envelope completes", async () => {
     const { agent, agentUser, carrierA, requestId } = await (async () => {
       const ctx = await freshOrg();
       const runId = await startRun(ctx.admin.id, ctx.agent.id);
@@ -697,11 +668,26 @@ describe("carrier_contracting_requests lifecycle on /sign", () => {
     })();
 
     const before = Date.now();
-    const res = await request(app)
+    const startRes = await request(app)
       .post(`/api/onboarding/${agent.id}/carriers/${carrierA.id}/sign`)
       .set(withAuth(agentUser.id))
       .send({});
-    expect(res.status).toBe(200);
+    expect(startRes.status).toBe(200);
+    const envelopeId = startRes.body.envelopeId as string;
+
+    // Drive the envelope through completion — this is where the
+    // contracting request is transitioned to `signed` (via
+    // completeCarrierSigningTransition).
+    const completeRes = await request(app)
+      .post(`/api/esign/envelopes/${envelopeId}/sign`)
+      .set(withAuth(agentUser.id))
+      .send({
+        typedName: "Test Agent",
+        signatureSvg: "<svg/>",
+        consentToElectronicBusiness: true,
+        intentToSign: true,
+      });
+    expect(completeRes.status).toBe(200);
 
     const handle = await bootTestDb();
     const [req] = await handle.db
@@ -751,33 +737,58 @@ describe("Run completion + notification", () => {
       .post(`/api/onboarding/${agent.id}/request-contracting`)
       .set(withAuth(admin.id))
       .send({});
-    // Sign each.
-    await request(app)
-      .post(`/api/onboarding/${agent.id}/carriers/${carrierA.id}/sign`)
-      .set(withAuth(admin.id))
-      .send({});
-    await request(app)
-      .post(`/api/onboarding/${agent.id}/carriers/${carrierB.id}/sign`)
-      .set(withAuth(admin.id))
-      .send({});
+    // Drive each carrier through the e-sign envelope completion.
+    for (const carrierId of [carrierA.id, carrierB.id]) {
+      const startRes = await request(app)
+        .post(`/api/onboarding/${agent.id}/carriers/${carrierId}/sign`)
+        .set(withAuth(admin.id))
+        .send({});
+      const envelopeId = startRes.body.envelopeId;
+      await request(app)
+        .post(`/api/esign/envelopes/${envelopeId}/sign`)
+        .set(withAuth(admin.id))
+        .send({
+          typedName: "Admin",
+          signatureSvg: "<svg/>",
+          consentToElectronicBusiness: true,
+          intentToSign: true,
+        });
+    }
 
-    // Day 6 will flip these via the worker; simulate with a direct DB
-    // update + then a fresh `/sign` call to re-trigger the aggregator.
-    // (The aggregator runs on every sign; we re-run it via a no-op sign
-    // — but the request is already signed so it returns idempotent.)
+    // Day-6 worker simulation: flip each request to `appointed` directly.
     const handle = await bootTestDb();
     await handle.db
       .update(carrierContractingRequestsTable)
       .set({ status: "appointed", appointedAt: new Date() })
       .where(eq(carrierContractingRequestsTable.onboardingRunId, runId));
 
-    // Trigger the aggregator. We use a fresh sign call — it's idempotent
-    // and re-runs maybeAdvanceRunForRequests, which is where the
+    // Trigger the run-aggregator by re-completing the (already-completed)
+    // envelope for carrierA. completeCarrierSigningTransition's idempotent
+    // path still calls maybeAdvanceRunForRequests, which is where the
     // complete + notification logic lives.
-    await request(app)
+    const [envA] = await handle.db
+      .select()
+      .from(carrierContractingRequestsTable)
+      .where(
+        and(
+          eq(carrierContractingRequestsTable.onboardingRunId, runId),
+          eq(carrierContractingRequestsTable.carrierId, carrierA.id),
+        ),
+      );
+    const startRes = await request(app)
       .post(`/api/onboarding/${agent.id}/carriers/${carrierA.id}/sign`)
       .set(withAuth(admin.id))
       .send({});
+    await request(app)
+      .post(`/api/esign/envelopes/${startRes.body.envelopeId}/sign`)
+      .set(withAuth(admin.id))
+      .send({
+        typedName: "Admin",
+        signatureSvg: "<svg/>",
+        consentToElectronicBusiness: true,
+        intentToSign: true,
+      });
+    void envA;
 
     // Run should now be complete.
     const [run] = await handle.db

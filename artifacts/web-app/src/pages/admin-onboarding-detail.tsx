@@ -48,6 +48,7 @@ import {
   onboardingStatusLabel,
   useCancelOnboarding,
   useOnboarding,
+  useRecordWritingNumber,
   useRequestContracting,
   type CarrierContractingRequest,
 } from "@/lib/onboarding/api";
@@ -243,7 +244,7 @@ export default function AdminOnboardingDetail({ agentId }: { agentId: string }) 
               The agent hasn't selected any carriers yet.
             </p>
           ) : (
-            <CarrierRequestsTable requests={active} />
+            <CarrierRequestsTable requests={active} agentId={agentId} />
           )}
         </CardContent>
       </Card>
@@ -275,7 +276,13 @@ export default function AdminOnboardingDetail({ agentId }: { agentId: string }) 
   );
 }
 
-function CarrierRequestsTable({ requests }: { requests: CarrierContractingRequest[] }) {
+function CarrierRequestsTable({
+  requests,
+  agentId,
+}: {
+  requests: CarrierContractingRequest[];
+  agentId: string;
+}) {
   const { data: carriers } = useGetCarriers();
   const carrierName = (id: string) =>
     (carriers ?? []).find((c) => c.id === id)?.name ?? id;
@@ -319,7 +326,7 @@ function CarrierRequestsTable({ requests }: { requests: CarrierContractingReques
               )}
             </TableCell>
             <TableCell>
-              <WritingNumberCell request={r} />
+              <WritingNumberCell request={r} agentId={agentId} />
             </TableCell>
           </TableRow>
         ))}
@@ -331,18 +338,46 @@ function CarrierRequestsTable({ requests }: { requests: CarrierContractingReques
 /**
  * Inline writing-number entry.
  *
- * TODO(day-6): wire to `PATCH /admin/contracting/:requestId` once the route
- * is implemented. For now the UI element exists and validates the input but
- * the submit is a client-side noop that toasts a placeholder so the QA
- * harness can exercise the flow.
+ * Wired to `PATCH /admin/contracting/:requestId`. Saving the writing
+ * number (without an explicit status) transitions the request to
+ * `appointed`; when it's the last outstanding request the backend rolls
+ * the onboarding run to `complete` and the page-header badge updates
+ * naturally via the react-query refetch triggered on success.
  */
-function WritingNumberCell({ request }: { request: CarrierContractingRequest }) {
+export function WritingNumberCell({
+  request,
+  agentId,
+}: {
+  request: CarrierContractingRequest;
+  agentId: string;
+}) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(request.writingNumber ?? "");
+  const recordWritingNumber = useRecordWritingNumber(agentId);
   const isReadyForWritingNumber =
     request.status === "submitted" ||
     request.status === "under_review" ||
     request.status === "appointed";
+
+  const handleSave = async () => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      toast.error("Writing number is required");
+      return;
+    }
+    try {
+      await recordWritingNumber.mutateAsync({
+        requestId: request.id,
+        writingNumber: trimmed,
+      });
+      toast.success("Writing number recorded — appointment marked complete");
+      setEditing(false);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save writing number",
+      );
+    }
+  };
 
   if (request.writingNumber && !editing) {
     return (
@@ -379,22 +414,18 @@ function WritingNumberCell({ request }: { request: CarrierContractingRequest }) 
         placeholder="e.g. W-1234567"
         className="h-7 text-xs w-32"
         autoFocus
+        disabled={recordWritingNumber.isPending}
       />
       <Button
         size="sm"
         className="h-7 text-xs"
         onClick={() => {
-          // TODO(day-6): hit PATCH /api/admin/contracting/:requestId
-          // with { writingNumber: value }. The endpoint is currently a
-          // 501 stub in routes/onboarding.ts ("admin status override").
-          toast.message(
-            "Writing-number entry is wired but the backend route is a Day-6 stub",
-          );
-          setEditing(false);
+          void handleSave();
         }}
+        disabled={recordWritingNumber.isPending}
         data-testid={`save-writing-num-${request.id}`}
       >
-        Save
+        {recordWritingNumber.isPending ? "Saving…" : "Save"}
       </Button>
       <Button
         size="sm"
@@ -404,6 +435,7 @@ function WritingNumberCell({ request }: { request: CarrierContractingRequest }) 
           setEditing(false);
           setValue(request.writingNumber ?? "");
         }}
+        disabled={recordWritingNumber.isPending}
       >
         Cancel
       </Button>

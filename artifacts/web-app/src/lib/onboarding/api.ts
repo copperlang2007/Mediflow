@@ -438,6 +438,52 @@ export function useSignEnvelope(envelopeId: string) {
   });
 }
 
+/**
+ * PATCH /admin/contracting/:requestId (admin/compliance)
+ *
+ * Records the appointment-desk decision for a single carrier request:
+ *   - writingNumber (final paperwork-trail identifier from the carrier)
+ *   - optional explicit status override
+ *   - optional notes (the column is overwritten, not appended; the audit
+ *     log preserves the change trail).
+ *
+ * The hook invalidates the onboarding detail query on success so the
+ * detail page refetches and shows the new writing number + status badge.
+ * When the LAST outstanding carrier request flips to `appointed` the
+ * backend rolls the onboarding run → `complete` — the detail-page header
+ * badge updates naturally via the same refetch.
+ */
+export interface RecordWritingNumberInput {
+  requestId: string;
+  writingNumber?: string;
+  status?: "appointed" | "rejected" | "submitted" | "under_review";
+  notes?: string;
+}
+
+export function useRecordWritingNumber(agentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: RecordWritingNumberInput) => {
+      const { requestId, ...body } = vars;
+      return apiFetch<{
+        request: CarrierContractingRequest;
+        idempotent: boolean;
+      }>(`/api/admin/contracting/${requestId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    },
+    onSuccess: () => {
+      // Refetch both the agent's detail (run/profile/requests) AND the
+      // admin list — the list shows aggregate status badges that flip
+      // when a run completes.
+      void qc.invalidateQueries({ queryKey: onboardingKeys.detail(agentId) });
+      void qc.invalidateQueries({ queryKey: ["onboarding", "list"] });
+    },
+  });
+}
+
 // ---------- Helpers ---------------------------------------------------------
 
 const STATUS_LABELS: Record<OnboardingStatus, string> = {
