@@ -299,12 +299,9 @@ export function useRequestContracting(agentId: string) {
 /**
  * POST /onboarding/:agentId/carriers/:carrierId/sign.
  *
- * Day 3 stand-in: synchronous "I signed it" confirmation. Day 5 will
- * replace this with a Dropbox Sign envelope launch.
- *
- * NOTE: the backend route is keyed on `carrierId`, NOT `requestId` —
- * see `routes/onboarding.ts` line 1241. The carrier_contracting_requests
- * row is looked up by the (agent, carrier) pair.
+ * Legacy synchronous stand-in. Kept for back-compat with any non-esign code
+ * paths; the wizard now uses `useStartCarrierSign` + the `/sign/:envelopeId`
+ * page instead.
  */
 export function useSignCarrier(agentId: string) {
   const qc = useQueryClient();
@@ -320,6 +317,123 @@ export function useSignCarrier(agentId: string) {
       ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: onboardingKeys.detail(agentId) });
+    },
+  });
+}
+
+// ---------- E-Sign (Beta) ---------------------------------------------------
+
+export type EnvelopeStatus = "pending" | "signed" | "completed" | "voided";
+
+export interface EnvelopeSigner {
+  userId: string;
+  displayName: string;
+  email: string;
+}
+
+export interface EnvelopeConsentRecord {
+  consentText: string;
+  version: string;
+  acceptedAt: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+}
+
+export interface Envelope {
+  envelopeId: string;
+  status: EnvelopeStatus;
+  carrierContractingRequestId: string;
+  pdfDocumentId: string;
+  signers: EnvelopeSigner[];
+  signedAt: string | null;
+  signedPdfDocumentId: string | null;
+  integritySha256: string | null;
+  consentRecord: EnvelopeConsentRecord | null;
+}
+
+export const esignKeys = {
+  all: ["esign"] as const,
+  envelope: (envelopeId: string) => ["esign", "envelope", envelopeId] as const,
+};
+
+export interface StartCarrierSignBody {
+  pdfDocumentId: string;
+  carrierContractingRequestId: string;
+  signers: EnvelopeSigner[];
+}
+
+export interface StartCarrierSignResponse {
+  envelopeId: string;
+  status: "pending";
+  signingUrl: string;
+}
+
+/**
+ * POST /esign/envelopes — create a signing envelope for a carrier contracting
+ * request. Returns the envelopeId + signing URL that the wizard should
+ * navigate the agent to.
+ */
+export function useStartCarrierSign(agentId: string, _requestId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: StartCarrierSignBody) =>
+      apiFetch<StartCarrierSignResponse>(`/api/esign/envelopes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(vars),
+      }),
+    onSuccess: () => {
+      // Invalidate so the wizard reflects any status side-effects when the
+      // user comes back after signing.
+      void qc.invalidateQueries({ queryKey: onboardingKeys.detail(agentId) });
+    },
+  });
+}
+
+/** GET /esign/envelopes/:envelopeId. */
+export function useEnvelope(
+  envelopeId: string | null | undefined,
+  options?: Partial<UseQueryOptions<Envelope>>,
+) {
+  return useQuery<Envelope>({
+    queryKey: esignKeys.envelope(envelopeId ?? ""),
+    enabled: Boolean(envelopeId) && options?.enabled !== false,
+    queryFn: async () =>
+      apiFetch<Envelope>(`/api/esign/envelopes/${envelopeId}`),
+    ...options,
+  });
+}
+
+export interface SignEnvelopeBody {
+  typedName: string;
+  signatureSvg: string;
+  consentToElectronicBusiness: true;
+  intentToSign: true;
+}
+
+export interface SignEnvelopeResponse {
+  envelopeId: string;
+  status: "completed";
+  signedPdfDocumentId: string;
+  integritySha256: string;
+}
+
+/** POST /esign/envelopes/:envelopeId/sign. */
+export function useSignEnvelope(envelopeId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: SignEnvelopeBody) =>
+      apiFetch<SignEnvelopeResponse>(
+        `/api/esign/envelopes/${envelopeId}/sign`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(vars),
+        },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: esignKeys.envelope(envelopeId) });
+      void qc.invalidateQueries({ queryKey: ["onboarding"] });
     },
   });
 }

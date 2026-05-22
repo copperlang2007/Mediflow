@@ -1,6 +1,7 @@
 import { useMemo } from "react";
+import { useLocation } from "wouter";
 import { toast } from "sonner";
-import { useGetCarriers } from "@workspace/api-client-react";
+import { useGetCarriers, useGetMe } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,15 +9,16 @@ import { CheckCircle2, Clock, PenTool } from "lucide-react";
 import {
   type CarrierContractingRequest,
   contractingStatusLabel,
-  useSignCarrier,
+  useStartCarrierSign,
 } from "@/lib/onboarding/api";
 
 /**
- * Day-3 stand-in: synchronous sign confirmation.
- *
- * TODO(day-5): swap the "Sign now" button to launch a Dropbox Sign envelope
- * via `POST /onboarding/:agentId/signing/start` (currently 501-stubbed) and
- * embed the carrier-signing iframe instead of synchronously POSTing.
+ * Sign-paperwork step. Each carrier-contracting-request whose paperwork
+ * has been generated gets a "Sign now" button — clicking it creates an
+ * e-sign envelope via `POST /esign/envelopes` and navigates the agent to
+ * `/sign/:envelopeId` (our in-house signing window). On return, React
+ * Query's onboarding-detail invalidation surfaces the updated `signed`
+ * status.
  */
 export function SigningStep({
   agentId,
@@ -28,13 +30,15 @@ export function SigningStep({
   onContinue: () => void;
 }) {
   const { data: carriers } = useGetCarriers();
+  const { data: me } = useGetMe();
+  const [, setLocation] = useLocation();
   const carrierName = useMemo(() => {
     const m = new Map<string, string>();
     (carriers ?? []).forEach((c) => m.set(c.id, c.name));
     return (id: string) => m.get(id) ?? id;
   }, [carriers]);
 
-  const { mutateAsync, isPending } = useSignCarrier(agentId);
+  const { mutateAsync, isPending } = useStartCarrierSign(agentId);
 
   const active = carrierRequests.filter((r) => r.status !== "cancelled");
   const ready = active.filter((r) => r.status === "paperwork_generated");
@@ -43,12 +47,34 @@ export function SigningStep({
   );
   const allDone = active.length > 0 && ready.length === 0 && active.every((r) => r.status !== "draft");
 
-  const handleSign = async (carrierId: string) => {
+  const handleSign = async (req: CarrierContractingRequest) => {
+    if (!req.paperworkDocumentId) {
+      toast.error("This carrier's paperwork isn't ready yet.");
+      return;
+    }
+    if (!me) {
+      toast.error("Loading your user profile — try again in a moment.");
+      return;
+    }
     try {
-      await mutateAsync({ carrierId });
-      toast.success(`Signed paperwork for ${carrierName(carrierId)}`);
+      const res = await mutateAsync({
+        pdfDocumentId: req.paperworkDocumentId,
+        carrierContractingRequestId: req.id,
+        signers: [
+          {
+            userId: me.id,
+            displayName: me.fullName,
+            email: me.email,
+          },
+        ],
+      });
+      // Prefer the server-provided signing URL; fall back to convention.
+      const target = res.signingUrl || `/sign/${res.envelopeId}`;
+      setLocation(target);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to sign paperwork");
+      toast.error(
+        err instanceof Error ? err.message : "Failed to start signing",
+      );
     }
   };
 
@@ -70,8 +96,8 @@ export function SigningStep({
       <CardHeader>
         <CardTitle>Sign carrier paperwork</CardTitle>
         <CardDescription>
-          Each carrier has its own contracting packet. Sign them one at a time
-          — the next one will become available as you finish.
+          Each carrier has its own contracting packet. Click "Sign now" to
+          open the in-house signing window (Beta).
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -118,10 +144,10 @@ export function SigningStep({
                     <Button
                       size="sm"
                       disabled={isPending}
-                      onClick={() => handleSign(r.carrierId)}
+                      onClick={() => handleSign(r)}
                       data-testid={`sign-btn-${r.carrierId}`}
                     >
-                      {isPending ? "Signing…" : "Sign"}
+                      {isPending ? "Opening…" : "Sign now"}
                     </Button>
                   )}
                 </div>
