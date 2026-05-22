@@ -12,14 +12,31 @@ import { logger } from "./logger";
 
 export type EmailRecipient = { email: string; name?: string };
 
+/**
+ * File attachment for a transactional email. Resend's API accepts the bytes
+ * base64-encoded in the JSON payload (no multipart upload step needed).
+ *
+ * Used by the Day-6 contracting email-out worker to send signed PDFs to
+ * carrier appointment desks. We deliberately do NOT log attachment bytes
+ * anywhere — the signed PDF contains PII (SSN, DOB, address) and the email
+ * body is the only sink that should ever see those bytes.
+ */
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+}
+
 export interface SendEmailOptions {
   to: EmailRecipient | EmailRecipient[];
+  cc?: EmailRecipient | EmailRecipient[];
   subject: string;
   html: string;
   text?: string;
   from?: string;
   replyTo?: string;
   tags?: Record<string, string>;
+  attachments?: EmailAttachment[];
 }
 
 export interface EmailResult {
@@ -55,10 +72,19 @@ export async function sendEmail(
   const toAddresses = toArray.map((r) =>
     r.name ? `${r.name} <${r.email}>` : r.email,
   );
+  const ccArray = opts.cc
+    ? Array.isArray(opts.cc)
+      ? opts.cc
+      : [opts.cc]
+    : [];
+  const ccAddresses = ccArray.map((r) =>
+    r.name ? `${r.name} <${r.email}>` : r.email,
+  );
 
   const payload = {
     from: opts.from ?? DEFAULT_FROM,
     to: toAddresses,
+    ...(ccAddresses.length > 0 ? { cc: ccAddresses } : {}),
     subject: opts.subject,
     html: opts.html,
     ...(opts.text ? { text: opts.text } : {}),
@@ -68,6 +94,18 @@ export async function sendEmail(
           tags: Object.entries(opts.tags).map(([k, v]) => ({
             name: k,
             value: v,
+          })),
+        }
+      : {}),
+    // Attachments are base64-encoded inline per the Resend API. We never log
+    // the encoded bytes — the surrounding worker scrubs payload from any log
+    // line (see `submitContractingPacket.ts`).
+    ...(opts.attachments && opts.attachments.length > 0
+      ? {
+          attachments: opts.attachments.map((a) => ({
+            filename: a.filename,
+            content: a.content.toString("base64"),
+            ...(a.contentType ? { content_type: a.contentType } : {}),
           })),
         }
       : {}),

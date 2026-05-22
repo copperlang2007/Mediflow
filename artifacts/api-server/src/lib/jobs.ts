@@ -102,6 +102,9 @@ export const JOB_NAMES = {
   SEND_SCHEDULED_EMAIL: "send-scheduled-email",
   SEND_SCHEDULED_SMS: "send-scheduled-sms",
   RECONCILE_COMMISSION_STATEMENT: "reconcile-commission-statement",
+  // Day-6 contracting email-out: drains `*:submit` system tasks created by
+  // the e-sign completion path. One job per carrier_contracting_request.
+  SUBMIT_CONTRACTING_PACKET: "submit-contracting-packet",
 } as const;
 
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
@@ -248,6 +251,17 @@ export interface ReconcileCommissionStatementPayload extends Record<string, unkn
 
 export interface CommissionMissedPaymentCheckPayload extends Record<string, unknown> {
   orgId?: string;
+}
+
+/**
+ * Day-6 contracting email-out. Direct-enqueued by the e-sign callback
+ * immediately after the submit-task is created (see
+ * `lib/esign/carrierSignCallback.ts`). The worker is idempotent on the
+ * carrier_contracting_request status — a duplicate enqueue is a no-op.
+ */
+export interface SubmitContractingPacketPayload extends Record<string, unknown> {
+  carrierContractingRequestId: string;
+  orgId: string;
 }
 
 // ---- Enqueue helper ----
@@ -561,6 +575,23 @@ export async function startWorkers(): Promise<void> {
   await boss.work<CommissionMissedPaymentCheckPayload>(
     JOB_NAMES.COMMISSION_MISSED_PAYMENT_CHECK,
     missedPaymentHandler,
+  );
+
+  const submitContractingPacketHandler: WorkHandler<SubmitContractingPacketPayload> = async (
+    jobs: Job<SubmitContractingPacketPayload>[],
+  ) => {
+    const { submitContractingPacketWorker } = await import(
+      "../workers/submitContractingPacket"
+    );
+    for (const job of jobs) await submitContractingPacketWorker(job.data);
+  };
+  // Email-out: one job per carrier request. Conservative concurrency — the
+  // job's most expensive step is the Resend POST + a GCS read; we don't want
+  // to fan out so wide that a stuck downstream chokes the pool.
+  await boss.work<SubmitContractingPacketPayload>(
+    JOB_NAMES.SUBMIT_CONTRACTING_PACKET,
+    { batchSize: 3, localConcurrency: 3 },
+    submitContractingPacketHandler,
   );
 
   const exportAnomalyHandler: WorkHandler<Record<string, never>> = async () => {
