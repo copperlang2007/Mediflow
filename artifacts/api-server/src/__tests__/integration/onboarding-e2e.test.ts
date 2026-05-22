@@ -358,25 +358,42 @@ describe("INSUREitALL onboarding — full end-to-end flow", () => {
     expect(reqAgain.body.paperworkGenerated).toBe(0);
 
     // -------------------------------------------------------------------
-    // 5. POST /:agentId/carriers/:carrierId/sign (×3)
+    // 5. POST /:agentId/carriers/:carrierId/sign (×3) — Day-5 e-sign flow
+    //    creates an envelope; we complete each via POST /esign/.../sign
+    //    to drive the carrier_contracting_request to `signed`.
     // -------------------------------------------------------------------
+    const envelopeIds: string[] = [];
     for (const c of orgA.carriers) {
       const signRes = await request(app)
         .post(`/api/onboarding/${orgA.agentId}/carriers/${c.id}/sign`)
         .set(withAuth(orgA.agentUser.id))
         .send({});
       expect(signRes.status).toBe(200);
-      expect(signRes.body.request.status).toBe("signed");
-      expect(signRes.body.idempotent).toBe(false);
+      expect(signRes.body.envelopeId).toBeTruthy();
+      expect(signRes.body.status).toBe("pending");
+      envelopeIds.push(signRes.body.envelopeId);
+
+      const completeRes = await request(app)
+        .post(`/api/esign/envelopes/${signRes.body.envelopeId}/sign`)
+        .set(withAuth(orgA.agentUser.id))
+        .send({
+          typedName: "Test Agent",
+          signatureSvg: "<svg/>",
+          consentToElectronicBusiness: true,
+          intentToSign: true,
+        });
+      expect(completeRes.status).toBe(200);
+      expect(completeRes.body.status).toBe("completed");
     }
 
-    // Idempotent re-sign on the first carrier.
+    // Idempotent re-start on the first carrier — returns the existing
+    // (completed) envelope rather than 409'ing.
     const reSign = await request(app)
       .post(`/api/onboarding/${orgA.agentId}/carriers/${orgA.carriers[0].id}/sign`)
       .set(withAuth(orgA.agentUser.id))
       .send({});
     expect(reSign.status).toBe(200);
-    expect(reSign.body.idempotent).toBe(true);
+    expect(reSign.body.envelopeId).toBe(envelopeIds[0]);
 
     {
       const reqRows = await handle.db
@@ -420,22 +437,19 @@ describe("INSUREitALL onboarding — full end-to-end flow", () => {
     }
 
     // -------------------------------------------------------------------
-    // 6. Simulate Day-6 worker: each request → 'submitted'. Re-call /sign
-    //    on one row idempotently to re-trigger the aggregator.
+    // 6. Simulate Day-6 worker: each request → 'submitted'.
     // -------------------------------------------------------------------
     await handle.db
       .update(carrierContractingRequestsTable)
       .set({ status: "submitted", submittedAt: new Date() })
       .where(eq(carrierContractingRequestsTable.onboardingRunId, runId));
 
-    // Re-trigger the aggregator. (The /sign route is the cheapest way to
-    // re-run maybeAdvanceRunForRequests without exposing it as a public
-    // endpoint. The PATCH below in step 7 would also trigger it, but we
-    // assert the intermediate `submitted` state first.)
-    await request(app)
-      .post(`/api/onboarding/${orgA.agentId}/carriers/${orgA.carriers[0].id}/sign`)
-      .set(withAuth(orgA.agentUser.id))
-      .send({});
+    // Roll the run forward to `submitted` directly — the e-sign flow no
+    // longer has a passive "re-call /sign" trigger.
+    await handle.db
+      .update(agentOnboardingRunsTable)
+      .set({ status: "submitted" })
+      .where(eq(agentOnboardingRunsTable.id, runId));
 
     {
       const [r] = await handle.db

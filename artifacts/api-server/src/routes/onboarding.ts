@@ -41,13 +41,12 @@ import {
   createCompleteProfileTask,
   createAdminReviewTask,
   createCarrierSignTask,
-  createCarrierSubmitTask,
   closeContractingTask,
   completeProfileTaskKey,
   adminReviewTaskKey,
-  carrierSignTaskKey,
 } from "../workers/contractingTasks";
 import { buildDummyTemplate, fillTemplateFromBytes } from "../lib/contractingPdf/pdfFiller";
+import { getMediflowProvider } from "../lib/esign/mediflowProvider";
 import {
   requireAuth,
   requirePermission,
@@ -1226,23 +1225,24 @@ router.post(
 /**
  * POST /onboarding/:agentId/carriers/:carrierId/sign
  *
- * Day 3 stand-in for the Dropbox-Sign webhook (Day 5). The agent (or an
- * admin on their behalf) confirms the contracting packet was signed —
- * we transition the request `paperwork_generated → signed` and create
- * the SYSTEM "Submit signed packet to {carrierName} appointment desk"
- * task (Day 6 worker drains those).
+ * Day-5 native e-signature replacement (Beta). Previously synchronously
+ * transitioned the carrier_contracting_request to `signed`; now it
+ * creates an `esign_envelopes` row pointing at the paperwork PDF and
+ * returns the signing URL. The actual state transition happens when the
+ * envelope completes — see `lib/esign/mediflowProvider.ts` →
+ * `recordSignature`, which calls `completeCarrierSigningTransition`
+ * once the signed bytes are persisted.
  *
- * Permission: the agent themselves OR an admin. We narrow the check by
- * loading the agent's linked user_id and comparing against the caller.
- * `agent_support` (whose `agent` permission is `read`-only) is rejected
- * because they don't own the workflow handoff.
+ * Permission: the agent themselves OR an admin / compliance manager.
+ * `agent_support` is rejected because it doesn't own the handoff.
+ *
+ * Idempotent: re-posting while a non-voided envelope already exists for
+ * the same carrier_contracting_request returns that envelope's metadata
+ * (and its `signingUrl`) rather than creating a duplicate.
  */
 router.post(
   "/onboarding/:agentId/carriers/:carrierId/sign",
   requireAuth,
-  // Permission check happens inline — the `agent:update` matrix doesn't
-  // include the `agent` role, but an agent IS allowed to sign their own
-  // paperwork. We narrow on (agent-self OR admin/compliance) below.
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const agentId = String(req.params.agentId);
@@ -1254,9 +1254,6 @@ router.post(
       return;
     }
 
-    // Permission narrowing: only the agent themselves OR an admin role
-    // can confirm a signature. agent_support reads everything but cannot
-    // own this handoff.
     const isAdmin =
       authReq.userRole === "super_admin" ||
       authReq.userRole === "agency_admin" ||
@@ -1265,7 +1262,7 @@ router.post(
       authReq.userRole === "agent" && agent.userId === authReq.userId;
     if (!isAdmin && !isOwningAgent) {
       res.status(403).json({
-        error: "Only the agent themselves or an admin can confirm signing",
+        error: "Only the agent themselves or an admin can start signing",
       });
       return;
     }
@@ -1276,9 +1273,6 @@ router.post(
       return;
     }
 
-    // Find the (singular) active carrier_contracting_request for this
-    // (agent, carrier) pair. The partial-unique on the table guarantees
-    // at most one non-cancelled row.
     const [request] = await db
       .select()
       .from(carrierContractingRequestsTable)
@@ -1298,70 +1292,69 @@ router.post(
       return;
     }
 
-    // Idempotency: if already signed (or beyond), report the current
-    // state and don't double-create the submit task.
-    const alreadySigned = isContractingStatus(request.status)
-      ? ["signed", "submitted", "under_review", "appointed", "rejected"].includes(
-          request.status,
-        )
-      : false;
+    if (!request.paperworkDocumentId) {
+      res.status(409).json({
+        error:
+          "Carrier paperwork not generated yet — call POST /onboarding/:agentId/request-contracting first",
+      });
+      return;
+    }
 
-    const [carrier] = await db
-      .select({ id: carriersTable.id, name: carriersTable.name })
-      .from(carriersTable)
+    // Single-signer MVP: the signer is always the agent themselves. We
+    // pull the display name from the agent row and the email from the
+    // contracting profile (carrier paperwork uses that email).
+    const [profile] = await db
+      .select()
+      .from(agentContractingProfilesTable)
       .where(
         and(
-          eq(carriersTable.id, carrierId),
-          eq(carriersTable.orgId, authReq.orgId),
+          eq(agentContractingProfilesTable.agentId, agentId),
+          eq(agentContractingProfilesTable.orgId, authReq.orgId),
         ),
       )
       .limit(1);
-    const carrierName = carrier?.name ?? "the carrier";
 
-    let signedRequest = request;
-    if (!alreadySigned) {
-      try {
-        const updated = await transitionContractingRequest(
-          request.id,
-          authReq.orgId,
-          "signed",
-          { signatureCompletedAt: new Date() },
-        );
-        if (!updated) {
-          res.status(404).json({ error: "Contracting request vanished" });
-          return;
-        }
-        signedRequest = updated;
-      } catch (err) {
-        if (err instanceof ForbiddenContractingTransitionError) {
-          res.status(409).json({
-            error: "Cannot sign — invalid state transition",
-            from: err.from,
-            to: err.to,
-          });
-          return;
-        }
-        throw err;
-      }
+    if (!agent.userId) {
+      res.status(409).json({
+        error:
+          "Agent has no linked user account — cannot create signing envelope",
+      });
+      return;
     }
+    const displayName =
+      `${agent.firstName} ${agent.lastName}`.trim() || "agent";
+    const [agentRow] = await db
+      .select({ email: agentsTable.email })
+      .from(agentsTable)
+      .where(eq(agentsTable.id, agentId))
+      .limit(1);
+    const signerEmail =
+      profile?.email ?? agentRow?.email ?? "unknown@example.com";
 
-    // Close the agent's sign task + create the SYSTEM submit task.
-    await closeContractingTask(
-      authReq.orgId,
-      carrierSignTaskKey(run.id, request.id),
-    );
-    const submitTask = await createCarrierSubmitTask(signedRequest, carrierName);
-
-    // Day-6 worker will flip the request to `submitted` and (eventually)
-    // `appointed`. We still call maybeAdvanceRunForRequests here in case
-    // a test or admin override has already pushed every request past
-    // `signed`.
-    await maybeAdvanceRunForRequests(run.id, authReq.orgId);
+    const envelope = await getMediflowProvider().createEnvelope({
+      orgId: authReq.orgId,
+      carrierContractingRequestId: request.id,
+      pdfDocumentId: request.paperworkDocumentId,
+      signers: [
+        {
+          userId: agent.userId,
+          displayName,
+          email: signerEmail,
+        },
+      ],
+      createdByUserId: authReq.userId,
+      ipAddress: req.ip ?? null,
+      userAgent:
+        typeof req.headers["user-agent"] === "string"
+          ? req.headers["user-agent"]
+          : null,
+    });
 
     res.status(200).json({
-      request: signedRequest,
-      submitTaskId: submitTask.id,
-      idempotent: alreadySigned,
+      envelopeId: envelope.id,
+      status: envelope.status,
+      signingUrl: `/sign/${envelope.id}`,
+      carrierContractingRequestId: request.id,
     });
   },
 );

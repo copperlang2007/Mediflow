@@ -162,6 +162,13 @@
       "when": 1778430000000,
       "tag": "0019_onboarding_started_by",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1778440000000,
+      "tag": "0020_esign_envelopes",
+      "breakpoints": true
     }
   ]
 }

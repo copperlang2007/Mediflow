@@ -135,16 +135,25 @@ async function bootFlow(): Promise<{
     .set(withAuth(admin.id))
     .send({});
 
-  // Sign each carrier — uses the admin role, which the /sign route accepts
-  // on behalf of the agent.
-  await request(app)
-    .post(`/api/onboarding/${agentRow.id}/carriers/${carrierA.id}/sign`)
-    .set(withAuth(admin.id))
-    .send({});
-  await request(app)
-    .post(`/api/onboarding/${agentRow.id}/carriers/${carrierB.id}/sign`)
-    .set(withAuth(admin.id))
-    .send({});
+  // Sign each carrier — Day-5 e-sign flow: start an envelope then
+  // complete it. The admin role can act on behalf of the agent.
+  for (const carrierId of [carrierA.id, carrierB.id]) {
+    const startRes = await request(app)
+      .post(`/api/onboarding/${agentRow.id}/carriers/${carrierId}/sign`)
+      .set(withAuth(admin.id))
+      .send({});
+    if (startRes.body?.envelopeId) {
+      await request(app)
+        .post(`/api/esign/envelopes/${startRes.body.envelopeId}/sign`)
+        .set(withAuth(admin.id))
+        .send({
+          typedName: "Admin On Behalf",
+          signatureSvg: "<svg/>",
+          consentToElectronicBusiness: true,
+          intentToSign: true,
+        });
+    }
+  }
 
   // Move each to `submitted` (Day-6 worker stand-in).
   await handle.db
