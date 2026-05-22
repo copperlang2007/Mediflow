@@ -7,6 +7,7 @@ import {
   pgEnum,
   real,
   index,
+  jsonb,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
@@ -167,6 +168,19 @@ export const carriersTable = pgTable("carriers", {
   cmsContractNumber: text("cms_contract_number"),
   logoUrl: text("logo_url"),
   isActive: boolean("is_active").notNull().default(true),
+  // Day-6 contracting email-out: per-carrier appointment-desk address.
+  // NULL until INSUREitALL provisions the address — the email-out worker
+  // treats null as "configure later" (WARN + leave task open), not "fail".
+  appointmentDeskEmail: text("appointment_desk_email"),
+  // Loosely-typed override bag for the email-out worker. Documented keys:
+  //   - `cc`: string[]  — CC list appended to every submission
+  //   - `subject`: string — subject-line template (variable substitution
+  //                         is not supported in v1; literal string only)
+  // Unknown keys are ignored so INSUREitALL can stash carrier-specific
+  // notes here without a schema change.
+  appointmentDeskMetadata: jsonb("appointment_desk_metadata")
+    .notNull()
+    .default({}),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

@@ -172,6 +172,7 @@ export const jobsMockFactory = (): Record<string, unknown> => ({
     GENERATE_OFFBOARDING_PDF: "generate-offboarding-pdf",
     SEND_SCHEDULED_EMAIL: "send-scheduled-email",
     SEND_SCHEDULED_SMS: "send-scheduled-sms",
+    SUBMIT_CONTRACTING_PACKET: "submit-contracting-packet",
   },
   enqueue: async (name: string, data: unknown): Promise<string> => {
     (globalThis.__TEST_ENQUEUED__ ??= []).push({ name, data });

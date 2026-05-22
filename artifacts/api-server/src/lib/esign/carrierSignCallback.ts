@@ -43,6 +43,8 @@ import {
   type ContractingStatus,
   type OnboardingStatus,
 } from "../../workers/contractingStateMachine";
+import { enqueue, JOB_NAMES } from "../jobs";
+import { logger } from "../logger";
 import { randomUUID } from "node:crypto";
 
 /**
@@ -156,6 +158,26 @@ export async function completeCarrierSigningTransition(
   // Create the SYSTEM submit task. The Day-6 email-out worker drains these.
   const submitTask = await createCarrierSubmitTask(updated, carrierName);
 
+  // Direct-enqueue the Day-6 email-out worker. `singletonKey` collapses
+  // duplicate enqueues (e.g. an idempotent re-completion of the same
+  // envelope) to a single in-flight job; the worker itself ALSO re-checks
+  // the request status on entry so a singleton-race miss still no-ops.
+  //
+  // `enqueue` is never-throw — a transient pg-boss outage is logged and the
+  // task stays open for a later poll/retry rather than failing the e-sign
+  // completion that already committed.
+  const jobId = await enqueue(
+    JOB_NAMES.SUBMIT_CONTRACTING_PACKET,
+    { carrierContractingRequestId: updated.id, orgId },
+    { singletonKey: `submit:${updated.id}` },
+  );
+  if (!jobId) {
+    logger.warn(
+      { requestId: updated.id, orgId },
+      "carrierSignCallback: submit-packet enqueue returned null — submit task left open for retry",
+    );
+  }
+
   // Roll the onboarding run forward if every request is past `signed`.
   if (run) {
     await maybeAdvanceRunForRequests(run.id, orgId);
@@ -173,8 +195,13 @@ export async function completeCarrierSigningTransition(
  * kept here so the envelope-completion path doesn't need to import a route
  * module (circular-import risk). The behaviour is intentionally identical
  * — duplication is preferred over coupling the two modules.
+ *
+ * Exported so the Day-6 email-out worker (`workers/submitContractingPacket.ts`)
+ * can fire the same aggregator after flipping a request to `submitted` —
+ * when the LAST request in a run lands `submitted` (or `appointed`), the
+ * onboarding run advances and the completion notification fires.
  */
-async function maybeAdvanceRunForRequests(
+export async function maybeAdvanceRunForRequests(
   runId: string,
   orgId: string,
 ): Promise<void> {
