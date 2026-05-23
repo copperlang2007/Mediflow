@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
-    "e2e:install": "playwright install --with-deps chromium"
+    "e2e:install": "playwright install --with-deps chromium",
+    "seed:demo": "pnpm --filter @workspace/scripts run seed:demo"
   },
   "private": true,
   "devDependencies": {

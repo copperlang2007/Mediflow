@@ -27,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Tooltip,
@@ -219,52 +220,72 @@ export default function SignPage() {
   }, [envelope]);
 
   // -- Confirmation view -----------------------------------------------------
+  // Demo-friendly: a big visual checkmark, a clear "done with this carrier"
+  // sentence, prominent "back to onboarding" CTA, and the integrity hash
+  // tucked into a tooltip so the headline isn't a cryptographic string of
+  // dread.
   if (completed) {
     const signedUrl = `${BASE}/api/esign/envelopes/${envelopeId}/signed-pdf`;
     return (
       <FullScreenShell>
-        <Card className="max-w-2xl mx-auto" data-testid="sign-confirmation">
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <CheckCircle2 className="h-7 w-7 text-green-600" />
-              <div>
-                <CardTitle>Document signed</CardTitle>
-                <CardDescription>
-                  Your signature has been recorded.
-                </CardDescription>
-              </div>
+        <Card
+          className="max-w-2xl mx-auto"
+          data-testid="sign-confirmation"
+        >
+          <CardContent className="py-8 sm:py-10 px-4 sm:px-8 space-y-6 text-center">
+            <div className="mx-auto h-16 w-16 sm:h-20 sm:w-20 rounded-full bg-green-100 flex items-center justify-center">
+              <CheckCircle2 className="h-10 w-10 sm:h-12 sm:w-12 text-green-600" />
             </div>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="rounded-lg border bg-muted/40 p-3 space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">
-                Integrity SHA-256
+            <div className="space-y-1">
+              <h2 className="text-xl sm:text-2xl font-semibold">
+                You're done with this carrier
+              </h2>
+              <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                Your signature has been recorded. Your admin will submit the
+                signed packet to the carrier's appointment desk.
               </p>
-              <p
-                className="font-mono text-xs break-all"
-                data-testid="integrity-hash"
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
+              <Button
+                size="lg"
+                onClick={() => setLocation("/onboarding")}
+                data-testid="return-to-onboarding"
+                className="w-full sm:w-auto"
               >
-                {completed.integritySha256}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to my onboarding
+              </Button>
               <a
                 href={signedUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-muted"
+                className="inline-flex items-center justify-center gap-2 rounded-md border bg-background px-4 py-2 text-sm font-medium hover:bg-muted w-full sm:w-auto"
                 data-testid="download-signed-pdf"
               >
                 <Download className="h-4 w-4" />
                 Download signed PDF
               </a>
-              <Button
-                onClick={() => setLocation("/onboarding")}
-                data-testid="return-to-onboarding"
-              >
-                Return to onboarding
-              </Button>
             </div>
+            <details className="pt-4 border-t group">
+              <summary
+                className="text-[10px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1 cursor-pointer list-none"
+                data-testid="integrity-hash-trigger"
+              >
+                <Info className="h-3 w-3" />
+                Integrity hash
+              </summary>
+              <div className="mt-2 rounded-md bg-muted/40 px-3 py-2 max-w-md mx-auto">
+                <p className="text-[10px] font-medium text-muted-foreground mb-1">
+                  SHA-256 of signed PDF
+                </p>
+                <p
+                  className="font-mono text-[10px] break-all text-left"
+                  data-testid="integrity-hash"
+                >
+                  {completed.integritySha256}
+                </p>
+              </div>
+            </details>
           </CardContent>
         </Card>
       </FullScreenShell>
@@ -272,15 +293,39 @@ export default function SignPage() {
   }
 
   // -- Loading / error -------------------------------------------------------
+  // Skeleton matches the real layout (doc viewer, consent block, signature
+  // pad, action buttons) so the page doesn't reflow when data lands.
   if (isLoading) {
     return (
       <FullScreenShell>
-        <Card className="max-w-2xl mx-auto">
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin mx-auto mb-3" />
-            Loading envelope…
-          </CardContent>
-        </Card>
+        <div
+          className="max-w-3xl mx-auto space-y-6"
+          data-testid="sign-loading"
+        >
+          <Card>
+            <CardContent className="py-6 space-y-3">
+              <Skeleton className="h-5 w-48" />
+              <Skeleton className="h-4 w-72" />
+              <Skeleton className="h-[300px] w-full sm:h-[500px] rounded-md" />
+              <Skeleton className="h-4 w-64" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-6 space-y-3">
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-3/4" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-6 space-y-3">
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </CardContent>
+          </Card>
+        </div>
       </FullScreenShell>
     );
   }
@@ -354,7 +399,7 @@ export default function SignPage() {
                 title="Carrier contracting document"
                 src={pdfUrl}
                 onLoad={handleIframeLoad}
-                className="w-full h-[500px] rounded-md border bg-muted"
+                className="w-full h-[360px] sm:h-[500px] rounded-md border bg-muted"
                 data-testid="pdf-viewer"
               />
             ) : (
@@ -523,11 +568,12 @@ export default function SignPage() {
                 {submitError}
               </div>
             )}
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
               <Button
                 variant="outline"
                 onClick={() => setLocation("/onboarding")}
                 data-testid="cancel-sign"
+                className="w-full sm:w-auto"
               >
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back to onboarding
@@ -537,6 +583,7 @@ export default function SignPage() {
                 disabled={!canSubmit}
                 onClick={handleSubmit}
                 data-testid="submit-sign"
+                className="w-full sm:w-auto"
               >
                 {signEnvelope.isPending ? (
                   <>
@@ -621,7 +668,7 @@ function FullScreenShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="px-4 py-6">{children}</main>
+      <main className="px-3 sm:px-4 py-4 sm:py-6">{children}</main>
     </div>
   );
 }

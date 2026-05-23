@@ -174,6 +174,10 @@ const navItems: NavGroup[] = [
         roles: ["super_admin", "agency_admin"],
       },
       {
+        href: "/admin-carriers", label: "Carriers", icon: Building2,
+        roles: ["super_admin", "agency_admin"],
+      },
+      {
         href: "/admin-compliance", label: "HIPAA / SOC 2", icon: Lock,
         roles: ["super_admin", "agency_admin", "compliance_manager"],
       },

@@ -143,6 +143,10 @@ export function ProfileStep({
 }) {
   const [form, setForm] = useState<FormState>(() => profileToForm(profile));
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Mirrors the per-form pattern in sign.tsx: keep an inline error message
+  // alongside the toast so the agent doesn't lose context if they dismiss
+  // the toast or it disappears too quickly.
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const { mutateAsync, isPending } = usePatchOnboardingProfile(agentId);
 
@@ -156,6 +160,7 @@ export function ProfileStep({
   );
 
   const handleSave = async (advance: boolean) => {
+    setSubmitError(null);
     const parsed = ProfileFormSchema.safeParse(form);
     if (!parsed.success) {
       const errs: Record<string, string> = {};
@@ -165,6 +170,7 @@ export function ProfileStep({
       }
       setErrors(errs);
       toast.error("Please fix the highlighted fields");
+      setSubmitError("Please fix the highlighted fields above.");
       return;
     }
     setErrors({});
@@ -179,7 +185,9 @@ export function ProfileStep({
       toast.success("Profile saved");
       if (advance) onContinue();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save profile");
+      const msg = err instanceof Error ? err.message : "Failed to save profile";
+      toast.error(msg);
+      setSubmitError(msg);
     }
   };
 
@@ -369,11 +377,31 @@ export function ProfileStep({
           </label>
         </section>
 
-        <div className="flex justify-end gap-2 border-t pt-4">
-          <Button variant="outline" disabled={isPending} onClick={() => handleSave(false)}>
+        {submitError && (
+          <div
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+            data-testid="profile-submit-error"
+          >
+            {submitError}
+          </div>
+        )}
+
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 border-t pt-4">
+          <Button
+            variant="outline"
+            disabled={isPending}
+            onClick={() => handleSave(false)}
+            className="w-full sm:w-auto"
+          >
             {isPending ? "Saving…" : "Save progress"}
           </Button>
-          <Button disabled={isPending} onClick={() => handleSave(true)} data-testid="profile-continue">
+          <Button
+            disabled={isPending}
+            onClick={() => handleSave(true)}
+            data-testid="profile-continue"
+            className="w-full sm:w-auto"
+          >
             {isPending ? "Saving…" : "Save and continue"}
           </Button>
         </div>
