@@ -111,8 +111,9 @@ describe("SigningStep", () => {
 
   it("renders an empty-state message when no carrier requests exist", () => {
     renderStep({ carrierRequests: [] });
+    expect(screen.getByText(/Nothing to sign yet/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/No carrier paperwork has been generated yet/i),
+      screen.getByText(/Your admin will review your carrier selections/i),
     ).toBeInTheDocument();
   });
 
