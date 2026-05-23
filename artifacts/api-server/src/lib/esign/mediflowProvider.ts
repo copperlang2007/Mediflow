@@ -27,6 +27,8 @@ import { and, desc, eq } from "drizzle-orm";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import {
   db,
+  carriersTable,
+  carrierContractingRequestsTable,
   documentsTable,
   esignEnvelopesTable,
   esignSigningEventsTable,
@@ -46,6 +48,7 @@ import {
 } from "./provider";
 import { ESIGN_CONSENT_TEXT, ESIGN_CONSENT_VERSION } from "./consent";
 import { renderSignatureCertificate } from "../contractingPdf/signatureCertificate";
+import { findSignatureAnchor } from "../contractingPdf/anchorLookup";
 import { ObjectStorageService } from "../objectStorage";
 import { completeCarrierSigningTransition } from "./carrierSignCallback";
 import { logger } from "../logger";
@@ -256,6 +259,15 @@ export class MediflowESignProvider implements ESignProvider {
       userAgent: ctx.userAgent,
     };
 
+    // Look up the carrier's signature anchor string (if any). The
+    // `applySignatureToPdf` method searches the PDF for this string and
+    // places the visible signature there; if not found (or anchor
+    // unknown) it falls back to the legacy top-right-of-last-page.
+    const signatureAnchor = await this.resolveSignatureAnchor(
+      orgId,
+      envelope.carrierContractingRequestId,
+    );
+
     const signedPdfBuffer = await this.applySignatureToPdf({
       unsignedBytes,
       signer,
@@ -264,6 +276,7 @@ export class MediflowESignProvider implements ESignProvider {
       consentRecord,
       unsignedHash,
       documentName: doc.name,
+      signatureAnchor,
     });
 
     // 6. Integrity hash of the final signed PDF.
@@ -489,10 +502,54 @@ export class MediflowESignProvider implements ESignProvider {
   }
 
   /**
+   * Look up the carrier-specific signature-anchor string for the request
+   * tied to an envelope. Returns `null` when the request / carrier can't
+   * be resolved, which causes the caller to fall back to its legacy
+   * fixed-position placement.
+   */
+  private async resolveSignatureAnchor(
+    orgId: string,
+    carrierContractingRequestId: string,
+  ): Promise<string | null> {
+    try {
+      const [row] = await db
+        .select({ carrierName: carriersTable.name })
+        .from(carrierContractingRequestsTable)
+        .innerJoin(
+          carriersTable,
+          eq(carriersTable.id, carrierContractingRequestsTable.carrierId),
+        )
+        .where(
+          and(
+            eq(carrierContractingRequestsTable.id, carrierContractingRequestId),
+            eq(carrierContractingRequestsTable.orgId, orgId),
+          ),
+        )
+        .limit(1);
+      if (!row) return null;
+      const { getCarrierTemplate } = await import(
+        "../contractingPdf/carrierTemplates"
+      );
+      return getCarrierTemplate(row.carrierName).signatureAnchor;
+    } catch (err) {
+      logger.warn(
+        { err, orgId, carrierContractingRequestId },
+        "resolveSignatureAnchor failed — falling back to default placement",
+      );
+      return null;
+    }
+  }
+
+  /**
    * Apply the visible signature mark to the unsigned PDF + append the
-   * certificate page. Signature placement: top-right of the last page.
-   * (An anchor-string strategy ships in Phase 3 once the INSUREitALL
-   * templates land with reliable signature anchors.)
+   * certificate page.
+   *
+   * Placement strategy:
+   *   1. If a `signatureAnchor` string is provided AND the PDF contains
+   *      it, place the signature on the anchor's page near where the
+   *      anchor appears (see `findSignatureAnchor`).
+   *   2. Otherwise, fall back to the legacy top-right-of-last-page —
+   *      same behavior the Day-5 e-sign rollout shipped with.
    */
   private async applySignatureToPdf(args: {
     unsignedBytes: Buffer;
@@ -502,33 +559,54 @@ export class MediflowESignProvider implements ESignProvider {
     consentRecord: EsignConsentRecord;
     unsignedHash: string;
     documentName: string;
+    signatureAnchor: string | null;
   }): Promise<Buffer> {
     const pdf = await PDFDocument.load(args.unsignedBytes);
     const pages = pdf.getPages();
-    const lastPage = pages[pages.length - 1];
-    if (lastPage) {
+
+    // Anchor-driven placement when available.
+    const anchorResult = args.signatureAnchor
+      ? await findSignatureAnchor(args.unsignedBytes, args.signatureAnchor)
+      : ({ found: false } as const);
+
+    const targetPage =
+      anchorResult.found && pages[anchorResult.pageIndex]
+        ? pages[anchorResult.pageIndex]
+        : pages[pages.length - 1];
+
+    if (targetPage) {
       const fontItalic = await pdf.embedFont(StandardFonts.HelveticaOblique);
       const font = await pdf.embedFont(StandardFonts.Helvetica);
 
-      const { width, height } = lastPage.getSize();
-      const sigX = width - 250;
-      const sigY = height - 100;
+      let sigX: number;
+      let sigY: number;
+      if (anchorResult.found) {
+        // Anchor-driven: caller already converted the anchor location to
+        // a (page, x, y) tuple. We sit the signature label above the
+        // anchor's y so the typed name doesn't overprint the anchor text.
+        sigX = anchorResult.placement.x;
+        sigY = anchorResult.placement.y + 20;
+      } else {
+        const { width, height } = targetPage.getSize();
+        sigX = width - 250;
+        sigY = height - 100;
+      }
 
-      lastPage.drawText("Signed electronically by:", {
+      targetPage.drawText("Signed electronically by:", {
         x: sigX,
         y: sigY + 30,
         size: 9,
         font,
         color: rgb(0, 0, 0),
       });
-      lastPage.drawText(args.typedName, {
+      targetPage.drawText(args.typedName, {
         x: sigX,
         y: sigY + 12,
         size: 16,
         font: fontItalic,
         color: rgb(0, 0, 0.6),
       });
-      lastPage.drawText(args.signedAt.toISOString(), {
+      targetPage.drawText(args.signedAt.toISOString(), {
         x: sigX,
         y: sigY - 4,
         size: 8,
