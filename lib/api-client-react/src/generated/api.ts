@@ -43,6 +43,7 @@ import type {
   BulkImportResult,
   BulkUpdateAgentTechStack200,
   BulkUpdateTechStackBody,
+  CancelOnboardingResponse,
   Carrier,
   CarrierCertification,
   CertificationMatrix,
@@ -69,6 +70,8 @@ import type {
   CreateDealBody,
   CreateDocumentBody,
   CreateEmailTemplateBody,
+  CreateEsignEnvelopeBody,
+  CreateEsignEnvelopeResponse,
   CreateLeadBody,
   CreateLicenseBody,
   CreatePipelineBody,
@@ -89,6 +92,7 @@ import type {
   EmailTemplate,
   EnrollInSequence200,
   EnrollInSequenceBody,
+  Envelope,
   Error,
   ExportAdminAuditLogParams,
   ExportAgentPerformanceReportParams,
@@ -146,6 +150,7 @@ import type {
   LeadStats,
   LeadsReport,
   LicenseRenewalAlert,
+  ListOnboardingsParams,
   LogActivityBody,
   MarkMessageRead200,
   Message,
@@ -153,11 +158,15 @@ import type {
   NotificationCount,
   OffboardResponse,
   OffboardingReportDocument,
+  OnboardingDetail,
+  OnboardingListResponse,
   OrgSettings,
   Organization,
   PaginatedAuditLog,
   PaginatedExportLog,
   PaginatedLoginHistory,
+  PatchOnboardingProfileBody,
+  PatchOnboardingProfileResponse,
   Pipeline,
   PipelineAnalytics,
   PipelineReportRow,
@@ -167,9 +176,12 @@ import type {
   PreviewTemplate200,
   PreviewTemplateBody,
   ReactivateUser200,
+  RecordContractingDecisionBody,
+  RecordContractingDecisionResponse,
   RenewalSnoozeResponse,
   RenewalsResponse,
   ReplyInThreadBody,
+  RequestContractingResponse,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   ResolveRenewal200,
@@ -179,6 +191,8 @@ import type {
   RunAutomationRuleBody,
   RunAutomationRuleResponse,
   SeedCarriersResponse,
+  SelectCarriersBody,
+  SelectCarriersResponse,
   SendContactEmail201,
   SendContactEmailBody,
   SendContactSms201,
@@ -189,8 +203,13 @@ import type {
   SequenceWithStats,
   SequenceWithSteps,
   SessionConfig,
+  SignEnvelopeBody,
+  SignEnvelopeResponse,
+  SignOnboardingCarrierResponse,
   SmsTemplate,
   SnoozeRenewalBody,
+  StartOnboardingBody,
+  StartOnboardingResponse,
   StateLicense,
   StateLicenseListResponse,
   SuccessResponse,
@@ -234,6 +253,8 @@ import type {
   UserListResponse,
   ValidateGhlImportBody,
   ValidateMondayImportBody,
+  VoidEnvelopeBody,
+  VoidEnvelopeResponse,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -16814,6 +16835,1276 @@ export function useGetImportErrorsCsv<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetImportErrorsCsvQueryOptions(jobId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Admin starts an onboarding run. Idempotent on `(org_id, agent_id)`
+— re-posting returns the existing active run with `idempotent: true`
+rather than 409'ing.
+
+ * @summary Start (or invite) an onboarding run for an agent
+ */
+export const getStartOnboardingUrl = () => {
+  return `/api/onboarding/start`;
+};
+
+export const startOnboarding = async (
+  startOnboardingBody: StartOnboardingBody,
+  options?: RequestInit,
+): Promise<StartOnboardingResponse> => {
+  return customFetch<StartOnboardingResponse>(getStartOnboardingUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(startOnboardingBody),
+  });
+};
+
+export const getStartOnboardingMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startOnboarding>>,
+    TError,
+    { data: BodyType<StartOnboardingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof startOnboarding>>,
+  TError,
+  { data: BodyType<StartOnboardingBody> },
+  TContext
+> => {
+  const mutationKey = ["startOnboarding"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof startOnboarding>>,
+    { data: BodyType<StartOnboardingBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return startOnboarding(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type StartOnboardingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof startOnboarding>>
+>;
+export type StartOnboardingMutationBody = BodyType<StartOnboardingBody>;
+export type StartOnboardingMutationError = ErrorType<Error>;
+
+/**
+ * @summary Start (or invite) an onboarding run for an agent
+ */
+export const useStartOnboarding = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startOnboarding>>,
+    TError,
+    { data: BodyType<StartOnboardingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof startOnboarding>>,
+  TError,
+  { data: BodyType<StartOnboardingBody> },
+  TContext
+> => {
+  return useMutation(getStartOnboardingMutationOptions(options));
+};
+
+/**
+ * @summary List onboarding runs (admin)
+ */
+export const getListOnboardingsUrl = (params?: ListOnboardingsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/onboarding?${stringifiedParams}`
+    : `/api/onboarding`;
+};
+
+export const listOnboardings = async (
+  params?: ListOnboardingsParams,
+  options?: RequestInit,
+): Promise<OnboardingListResponse> => {
+  return customFetch<OnboardingListResponse>(getListOnboardingsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListOnboardingsQueryKey = (params?: ListOnboardingsParams) => {
+  return [`/api/onboarding`, ...(params ? [params] : [])] as const;
+};
+
+export const getListOnboardingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listOnboardings>>,
+  TError = ErrorType<Error>,
+>(
+  params?: ListOnboardingsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listOnboardings>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListOnboardingsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listOnboardings>>> = ({
+    signal,
+  }) => listOnboardings(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listOnboardings>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListOnboardingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listOnboardings>>
+>;
+export type ListOnboardingsQueryError = ErrorType<Error>;
+
+/**
+ * @summary List onboarding runs (admin)
+ */
+
+export function useListOnboardings<
+  TData = Awaited<ReturnType<typeof listOnboardings>>,
+  TError = ErrorType<Error>,
+>(
+  params?: ListOnboardingsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listOnboardings>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListOnboardingsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get current onboarding run + profile + carrier requests for an agent
+ */
+export const getGetOnboardingUrl = (agentId: string) => {
+  return `/api/onboarding/${agentId}`;
+};
+
+export const getOnboarding = async (
+  agentId: string,
+  options?: RequestInit,
+): Promise<OnboardingDetail> => {
+  return customFetch<OnboardingDetail>(getGetOnboardingUrl(agentId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetOnboardingQueryKey = (agentId: string) => {
+  return [`/api/onboarding/${agentId}`] as const;
+};
+
+export const getGetOnboardingQueryOptions = <
+  TData = Awaited<ReturnType<typeof getOnboarding>>,
+  TError = ErrorType<Error>,
+>(
+  agentId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getOnboarding>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetOnboardingQueryKey(agentId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getOnboarding>>> = ({
+    signal,
+  }) => getOnboarding(agentId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!agentId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getOnboarding>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetOnboardingQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getOnboarding>>
+>;
+export type GetOnboardingQueryError = ErrorType<Error>;
+
+/**
+ * @summary Get current onboarding run + profile + carrier requests for an agent
+ */
+
+export function useGetOnboarding<
+  TData = Awaited<ReturnType<typeof getOnboarding>>,
+  TError = ErrorType<Error>,
+>(
+  agentId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getOnboarding>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetOnboardingQueryOptions(agentId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Agent (or admin on behalf of) updates the contracting profile.
+SSN + EIN are AES-256-GCM-encrypted before write; plaintext never
+lands in the database. Auto-advances the run from `draft` →
+`profile_in_progress`.
+
+ * @summary Update the agent's contracting profile
+ */
+export const getPatchOnboardingProfileUrl = (agentId: string) => {
+  return `/api/onboarding/${agentId}/profile`;
+};
+
+export const patchOnboardingProfile = async (
+  agentId: string,
+  patchOnboardingProfileBody: PatchOnboardingProfileBody,
+  options?: RequestInit,
+): Promise<PatchOnboardingProfileResponse> => {
+  return customFetch<PatchOnboardingProfileResponse>(
+    getPatchOnboardingProfileUrl(agentId),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(patchOnboardingProfileBody),
+    },
+  );
+};
+
+export const getPatchOnboardingProfileMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof patchOnboardingProfile>>,
+    TError,
+    { agentId: string; data: BodyType<PatchOnboardingProfileBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof patchOnboardingProfile>>,
+  TError,
+  { agentId: string; data: BodyType<PatchOnboardingProfileBody> },
+  TContext
+> => {
+  const mutationKey = ["patchOnboardingProfile"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof patchOnboardingProfile>>,
+    { agentId: string; data: BodyType<PatchOnboardingProfileBody> }
+  > = (props) => {
+    const { agentId, data } = props ?? {};
+
+    return patchOnboardingProfile(agentId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PatchOnboardingProfileMutationResult = NonNullable<
+  Awaited<ReturnType<typeof patchOnboardingProfile>>
+>;
+export type PatchOnboardingProfileMutationBody =
+  BodyType<PatchOnboardingProfileBody>;
+export type PatchOnboardingProfileMutationError = ErrorType<Error>;
+
+/**
+ * @summary Update the agent's contracting profile
+ */
+export const usePatchOnboardingProfile = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof patchOnboardingProfile>>,
+    TError,
+    { agentId: string; data: BodyType<PatchOnboardingProfileBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof patchOnboardingProfile>>,
+  TError,
+  { agentId: string; data: BodyType<PatchOnboardingProfileBody> },
+  TContext
+> => {
+  return useMutation(getPatchOnboardingProfileMutationOptions(options));
+};
+
+/**
+ * @summary Pick carriers + states for an onboarding run
+ */
+export const getSelectOnboardingCarriersUrl = (agentId: string) => {
+  return `/api/onboarding/${agentId}/carriers/select`;
+};
+
+export const selectOnboardingCarriers = async (
+  agentId: string,
+  selectCarriersBody: SelectCarriersBody,
+  options?: RequestInit,
+): Promise<SelectCarriersResponse> => {
+  return customFetch<SelectCarriersResponse>(
+    getSelectOnboardingCarriersUrl(agentId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(selectCarriersBody),
+    },
+  );
+};
+
+export const getSelectOnboardingCarriersMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof selectOnboardingCarriers>>,
+    TError,
+    { agentId: string; data: BodyType<SelectCarriersBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof selectOnboardingCarriers>>,
+  TError,
+  { agentId: string; data: BodyType<SelectCarriersBody> },
+  TContext
+> => {
+  const mutationKey = ["selectOnboardingCarriers"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof selectOnboardingCarriers>>,
+    { agentId: string; data: BodyType<SelectCarriersBody> }
+  > = (props) => {
+    const { agentId, data } = props ?? {};
+
+    return selectOnboardingCarriers(agentId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SelectOnboardingCarriersMutationResult = NonNullable<
+  Awaited<ReturnType<typeof selectOnboardingCarriers>>
+>;
+export type SelectOnboardingCarriersMutationBody = BodyType<SelectCarriersBody>;
+export type SelectOnboardingCarriersMutationError = ErrorType<Error>;
+
+/**
+ * @summary Pick carriers + states for an onboarding run
+ */
+export const useSelectOnboardingCarriers = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof selectOnboardingCarriers>>,
+    TError,
+    { agentId: string; data: BodyType<SelectCarriersBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof selectOnboardingCarriers>>,
+  TError,
+  { agentId: string; data: BodyType<SelectCarriersBody> },
+  TContext
+> => {
+  return useMutation(getSelectOnboardingCarriersMutationOptions(options));
+};
+
+/**
+ * @summary Cancel the active onboarding run for an agent
+ */
+export const getCancelOnboardingUrl = (agentId: string) => {
+  return `/api/onboarding/${agentId}/cancel`;
+};
+
+export const cancelOnboarding = async (
+  agentId: string,
+  options?: RequestInit,
+): Promise<CancelOnboardingResponse> => {
+  return customFetch<CancelOnboardingResponse>(
+    getCancelOnboardingUrl(agentId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getCancelOnboardingMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof cancelOnboarding>>,
+    TError,
+    { agentId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof cancelOnboarding>>,
+  TError,
+  { agentId: string },
+  TContext
+> => {
+  const mutationKey = ["cancelOnboarding"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof cancelOnboarding>>,
+    { agentId: string }
+  > = (props) => {
+    const { agentId } = props ?? {};
+
+    return cancelOnboarding(agentId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CancelOnboardingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof cancelOnboarding>>
+>;
+
+export type CancelOnboardingMutationError = ErrorType<Error>;
+
+/**
+ * @summary Cancel the active onboarding run for an agent
+ */
+export const useCancelOnboarding = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof cancelOnboarding>>,
+    TError,
+    { agentId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof cancelOnboarding>>,
+  TError,
+  { agentId: string },
+  TContext
+> => {
+  return useMutation(getCancelOnboardingMutationOptions(options));
+};
+
+/**
+ * @summary Generate carrier paperwork + create sign tasks (admin)
+ */
+export const getRequestContractingUrl = (agentId: string) => {
+  return `/api/onboarding/${agentId}/request-contracting`;
+};
+
+export const requestContracting = async (
+  agentId: string,
+  options?: RequestInit,
+): Promise<RequestContractingResponse> => {
+  return customFetch<RequestContractingResponse>(
+    getRequestContractingUrl(agentId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getRequestContractingMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestContracting>>,
+    TError,
+    { agentId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof requestContracting>>,
+  TError,
+  { agentId: string },
+  TContext
+> => {
+  const mutationKey = ["requestContracting"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof requestContracting>>,
+    { agentId: string }
+  > = (props) => {
+    const { agentId } = props ?? {};
+
+    return requestContracting(agentId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RequestContractingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof requestContracting>>
+>;
+
+export type RequestContractingMutationError = ErrorType<Error>;
+
+/**
+ * @summary Generate carrier paperwork + create sign tasks (admin)
+ */
+export const useRequestContracting = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestContracting>>,
+    TError,
+    { agentId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof requestContracting>>,
+  TError,
+  { agentId: string },
+  TContext
+> => {
+  return useMutation(getRequestContractingMutationOptions(options));
+};
+
+/**
+ * `requestId` is the *carrier id* on the contracting request — the route
+looks the request up by `(run, carrierId)`. Returns an e-sign envelope
+id + signing URL the wizard navigates the agent to. Idempotent.
+
+ * @summary Start a signing envelope for a carrier contracting request
+ */
+export const getSignOnboardingCarrierUrl = (
+  agentId: string,
+  requestId: string,
+) => {
+  return `/api/onboarding/${agentId}/carriers/${requestId}/sign`;
+};
+
+export const signOnboardingCarrier = async (
+  agentId: string,
+  requestId: string,
+  options?: RequestInit,
+): Promise<SignOnboardingCarrierResponse> => {
+  return customFetch<SignOnboardingCarrierResponse>(
+    getSignOnboardingCarrierUrl(agentId, requestId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getSignOnboardingCarrierMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof signOnboardingCarrier>>,
+    TError,
+    { agentId: string; requestId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof signOnboardingCarrier>>,
+  TError,
+  { agentId: string; requestId: string },
+  TContext
+> => {
+  const mutationKey = ["signOnboardingCarrier"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof signOnboardingCarrier>>,
+    { agentId: string; requestId: string }
+  > = (props) => {
+    const { agentId, requestId } = props ?? {};
+
+    return signOnboardingCarrier(agentId, requestId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SignOnboardingCarrierMutationResult = NonNullable<
+  Awaited<ReturnType<typeof signOnboardingCarrier>>
+>;
+
+export type SignOnboardingCarrierMutationError = ErrorType<Error>;
+
+/**
+ * @summary Start a signing envelope for a carrier contracting request
+ */
+export const useSignOnboardingCarrier = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof signOnboardingCarrier>>,
+    TError,
+    { agentId: string; requestId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof signOnboardingCarrier>>,
+  TError,
+  { agentId: string; requestId: string },
+  TContext
+> => {
+  return useMutation(getSignOnboardingCarrierMutationOptions(options));
+};
+
+/**
+ * @summary Record carrier writing-number / appointment decision (admin)
+ */
+export const getRecordCarrierContractingDecisionUrl = (requestId: string) => {
+  return `/api/admin/contracting/${requestId}`;
+};
+
+export const recordCarrierContractingDecision = async (
+  requestId: string,
+  recordContractingDecisionBody: RecordContractingDecisionBody,
+  options?: RequestInit,
+): Promise<RecordContractingDecisionResponse> => {
+  return customFetch<RecordContractingDecisionResponse>(
+    getRecordCarrierContractingDecisionUrl(requestId),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(recordContractingDecisionBody),
+    },
+  );
+};
+
+export const getRecordCarrierContractingDecisionMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordCarrierContractingDecision>>,
+    TError,
+    { requestId: string; data: BodyType<RecordContractingDecisionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof recordCarrierContractingDecision>>,
+  TError,
+  { requestId: string; data: BodyType<RecordContractingDecisionBody> },
+  TContext
+> => {
+  const mutationKey = ["recordCarrierContractingDecision"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof recordCarrierContractingDecision>>,
+    { requestId: string; data: BodyType<RecordContractingDecisionBody> }
+  > = (props) => {
+    const { requestId, data } = props ?? {};
+
+    return recordCarrierContractingDecision(requestId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RecordCarrierContractingDecisionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof recordCarrierContractingDecision>>
+>;
+export type RecordCarrierContractingDecisionMutationBody =
+  BodyType<RecordContractingDecisionBody>;
+export type RecordCarrierContractingDecisionMutationError = ErrorType<Error>;
+
+/**
+ * @summary Record carrier writing-number / appointment decision (admin)
+ */
+export const useRecordCarrierContractingDecision = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordCarrierContractingDecision>>,
+    TError,
+    { requestId: string; data: BodyType<RecordContractingDecisionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof recordCarrierContractingDecision>>,
+  TError,
+  { requestId: string; data: BodyType<RecordContractingDecisionBody> },
+  TContext
+> => {
+  return useMutation(
+    getRecordCarrierContractingDecisionMutationOptions(options),
+  );
+};
+
+/**
+ * Idempotent on `(org, carrier_contracting_request_id)` while not
+voided — re-posting returns the existing envelope rather than 409'ing.
+
+ * @summary Create an e-sign envelope for a carrier contracting request
+ */
+export const getCreateEsignEnvelopeUrl = () => {
+  return `/api/esign/envelopes`;
+};
+
+export const createEsignEnvelope = async (
+  createEsignEnvelopeBody: CreateEsignEnvelopeBody,
+  options?: RequestInit,
+): Promise<CreateEsignEnvelopeResponse> => {
+  return customFetch<CreateEsignEnvelopeResponse>(getCreateEsignEnvelopeUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createEsignEnvelopeBody),
+  });
+};
+
+export const getCreateEsignEnvelopeMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createEsignEnvelope>>,
+    TError,
+    { data: BodyType<CreateEsignEnvelopeBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createEsignEnvelope>>,
+  TError,
+  { data: BodyType<CreateEsignEnvelopeBody> },
+  TContext
+> => {
+  const mutationKey = ["createEsignEnvelope"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createEsignEnvelope>>,
+    { data: BodyType<CreateEsignEnvelopeBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createEsignEnvelope(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateEsignEnvelopeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createEsignEnvelope>>
+>;
+export type CreateEsignEnvelopeMutationBody = BodyType<CreateEsignEnvelopeBody>;
+export type CreateEsignEnvelopeMutationError = ErrorType<Error>;
+
+/**
+ * @summary Create an e-sign envelope for a carrier contracting request
+ */
+export const useCreateEsignEnvelope = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createEsignEnvelope>>,
+    TError,
+    { data: BodyType<CreateEsignEnvelopeBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createEsignEnvelope>>,
+  TError,
+  { data: BodyType<CreateEsignEnvelopeBody> },
+  TContext
+> => {
+  return useMutation(getCreateEsignEnvelopeMutationOptions(options));
+};
+
+/**
+ * @summary Fetch an e-sign envelope by id
+ */
+export const getGetEsignEnvelopeUrl = (envelopeId: string) => {
+  return `/api/esign/envelopes/${envelopeId}`;
+};
+
+export const getEsignEnvelope = async (
+  envelopeId: string,
+  options?: RequestInit,
+): Promise<Envelope> => {
+  return customFetch<Envelope>(getGetEsignEnvelopeUrl(envelopeId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetEsignEnvelopeQueryKey = (envelopeId: string) => {
+  return [`/api/esign/envelopes/${envelopeId}`] as const;
+};
+
+export const getGetEsignEnvelopeQueryOptions = <
+  TData = Awaited<ReturnType<typeof getEsignEnvelope>>,
+  TError = ErrorType<Error>,
+>(
+  envelopeId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEsignEnvelope>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetEsignEnvelopeQueryKey(envelopeId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getEsignEnvelope>>
+  > = ({ signal }) =>
+    getEsignEnvelope(envelopeId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!envelopeId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getEsignEnvelope>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetEsignEnvelopeQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getEsignEnvelope>>
+>;
+export type GetEsignEnvelopeQueryError = ErrorType<Error>;
+
+/**
+ * @summary Fetch an e-sign envelope by id
+ */
+
+export function useGetEsignEnvelope<
+  TData = Awaited<ReturnType<typeof getEsignEnvelope>>,
+  TError = ErrorType<Error>,
+>(
+  envelopeId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEsignEnvelope>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetEsignEnvelopeQueryOptions(envelopeId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Server captures `req.ip` + `user-agent` itself — the frontend MUST NOT
+send these in the body. Only the signer-userId on the envelope OR
+a `super_admin` / `agency_admin` may sign.
+
+ * @summary Record a signature on an e-sign envelope
+ */
+export const getSignEsignEnvelopeUrl = (envelopeId: string) => {
+  return `/api/esign/envelopes/${envelopeId}/sign`;
+};
+
+export const signEsignEnvelope = async (
+  envelopeId: string,
+  signEnvelopeBody: SignEnvelopeBody,
+  options?: RequestInit,
+): Promise<SignEnvelopeResponse> => {
+  return customFetch<SignEnvelopeResponse>(
+    getSignEsignEnvelopeUrl(envelopeId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(signEnvelopeBody),
+    },
+  );
+};
+
+export const getSignEsignEnvelopeMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof signEsignEnvelope>>,
+    TError,
+    { envelopeId: string; data: BodyType<SignEnvelopeBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof signEsignEnvelope>>,
+  TError,
+  { envelopeId: string; data: BodyType<SignEnvelopeBody> },
+  TContext
+> => {
+  const mutationKey = ["signEsignEnvelope"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof signEsignEnvelope>>,
+    { envelopeId: string; data: BodyType<SignEnvelopeBody> }
+  > = (props) => {
+    const { envelopeId, data } = props ?? {};
+
+    return signEsignEnvelope(envelopeId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SignEsignEnvelopeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof signEsignEnvelope>>
+>;
+export type SignEsignEnvelopeMutationBody = BodyType<SignEnvelopeBody>;
+export type SignEsignEnvelopeMutationError = ErrorType<Error>;
+
+/**
+ * @summary Record a signature on an e-sign envelope
+ */
+export const useSignEsignEnvelope = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof signEsignEnvelope>>,
+    TError,
+    { envelopeId: string; data: BodyType<SignEnvelopeBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof signEsignEnvelope>>,
+  TError,
+  { envelopeId: string; data: BodyType<SignEnvelopeBody> },
+  TContext
+> => {
+  return useMutation(getSignEsignEnvelopeMutationOptions(options));
+};
+
+/**
+ * @summary Void an e-sign envelope (admin only)
+ */
+export const getVoidEsignEnvelopeUrl = (envelopeId: string) => {
+  return `/api/esign/envelopes/${envelopeId}/void`;
+};
+
+export const voidEsignEnvelope = async (
+  envelopeId: string,
+  voidEnvelopeBody: VoidEnvelopeBody,
+  options?: RequestInit,
+): Promise<VoidEnvelopeResponse> => {
+  return customFetch<VoidEnvelopeResponse>(
+    getVoidEsignEnvelopeUrl(envelopeId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(voidEnvelopeBody),
+    },
+  );
+};
+
+export const getVoidEsignEnvelopeMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof voidEsignEnvelope>>,
+    TError,
+    { envelopeId: string; data: BodyType<VoidEnvelopeBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof voidEsignEnvelope>>,
+  TError,
+  { envelopeId: string; data: BodyType<VoidEnvelopeBody> },
+  TContext
+> => {
+  const mutationKey = ["voidEsignEnvelope"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof voidEsignEnvelope>>,
+    { envelopeId: string; data: BodyType<VoidEnvelopeBody> }
+  > = (props) => {
+    const { envelopeId, data } = props ?? {};
+
+    return voidEsignEnvelope(envelopeId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type VoidEsignEnvelopeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof voidEsignEnvelope>>
+>;
+export type VoidEsignEnvelopeMutationBody = BodyType<VoidEnvelopeBody>;
+export type VoidEsignEnvelopeMutationError = ErrorType<Error>;
+
+/**
+ * @summary Void an e-sign envelope (admin only)
+ */
+export const useVoidEsignEnvelope = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof voidEsignEnvelope>>,
+    TError,
+    { envelopeId: string; data: BodyType<VoidEnvelopeBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof voidEsignEnvelope>>,
+  TError,
+  { envelopeId: string; data: BodyType<VoidEnvelopeBody> },
+  TContext
+> => {
+  return useMutation(getVoidEsignEnvelopeMutationOptions(options));
+};
+
+/**
+ * @summary Download the signed PDF for a completed envelope
+ */
+export const getGetEsignSignedPdfUrl = (envelopeId: string) => {
+  return `/api/esign/envelopes/${envelopeId}/signed-pdf`;
+};
+
+export const getEsignSignedPdf = async (
+  envelopeId: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getGetEsignSignedPdfUrl(envelopeId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetEsignSignedPdfQueryKey = (envelopeId: string) => {
+  return [`/api/esign/envelopes/${envelopeId}/signed-pdf`] as const;
+};
+
+export const getGetEsignSignedPdfQueryOptions = <
+  TData = Awaited<ReturnType<typeof getEsignSignedPdf>>,
+  TError = ErrorType<Error>,
+>(
+  envelopeId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEsignSignedPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetEsignSignedPdfQueryKey(envelopeId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getEsignSignedPdf>>
+  > = ({ signal }) =>
+    getEsignSignedPdf(envelopeId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!envelopeId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getEsignSignedPdf>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetEsignSignedPdfQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getEsignSignedPdf>>
+>;
+export type GetEsignSignedPdfQueryError = ErrorType<Error>;
+
+/**
+ * @summary Download the signed PDF for a completed envelope
+ */
+
+export function useGetEsignSignedPdf<
+  TData = Awaited<ReturnType<typeof getEsignSignedPdf>>,
+  TError = ErrorType<Error>,
+>(
+  envelopeId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEsignSignedPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetEsignSignedPdfQueryOptions(envelopeId, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

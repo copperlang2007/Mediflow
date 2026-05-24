@@ -30,11 +30,12 @@ import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import { logger } from "../lib/logger";
 import { captureWorkerError } from "../lib/sentry";
+import { PHI_PRIVILEGED_ROLES, type Role } from "../lib/permissions";
 
 const router: IRouter = Router();
 
-// PHI masking — roles that may see full DOB and Medicare ID
-const PHI_PRIVILEGED_ROLES = new Set(["super_admin", "agency_admin", "compliance_manager"]);
+// PHI masking — roles that may see full DOB and Medicare ID. Canonical set
+// lives in `../lib/permissions`.
 
 const MASKED_MEDICARE_ID = "***-**-****";
 
@@ -65,7 +66,7 @@ function serializeContact<
 } {
   const { medicareIdEncrypted, medicareIdHash: _hash, ...rest } = contact;
   const hasMbi = medicareIdEncrypted != null;
-  const privileged = PHI_PRIVILEGED_ROLES.has(userRole);
+  const privileged = PHI_PRIVILEGED_ROLES.has(userRole as Role);
 
   let medicareId: string | null = null;
   if (hasMbi) {
