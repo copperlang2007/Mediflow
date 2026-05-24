@@ -1,22 +1,30 @@
 /**
  * Mediflow native e-signature provider (Beta).
  *
- * PHASE 3 HARDENING — not yet implemented in this Beta provider:
- *   - PKI signing of the final PDF with an org-owned certificate (true
- *     tamper-evident sealing per ESIGN §101(g))
- *   - Knowledge-based authentication (KBA) — DOB / SSN-last-4 / OFAC-style
- *     identity proofing before the signer can sign
- *   - Voice + SMS verification (multi-channel identity binding)
- *   - Long-term-validation (LTV) timestamp authority for documents
- *     intended to outlive the signing certificate
- *   - Certificate-of-completion email delivery to every party with a
- *     hosted-link copy of the signed PDF
- *   - PDF-level anti-tamper stamping beyond the SHA-256 hash + the
- *     audit-trail certificate page
+ * PHASE 3 HARDENING — status:
+ *   Shipped:
+ *     - DB-level append-only enforcement on `esign_signing_events`
+ *       (BEFORE UPDATE / BEFORE DELETE triggers, migration 0022) so the
+ *       audit trail cannot be tampered with even by application code.
+ *     - Certificate-of-completion email delivery: each signer with a
+ *       non-empty email receives the signed PDF + integrity hash after
+ *       envelope completion. Fire-and-forget — failures are logged +
+ *       captured to Sentry but never fail the signing flow.
+ *   Still pending (shipping in dedicated post-demo PRs):
+ *     - PKI signing of the final PDF with an org-owned certificate (true
+ *       tamper-evident sealing per ESIGN §101(g))
+ *     - Knowledge-based authentication (KBA) — DOB / SSN-last-4 / OFAC-style
+ *       identity proofing before the signer can sign
+ *     - Voice + SMS verification (multi-channel identity binding)
+ *     - Long-term-validation (LTV) timestamp authority for documents
+ *       intended to outlive the signing certificate
+ *     - PDF-level anti-tamper stamping beyond the SHA-256 hash + the
+ *       audit-trail certificate page
  *
  * Today's tamper-evidence story is the `integrity_sha256` column +
- * `esign_signing_events` granular audit trail + the visible
- * certificate-of-completion page appended to every signed PDF.
+ * the DB-enforced append-only `esign_signing_events` audit trail +
+ * the visible certificate-of-completion page appended to every signed
+ * PDF + the certificate-of-completion email to every signer.
  *
  * Single-signer assumption: the MVP routes every envelope to exactly one
  * signer (the agent). Multi-signer routing is a Phase-3 swap behind the
@@ -51,7 +59,9 @@ import { renderSignatureCertificate } from "../contractingPdf/signatureCertifica
 import { findSignatureAnchor } from "../contractingPdf/anchorLookup";
 import { ObjectStorageService } from "../objectStorage";
 import { completeCarrierSigningTransition } from "./carrierSignCallback";
+import { sendCertificateOfCompletion } from "./completionEmail";
 import { logger } from "../logger";
+import { captureWorkerError } from "../sentry";
 
 /**
  * Storage facade so tests can swap a fake implementation in without
@@ -99,6 +109,13 @@ export class MediflowESignProvider implements ESignProvider {
   private readonly storage: EsignStorage;
   private readonly consentText: string;
   private readonly consentVersion: string;
+  /**
+   * Tracks the fire-and-forget certificate-of-completion email promise
+   * from the most recent `recordSignature` call. Production code should
+   * NOT await this — the email is intentionally fire-and-forget. Tests
+   * can await it to assert email side-effects deterministically.
+   */
+  public lastCompletionEmailPromise: Promise<unknown> | undefined;
 
   constructor(opts: MediflowProviderOptions = {}) {
     this.storage = opts.storage ?? new GcsEsignStorage();
@@ -378,6 +395,33 @@ export class MediflowESignProvider implements ESignProvider {
         "Carrier-contracting transition failed after envelope completion",
       );
     }
+
+    // 12. Certificate-of-completion email — fire-and-forget. Failures
+    //     here MUST NOT undo the completed envelope. We `.catch` rather
+    //     than `await`-throw so a Resend outage / config-missing cannot
+    //     surface to the route caller. Same observability convention as
+    //     `enqueue` from PR #73: log + Sentry-capture + continue.
+    //
+    //     The promise is stashed on the provider so tests can await it
+    //     deterministically. The re-completion (`completed`) branch
+    //     above does NOT enter this code path, so an idempotent re-sign
+    //     never triggers a duplicate email.
+    this.lastCompletionEmailPromise = sendCertificateOfCompletion(
+      updated,
+      signedPdfBuffer,
+      integritySha256,
+      { documentName: doc.name },
+    ).catch((err: unknown) => {
+      logger.warn(
+        { err, envelopeId, orgId },
+        "Certificate-of-completion email hook threw",
+      );
+      captureWorkerError(err, {
+        worker: "esignCompletionEmail",
+        envelopeId,
+        orgId,
+      });
+    });
 
     return updated;
   }

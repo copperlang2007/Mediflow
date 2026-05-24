@@ -129,9 +129,21 @@ export const ESIGN_EVENT_TYPES = [
   "signature_captured",
   "envelope_completed",
   "envelope_voided",
+  // Recorded by the certificate-of-completion email side-effect after an
+  // envelope completes. One row per signer-attempt (success or failure)
+  // so the audit trail captures whether the signer was actually notified.
+  "certificate_of_completion_emailed",
 ] as const;
 export type EsignEventType = (typeof ESIGN_EVENT_TYPES)[number];
 
+/**
+ * Append-only audit trail. Immutability is enforced at the DB layer by
+ * the BEFORE UPDATE / BEFORE DELETE triggers installed in migration
+ * `0022_esign_signing_events_immutability.sql` — any attempt to mutate
+ * an existing row raises an exception. Application code MUST only ever
+ * INSERT into this table; writes that look like edits must be modeled as
+ * a new row with a different `event_type`.
+ */
 export const esignSigningEventsTable = pgTable(
   "esign_signing_events",
   {
