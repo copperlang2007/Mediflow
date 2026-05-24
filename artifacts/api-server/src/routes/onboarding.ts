@@ -58,6 +58,7 @@ import {
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { safeLimit, safeOffset } from "../lib/listGuards";
+import { PHI_PRIVILEGED_ROLES, type Role } from "../lib/permissions";
 import {
   canTransitionOnboarding,
   canTransitionContracting,
@@ -69,14 +70,10 @@ import {
   type OnboardingStatus,
 } from "../workers/contractingStateMachine";
 
-// Roles that see SSN/EIN/DOB in plaintext. Same shape as PHI_PRIVILEGED_ROLES
-// in routes/contacts.ts — the design partner expects identical handling for
-// contracting PII as for contact PHI.
-const PII_PRIVILEGED_ROLES = new Set([
-  "super_admin",
-  "agency_admin",
-  "compliance_manager",
-]);
+// Roles that see SSN/EIN/DOB in plaintext. The canonical set lives in
+// `../lib/permissions` (PHI_PRIVILEGED_ROLES) — the design partner expects
+// identical handling for contracting PII as for contact PHI, so both
+// routes import the same set.
 
 const MASKED_SSN = "***-**-****";
 const MASKED_EIN = "**-*******";
@@ -118,7 +115,7 @@ function serializeProfile(
     businessEinEncrypted,
     ...rest
   } = profile;
-  const privileged = PII_PRIVILEGED_ROLES.has(userRole);
+  const privileged = PHI_PRIVILEGED_ROLES.has(userRole as Role);
 
   let ssn: string | null = null;
   if (ssnEncrypted != null) {

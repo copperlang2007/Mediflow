@@ -90,6 +90,10 @@ function serializeEnvelope(env: Awaited<ReturnType<ReturnType<typeof getMediflow
     envelopeId: env.id,
     status: env.status,
     carrierContractingRequestId: env.carrierContractingRequestId,
+    // Frontend `/sign/:envelopeId` page needs the unsigned-PDF document id
+    // to render the pre-signature preview. Exposed as `pdfDocumentId` to
+    // match the public field name in `lib/api-spec/openapi.yaml`.
+    pdfDocumentId: env.unsignedPdfDocumentId,
     signers: env.signers,
     signedAt: env.signedAt?.toISOString() ?? null,
     signedPdfDocumentId: env.signedPdfDocumentId,

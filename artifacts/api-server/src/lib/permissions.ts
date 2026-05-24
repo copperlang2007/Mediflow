@@ -227,3 +227,21 @@ export function can(role: Role, resource: Resource, action: Action): boolean {
 export function allowedRoles(resource: Resource, action: Action): Role[] {
   return (MATRIX[resource]?.[action] ?? ["super_admin"]) as Role[];
 }
+
+/**
+ * Roles allowed to see full PHI / PII in plaintext.
+ *
+ * Applies to:
+ *   - Contact PHI in `routes/contacts.ts` (DOB, Medicare ID, health conditions)
+ *   - Agent contracting PII in `routes/onboarding.ts` (SSN, EIN, DOB)
+ *
+ * Anyone outside this set sees a masked sentinel (e.g. `***-**-****`) and
+ * `null` for the date-of-birth field. The design partner expects identical
+ * handling for contact PHI and contracting PII, so the canonical set lives
+ * here next to the permission matrix instead of in two route files.
+ */
+export const PHI_PRIVILEGED_ROLES: Set<Role> = new Set<Role>([
+  "super_admin",
+  "agency_admin",
+  "compliance_manager",
+]);

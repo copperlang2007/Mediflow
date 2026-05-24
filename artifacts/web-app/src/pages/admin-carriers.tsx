@@ -11,12 +11,10 @@
  * Edit:  full carrier form (name, cms contract #, logo URL, active toggle,
  *        appointment-desk email, cc list, subject template).
  *
- * The carriers API (`GET/POST/PATCH /carriers`) already exposes the
- * `appointmentDeskEmail` + `appointmentDeskMetadata` fields. The generated
- * `lib/api-client-react` schema is older — it doesn't yet include those
- * fields. To avoid a regen here, we go through `apiFetch` for the create /
- * update path and use the generated hook only for the list query (which
- * returns extra unknown keys harmlessly).
+ * The carriers API (`GET/POST/PATCH /carriers`) exposes the
+ * `appointmentDeskEmail` + `appointmentDeskMetadata` fields and the
+ * generated client knows about them (openapi-regen). Create + update go
+ * through the generated `useCreateCarrier` / `useUpdateCarrier` hooks.
  *
  * The "# active contracting requests" count is derived client-side from
  * the onboarding-list endpoint, which already enumerates every active run.
@@ -24,10 +22,18 @@
  * Friday demo.
  */
 import { useMemo, useState } from "react";
-import { useGetMe, useGetCarriers, getGetCarriersQueryKey } from "@workspace/api-client-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useGetMe,
+  useGetCarriers,
+  useCreateCarrier,
+  useUpdateCarrier,
+  getGetCarriersQueryKey,
+  type Carrier,
+  type CreateCarrierBody,
+  type UpdateCarrierBody,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { apiFetch } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,26 +59,14 @@ import {
 } from "@/components/ui/table";
 import { Plus, Search, Mail, AlertCircle } from "lucide-react";
 
-// ---- Local types ------------------------------------------------------------
-// Mirror the API shape from artifacts/api-server/src/routes/carriers.ts.
-// We carry these locally because the generated client hasn't picked up the
-// appointment_desk_* columns yet.
+// ---- Types ------------------------------------------------------------------
+// `AdminCarrier` was a local interface that mirrored the generated `Carrier`
+// schema while the openapi spec lagged behind. The spec now exposes the
+// appointment-desk fields directly (`appointmentDeskEmail` +
+// `appointmentDeskMetadata`), so `AdminCarrier` is a thin alias retained for
+// back-compat with any external imports of this module.
 
-export interface AdminCarrier {
-  id: string;
-  orgId: string;
-  name: string;
-  cmsContractNumber: string | null;
-  logoUrl: string | null;
-  isActive: boolean;
-  appointmentDeskEmail: string | null;
-  appointmentDeskMetadata: {
-    cc?: string[];
-    subject?: string;
-    [key: string]: unknown;
-  } | null;
-  createdAt: string;
-}
+export type AdminCarrier = Carrier;
 
 export interface CarrierFormValues {
   name: string;
@@ -104,7 +98,12 @@ export function isValidEmail(s: string): boolean {
 }
 
 /** Form → API body. Drops empty optionals; serializes cc + subject into the
- *  jsonb `metadata` shape. Returns `null` when the form is invalid. */
+ *  jsonb `metadata` shape. Returns `null` when the form is invalid.
+ *
+ *  Return shape is wider than `CreateCarrierBody` (it includes `isActive`),
+ *  which `UpdateCarrierBody` accepts; for create we just ignore the extra
+ *  key. Both server-side schemas tolerate `null` clears on the optional
+ *  fields. */
 export function buildCarrierPayload(
   v: CarrierFormValues,
 ): {
@@ -165,16 +164,13 @@ export default function AdminCarriersPage() {
   const isAdmin =
     me && (me.role === "super_admin" || me.role === "agency_admin");
 
-  // `useGetCarriers` types the response as the older Carrier shape; we cast
-  // because the server actually returns the extra fields (extra keys are
-  // structural-typing-safe).
   const carriersQuery = useGetCarriers({
     query: {
       enabled: Boolean(isAdmin),
       queryKey: getGetCarriersQueryKey(),
     },
   });
-  const carriers = (carriersQuery.data ?? []) as unknown as AdminCarrier[];
+  const carriers: AdminCarrier[] = carriersQuery.data ?? [];
 
   // # active contracting requests per carrier. Best-effort: only show when
   // the onboarding list resolves; otherwise dash. Failing gracefully here
@@ -391,31 +387,51 @@ export function CarrierEditDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId]);
 
-  const saveMutation = useMutation({
-    mutationFn: async (vars: {
+  const onSaveSuccess = () => {
+    void qc.invalidateQueries({ queryKey: getGetCarriersQueryKey() });
+    toast.success(editing === "new" ? "Carrier added" : "Carrier updated");
+    onClose();
+  };
+  const createMutation = useCreateCarrier({ mutation: { onSuccess: onSaveSuccess } });
+  const updateMutation = useUpdateCarrier({ mutation: { onSuccess: onSaveSuccess } });
+  const saveMutation = {
+    isPending: createMutation.isPending || updateMutation.isPending,
+    error: createMutation.error ?? updateMutation.error,
+    mutate: (vars: {
       id: string | null;
       payload: ReturnType<typeof buildCarrierPayload>;
-    }) => {
-      if (!vars.payload) throw new Error("Invalid form values");
-      if (vars.id) {
-        return apiFetch<AdminCarrier>(`/api/carriers/${vars.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(vars.payload),
-        });
+    }, opts?: { onError?: (err: unknown) => void }) => {
+      if (!vars.payload) {
+        opts?.onError?.(new Error("Invalid form values"));
+        return;
       }
-      return apiFetch<AdminCarrier>(`/api/carriers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(vars.payload),
-      });
+      if (vars.id) {
+        const updateBody: UpdateCarrierBody = vars.payload;
+        updateMutation.mutate(
+          { id: vars.id, data: updateBody },
+          { onError: opts?.onError },
+        );
+      } else {
+        // Create body cannot carry `null` for the optional URL/contract
+        // fields — strip null clears that only make sense on update.
+        const createBody: CreateCarrierBody = {
+          name: vars.payload.name,
+          ...(vars.payload.cmsContractNumber
+            ? { cmsContractNumber: vars.payload.cmsContractNumber }
+            : {}),
+          ...(vars.payload.logoUrl ? { logoUrl: vars.payload.logoUrl } : {}),
+          ...(vars.payload.appointmentDeskEmail
+            ? { appointmentDeskEmail: vars.payload.appointmentDeskEmail }
+            : {}),
+          appointmentDeskMetadata: vars.payload.appointmentDeskMetadata,
+        };
+        createMutation.mutate(
+          { data: createBody },
+          { onError: opts?.onError },
+        );
+      }
     },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: getGetCarriersQueryKey() });
-      toast.success(editing === "new" ? "Carrier added" : "Carrier updated");
-      onClose();
-    },
-  });
+  };
 
   if (editing === null) return null;
 
