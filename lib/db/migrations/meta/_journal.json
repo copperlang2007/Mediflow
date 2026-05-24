@@ -176,6 +176,13 @@
       "when": 1778450000000,
       "tag": "0021_carriers_appointment_desk_email",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1778460000000,
+      "tag": "0022_esign_signing_events_immutability",
+      "breakpoints": true
     }
   ]
 }

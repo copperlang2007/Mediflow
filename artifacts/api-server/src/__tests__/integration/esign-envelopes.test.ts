@@ -368,13 +368,21 @@ describe("POST /api/esign/envelopes/:envelopeId/sign", () => {
     expect(signers[0].signedAt).toBeTruthy();
 
     // Audit events written: consent_accepted + signature_captured +
-    // envelope_completed (in addition to the envelope_created from create).
+    // envelope_completed (in addition to the envelope_created from create),
+    // plus the certificate_of_completion_emailed row from the post-complete
+    // email side-effect (which is fire-and-forget but the test app's
+    // in-process mock resolves synchronously enough that the row is present
+    // by the time supertest's response returns; we still tolerate either by
+    // filtering rather than strict-equal).
     const events = await handle.db
       .select()
       .from(esignSigningEventsTable)
       .where(eq(esignSigningEventsTable.envelopeId, envId));
     const types = events.map((e) => e.eventType).sort();
-    expect(types).toEqual([
+    const coreTypes = types.filter(
+      (t) => t !== "certificate_of_completion_emailed",
+    );
+    expect(coreTypes).toEqual([
       "consent_accepted",
       "envelope_completed",
       "envelope_created",

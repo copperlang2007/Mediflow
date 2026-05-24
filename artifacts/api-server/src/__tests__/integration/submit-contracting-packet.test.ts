@@ -196,6 +196,16 @@ async function driveToSigned(opts: {
     .set(withAuth(agentUser.id))
     .send(VALID_SIGN_BODY);
 
+  // Drain the certificate-of-completion fire-and-forget email side-effect
+  // before returning so its emailCall doesn't pollute the worker tests that
+  // count emailCalls. The worker itself fires a separate appointment-desk
+  // email — that's what these tests are asserting on.
+  const provider = (
+    await import("../../lib/esign/mediflowProvider")
+  ).getMediflowProvider();
+  await provider.lastCompletionEmailPromise;
+  emailCalls.length = 0;
+
   const [runRow] = await handle.db
     .select()
     .from(agentOnboardingRunsTable)
