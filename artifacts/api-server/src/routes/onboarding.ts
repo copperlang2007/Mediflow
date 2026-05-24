@@ -45,10 +45,7 @@ import {
   completeProfileTaskKey,
   adminReviewTaskKey,
 } from "../workers/contractingTasks";
-import {
-  generateCarrierPaperworkPdf,
-  getCarrierTemplate,
-} from "../lib/contractingPdf/carrierTemplates";
+import { buildDummyTemplate, fillTemplateFromBytes } from "../lib/contractingPdf/pdfFiller";
 import { getMediflowProvider } from "../lib/esign/mediflowProvider";
 import {
   requireAuth,
@@ -870,74 +867,55 @@ router.get(
 // ---- Helpers for Day-3 contracting orchestration ---------------------------
 
 /**
- * Generate the carrier-specific PDF for a `carrier_contracting_request`
- * and persist a `documents` row pointing at a synthetic storage key.
+ * Generate a placeholder PDF for a carrier_contracting_request and persist
+ * a `documents` row pointing at a synthetic storage key.
  *
- * Pipeline:
- *   1. Look up the carrier-specific template via the registry; falls back
- *      to the default template for unknown carrier names.
- *   2. Resolve every binding against the agent + profile + request
- *      context via `buildFieldMap` (handled inside the registry helper).
- *   3. Fill + flatten the PDF via `fillTemplateFromBytes`.
- *   4. Insert a `documents` row so the FK on
- *      `carrier_contracting_requests.paperwork_document_id` is satisfied
- *      and admin UIs can show "paperwork generated".
+ * ARCHITECTURE NOTE: this per-carrier paperwork generation is a placeholder
+ * path retained for the current e-sign flow shape. The wider plan replaces
+ * it with a single Power-of-Attorney signing per onboarding run (see issue
+ * #90's INSUREitALL feature plan). Per-carrier signing tasks are still
+ * created today; a future PR will replace them with a single POA signing
+ * + admin-handled carrier submission.
  *
- * Today every carrier still resolves to a STUB PDF (no real INSUREitALL
- * PDFs have been delivered yet); the stub is loudly marked
- * "TEMPLATE STUB — NOT THE REAL CARRIER PACKET" by the stub builder.
- * Once real PDFs land in `carrierTemplates/fixtures/`, the registry
- * picks them up automatically — no change to this function.
+ * The dummy template from `pdfFiller.buildDummyTemplate()` is filled with
+ * the agent's name + a generated request id. Generic 1-page PDF — same
+ * shape Day 3 had before the per-carrier scaffolding was attempted.
  *
  * Idempotent: callers gate on `request.status === 'draft'`, so a second
  * `request-contracting` call on an already-paperwork-generated request
  * never lands here.
- *
- * Storage: the bytes are NOT yet uploaded to GCS (Phase 4 work — same
- * as the prior placeholder code). The synthetic storage key keeps the
- * FK constraint happy; the e-sign provider has a fallback path for
- * synthetic keys (see `MediflowESignProvider.loadUnsignedPdfBytes`).
  */
-async function generateCarrierPaperwork(
+async function generatePlaceholderPaperwork(
   orgId: string,
-  agent: Pick<Agent, "firstName" | "lastName" | "email">,
-  profile: AgentContractingProfile | null,
-  request: Pick<CarrierContractingRequest, "id" | "states">,
+  agentName: string,
   carrierName: string,
+  requestId: string,
   uploadedByUserId: string | null,
 ): Promise<string> {
-  // Decrypt SSN here (not inside the registry) so the carrier-templates
-  // module stays free of `@workspace/db` runtime imports — it lives one
-  // layer below the route and is reused by unit tests that don't boot a
-  // DB. `decryptSsn` throws on garbage bytes; we swallow + fall through
-  // to leaving the SSN-derived fields blank.
-  let ssnPlaintext: string | null = null;
-  if (profile?.ssnEncrypted) {
-    try {
-      ssnPlaintext = decryptSsn(profile.ssnEncrypted as Buffer | Uint8Array);
-    } catch {
-      ssnPlaintext = null;
-    }
-  }
+  const template = await buildDummyTemplate();
+  // The dummy template ships two text fields and a checkbox. The wider
+  // plan replaces this with a single POA PDF (see issue #90); for now
+  // we just prove the plumbing executes.
+  await fillTemplateFromBytes(
+    template,
+    {
+      fullName: agentName,
+      ssn: "(see encrypted profile)",
+      consent: true,
+    },
+    { flatten: true },
+  );
 
-  // Build the filled bytes via the registry. We currently discard the
-  // bytes (storage isn't wired) but resolving + filling validates that
-  // the template config + the agent's profile data line up correctly.
-  // When Phase 4 wires storage, this is the single place to call
-  // `storage.uploadPdf(bytes, ...)`.
-  const { config } = await generateCarrierPaperworkPdf(carrierName, {
-    agent,
-    profile,
-    request,
-    ssnPlaintext,
-  });
-
+  // Synthetic storage key — contracting PDFs aren't yet wired to object
+  // storage. The `documents` row exists so the foreign key on
+  // `carrier_contracting_requests.paperwork_document_id` is satisfied
+  // and admin UIs can show "paperwork generated".
   const docId = randomUUID();
-  const storageKey = `contracting/${orgId}/${request.id}/${config.templatePath}`;
+  const storageKey = `contracting/${orgId}/${requestId}/placeholder.pdf`;
   await db.insert(documentsTable).values({
     id: docId,
     orgId,
-    name: `${config.name} contracting packet (${config.version})`,
+    name: `${carrierName} contracting packet (placeholder)`,
     category: "contracting",
     storageKey,
     mimeType: "application/pdf",
@@ -1166,33 +1144,7 @@ router.post(
       .where(eq(carriersTable.orgId, authReq.orgId));
     const carrierNameById = new Map(carrierRows.map((c) => [c.id, c.name]));
 
-    // Single fetch of the agent's contracting profile — every per-carrier
-    // paperwork call uses the same profile, so resolving it once outside
-    // the loop avoids N profile reads on a run with many carriers.
-    const [profile] = await db
-      .select()
-      .from(agentContractingProfilesTable)
-      .where(
-        and(
-          eq(agentContractingProfilesTable.agentId, agentId),
-          eq(agentContractingProfilesTable.orgId, authReq.orgId),
-        ),
-      )
-      .limit(1);
-
-    // Pulled for resolveField — the registry uses these to fill name/email
-    // bindings. Email comes from the agents row (canonical) rather than
-    // profile.email (which the agent can edit independently for paperwork).
-    const [agentEmailRow] = await db
-      .select({ email: agentsTable.email })
-      .from(agentsTable)
-      .where(eq(agentsTable.id, agentId))
-      .limit(1);
-    const agentForFill = {
-      firstName: agent.firstName,
-      lastName: agent.lastName,
-      email: agentEmailRow?.email ?? null,
-    };
+    const agentName = `${agent.firstName} ${agent.lastName}`.trim() || "agent";
 
     const advanced: CarrierContractingRequest[] = [];
     const signTasks: Array<{ requestId: string; taskId: string }> = [];
@@ -1215,12 +1167,17 @@ router.post(
       }
 
       const carrierName = carrierNameById.get(r.carrierId) ?? "the carrier";
-      const docId = await generateCarrierPaperwork(
+      // ARCHITECTURE NOTE: this per-carrier paperwork generation is a placeholder
+      // path retained for the current e-sign flow shape. The wider plan replaces
+      // it with a single Power-of-Attorney signing per onboarding run (see issue
+      // #90's INSUREitALL feature plan). Per-carrier signing tasks are still
+      // created today; a future PR will replace them with a single POA signing
+      // + admin-handled carrier submission.
+      const docId = await generatePlaceholderPaperwork(
         authReq.orgId,
-        agentForFill,
-        profile ?? null,
-        { id: r.id, states: r.states },
+        agentName,
         carrierName,
+        r.id,
         authReq.userId,
       );
 
