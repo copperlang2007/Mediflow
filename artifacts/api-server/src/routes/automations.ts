@@ -37,6 +37,7 @@ const TRIGGER_TYPES = [
   "lead_created",
   "contact_created",
   "contact_status_changed",
+  "contact_assigned",
   "contact_no_activity",
   "deal_stage_changed",
   "task_overdue",

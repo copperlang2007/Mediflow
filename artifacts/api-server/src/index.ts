@@ -1,4 +1,15 @@
 import { initSentry } from "./lib/sentry";
+import { logger } from "./lib/logger";
+import { assertProdEnvIntegrity } from "./lib/prodEnvGuard";
+
+// L1 security guard: refuse to boot if production-looking credentials
+// (live Clerk keys, non-localhost DATABASE_URL, PHI_ENCRYPTION_KEY set)
+// are paired with a non-production NODE_ENV. A misconfigured prod deploy
+// that ships `NODE_ENV=test` would otherwise silently bypass
+// `requireMfa` enforcement and fall back to the dev sentinel PHI key.
+// Run BEFORE Sentry init so an env misconfiguration can't even ship a
+// crash to the wrong Sentry environment.
+assertProdEnvIntegrity(process.env, logger);
 
 // Initialize Sentry before any other module so that errors thrown during
 // app/jobs/workers boot are captured. No-op when SENTRY_DSN is unset.
@@ -7,7 +18,6 @@ initSentry();
 import type { Server } from "node:http";
 
 import app from "./app";
-import { logger } from "./lib/logger";
 import { getQueue, startWorkers } from "./lib/jobs";
 import { captureWorkerError } from "./lib/sentry";
 import { markWorkersReady } from "./lib/readiness";
@@ -40,6 +50,21 @@ async function bootstrap(): Promise<void> {
   // dies at boot rather than leaking PHI on the first patient
   // interaction. Mirrors the PHI_ENCRYPTION_KEY boot check (PR #64).
   assertAiProviderHipaaCompliant();
+
+  // Operational nudge: if Twilio is configured but the webhook public
+  // host pin isn't, log a one-time WARN. Header-based URL reconstruction
+  // still works (and is required behind some proxies) but is brittle.
+  if (
+    process.env.TWILIO_ACCOUNT_SID &&
+    !process.env.TWILIO_WEBHOOK_PUBLIC_HOST
+  ) {
+    logger.warn(
+      "TWILIO_ACCOUNT_SID is set but TWILIO_WEBHOOK_PUBLIC_HOST is not; " +
+        "inbound SMS signature verification will fall back to Host/X-Forwarded-Proto " +
+        "headers. Set TWILIO_WEBHOOK_PUBLIC_HOST (e.g. https://mediflow.app) " +
+        "to pin the signed URL to your public origin.",
+    );
+  }
 
   // Start pg-boss job queue and register workers.
   //
