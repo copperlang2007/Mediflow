@@ -73,9 +73,30 @@ export function carrierSubmitTaskKey(carrierRequestId: string): string {
   return `${carrierRequestId}:submit`;
 }
 
+// ---- Phase 1.5 POA dedup keys ----------------------------------------------
+
+/** Agent-facing "Decide whether to grant the run-wide POA" task. */
+export function poaDecisionTaskKey(runId: string): string {
+  return `${runId}:poa-decision`;
+}
+
+/** Admin task created after the agent signs the POA. */
+export function adminPoaSubmitTaskKey(runId: string): string {
+  return `${runId}:admin-poa-submit`;
+}
+
+/** Admin task created after the agent opts OUT of the POA. */
+export function adminOptOutTrackTaskKey(runId: string): string {
+  return `${runId}:admin-optout-track`;
+}
+
 // ---- Helpers ---------------------------------------------------------------
 
-function agentDisplayName(agent: Pick<Agent, "firstName" | "lastName">): string {
+// Exported so other modules (esign callback, opt-out task helpers) can use
+// the same display-name logic without re-importing the Agent type.
+export function agentDisplayName(
+  agent: Pick<Agent, "firstName" | "lastName">,
+): string {
   return `${agent.firstName} ${agent.lastName}`.trim() || "agent";
 }
 

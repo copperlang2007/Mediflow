@@ -131,3 +131,54 @@ describe("contracting state machine — carrier contracting", () => {
     expect(unique.size).toBe(CONTRACTING_STATUSES.length);
   });
 });
+
+describe("contracting state machine — Phase 1.5 POA pivot", () => {
+  it("POA accept path: draft → awaiting_admin_submission → submitted → appointed", () => {
+    expect(canTransitionContracting("draft", "awaiting_admin_submission")).toBe(
+      true,
+    );
+    expect(
+      canTransitionContracting("awaiting_admin_submission", "submitted"),
+    ).toBe(true);
+    expect(canTransitionContracting("submitted", "appointed")).toBe(true);
+  });
+
+  it("POA decline path: draft → invite_requested → submitted → appointed", () => {
+    expect(canTransitionContracting("draft", "invite_requested")).toBe(true);
+    expect(canTransitionContracting("invite_requested", "submitted")).toBe(true);
+  });
+
+  it("Phase 1.5 new statuses are cancellable", () => {
+    expect(
+      canTransitionContracting("awaiting_admin_submission", "cancelled"),
+    ).toBe(true);
+    expect(canTransitionContracting("invite_requested", "cancelled")).toBe(
+      true,
+    );
+  });
+
+  it("Phase 1.5 statuses can't skip to appointed without going through submitted", () => {
+    expect(
+      canTransitionContracting("awaiting_admin_submission", "appointed"),
+    ).toBe(false);
+    expect(canTransitionContracting("invite_requested", "appointed")).toBe(
+      false,
+    );
+  });
+
+  it("Phase 1.5 statuses can't slide back to draft", () => {
+    expect(canTransitionContracting("awaiting_admin_submission", "draft")).toBe(
+      false,
+    );
+    expect(canTransitionContracting("invite_requested", "draft")).toBe(false);
+  });
+
+  it("legacy per-carrier flow still works alongside Phase 1.5 statuses", () => {
+    // Both paths exit draft; both flow through submitted+.
+    expect(canTransitionContracting("draft", "paperwork_generated")).toBe(true);
+    expect(canTransitionContracting("draft", "awaiting_admin_submission")).toBe(
+      true,
+    );
+    expect(canTransitionContracting("draft", "invite_requested")).toBe(true);
+  });
+});

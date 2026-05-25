@@ -173,6 +173,8 @@ import type {
   PipelineStage,
   PipelineWithStages,
   PlatformRequirement,
+  PoaDecisionBody,
+  PoaDecisionResponse,
   PreviewTemplate200,
   PreviewTemplateBody,
   ReactivateUser200,
@@ -17472,6 +17474,98 @@ export const useRequestContracting = <
   TContext
 > => {
   return useMutation(getRequestContractingMutationOptions(options));
+};
+
+/**
+ * Phase 1.5 — agent either accepts the run-wide POA (INSUREitALL
+submits contracts on their behalf) or declines it (carriers email
+the agent invitations to complete each contracting flow directly).
+Idempotent on the run.
+
+ * @summary Record the agent's Power-of-Attorney decision
+ */
+export const getRecordPoaDecisionUrl = (agentId: string) => {
+  return `/api/onboarding/${agentId}/poa-decision`;
+};
+
+export const recordPoaDecision = async (
+  agentId: string,
+  poaDecisionBody: PoaDecisionBody,
+  options?: RequestInit,
+): Promise<PoaDecisionResponse> => {
+  return customFetch<PoaDecisionResponse>(getRecordPoaDecisionUrl(agentId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(poaDecisionBody),
+  });
+};
+
+export const getRecordPoaDecisionMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordPoaDecision>>,
+    TError,
+    { agentId: string; data: BodyType<PoaDecisionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof recordPoaDecision>>,
+  TError,
+  { agentId: string; data: BodyType<PoaDecisionBody> },
+  TContext
+> => {
+  const mutationKey = ["recordPoaDecision"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof recordPoaDecision>>,
+    { agentId: string; data: BodyType<PoaDecisionBody> }
+  > = (props) => {
+    const { agentId, data } = props ?? {};
+
+    return recordPoaDecision(agentId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RecordPoaDecisionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof recordPoaDecision>>
+>;
+export type RecordPoaDecisionMutationBody = BodyType<PoaDecisionBody>;
+export type RecordPoaDecisionMutationError = ErrorType<Error>;
+
+/**
+ * @summary Record the agent's Power-of-Attorney decision
+ */
+export const useRecordPoaDecision = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordPoaDecision>>,
+    TError,
+    { agentId: string; data: BodyType<PoaDecisionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof recordPoaDecision>>,
+  TError,
+  { agentId: string; data: BodyType<PoaDecisionBody> },
+  TContext
+> => {
+  return useMutation(getRecordPoaDecisionMutationOptions(options));
 };
 
 /**

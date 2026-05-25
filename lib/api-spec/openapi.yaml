@@ -4329,6 +4329,54 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /onboarding/{agentId}/poa-decision:
+    post:
+      operationId: recordPoaDecision
+      tags: [onboarding]
+      summary: Record the agent's Power-of-Attorney decision
+      description: |
+        Phase 1.5 — agent either accepts the run-wide POA (INSUREitALL
+        submits contracts on their behalf) or declines it (carriers email
+        the agent invitations to complete each contracting flow directly).
+        Idempotent on the run.
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PoaDecisionBody"
+      responses:
+        "200":
+          description: Decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PoaDecisionResponse"
+        "400":
+          description: Invalid body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Caller is neither the owning agent nor an admin
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Agent / run not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: No carriers selected on the run yet
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /onboarding/{agentId}/carriers/{requestId}/sign:
     post:
       operationId: signOnboardingCarrier
@@ -7562,6 +7610,20 @@ components:
         - appointed
         - rejected
         - cancelled
+        - awaiting_admin_submission
+        - invite_requested
+
+    PoaStatus:
+      type: string
+      description: |
+        Phase 1.5 POA decision state recorded on agent_onboarding_runs.
+        `not_applicable` is the default for runs that have not (yet) reached
+        the POA decision step or for legacy runs that pre-date the pivot.
+      enum:
+        - not_applicable
+        - pending
+        - signed
+        - opted_out
 
     EntityType:
       type: string
@@ -7577,6 +7639,13 @@ components:
           type: ["string", "null"]
         status:
           $ref: "#/components/schemas/OnboardingStatus"
+        poaStatus:
+          $ref: "#/components/schemas/PoaStatus"
+        poaEnvelopeId:
+          type: ["string", "null"]
+        poaExpiresAt:
+          type: ["string", "null"]
+          format: date-time
         completedSteps:
           type: ["object", "null"]
           additionalProperties: { type: boolean }
@@ -7833,6 +7902,32 @@ components:
         signingUrl: { type: string }
         carrierContractingRequestId: { type: string }
       required: [envelopeId, status, signingUrl]
+
+    PoaDecisionBody:
+      type: object
+      description: |
+        Phase 1.5 POA decision body. `accepted: true` triggers POA PDF
+        generation + envelope creation. `accepted: false` flips every
+        draft carrier request to `invite_requested` and queues the
+        invite-request emails to each carrier's appointment desk.
+      properties:
+        accepted: { type: boolean }
+      required: [accepted]
+
+    PoaDecisionResponse:
+      type: object
+      properties:
+        poaStatus:
+          $ref: "#/components/schemas/PoaStatus"
+        envelopeId:
+          type: ["string", "null"]
+        signingUrl:
+          type: ["string", "null"]
+        transitioned:
+          type: ["integer", "null"]
+        idempotent:
+          type: ["boolean", "null"]
+      required: [poaStatus]
 
     RecordContractingDecisionBody:
       type: object

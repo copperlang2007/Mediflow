@@ -65,11 +65,21 @@ export const esignEnvelopesTable = pgTable(
     orgId: text("org_id")
       .notNull()
       .references(() => organizationsTable.id),
-    carrierContractingRequestId: text("carrier_contracting_request_id")
-      .notNull()
-      .references(() => carrierContractingRequestsTable.id, {
-        onDelete: "cascade",
-      }),
+    // Nullable since Phase 1.5 POA pivot — a POA envelope links to an
+    // onboarding run instead of a carrier_contracting_request. The DB-level
+    // check constraint (`esign_envelopes_parent_check`, migration 0023)
+    // enforces that exactly one of `carrier_contracting_request_id` or
+    // `onboarding_run_id` is set.
+    carrierContractingRequestId: text(
+      "carrier_contracting_request_id",
+    ).references(() => carrierContractingRequestsTable.id, {
+      onDelete: "cascade",
+    }),
+    // Set on POA envelopes (the run-wide signing). NULL for per-carrier
+    // envelopes (legacy). Together with carrierContractingRequestId this
+    // forms a "polymorphic parent" pattern, enforced by the
+    // esign_envelopes_parent_check check constraint.
+    onboardingRunId: text("onboarding_run_id"),
     unsignedPdfDocumentId: text("unsigned_pdf_document_id")
       .notNull()
       .references(() => documentsTable.id),

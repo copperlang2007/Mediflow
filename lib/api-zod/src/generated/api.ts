@@ -4391,6 +4391,14 @@ export const StartOnboardingResponse = zod.object({
       "cancelled",
       "rejected",
     ]),
+    poaStatus: zod
+      .enum(["not_applicable", "pending", "signed", "opted_out"])
+      .optional()
+      .describe(
+        "Phase 1.5 POA decision state recorded on agent_onboarding_runs.\n`not_applicable` is the default for runs that have not (yet) reached\nthe POA decision step or for legacy runs that pre-date the pivot.\n",
+      ),
+    poaEnvelopeId: zod.string().nullish(),
+    poaExpiresAt: zod.coerce.date().nullish(),
     completedSteps: zod.record(zod.string(), zod.boolean()).nullish(),
     startedAt: zod.coerce.date(),
     completedAt: zod.coerce.date().nullish(),
@@ -4469,6 +4477,14 @@ export const ListOnboardingsResponse = zod.object({
         "cancelled",
         "rejected",
       ]),
+      poaStatus: zod
+        .enum(["not_applicable", "pending", "signed", "opted_out"])
+        .optional()
+        .describe(
+          "Phase 1.5 POA decision state recorded on agent_onboarding_runs.\n`not_applicable` is the default for runs that have not (yet) reached\nthe POA decision step or for legacy runs that pre-date the pivot.\n",
+        ),
+      poaEnvelopeId: zod.string().nullish(),
+      poaExpiresAt: zod.coerce.date().nullish(),
       completedSteps: zod.record(zod.string(), zod.boolean()).nullish(),
       startedAt: zod.coerce.date(),
       completedAt: zod.coerce.date().nullish(),
@@ -4503,6 +4519,14 @@ export const GetOnboardingResponse = zod.object({
       "cancelled",
       "rejected",
     ]),
+    poaStatus: zod
+      .enum(["not_applicable", "pending", "signed", "opted_out"])
+      .optional()
+      .describe(
+        "Phase 1.5 POA decision state recorded on agent_onboarding_runs.\n`not_applicable` is the default for runs that have not (yet) reached\nthe POA decision step or for legacy runs that pre-date the pivot.\n",
+      ),
+    poaEnvelopeId: zod.string().nullish(),
+    poaExpiresAt: zod.coerce.date().nullish(),
     completedSteps: zod.record(zod.string(), zod.boolean()).nullish(),
     startedAt: zod.coerce.date(),
     completedAt: zod.coerce.date().nullish(),
@@ -4566,6 +4590,8 @@ export const GetOnboardingResponse = zod.object({
         "appointed",
         "rejected",
         "cancelled",
+        "awaiting_admin_submission",
+        "invite_requested",
       ]),
       paperworkDocumentId: zod.string().nullish(),
       signatureCompletedAt: zod.coerce.date().nullish(),
@@ -4783,6 +4809,14 @@ export const CancelOnboardingResponse = zod.object({
       "cancelled",
       "rejected",
     ]),
+    poaStatus: zod
+      .enum(["not_applicable", "pending", "signed", "opted_out"])
+      .optional()
+      .describe(
+        "Phase 1.5 POA decision state recorded on agent_onboarding_runs.\n`not_applicable` is the default for runs that have not (yet) reached\nthe POA decision step or for legacy runs that pre-date the pivot.\n",
+      ),
+    poaEnvelopeId: zod.string().nullish(),
+    poaExpiresAt: zod.coerce.date().nullish(),
     completedSteps: zod.record(zod.string(), zod.boolean()).nullish(),
     startedAt: zod.coerce.date(),
     completedAt: zod.coerce.date().nullish(),
@@ -4813,6 +4847,14 @@ export const RequestContractingResponse = zod.object({
       "cancelled",
       "rejected",
     ]),
+    poaStatus: zod
+      .enum(["not_applicable", "pending", "signed", "opted_out"])
+      .optional()
+      .describe(
+        "Phase 1.5 POA decision state recorded on agent_onboarding_runs.\n`not_applicable` is the default for runs that have not (yet) reached\nthe POA decision step or for legacy runs that pre-date the pivot.\n",
+      ),
+    poaEnvelopeId: zod.string().nullish(),
+    poaExpiresAt: zod.coerce.date().nullish(),
     completedSteps: zod.record(zod.string(), zod.boolean()).nullish(),
     startedAt: zod.coerce.date(),
     completedAt: zod.coerce.date().nullish(),
@@ -4825,6 +4867,38 @@ export const RequestContractingResponse = zod.object({
       taskId: zod.string(),
     }),
   ),
+});
+
+/**
+ * Phase 1.5 — agent either accepts the run-wide POA (INSUREitALL
+submits contracts on their behalf) or declines it (carriers email
+the agent invitations to complete each contracting flow directly).
+Idempotent on the run.
+
+ * @summary Record the agent's Power-of-Attorney decision
+ */
+export const RecordPoaDecisionParams = zod.object({
+  agentId: zod.coerce.string(),
+});
+
+export const RecordPoaDecisionBody = zod
+  .object({
+    accepted: zod.boolean(),
+  })
+  .describe(
+    "Phase 1.5 POA decision body. `accepted: true` triggers POA PDF\ngeneration + envelope creation. `accepted: false` flips every\ndraft carrier request to `invite_requested` and queues the\ninvite-request emails to each carrier's appointment desk.\n",
+  );
+
+export const RecordPoaDecisionResponse = zod.object({
+  poaStatus: zod
+    .enum(["not_applicable", "pending", "signed", "opted_out"])
+    .describe(
+      "Phase 1.5 POA decision state recorded on agent_onboarding_runs.\n`not_applicable` is the default for runs that have not (yet) reached\nthe POA decision step or for legacy runs that pre-date the pivot.\n",
+    ),
+  envelopeId: zod.string().nullish(),
+  signingUrl: zod.string().nullish(),
+  transitioned: zod.number().nullish(),
+  idempotent: zod.boolean().nullish(),
 });
 
 /**
@@ -4892,6 +4966,8 @@ export const RecordCarrierContractingDecisionResponse = zod.object({
       "appointed",
       "rejected",
       "cancelled",
+      "awaiting_admin_submission",
+      "invite_requested",
     ]),
     paperworkDocumentId: zod.string().nullish(),
     signatureCompletedAt: zod.coerce.date().nullish(),
