@@ -25,7 +25,18 @@ import type {
  */
 export interface CreateEnvelopeInput {
   orgId: string;
-  carrierContractingRequestId: string;
+  /**
+   * Per-carrier signing flow parent. Mutually exclusive with
+   * `onboardingRunId` — exactly one of the two is required. The DB-level
+   * `esign_envelopes_parent_check` constraint enforces this at write time.
+   */
+  carrierContractingRequestId?: string | null;
+  /**
+   * Phase 1.5 POA path parent. Set on run-wide POA envelopes that
+   * authorize the grantee to submit ALL carrier paperwork on the agent's
+   * behalf.
+   */
+  onboardingRunId?: string | null;
   pdfDocumentId: string;
   signers: EnvelopeSigner[];
   /**

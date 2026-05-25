@@ -25,6 +25,7 @@ import { WelcomeStep } from "./steps/WelcomeStep";
 import { ProfileStep } from "./steps/ProfileStep";
 import { CarriersStep } from "./steps/CarriersStep";
 import { ReviewStep } from "./steps/ReviewStep";
+import { PoaDecisionStep } from "./steps/PoaDecisionStep";
 import { SigningStep } from "./steps/SigningStep";
 import { DoneStep } from "./steps/DoneStep";
 
@@ -33,6 +34,7 @@ const STEP_ORDER: WizardStep[] = [
   "profile",
   "carriers",
   "review",
+  "poa",
   "signing",
   "done",
 ];
@@ -42,6 +44,7 @@ const STEP_LABEL: Record<WizardStep, string> = {
   profile: "Your profile",
   carriers: "Carriers",
   review: "Review",
+  poa: "Authorize",
   signing: "Sign",
   done: "Done",
 };
@@ -253,7 +256,14 @@ export default function OnboardingPage() {
             profile={onboarding.profile}
             carrierRequests={onboarding.carrierRequests}
             onBack={() => setStepOverride("carriers")}
-            onContinue={() => setStepOverride("signing")}
+            onContinue={() => setStepOverride("poa")}
+          />
+        )}
+        {activeStep === "poa" && (
+          <PoaDecisionStep
+            agentId={myAgent.id}
+            carrierRequests={onboarding.carrierRequests}
+            onContinue={() => setStepOverride("done")}
           />
         )}
         {activeStep === "signing" && (

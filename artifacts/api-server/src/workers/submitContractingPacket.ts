@@ -177,6 +177,170 @@ function coverLetterText(opts: {
 }
 
 /**
+ * Phase 1.5 — opt-out path. Send an "agent has opted to complete your
+ * carrier flow directly; please email them a contracting invitation"
+ * request to the carrier's appointment desk. No attachment, no signed
+ * packet. The request row STAYS at `invite_requested` after dispatch;
+ * the admin manually flips it to `submitted` once the agent confirms
+ * they've completed the carrier's web flow.
+ *
+ * Same defensive shape as the main worker:
+ *   - missing carrier / appointment_desk_email → WARN log + exit clean
+ *     (leave the row as-is so an admin can re-trigger after fixing data).
+ *   - Resend failure → throw so pg-boss retries.
+ */
+async function dispatchInviteRequest(
+  request: typeof carrierContractingRequestsTable.$inferSelect,
+  orgId: string,
+): Promise<void> {
+  const requestId = request.id;
+
+  const [carrier] = await db
+    .select()
+    .from(carriersTable)
+    .where(
+      and(
+        eq(carriersTable.id, request.carrierId),
+        eq(carriersTable.orgId, orgId),
+      ),
+    )
+    .limit(1);
+  if (!carrier) {
+    logger.warn(
+      { requestId, orgId, carrierId: request.carrierId },
+      "submitContractingPacket(invite): carrier row missing — skipping",
+    );
+    return;
+  }
+
+  const deskEmail = carrier.appointmentDeskEmail;
+  if (!deskEmail || !EMAIL_RX.test(deskEmail)) {
+    logger.warn(
+      { requestId, orgId, carrierId: carrier.id, carrierName: carrier.name },
+      "submitContractingPacket(invite): appointment_desk_email not configured — leaving request open for retry",
+    );
+    return;
+  }
+
+  const [agent] = await db
+    .select()
+    .from(agentsTable)
+    .where(
+      and(eq(agentsTable.id, request.agentId), eq(agentsTable.orgId, orgId)),
+    )
+    .limit(1);
+  const [profile] = await db
+    .select()
+    .from(agentContractingProfilesTable)
+    .where(eq(agentContractingProfilesTable.agentId, request.agentId))
+    .limit(1);
+  const agentName = agent
+    ? `${agent.firstName} ${agent.lastName}`.trim() || "(unknown agent)"
+    : "(unknown agent)";
+  const npn = agent?.npn ?? null;
+  // Prefer the profile email (the address the agent listed on the
+  // contracting profile) — that's the address the carrier will write to.
+  // Fall back to the agent row email.
+  const agentEmail = profile?.email ?? agent?.email ?? null;
+  const states = request.states ?? [];
+
+  const metadata = readMetadata(carrier.appointmentDeskMetadata);
+  const defaultSubject = `Contracting invite request: ${agentName} — ${carrier.name}`;
+  const subject = metadata.subject ?? defaultSubject;
+  const cc = (metadata.cc ?? []).map((email) => ({ email }));
+  const fromAddr =
+    process.env.CONTRACTING_EMAIL_FROM ??
+    process.env.EMAIL_FROM_ADDRESS ??
+    "noreply@mediflow.app";
+
+  const html = `
+<p>Hello ${htmlEscape(carrier.name)} appointment desk,</p>
+<p>Please send a contracting invitation to the following agent so they can complete your contracting flow directly:</p>
+<ul>
+  <li>Agent: <strong>${htmlEscape(agentName)}</strong></li>
+  ${npn ? `<li>NPN: <strong>${htmlEscape(npn)}</strong></li>` : ""}
+  ${agentEmail ? `<li>Email: <strong>${htmlEscape(agentEmail)}</strong></li>` : ""}
+  <li>States: <strong>${htmlEscape(states.join(", ") || "(none listed)")}</strong></li>
+</ul>
+<p>The agent has opted to complete your contracting paperwork directly rather than via MediFlow's submission service.</p>
+<p>Thank you,<br/>MediFlow on behalf of the agent's agency</p>`.trim();
+
+  const text = [
+    `Hello ${carrier.name} appointment desk,`,
+    "",
+    "Please send a contracting invitation to the following agent so they can complete your contracting flow directly:",
+    `  Agent: ${agentName}`,
+    npn ? `  NPN: ${npn}` : "",
+    agentEmail ? `  Email: ${agentEmail}` : "",
+    `  States: ${states.join(", ") || "(none listed)"}`,
+    "",
+    "The agent has opted to complete your contracting paperwork directly rather than via MediFlow's submission service.",
+    "",
+    "Thank you,",
+    "MediFlow on behalf of the agent's agency",
+  ]
+    .filter((l) => l !== "")
+    .join("\n");
+
+  const sendResult = await sendEmail({
+    to: { email: deskEmail },
+    cc: cc.length > 0 ? cc : undefined,
+    from: fromAddr,
+    subject,
+    html,
+    text,
+    tags: {
+      kind: "contracting-invite-request",
+      carrierId: carrier.id,
+      requestId,
+    },
+  });
+
+  if (!sendResult.success) {
+    const msg = `Email send (invite-request) to appointment desk failed: ${sendResult.error}`;
+    logger.error(
+      {
+        requestId,
+        orgId,
+        carrierId: carrier.id,
+        to: maskEmail(deskEmail),
+        error: sendResult.error,
+      },
+      msg,
+    );
+    throw new Error(msg);
+  }
+
+  // Audit log (no transition — row stays at `invite_requested`).
+  await db.insert(auditLogTable).values({
+    id: randomUUID(),
+    orgId,
+    userId: null,
+    userRole: "system",
+    action: "update",
+    resourceType: "carrier_contracting",
+    resourceId: requestId,
+    changes: {
+      worker: "submitContractingPacket",
+      kind: "invite_request_dispatched",
+      sentTo: deskEmail,
+      ccCount: cc.length,
+    },
+  });
+
+  logger.info(
+    {
+      requestId,
+      orgId,
+      carrierId: carrier.id,
+      to: maskEmail(deskEmail),
+      ccCount: cc.length,
+    },
+    "submitContractingPacket(invite): invite-request emailed to appointment desk",
+  );
+}
+
+/**
  * Worker entrypoint. Throws on Resend send failures so pg-boss retries
  * kick in; returns silently on "data not yet configured" (null
  * appointment-desk email) so the dead-letter queue isn't polluted with
@@ -214,6 +378,31 @@ export async function submitContractingPacketWorker(
     logger.info(
       { requestId, orgId, status: request.status },
       "submitContractingPacket: request already past `signed` — no-op",
+    );
+    return;
+  }
+
+  // 2a. Phase 1.5 opt-out path: when status = `invite_requested`, we
+  //     dispatch the "please email the agent a contracting invitation"
+  //     request to the carrier's appointment desk instead of the signed
+  //     packet (no attachment — no POA, no per-carrier paperwork). The
+  //     row STAYS at `invite_requested` afterwards; the admin manually
+  //     flips it to `submitted` once the agent confirms they completed
+  //     the carrier's own flow.
+  if ((request.status as ContractingStatus) === "invite_requested") {
+    await dispatchInviteRequest(request, orgId);
+    return;
+  }
+
+  // 2b. Phase 1.5 POA path: when status = `awaiting_admin_submission`,
+  //     do nothing here. Admins handle the off-system submission and
+  //     mark each request `submitted` via PATCH /admin/contracting/:id.
+  if (
+    (request.status as ContractingStatus) === "awaiting_admin_submission"
+  ) {
+    logger.info(
+      { requestId, orgId },
+      "submitContractingPacket: request awaiting admin submission (POA path) — no auto-dispatch",
     );
     return;
   }

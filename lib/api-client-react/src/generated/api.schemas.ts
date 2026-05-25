@@ -2329,6 +2329,23 @@ export const ContractingStatus = {
   appointed: "appointed",
   rejected: "rejected",
   cancelled: "cancelled",
+  awaiting_admin_submission: "awaiting_admin_submission",
+  invite_requested: "invite_requested",
+} as const;
+
+/**
+ * Phase 1.5 POA decision state recorded on agent_onboarding_runs.
+`not_applicable` is the default for runs that have not (yet) reached
+the POA decision step or for legacy runs that pre-date the pivot.
+
+ */
+export type PoaStatus = (typeof PoaStatus)[keyof typeof PoaStatus];
+
+export const PoaStatus = {
+  not_applicable: "not_applicable",
+  pending: "pending",
+  signed: "signed",
+  opted_out: "opted_out",
 } as const;
 
 export type EntityType = (typeof EntityType)[keyof typeof EntityType];
@@ -2354,6 +2371,11 @@ export interface AgentOnboardingRun {
   /** @nullable */
   startedByUserId?: string | null;
   status: OnboardingStatus;
+  poaStatus?: PoaStatus;
+  /** @nullable */
+  poaEnvelopeId?: string | null;
+  /** @nullable */
+  poaExpiresAt?: string | null;
   /** @nullable */
   completedSteps?: AgentOnboardingRunCompletedSteps;
   startedAt: string;
@@ -2609,6 +2631,29 @@ export interface SignOnboardingCarrierResponse {
   status: SignOnboardingCarrierResponseStatus;
   signingUrl: string;
   carrierContractingRequestId?: string;
+}
+
+/**
+ * Phase 1.5 POA decision body. `accepted: true` triggers POA PDF
+generation + envelope creation. `accepted: false` flips every
+draft carrier request to `invite_requested` and queues the
+invite-request emails to each carrier's appointment desk.
+
+ */
+export interface PoaDecisionBody {
+  accepted: boolean;
+}
+
+export interface PoaDecisionResponse {
+  poaStatus: PoaStatus;
+  /** @nullable */
+  envelopeId?: string | null;
+  /** @nullable */
+  signingUrl?: string | null;
+  /** @nullable */
+  transitioned?: number | null;
+  /** @nullable */
+  idempotent?: boolean | null;
 }
 
 export type RecordContractingDecisionBodyStatus =

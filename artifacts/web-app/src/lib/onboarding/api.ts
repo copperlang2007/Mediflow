@@ -31,6 +31,7 @@ import {
   useRequestContracting as useRequestContractingGenerated,
   useSignOnboardingCarrier,
   useRecordCarrierContractingDecision,
+  useRecordPoaDecision as useRecordPoaDecisionGenerated,
   useCreateEsignEnvelope,
   useGetEsignEnvelope,
   useSignEsignEnvelope,
@@ -48,9 +49,12 @@ import type {
   OnboardingListResponse as GeneratedOnboardingListResponse,
   OnboardingStatus as GeneratedOnboardingStatus,
   ContractingStatus as GeneratedContractingStatus,
+  PoaStatus as GeneratedPoaStatus,
   EntityType as GeneratedEntityType,
   PatchOnboardingProfileBody,
   RecordContractingDecisionBody,
+  PoaDecisionBody,
+  PoaDecisionResponse,
   Envelope as GeneratedEnvelope,
   EnvelopeSigner as GeneratedEnvelopeSigner,
   EnvelopeConsentRecord as GeneratedEnvelopeConsentRecord,
@@ -66,6 +70,7 @@ import type {
 
 export type OnboardingStatus = GeneratedOnboardingStatus;
 export type ContractingStatus = GeneratedContractingStatus;
+export type PoaStatus = GeneratedPoaStatus;
 export type EntityType = GeneratedEntityType;
 export type AgentOnboardingRun = GeneratedAgentOnboardingRun;
 export type AgentContractingProfile = GeneratedAgentContractingProfile;
@@ -348,6 +353,43 @@ export function useSignEnvelope(envelopeId: string) {
 }
 
 /**
+ * POST /onboarding/:agentId/poa-decision (Phase 1.5)
+ *
+ * Returns one of:
+ *   - `{ poaStatus: "pending", envelopeId, signingUrl }` for `accepted: true`
+ *   - `{ poaStatus: "opted_out", transitioned }` for `accepted: false`
+ *
+ * The wizard navigates to `signingUrl` on accept, or to the post-decline
+ * confirmation view.
+ */
+export function usePoaDecision(agentId: string) {
+  const qc = useQueryClient();
+  const mutation = useRecordPoaDecisionGenerated({
+    mutation: {
+      onSuccess: () => {
+        void qc.invalidateQueries({ queryKey: getGetOnboardingQueryKey(agentId) });
+        void qc.invalidateQueries({ queryKey: ["/api/onboarding"] });
+      },
+    },
+  });
+  return {
+    ...mutation,
+    mutateAsync: (vars: { accepted: boolean }) =>
+      mutation.mutateAsync({
+        agentId,
+        data: { accepted: vars.accepted } satisfies PoaDecisionBody,
+      }),
+    mutate: (vars: { accepted: boolean }) =>
+      mutation.mutate({
+        agentId,
+        data: { accepted: vars.accepted } satisfies PoaDecisionBody,
+      }),
+  };
+}
+
+export type { PoaDecisionResponse };
+
+/**
  * PATCH /admin/contracting/:requestId (admin/compliance)
  *
  * Records the appointment-desk decision for a single carrier request:
@@ -419,7 +461,21 @@ const CONTRACTING_LABELS: Record<ContractingStatus, string> = {
   appointed: "Appointed",
   rejected: "Rejected",
   cancelled: "Cancelled",
+  awaiting_admin_submission: "Awaiting submission",
+  invite_requested: "Invite requested",
 };
+
+const POA_LABELS: Record<PoaStatus, string> = {
+  not_applicable: "Not yet decided",
+  pending: "POA pending signature",
+  signed: "POA signed",
+  opted_out: "Opted out",
+};
+
+export function poaStatusLabel(s: PoaStatus | string | null | undefined): string {
+  if (!s) return POA_LABELS.not_applicable;
+  return POA_LABELS[s as PoaStatus] ?? s;
+}
 
 export function contractingStatusLabel(s: ContractingStatus | string): string {
   return CONTRACTING_LABELS[s as ContractingStatus] ?? s;
@@ -435,6 +491,7 @@ export type WizardStep =
   | "profile"
   | "carriers"
   | "review"
+  | "poa"
   | "signing"
   | "done";
 
@@ -444,13 +501,35 @@ export function wizardStepForRun(
 ): WizardStep {
   if (run.status === "complete") return "done";
   if (run.status === "submitted") return "done";
-  if (run.status === "signing") return "signing";
+
+  // Phase 1.5 POA branch — when the run has reached a decision, route
+  // to the right view regardless of the underlying onboarding status.
+  if (run.poaStatus === "opted_out") return "done";
+  if (run.poaStatus === "signed") return "done";
+
+  if (run.status === "signing") {
+    // POA flow: agent should be on the POA step until they sign;
+    // legacy per-carrier flow: agent should be on the per-carrier
+    // signing step.
+    if (run.poaStatus === "pending") return "poa";
+    if (run.poaStatus === "not_applicable") return "signing";
+    return "poa";
+  }
   if (run.status === "carriers_selected") {
-    // If any paperwork has been generated already, jump to signing.
-    if (carrierRequests.some((r) => r.status !== "draft" && r.status !== "cancelled")) {
+    // Phase 1.5: with carriers selected, the natural next step is the POA
+    // decision. If carrier requests have any non-draft status (legacy
+    // per-carrier flow), keep the old behaviour.
+    if (
+      carrierRequests.some(
+        (r) =>
+          r.status === "paperwork_generated" ||
+          r.status === "signed" ||
+          r.status === "submitted",
+      )
+    ) {
       return "signing";
     }
-    return "review";
+    return "poa";
   }
   if (run.status === "profile_in_progress") {
     if (carrierRequests.length > 0) return "review";

@@ -55,7 +55,10 @@ import {
 import { ESIGN_CONSENT_TEXT, ESIGN_CONSENT_VERSION } from "./consent";
 import { renderSignatureCertificate } from "../contractingPdf/signatureCertificate";
 import { ObjectStorageService } from "../objectStorage";
-import { completeCarrierSigningTransition } from "./carrierSignCallback";
+import {
+  completeCarrierSigningTransition,
+  completePoaSigningTransition,
+} from "./carrierSignCallback";
 import { sendCertificateOfCompletion } from "./completionEmail";
 import { logger } from "../logger";
 import { captureWorkerError } from "../sentry";
@@ -123,23 +126,34 @@ export class MediflowESignProvider implements ESignProvider {
   // ---- createEnvelope ------------------------------------------------------
 
   async createEnvelope(input: CreateEnvelopeInput): Promise<EsignEnvelope> {
-    // Idempotency: re-creating an envelope for the same
-    // (org, carrier_contracting_request) while a non-voided envelope
-    // exists returns the existing row. The partial-unique index on the
-    // table would otherwise raise — we catch + return-existing so the
+    // Polymorphic parent: exactly one of `carrierContractingRequestId` or
+    // `onboardingRunId` must be set. Surface a clear error instead of
+    // letting the DB check constraint reject the insert with an opaque
+    // message — routes catch this and translate to a 400.
+    const hasCarrier = Boolean(input.carrierContractingRequestId);
+    const hasRun = Boolean(input.onboardingRunId);
+    if (hasCarrier === hasRun) {
+      throw new InvalidSignatureInputError(
+        "createEnvelope: exactly one of carrierContractingRequestId or onboardingRunId must be set",
+      );
+    }
+
+    // Idempotency: re-creating an envelope for the same parent while a
+    // non-voided envelope exists returns the existing row. The partial-
+    // unique indexes (esign_envelopes_active_per_request_unique for the
+    // per-carrier flow; esign_envelopes_active_per_run_unique for the POA
+    // flow) would otherwise raise — we catch + return-existing so the
     // route surface stays clean.
+    const parentClause = hasCarrier
+      ? eq(
+          esignEnvelopesTable.carrierContractingRequestId,
+          input.carrierContractingRequestId!,
+        )
+      : eq(esignEnvelopesTable.onboardingRunId, input.onboardingRunId!);
     const [existing] = await db
       .select()
       .from(esignEnvelopesTable)
-      .where(
-        and(
-          eq(esignEnvelopesTable.orgId, input.orgId),
-          eq(
-            esignEnvelopesTable.carrierContractingRequestId,
-            input.carrierContractingRequestId,
-          ),
-        ),
-      )
+      .where(and(eq(esignEnvelopesTable.orgId, input.orgId), parentClause))
       .orderBy(desc(esignEnvelopesTable.createdAt))
       .limit(1);
     if (existing && existing.status !== "voided") return existing;
@@ -150,7 +164,8 @@ export class MediflowESignProvider implements ESignProvider {
       .values({
         id,
         orgId: input.orgId,
-        carrierContractingRequestId: input.carrierContractingRequestId,
+        carrierContractingRequestId: input.carrierContractingRequestId ?? null,
+        onboardingRunId: input.onboardingRunId ?? null,
         unsignedPdfDocumentId: input.pdfDocumentId,
         signers: input.signers,
         status: "pending",
@@ -205,20 +220,25 @@ export class MediflowESignProvider implements ESignProvider {
       );
     }
     if (envelope.status === "completed") {
-      // Idempotent re-completion. We still call the carrier-side
-      // transition (it's no-op-safe via the same-status short-circuit
-      // in completeCarrierSigningTransition + its run aggregator) so a
-      // re-call after the Day-6 worker flipped requests forward to
-      // `appointed` can roll the onboarding run forward to `complete`.
+      // Idempotent re-completion. We still call the appropriate
+      // workflow transition (it's no-op-safe via the same-status
+      // short-circuit in completeCarrierSigningTransition / its run
+      // aggregator) so a re-call after a downstream worker flipped
+      // requests forward can roll the onboarding run forward.
       try {
-        await completeCarrierSigningTransition(
-          orgId,
-          envelope.carrierContractingRequestId,
-        );
+        if (envelope.onboardingRunId) {
+          // POA path — Phase 1.5.
+          await completePoaSigningTransition(orgId, envelope.onboardingRunId);
+        } else if (envelope.carrierContractingRequestId) {
+          await completeCarrierSigningTransition(
+            orgId,
+            envelope.carrierContractingRequestId,
+          );
+        }
       } catch (err) {
         logger.error(
           { err, envelopeId, orgId },
-          "Idempotent re-completion: carrier transition failed",
+          "Idempotent re-completion: workflow transition failed",
         );
       }
       return envelope;
@@ -368,18 +388,31 @@ export class MediflowESignProvider implements ESignProvider {
       signedPdfDocumentId: signedDocId,
     });
 
-    // 11. Carrier-contracting workflow handoff. Errors here do NOT undo
-    //     the envelope completion — the signature is captured and the
-    //     audit trail is durable; the contracting row can be retried.
+    // 11. Workflow handoff. Errors here do NOT undo the envelope
+    //     completion — the signature is captured and the audit trail is
+    //     durable; the contracting row can be retried. The dispatch is
+    //     polymorphic: POA envelopes route to the run-wide POA transition,
+    //     legacy per-carrier envelopes route to the per-carrier
+    //     transition. Phase 1.5 onwards creates only POA envelopes; the
+    //     carrier branch remains for in-flight legacy data.
     try {
-      await completeCarrierSigningTransition(
-        orgId,
-        updated.carrierContractingRequestId,
-      );
+      if (updated.onboardingRunId) {
+        await completePoaSigningTransition(orgId, updated.onboardingRunId);
+      } else if (updated.carrierContractingRequestId) {
+        await completeCarrierSigningTransition(
+          orgId,
+          updated.carrierContractingRequestId,
+        );
+      } else {
+        logger.warn(
+          { envelopeId, orgId },
+          "Envelope completed with neither carrier nor run parent — skipping workflow transition",
+        );
+      }
     } catch (err) {
       logger.error(
         { err, envelopeId, orgId },
-        "Carrier-contracting transition failed after envelope completion",
+        "Workflow transition failed after envelope completion",
       );
     }
 
@@ -676,4 +709,29 @@ export function setMediflowProvider(
   provider: MediflowESignProvider | undefined,
 ): void {
   _singleton = provider;
+}
+
+/**
+ * Storage facade selector used by callers OUTSIDE the e-sign provider that
+ * need to upload a generated PDF (e.g. the Phase 1.5 POA generator, which
+ * persists the unsigned POA before creating an envelope). Reuses the same
+ * GCS vs. InMemory branch the provider uses, so tests transparently see
+ * the in-memory store without provisioning GCS.
+ *
+ * One singleton per process — the in-memory blob store needs cross-call
+ * visibility for the test harness (the provider's `loadUnsignedPdfBytes`
+ * later reads what this stored).
+ */
+let _storageSingleton: EsignStorage | undefined;
+export function getEsignStorage(): EsignStorage {
+  if (!_storageSingleton) {
+    _storageSingleton = process.env.PRIVATE_OBJECT_DIR
+      ? new GcsEsignStorage()
+      : new InMemoryEsignStorage();
+  }
+  return _storageSingleton;
+}
+/** Test-only: reset between tests when the storage backend is overridden. */
+export function setEsignStorage(storage: EsignStorage | undefined): void {
+  _storageSingleton = storage;
 }

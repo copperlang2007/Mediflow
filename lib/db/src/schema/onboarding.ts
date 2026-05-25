@@ -70,6 +70,19 @@ export const agentOnboardingRunsTable = pgTable(
     // validation without a follow-up migration on every workflow tweak. Each
     // route validates against the allowlist via the state machine helper.
     status: text("status").notNull().default("draft"),
+    // Phase 1.5 POA pivot. Default `not_applicable` keeps legacy/in-flight
+    // runs working — they don't have a POA decision until the wizard surfaces
+    // the new step. Allowed values (enforced by the state machine, not the
+    // DB): not_applicable | pending | signed | opted_out.
+    poaStatus: text("poa_status").notNull().default("not_applicable"),
+    // FK to esign_envelopes — set when the POA envelope is created. Soft FK
+    // (no `references()` here) because the envelope row is created AFTER
+    // this row exists and the inverse edge already lives on esign_envelopes.
+    poaEnvelopeId: text("poa_envelope_id"),
+    // 90 days after signing by default (POA_DAYS_TO_EXPIRE env var
+    // overrides). When the run completes carrier submissions before expiry,
+    // INSUREitALL renews / re-collects as needed (out of scope here).
+    poaExpiresAt: timestamp("poa_expires_at", { withTimezone: true }),
     startedAt: timestamp("started_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

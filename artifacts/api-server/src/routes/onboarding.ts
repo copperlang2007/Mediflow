@@ -14,7 +14,7 @@
  *     auditMiddleware("carrier_contracting", ...).
  */
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { and, eq, isNotNull, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import {
@@ -44,9 +44,20 @@ import {
   closeContractingTask,
   completeProfileTaskKey,
   adminReviewTaskKey,
+  poaDecisionTaskKey,
+  adminOptOutTrackTaskKey,
+  agentDisplayName,
 } from "../workers/contractingTasks";
 import { buildDummyTemplate, fillTemplateFromBytes } from "../lib/contractingPdf/pdfFiller";
-import { getMediflowProvider } from "../lib/esign/mediflowProvider";
+import {
+  generatePoaPdf,
+  readPoaConfig,
+} from "../lib/contractingPdf/poaTemplate";
+import {
+  getMediflowProvider,
+  getEsignStorage,
+} from "../lib/esign/mediflowProvider";
+import { enqueue, JOB_NAMES } from "../lib/jobs";
 import {
   requireAuth,
   requirePermission,
@@ -980,6 +991,16 @@ class ForbiddenContractingTransitionError extends Error {
 }
 
 /**
+ * Resolve the contracting status the admin PATCH should land on.
+ *
+ * Phase 1.5: an implicit transition (writing-number entered without an
+ * explicit `status`) defaults to `appointed` — terminal. The transitions
+ * to `submitted` are only valid from `signed`, `awaiting_admin_submission`,
+ * or `invite_requested`; the caller MUST set status explicitly when
+ * advancing a request through those mid-states.
+ */
+
+/**
  * Inspect every carrier_contracting_request on the run and roll the
  * onboarding_run status forward if the aggregate state warrants it:
  *
@@ -1071,7 +1092,389 @@ async function maybeAdvanceRunForRequests(runId: string, orgId: string): Promise
   }
 }
 
-// ---- Day-3 routes ----------------------------------------------------------
+// ---- Phase 1.5 POA path ----------------------------------------------------
+
+/**
+ * POST /onboarding/:agentId/poa-decision
+ *
+ * Phase 1.5 — replaces the per-carrier paperwork-generation + sign loop with
+ * a single Power-of-Attorney decision:
+ *
+ *   - `{ accepted: true }`  → generate the POA PDF, create an e-sign
+ *     envelope linked to the onboarding run, mark
+ *     `agent_onboarding_runs.poa_status = pending`. Return the signing
+ *     URL so the wizard can hop into `/sign/:envelopeId`. The
+ *     `carrier_contracting_request` rows stay in `draft` until the agent
+ *     signs the envelope (then `completePoaSigningTransition` flips
+ *     them to `awaiting_admin_submission`).
+ *
+ *   - `{ accepted: false }` → mark `poa_status = opted_out`, transition
+ *     every draft carrier request to `invite_requested`, enqueue the
+ *     submit-packet worker for each (repurposed: it now emails the
+ *     "please send the agent a contracting invite" request), and create
+ *     a single admin task to track the agent's manual carrier completions.
+ *
+ * Permission: the owning agent OR an admin / compliance manager.
+ * Idempotent: re-posting with the same body collapses to a no-op + returns
+ * the existing envelope (accept) or `{ poaStatus }` (decline).
+ */
+const PoaDecisionSchema = z.object({
+  accepted: z.boolean(),
+});
+
+router.post(
+  "/onboarding/:agentId/poa-decision",
+  requireAuth,
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const agentId = String(req.params.agentId);
+
+    const parsed = PoaDecisionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Invalid request body",
+        details: parsed.error.issues,
+      });
+      return;
+    }
+    const { accepted } = parsed.data;
+
+    const agent = await loadAgentForOrchestration(agentId, authReq.orgId);
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    // Permission narrowing — the agent themselves OR an admin.
+    const isAdmin =
+      authReq.userRole === "super_admin" ||
+      authReq.userRole === "agency_admin" ||
+      authReq.userRole === "compliance_manager";
+    const isOwningAgent =
+      authReq.userRole === "agent" && agent.userId === authReq.userId;
+    if (!isAdmin && !isOwningAgent) {
+      res.status(403).json({
+        error: "Only the agent themselves or an admin can record the POA decision",
+      });
+      return;
+    }
+
+    const run = await loadActiveOnboarding(agentId, authReq.orgId);
+    if (!run) {
+      res.status(404).json({ error: "No active onboarding run for agent" });
+      return;
+    }
+
+    // Re-call idempotency. If the run has already been processed via the
+    // POA path, return the same shape rather than re-doing the work.
+    if (run.poaStatus === "signed") {
+      res.status(200).json({
+        poaStatus: run.poaStatus,
+        envelopeId: run.poaEnvelopeId,
+        idempotent: true,
+      });
+      return;
+    }
+    if (run.poaStatus === "opted_out") {
+      if (accepted) {
+        // The agent flipped from opt-out → accept. Currently NOT supported
+        // — they need an admin to cancel + restart the run. Return 409 so
+        // the wizard surfaces a clear message.
+        res.status(409).json({
+          error:
+            "Run is already in the opt-out path; cannot switch to POA without cancelling and restarting onboarding",
+          poaStatus: run.poaStatus,
+        });
+        return;
+      }
+      res.status(200).json({ poaStatus: run.poaStatus, idempotent: true });
+      return;
+    }
+    if (run.poaStatus === "pending" && accepted && run.poaEnvelopeId) {
+      // Existing envelope — return its metadata for a re-call.
+      res.status(200).json({
+        poaStatus: run.poaStatus,
+        envelopeId: run.poaEnvelopeId,
+        signingUrl: `/sign/${run.poaEnvelopeId}`,
+        idempotent: true,
+      });
+      return;
+    }
+
+    // Load the carriers selected for this run so the POA body can list
+    // them by name. Empty selection blocks the accept path — a POA with
+    // no carriers is meaningless.
+    const carrierRequests = await db
+      .select()
+      .from(carrierContractingRequestsTable)
+      .where(
+        and(
+          eq(carrierContractingRequestsTable.onboardingRunId, run.id),
+          eq(carrierContractingRequestsTable.orgId, authReq.orgId),
+          sql`${carrierContractingRequestsTable.status} != 'cancelled'`,
+        ),
+      );
+    if (carrierRequests.length === 0) {
+      res.status(409).json({
+        error:
+          "No carriers selected on this run yet — call /carriers/select first",
+      });
+      return;
+    }
+
+    if (!accepted) {
+      return handlePoaDecline(req, res, authReq, run, agent, carrierRequests);
+    }
+    return handlePoaAccept(req, res, authReq, run, agent, carrierRequests);
+  },
+);
+
+async function handlePoaAccept(
+  req: Request,
+  res: Response,
+  authReq: AuthenticatedRequest,
+  run: AgentOnboardingRun,
+  agent: Pick<Agent, "id" | "orgId" | "userId" | "firstName" | "lastName">,
+  carrierRequests: CarrierContractingRequest[],
+): Promise<void> {
+  if (!agent.userId) {
+    res.status(409).json({
+      error:
+        "Agent has no linked user account — cannot create signing envelope",
+    });
+    return;
+  }
+
+  const carrierRows = await db
+    .select({ id: carriersTable.id, name: carriersTable.name })
+    .from(carriersTable)
+    .where(eq(carriersTable.orgId, authReq.orgId));
+  const nameById = new Map(carrierRows.map((c) => [c.id, c.name]));
+  const carrierNames = carrierRequests.map(
+    (r) => nameById.get(r.carrierId) ?? "(unknown carrier)",
+  );
+
+  // Pull the agent profile for address + email. The address goes into the
+  // POA body so the printed-name + address block reads correctly; the
+  // email is the e-sign signer email.
+  const [profile] = await db
+    .select()
+    .from(agentContractingProfilesTable)
+    .where(
+      and(
+        eq(agentContractingProfilesTable.agentId, agent.id),
+        eq(agentContractingProfilesTable.orgId, authReq.orgId),
+      ),
+    )
+    .limit(1);
+
+  const addressParts = [
+    profile?.homeAddressLine1,
+    profile?.homeAddressLine2,
+    profile?.homeCity,
+    profile?.homeState,
+    profile?.homeZip,
+  ].filter((v): v is string => Boolean(v && v.trim()));
+  const agentAddress =
+    addressParts.length > 0
+      ? addressParts.join(", ")
+      : "(address not on file)";
+
+  // Pull the agent's NPN + email from the agents table (fallback to
+  // profile email if the agent row's email is empty — unlikely but
+  // defensive).
+  const [agentRow] = await db
+    .select({ npn: agentsTable.npn, email: agentsTable.email })
+    .from(agentsTable)
+    .where(eq(agentsTable.id, agent.id))
+    .limit(1);
+  const signerEmail = profile?.email ?? agentRow?.email ?? "unknown@example.com";
+
+  const { daysToExpire, granteeName } = readPoaConfig();
+  const effectiveDate = new Date();
+  const expiryDate = new Date(
+    Date.now() + daysToExpire * 24 * 60 * 60 * 1000,
+  );
+
+  // Collect the union of state codes across all selected carriers so the
+  // POA's "licensed states" block is informational + accurate.
+  const stateUnion = new Set<string>();
+  for (const r of carrierRequests) {
+    for (const s of r.states ?? []) stateUnion.add(s);
+  }
+
+  const pdfBuffer = await generatePoaPdf({
+    agentFullName: agentDisplayName(agent),
+    agentNpn: agentRow?.npn ?? null,
+    agentAddress,
+    agentLicenseStates: [...stateUnion].sort(),
+    carrierNames,
+    effectiveDate,
+    expiryDate,
+    granteeName,
+  });
+
+  // Upload the unsigned POA + create a documents row so the e-sign
+  // provider can locate the bytes when the agent signs.
+  const storage = getEsignStorage();
+  const filename = `poa-${run.id}.pdf`;
+  const storageKey = await storage.uploadPdf(pdfBuffer, filename, authReq.orgId);
+  const docId = randomUUID();
+  await db.insert(documentsTable).values({
+    id: docId,
+    orgId: authReq.orgId,
+    name: `Power of Attorney — ${agentDisplayName(agent)} (DRAFT PLACEHOLDER)`,
+    category: "contracting",
+    storageKey,
+    mimeType: "application/pdf",
+    fileSizeBytes: pdfBuffer.byteLength,
+    uploadedBy: authReq.userId,
+  });
+
+  // Create the envelope. The POA-flow branch in createEnvelope links it
+  // to the onboarding run rather than a single carrier request.
+  const envelope = await getMediflowProvider().createEnvelope({
+    orgId: authReq.orgId,
+    onboardingRunId: run.id,
+    pdfDocumentId: docId,
+    signers: [
+      {
+        userId: agent.userId,
+        displayName: agentDisplayName(agent),
+        email: signerEmail,
+      },
+    ],
+    createdByUserId: authReq.userId,
+    ipAddress: req.ip ?? null,
+    userAgent:
+      typeof req.headers["user-agent"] === "string"
+        ? req.headers["user-agent"]
+        : null,
+  });
+
+  await db
+    .update(agentOnboardingRunsTable)
+    .set({
+      poaStatus: "pending",
+      poaEnvelopeId: envelope.id,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentOnboardingRunsTable.id, run.id),
+        eq(agentOnboardingRunsTable.orgId, authReq.orgId),
+      ),
+    );
+
+  res.status(200).json({
+    poaStatus: "pending",
+    envelopeId: envelope.id,
+    signingUrl: `/sign/${envelope.id}`,
+    idempotent: false,
+  });
+}
+
+async function handlePoaDecline(
+  _req: Request,
+  res: Response,
+  authReq: AuthenticatedRequest,
+  run: AgentOnboardingRun,
+  agent: Pick<Agent, "id" | "orgId" | "userId" | "firstName" | "lastName">,
+  carrierRequests: CarrierContractingRequest[],
+): Promise<void> {
+  // Flip the run + transition every draft carrier request → invite_requested.
+  await db
+    .update(agentOnboardingRunsTable)
+    .set({
+      poaStatus: "opted_out",
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentOnboardingRunsTable.id, run.id),
+        eq(agentOnboardingRunsTable.orgId, authReq.orgId),
+      ),
+    );
+
+  let transitioned = 0;
+  for (const r of carrierRequests) {
+    if (r.status !== "draft") continue;
+    const now = new Date();
+    const [updated] = await db
+      .update(carrierContractingRequestsTable)
+      .set({
+        status: "invite_requested",
+        lastStatusChangeAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(carrierContractingRequestsTable.id, r.id),
+          eq(carrierContractingRequestsTable.orgId, authReq.orgId),
+          eq(carrierContractingRequestsTable.status, "draft"),
+        ),
+      )
+      .returning();
+    if (updated) {
+      transitioned += 1;
+      // Enqueue the submit worker for each — repurposed for the
+      // invite-request email-out (see workers/submitContractingPacket.ts).
+      await enqueue(
+        JOB_NAMES.SUBMIT_CONTRACTING_PACKET,
+        { carrierContractingRequestId: updated.id, orgId: authReq.orgId },
+        { singletonKey: `invite:${updated.id}` },
+      );
+    }
+  }
+
+  // Advance the run: carriers_selected → signing (the agent has made
+  // their authorization decision; system now waits on carriers). Wrapped
+  // in try/catch — failure here doesn't undo the per-carrier transitions
+  // above.
+  try {
+    await transitionOnboarding(run.id, authReq.orgId, "signing");
+  } catch {
+    /* forbidden transition — run was already past carriers_selected */
+  }
+
+  // Close the agent's "decide POA" task (if surfaced as a task) +
+  // create the admin tracking task.
+  await closeContractingTask(
+    authReq.orgId,
+    poaDecisionTaskKey(run.id),
+  );
+
+  await db
+    .insert(taskInstancesTable)
+    .values({
+      id: randomUUID(),
+      orgId: authReq.orgId,
+      agentId: agent.id,
+      title: `Track ${agentDisplayName(agent)}'s carrier completions (opt-out path)`,
+      description:
+        "The agent declined the Power of Attorney and will complete each carrier's contracting flow directly. Track completions here and mark each carrier 'submitted' once the agent confirms they've finished the carrier's web flow.",
+      status: "open",
+      priority: "medium",
+      assignedToUserId: run.startedByUserId ?? null,
+      createdBy: null,
+      contractingTaskKey: adminOptOutTrackTaskKey(run.id),
+    })
+    .onConflictDoNothing({
+      target: [
+        taskInstancesTable.orgId,
+        taskInstancesTable.contractingTaskKey,
+      ],
+      where: isNotNull(taskInstancesTable.contractingTaskKey),
+    });
+
+  res.status(200).json({
+    poaStatus: "opted_out",
+    transitioned,
+    idempotent: false,
+  });
+}
+
+// ---- Day-3 routes (deprecated by Phase 1.5 POA pivot) ---------------------
 
 const RequestContractingSchema = z.object({}).strict().optional().or(z.undefined());
 
@@ -1114,6 +1517,21 @@ router.post(
     const run = await loadActiveOnboarding(agentId, authReq.orgId);
     if (!run) {
       res.status(404).json({ error: "No active onboarding run for agent" });
+      return;
+    }
+
+    // Phase 1.5 deprecation: per-carrier paperwork generation is replaced
+    // by the run-wide POA decision. If the run has already gone down the
+    // POA path (pending / signed / opted_out), refuse with a 410 + a
+    // pointer to the new flow. Runs still in `not_applicable` are legacy
+    // / in-flight and may continue.
+    if (run.poaStatus !== "not_applicable") {
+      res.status(410).json({
+        error:
+          "Per-carrier paperwork generation has been deprecated. This onboarding run uses the POA flow — call POST /onboarding/:agentId/poa-decision instead.",
+        poaStatus: run.poaStatus,
+        nextRoute: `/onboarding/${agentId}/poa-decision`,
+      });
       return;
     }
 
@@ -1279,6 +1697,20 @@ router.post(
     const run = await loadActiveOnboarding(agentId, authReq.orgId);
     if (!run) {
       res.status(404).json({ error: "No active onboarding run for agent" });
+      return;
+    }
+
+    // Phase 1.5 deprecation: per-carrier signing is replaced by the
+    // run-wide POA. If this run has been processed via the POA path
+    // (pending / signed / opted_out), refuse new sign requests with 410.
+    // In-flight legacy runs (poa_status = not_applicable) continue.
+    if (run.poaStatus !== "not_applicable") {
+      res.status(410).json({
+        error:
+          "Per-carrier signing has been deprecated. This onboarding run uses the POA flow — sign once via /sign/:envelopeId where envelopeId comes from POST /onboarding/:agentId/poa-decision.",
+        poaStatus: run.poaStatus,
+        nextRoute: `/onboarding/${agentId}/poa-decision`,
+      });
       return;
     }
 
