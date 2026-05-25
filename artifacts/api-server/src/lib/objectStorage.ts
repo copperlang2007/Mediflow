@@ -10,25 +10,38 @@ import {
   setObjectAclPolicy,
 } from "./objectAcl";
 
+// Storage backend selector.
+//
+//   STORAGE_MODE=replit (default) → use the Replit Object Storage sidecar
+//     at 127.0.0.1:1106. Convenient for sandbox/dev iteration on Replit.
+//   STORAGE_MODE=gcs              → talk to Google Cloud Storage directly
+//     via Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS,
+//     workload identity, or `gcloud auth application-default login`). This
+//     is the production path — there is no BAA on the Replit sidecar, so
+//     real PHI must not flow through it.
+const STORAGE_MODE = (process.env.STORAGE_MODE ?? "replit").toLowerCase();
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 
-export const objectStorageClient = new Storage({
-  credentials: {
-    audience: "replit",
-    subject_token_type: "access_token",
-    token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
-    type: "external_account",
-    credential_source: {
-      url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
-      format: {
-        type: "json",
-        subject_token_field_name: "access_token",
-      },
-    },
-    universe_domain: "googleapis.com",
-  },
-  projectId: "",
-});
+export const objectStorageClient =
+  STORAGE_MODE === "gcs"
+    ? new Storage()
+    : new Storage({
+        credentials: {
+          audience: "replit",
+          subject_token_type: "access_token",
+          token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
+          type: "external_account",
+          credential_source: {
+            url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
+            format: {
+              type: "json",
+              subject_token_field_name: "access_token",
+            },
+          },
+          universe_domain: "googleapis.com",
+        },
+        projectId: "",
+      });
 
 export class ObjectNotFoundError extends Error {
   constructor() {
@@ -316,6 +329,25 @@ async function signObjectURL({
   method: "GET" | "PUT" | "DELETE" | "HEAD";
   ttlSec: number;
 }): Promise<string> {
+  if (STORAGE_MODE === "gcs") {
+    const [url] = await objectStorageClient
+      .bucket(bucketName)
+      .file(objectName)
+      .getSignedUrl({
+        version: "v4",
+        action:
+          method === "GET"
+            ? "read"
+            : method === "PUT"
+              ? "write"
+              : method === "DELETE"
+                ? "delete"
+                : "resumable",
+        expires: Date.now() + ttlSec * 1000,
+      });
+    return url;
+  }
+
   const request = {
     bucket_name: bucketName,
     object_name: objectName,
