@@ -38,14 +38,27 @@ const router: IRouter = Router();
 router.post(
   "/webhooks/twilio/sms",
   async (req: Request, res: Response): Promise<void> => {
-    // Reconstruct the canonical URL Twilio signed
-    const proto =
-      (req.headers["x-forwarded-proto"] as string | undefined) ?? "https";
-    const host =
-      (req.headers["host"] as string | undefined) ??
-      process.env.REPLIT_DEV_DOMAIN ??
-      "";
-    const fullUrl = `${proto}://${host}${req.originalUrl}`;
+    // Reconstruct the canonical URL Twilio signed. Prefer the
+    // operator-configured TWILIO_WEBHOOK_PUBLIC_HOST (e.g.
+    // "https://mediflow.app") over attacker-controllable Host /
+    // X-Forwarded-Proto headers — a header-mismatch behind a misbehaving
+    // proxy would otherwise silently reject legitimate inbound SMS.
+    // When the env var is unset we fall back to the header-based path so
+    // local dev (ngrok / tunnel-style) workflows keep working.
+    const publicHost = process.env.TWILIO_WEBHOOK_PUBLIC_HOST?.trim();
+    let fullUrl: string;
+    if (publicHost) {
+      const trimmedHost = publicHost.replace(/\/+$/, "");
+      fullUrl = `${trimmedHost}${req.originalUrl}`;
+    } else {
+      const proto =
+        (req.headers["x-forwarded-proto"] as string | undefined) ?? "https";
+      const host =
+        (req.headers["host"] as string | undefined) ??
+        process.env.REPLIT_DEV_DOMAIN ??
+        "";
+      fullUrl = `${proto}://${host}${req.originalUrl}`;
+    }
 
     const rawSig = req.headers["x-twilio-signature"];
     const signature = Array.isArray(rawSig) ? rawSig[0] : (rawSig ?? "");

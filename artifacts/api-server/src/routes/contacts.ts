@@ -610,7 +610,6 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const limit = safeLimit(req.query.limit, 100, 500);
 
     const [contact] = await db
       .select({ id: contactsTable.id })
@@ -628,32 +627,63 @@ router.get(
       return;
     }
 
-    const rows = await db
-      .select({
-        id: messagesTable.id,
-        threadId: messagesTable.threadId,
-        channel: messageThreadsTable.channel,
-        direction: messagesTable.direction,
-        body: messagesTable.body,
-        subject: messagesTable.subject,
-        fromAddress: messagesTable.fromAddress,
-        toAddress: messagesTable.toAddress,
-        status: messagesTable.status,
-        sentAt: messagesTable.sentAt,
-        createdAt: messagesTable.createdAt,
-      })
-      .from(messagesTable)
-      .innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id))
-      .where(
-        and(
-          eq(messageThreadsTable.contactId, id),
-          eq(messageThreadsTable.orgId, authReq.orgId),
-        ),
-      )
-      .orderBy(desc(messagesTable.createdAt))
-      .limit(limit);
+    // B2 — accept `?limit` (default 100, max 500) + `?offset` (default 0),
+    // and return the real count() rather than `rows.length`. The old shape
+    // silently truncated for contacts with > 100 messages and reported a
+    // misleading `total`. Mirrors the /contacts/:id/threads pagination shape
+    // from PR #82.
+    const limit = safeLimit(req.query.limit, 100, 500);
+    const offset = safeOffset(req.query.offset);
 
-    res.json({ messages: rows, total: rows.length });
+    const whereClause = and(
+      eq(messageThreadsTable.contactId, id),
+      eq(messageThreadsTable.orgId, authReq.orgId),
+    );
+
+    const [rows, totalRes] = await Promise.all([
+      db
+        .select({
+          id: messagesTable.id,
+          threadId: messagesTable.threadId,
+          channel: messageThreadsTable.channel,
+          direction: messagesTable.direction,
+          body: messagesTable.body,
+          subject: messagesTable.subject,
+          fromAddress: messagesTable.fromAddress,
+          toAddress: messagesTable.toAddress,
+          status: messagesTable.status,
+          sentAt: messagesTable.sentAt,
+          createdAt: messagesTable.createdAt,
+        })
+        .from(messagesTable)
+        .innerJoin(
+          messageThreadsTable,
+          eq(messagesTable.threadId, messageThreadsTable.id),
+        )
+        .where(whereClause)
+        .orderBy(desc(messagesTable.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(messagesTable)
+        .innerJoin(
+          messageThreadsTable,
+          eq(messagesTable.threadId, messageThreadsTable.id),
+        )
+        .where(whereClause),
+    ]);
+
+    res.json({
+      // `messages` preserved so the existing web-app consumer keeps working;
+      // `data` mirrors the {data, total, limit, offset} envelope used by the
+      // adjacent /contacts/:id/threads route.
+      messages: rows,
+      data: rows,
+      total: Number(totalRes[0]?.count ?? 0),
+      limit,
+      offset,
+    });
   },
 );
 
@@ -722,6 +752,46 @@ router.post(
           return;
         }
         await db.update(contactsTable).set({ assignedAgentId: agentId }).where(and(inArray(contactsTable.id, ids), eq(contactsTable.orgId, authReq.orgId)));
+
+        // B1 — fan out one RUN_AUTOMATION_RULES per affected contact so
+        // bulk assign mirrors the single-contact PATCH trigger surface.
+        // Fire-and-forget per PR #73 (logger.warn + Sentry on enqueue
+        // failure; bulk operation result not blocked). Per-contact contexts
+        // built in parallel via Promise.all per PR #74's batching pattern.
+        await Promise.all(
+          contacts.map((c) =>
+            enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+              orgId: authReq.orgId,
+              trigger: "contact_assigned",
+              resourceType: "contact",
+              resourceId: c.id,
+              context: {
+                oldAssignedAgentId: c.assignedAgentId,
+                newAssignedAgentId: agentId,
+              },
+            }).catch((err) => {
+              logger.warn(
+                {
+                  err,
+                  jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+                  trigger: "contact_assigned",
+                  orgId: authReq.orgId,
+                  contactId: c.id,
+                },
+                "Failed to enqueue automation job (bulk assign_agent)",
+              );
+              captureWorkerError(err, {
+                worker: "contacts",
+                route: "POST /contacts/bulk",
+                action: "assign_agent",
+                jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+                trigger: "contact_assigned",
+                orgId: authReq.orgId,
+                contactId: c.id,
+              });
+            }),
+          ),
+        );
         break;
       }
       case "add_tag": {
@@ -763,6 +833,46 @@ router.post(
         }
         const status = statusParsed.data;
         await db.update(contactsTable).set({ status }).where(and(inArray(contactsTable.id, ids), eq(contactsTable.orgId, authReq.orgId)));
+
+        // B1 — mirror the single-contact PATCH path: fire one
+        // contact_status_changed RUN_AUTOMATION_RULES job per affected
+        // contact whose status actually changed. We use `contacts` (loaded
+        // and verified above) as the source of "old" status so we don't
+        // round-trip again. Same fire-and-forget + Sentry pattern as the
+        // PATCH handler at line ~370.
+        await Promise.all(
+          contacts
+            .filter((c) => c.status !== status)
+            .map((c) =>
+              enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
+                orgId: authReq.orgId,
+                trigger: "contact_status_changed",
+                resourceType: "contact",
+                resourceId: c.id,
+                context: { oldStatus: c.status, newStatus: status },
+              }).catch((err) => {
+                logger.warn(
+                  {
+                    err,
+                    jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+                    trigger: "contact_status_changed",
+                    orgId: authReq.orgId,
+                    contactId: c.id,
+                  },
+                  "Failed to enqueue automation job (bulk set_status)",
+                );
+                captureWorkerError(err, {
+                  worker: "contacts",
+                  route: "POST /contacts/bulk",
+                  action: "set_status",
+                  jobName: JOB_NAMES.RUN_AUTOMATION_RULES,
+                  trigger: "contact_status_changed",
+                  orgId: authReq.orgId,
+                  contactId: c.id,
+                });
+              }),
+            ),
+        );
         break;
       }
       case "export_csv": {
