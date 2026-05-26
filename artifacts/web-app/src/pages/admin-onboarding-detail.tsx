@@ -46,10 +46,12 @@ import { ChevronLeft, AlertTriangle, Send } from "lucide-react";
 import {
   contractingStatusLabel,
   onboardingStatusLabel,
+  poaStatusLabel,
   useCancelOnboarding,
   useOnboarding,
   useRecordWritingNumber,
   useRequestContracting,
+  type AgentOnboardingRun,
   type CarrierContractingRequest,
 } from "@/lib/onboarding/api";
 
@@ -108,7 +110,12 @@ export default function AdminOnboardingDetail({ agentId }: { agentId: string }) 
 
   const { run, profile, carrierRequests } = onboarding;
   const active = carrierRequests.filter((r) => r.status !== "cancelled");
-  const canRequestContracting = run.status === "carriers_selected";
+  // Phase 1.5: per-carrier paperwork generation is deprecated for new runs.
+  // The button stays available ONLY for legacy runs (poa_status =
+  // not_applicable) that pre-date the pivot.
+  const canRequestContracting =
+    run.status === "carriers_selected" &&
+    (!run.poaStatus || run.poaStatus === "not_applicable");
   const canCancel = !["complete", "cancelled"].includes(run.status);
 
   const handleRequestContracting = async () => {
@@ -149,14 +156,33 @@ export default function AdminOnboardingDetail({ agentId }: { agentId: string }) 
           <p className="text-sm text-muted-foreground mt-0.5">
             {agent?.email}
           </p>
-          <div className="flex items-center gap-2 mt-2">
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
             <Badge variant="secondary">{onboardingStatusLabel(run.status)}</Badge>
+            {run.poaStatus && run.poaStatus !== "not_applicable" && (
+              <Badge
+                variant={
+                  run.poaStatus === "signed"
+                    ? "default"
+                    : run.poaStatus === "opted_out"
+                      ? "outline"
+                      : "secondary"
+                }
+                data-testid="admin-poa-badge"
+              >
+                {poaStatusLabel(run.poaStatus)}
+              </Badge>
+            )}
             <span className="text-xs text-muted-foreground">
               Started {new Date(run.startedAt).toLocaleDateString()}
             </span>
             {run.completedAt && (
               <span className="text-xs text-muted-foreground">
                 · Completed {new Date(run.completedAt).toLocaleDateString()}
+              </span>
+            )}
+            {run.poaExpiresAt && run.poaStatus === "signed" && (
+              <span className="text-xs text-muted-foreground">
+                · POA expires {new Date(run.poaExpiresAt).toLocaleDateString()}
               </span>
             )}
           </div>
@@ -294,7 +320,7 @@ function CarrierRequestsTable({
           <TableHead>Carrier</TableHead>
           <TableHead>States</TableHead>
           <TableHead>Status</TableHead>
-          <TableHead>Paperwork</TableHead>
+          <TableHead>Action</TableHead>
           <TableHead>Writing #</TableHead>
         </TableRow>
       </TableHeader>
@@ -319,11 +345,7 @@ function CarrierRequestsTable({
               </Badge>
             </TableCell>
             <TableCell>
-              {r.paperworkDocumentId ? (
-                <span className="text-xs text-muted-foreground">Generated</span>
-              ) : (
-                <span className="text-xs text-muted-foreground/60">—</span>
-              )}
+              <AdminActionCell request={r} agentId={agentId} />
             </TableCell>
             <TableCell>
               <WritingNumberCell request={r} agentId={agentId} />
@@ -332,6 +354,68 @@ function CarrierRequestsTable({
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+/**
+ * Phase 1.5 — per-request action affordance.
+ *
+ *   - `awaiting_admin_submission` → "Mark submitted" button (admin submitted
+ *     the packet off-system).
+ *   - `invite_requested`           → "Mark submitted" button (the agent has
+ *     confirmed they completed the carrier's web flow), plus a small
+ *     "Resend invite" affordance hint.
+ *   - any other state → small status badge text only.
+ */
+function AdminActionCell({
+  request,
+  agentId,
+}: {
+  request: CarrierContractingRequest;
+  agentId: string;
+}) {
+  const recordWritingNumber = useRecordWritingNumber(agentId);
+  const canMarkSubmitted =
+    request.status === "awaiting_admin_submission" ||
+    request.status === "invite_requested";
+
+  if (!canMarkSubmitted) {
+    if (request.paperworkDocumentId) {
+      return (
+        <span className="text-xs text-muted-foreground">Paperwork ready</span>
+      );
+    }
+    return <span className="text-xs text-muted-foreground/60">—</span>;
+  }
+
+  const handleMarkSubmitted = async () => {
+    try {
+      await recordWritingNumber.mutateAsync({
+        requestId: request.id,
+        status: "submitted",
+      });
+      toast.success("Marked as submitted");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to mark submitted",
+      );
+    }
+  };
+
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      className="h-7 text-xs"
+      onClick={() => {
+        void handleMarkSubmitted();
+      }}
+      disabled={recordWritingNumber.isPending}
+      data-testid={`mark-submitted-${request.id}`}
+    >
+      <Send className="h-3 w-3 mr-1" />
+      Mark submitted
+    </Button>
   );
 }
 
@@ -354,6 +438,9 @@ export function WritingNumberCell({
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(request.writingNumber ?? "");
   const recordWritingNumber = useRecordWritingNumber(agentId);
+  // Phase 1.5: writing-number entry stays gated on submitted+. Awaiting/invite
+  // states aren't appointment-eligible yet — admins flip them to submitted
+  // via the action cell first.
   const isReadyForWritingNumber =
     request.status === "submitted" ||
     request.status === "under_review" ||

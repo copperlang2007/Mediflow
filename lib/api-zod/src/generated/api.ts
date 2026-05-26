@@ -789,6 +789,10 @@ export const GetCertificationMatrixQueryParams = zod.object({
   year: zod.coerce.number().optional(),
 });
 
+export const getCertificationMatrixResponseCarriersItemAppointmentDeskMetadataCcMax = 20;
+
+export const getCertificationMatrixResponseCarriersItemAppointmentDeskMetadataSubjectMax = 300;
+
 export const GetCertificationMatrixResponse = zod.object({
   year: zod.number(),
   carriers: zod.array(
@@ -799,6 +803,32 @@ export const GetCertificationMatrixResponse = zod.object({
       cmsContractNumber: zod.string().nullish(),
       logoUrl: zod.string().nullish(),
       isActive: zod.boolean(),
+      appointmentDeskEmail: zod
+        .string()
+        .email()
+        .nullish()
+        .describe(
+          "Per-carrier appointment-desk address used by the Day-6 email-out worker. NULL until provisioned.",
+        ),
+      appointmentDeskMetadata: zod
+        .object({
+          cc: zod
+            .array(zod.string().email())
+            .max(
+              getCertificationMatrixResponseCarriersItemAppointmentDeskMetadataCcMax,
+            )
+            .optional(),
+          subject: zod
+            .string()
+            .max(
+              getCertificationMatrixResponseCarriersItemAppointmentDeskMetadataSubjectMax,
+            )
+            .optional(),
+        })
+        .optional()
+        .describe(
+          "Loosely-typed override bag for the email-out worker. Documented keys\n(`cc`, `subject`) are validated when present; unknown keys pass\nthrough unchanged so carrier-specific notes can be stashed without a\nschema change.\n",
+        ),
       createdAt: zod.coerce.date(),
     }),
   ),
@@ -918,6 +948,10 @@ export const GetAhipDashboardResponse = zod.object({
 /**
  * @summary List carriers for the organization
  */
+export const getCarriersResponseAppointmentDeskMetadataCcMax = 20;
+
+export const getCarriersResponseAppointmentDeskMetadataSubjectMax = 300;
+
 export const GetCarriersResponseItem = zod.object({
   id: zod.string(),
   orgId: zod.string(),
@@ -925,6 +959,28 @@ export const GetCarriersResponseItem = zod.object({
   cmsContractNumber: zod.string().nullish(),
   logoUrl: zod.string().nullish(),
   isActive: zod.boolean(),
+  appointmentDeskEmail: zod
+    .string()
+    .email()
+    .nullish()
+    .describe(
+      "Per-carrier appointment-desk address used by the Day-6 email-out worker. NULL until provisioned.",
+    ),
+  appointmentDeskMetadata: zod
+    .object({
+      cc: zod
+        .array(zod.string().email())
+        .max(getCarriersResponseAppointmentDeskMetadataCcMax)
+        .optional(),
+      subject: zod
+        .string()
+        .max(getCarriersResponseAppointmentDeskMetadataSubjectMax)
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "Loosely-typed override bag for the email-out worker. Documented keys\n(`cc`, `subject`) are validated when present; unknown keys pass\nthrough unchanged so carrier-specific notes can be stashed without a\nschema change.\n",
+    ),
   createdAt: zod.coerce.date(),
 });
 export const GetCarriersResponse = zod.array(GetCarriersResponseItem);
@@ -932,15 +988,55 @@ export const GetCarriersResponse = zod.array(GetCarriersResponseItem);
 /**
  * @summary Create a carrier
  */
+export const createCarrierBodyNameMax = 200;
+
+export const createCarrierBodyCmsContractNumberMax = 50;
+
+export const createCarrierBodyAppointmentDeskEmailMax = 254;
+
+export const createCarrierBodyAppointmentDeskMetadataCcMax = 20;
+
+export const createCarrierBodyAppointmentDeskMetadataSubjectMax = 300;
+
 export const CreateCarrierBody = zod.object({
-  name: zod.string(),
-  cmsContractNumber: zod.string().optional(),
-  logoUrl: zod.string().optional(),
+  name: zod.string().min(1).max(createCarrierBodyNameMax),
+  cmsContractNumber: zod
+    .string()
+    .max(createCarrierBodyCmsContractNumberMax)
+    .optional(),
+  logoUrl: zod.string().url().optional(),
+  appointmentDeskEmail: zod
+    .string()
+    .email()
+    .max(createCarrierBodyAppointmentDeskEmailMax)
+    .optional()
+    .describe(
+      "Per-carrier appointment-desk email address. Used by the email-out worker.",
+    ),
+  appointmentDeskMetadata: zod
+    .object({
+      cc: zod
+        .array(zod.string().email())
+        .max(createCarrierBodyAppointmentDeskMetadataCcMax)
+        .optional(),
+      subject: zod
+        .string()
+        .max(createCarrierBodyAppointmentDeskMetadataSubjectMax)
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "Loosely-typed override bag for the email-out worker. Documented keys\n(`cc`, `subject`) are validated when present; unknown keys pass\nthrough unchanged so carrier-specific notes can be stashed without a\nschema change.\n",
+    ),
 });
 
 /**
  * @summary Seed default Medicare carriers
  */
+export const seedCarriersResponseCarriersItemAppointmentDeskMetadataCcMax = 20;
+
+export const seedCarriersResponseCarriersItemAppointmentDeskMetadataSubjectMax = 300;
+
 export const SeedCarriersResponse = zod.object({
   seeded: zod.number(),
   carriers: zod.array(
@@ -951,6 +1047,30 @@ export const SeedCarriersResponse = zod.object({
       cmsContractNumber: zod.string().nullish(),
       logoUrl: zod.string().nullish(),
       isActive: zod.boolean(),
+      appointmentDeskEmail: zod
+        .string()
+        .email()
+        .nullish()
+        .describe(
+          "Per-carrier appointment-desk address used by the Day-6 email-out worker. NULL until provisioned.",
+        ),
+      appointmentDeskMetadata: zod
+        .object({
+          cc: zod
+            .array(zod.string().email())
+            .max(seedCarriersResponseCarriersItemAppointmentDeskMetadataCcMax)
+            .optional(),
+          subject: zod
+            .string()
+            .max(
+              seedCarriersResponseCarriersItemAppointmentDeskMetadataSubjectMax,
+            )
+            .optional(),
+        })
+        .optional()
+        .describe(
+          "Loosely-typed override bag for the email-out worker. Documented keys\n(`cc`, `subject`) are validated when present; unknown keys pass\nthrough unchanged so carrier-specific notes can be stashed without a\nschema change.\n",
+        ),
       createdAt: zod.coerce.date(),
     }),
   ),
@@ -963,12 +1083,52 @@ export const UpdateCarrierParams = zod.object({
   id: zod.coerce.string(),
 });
 
+export const updateCarrierBodyNameMax = 200;
+
+export const updateCarrierBodyCmsContractNumberMax = 50;
+
+export const updateCarrierBodyAppointmentDeskEmailMax = 254;
+
+export const updateCarrierBodyAppointmentDeskMetadataCcMax = 20;
+
+export const updateCarrierBodyAppointmentDeskMetadataSubjectMax = 300;
+
 export const UpdateCarrierBody = zod.object({
-  name: zod.string().optional(),
-  cmsContractNumber: zod.string().optional(),
-  logoUrl: zod.string().optional(),
+  name: zod.string().min(1).max(updateCarrierBodyNameMax).optional(),
+  cmsContractNumber: zod
+    .string()
+    .max(updateCarrierBodyCmsContractNumberMax)
+    .nullish(),
+  logoUrl: zod.string().url().nullish(),
   isActive: zod.boolean().optional(),
+  appointmentDeskEmail: zod
+    .string()
+    .email()
+    .max(updateCarrierBodyAppointmentDeskEmailMax)
+    .nullish()
+    .describe(
+      "Email-out worker (Day 6) reads this. `null` clears the configured\naddress (worker reverts to WARN-and-leave-open).\n",
+    ),
+  appointmentDeskMetadata: zod
+    .object({
+      cc: zod
+        .array(zod.string().email())
+        .max(updateCarrierBodyAppointmentDeskMetadataCcMax)
+        .optional(),
+      subject: zod
+        .string()
+        .max(updateCarrierBodyAppointmentDeskMetadataSubjectMax)
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "Loosely-typed override bag for the email-out worker. Documented keys\n(`cc`, `subject`) are validated when present; unknown keys pass\nthrough unchanged so carrier-specific notes can be stashed without a\nschema change.\n",
+    ),
 });
+
+export const updateCarrierResponseAppointmentDeskMetadataCcMax = 20;
+
+export const updateCarrierResponseAppointmentDeskMetadataSubjectMax = 300;
 
 export const UpdateCarrierResponse = zod.object({
   id: zod.string(),
@@ -977,6 +1137,28 @@ export const UpdateCarrierResponse = zod.object({
   cmsContractNumber: zod.string().nullish(),
   logoUrl: zod.string().nullish(),
   isActive: zod.boolean(),
+  appointmentDeskEmail: zod
+    .string()
+    .email()
+    .nullish()
+    .describe(
+      "Per-carrier appointment-desk address used by the Day-6 email-out worker. NULL until provisioned.",
+    ),
+  appointmentDeskMetadata: zod
+    .object({
+      cc: zod
+        .array(zod.string().email())
+        .max(updateCarrierResponseAppointmentDeskMetadataCcMax)
+        .optional(),
+      subject: zod
+        .string()
+        .max(updateCarrierResponseAppointmentDeskMetadataSubjectMax)
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "Loosely-typed override bag for the email-out worker. Documented keys\n(`cc`, `subject`) are validated when present; unknown keys pass\nthrough unchanged so carrier-specific notes can be stashed without a\nschema change.\n",
+    ),
   createdAt: zod.coerce.date(),
 });
 
@@ -4179,4 +4361,762 @@ export const GetImportHistoryResponse = zod.array(GetImportHistoryResponseItem);
  */
 export const GetImportErrorsCsvParams = zod.object({
   jobId: zod.coerce.string(),
+});
+
+/**
+ * Admin starts an onboarding run. Idempotent on `(org_id, agent_id)`
+— re-posting returns the existing active run with `idempotent: true`
+rather than 409'ing.
+
+ * @summary Start (or invite) an onboarding run for an agent
+ */
+
+export const StartOnboardingBody = zod.object({
+  agentId: zod.string().min(1),
+});
+
+export const StartOnboardingResponse = zod.object({
+  run: zod.object({
+    id: zod.string(),
+    orgId: zod.string(),
+    agentId: zod.string(),
+    startedByUserId: zod.string().nullish(),
+    status: zod.enum([
+      "draft",
+      "profile_in_progress",
+      "carriers_selected",
+      "signing",
+      "submitted",
+      "complete",
+      "cancelled",
+      "rejected",
+    ]),
+    poaStatus: zod
+      .enum(["not_applicable", "pending", "signed", "opted_out"])
+      .optional()
+      .describe(
+        "Phase 1.5 POA decision state recorded on agent_onboarding_runs.\n`not_applicable` is the default for runs that have not (yet) reached\nthe POA decision step or for legacy runs that pre-date the pivot.\n",
+      ),
+    poaEnvelopeId: zod.string().nullish(),
+    poaExpiresAt: zod.coerce.date().nullish(),
+    completedSteps: zod.record(zod.string(), zod.boolean()).nullish(),
+    startedAt: zod.coerce.date(),
+    completedAt: zod.coerce.date().nullish(),
+    updatedAt: zod.coerce.date(),
+  }),
+  profile: zod
+    .union([
+      zod
+        .object({
+          id: zod.string().optional(),
+          orgId: zod.string(),
+          agentId: zod.string(),
+          ssn: zod.string().nullish(),
+          ein: zod.string().nullish(),
+          dob: zod.coerce.date().nullish(),
+          homeAddressLine1: zod.string().nullish(),
+          homeAddressLine2: zod.string().nullish(),
+          homeCity: zod.string().nullish(),
+          homeState: zod.string().nullish(),
+          homeZip: zod.string().nullish(),
+          mailingSameAsHome: zod.boolean().nullish(),
+          mailingAddressLine1: zod.string().nullish(),
+          mailingAddressLine2: zod.string().nullish(),
+          mailingCity: zod.string().nullish(),
+          mailingState: zod.string().nullish(),
+          mailingZip: zod.string().nullish(),
+          phone: zod.string().nullish(),
+          email: zod.string().email().nullish(),
+          entityType: zod
+            .union([
+              zod.enum(["individual", "llc", "corp", "partnership"]),
+              zod.null(),
+            ])
+            .optional(),
+          businessName: zod.string().nullish(),
+          eAndOCarrier: zod.string().nullish(),
+          eAndOPolicyNumber: zod.string().nullish(),
+          eAndOExpiresOn: zod.coerce.date().nullish(),
+          backgroundCheckAuthorized: zod.boolean().nullish(),
+        })
+        .describe(
+          "Agent contracting profile (PII). `ssn`, `ein`, and `dob` are returned\neither as plaintext (for PHI-privileged roles or self-on-own-record)\nor as fixed masked sentinels (`\*\*\*-\*\*-\*\*\*\*` \/ `\*\*-\*\*\*\*\*\*\*` \/ null).\n",
+        ),
+      zod.null(),
+    ])
+    .optional(),
+  idempotent: zod.boolean(),
+});
+
+/**
+ * @summary List onboarding runs (admin)
+ */
+export const listOnboardingsQueryLimitDefault = 50;
+export const listOnboardingsQueryOffsetDefault = 0;
+
+export const ListOnboardingsQueryParams = zod.object({
+  status: zod.coerce.string().optional(),
+  limit: zod.coerce.number().default(listOnboardingsQueryLimitDefault),
+  offset: zod.coerce.number().default(listOnboardingsQueryOffsetDefault),
+});
+
+export const ListOnboardingsResponse = zod.object({
+  data: zod.array(
+    zod.object({
+      id: zod.string(),
+      orgId: zod.string(),
+      agentId: zod.string(),
+      startedByUserId: zod.string().nullish(),
+      status: zod.enum([
+        "draft",
+        "profile_in_progress",
+        "carriers_selected",
+        "signing",
+        "submitted",
+        "complete",
+        "cancelled",
+        "rejected",
+      ]),
+      poaStatus: zod
+        .enum(["not_applicable", "pending", "signed", "opted_out"])
+        .optional()
+        .describe(
+          "Phase 1.5 POA decision state recorded on agent_onboarding_runs.\n`not_applicable` is the default for runs that have not (yet) reached\nthe POA decision step or for legacy runs that pre-date the pivot.\n",
+        ),
+      poaEnvelopeId: zod.string().nullish(),
+      poaExpiresAt: zod.coerce.date().nullish(),
+      completedSteps: zod.record(zod.string(), zod.boolean()).nullish(),
+      startedAt: zod.coerce.date(),
+      completedAt: zod.coerce.date().nullish(),
+      updatedAt: zod.coerce.date(),
+    }),
+  ),
+  total: zod.number(),
+  limit: zod.number(),
+  offset: zod.number(),
+});
+
+/**
+ * @summary Get current onboarding run + profile + carrier requests for an agent
+ */
+export const GetOnboardingParams = zod.object({
+  agentId: zod.coerce.string(),
+});
+
+export const GetOnboardingResponse = zod.object({
+  run: zod.object({
+    id: zod.string(),
+    orgId: zod.string(),
+    agentId: zod.string(),
+    startedByUserId: zod.string().nullish(),
+    status: zod.enum([
+      "draft",
+      "profile_in_progress",
+      "carriers_selected",
+      "signing",
+      "submitted",
+      "complete",
+      "cancelled",
+      "rejected",
+    ]),
+    poaStatus: zod
+      .enum(["not_applicable", "pending", "signed", "opted_out"])
+      .optional()
+      .describe(
+        "Phase 1.5 POA decision state recorded on agent_onboarding_runs.\n`not_applicable` is the default for runs that have not (yet) reached\nthe POA decision step or for legacy runs that pre-date the pivot.\n",
+      ),
+    poaEnvelopeId: zod.string().nullish(),
+    poaExpiresAt: zod.coerce.date().nullish(),
+    completedSteps: zod.record(zod.string(), zod.boolean()).nullish(),
+    startedAt: zod.coerce.date(),
+    completedAt: zod.coerce.date().nullish(),
+    updatedAt: zod.coerce.date(),
+  }),
+  profile: zod
+    .union([
+      zod
+        .object({
+          id: zod.string().optional(),
+          orgId: zod.string(),
+          agentId: zod.string(),
+          ssn: zod.string().nullish(),
+          ein: zod.string().nullish(),
+          dob: zod.coerce.date().nullish(),
+          homeAddressLine1: zod.string().nullish(),
+          homeAddressLine2: zod.string().nullish(),
+          homeCity: zod.string().nullish(),
+          homeState: zod.string().nullish(),
+          homeZip: zod.string().nullish(),
+          mailingSameAsHome: zod.boolean().nullish(),
+          mailingAddressLine1: zod.string().nullish(),
+          mailingAddressLine2: zod.string().nullish(),
+          mailingCity: zod.string().nullish(),
+          mailingState: zod.string().nullish(),
+          mailingZip: zod.string().nullish(),
+          phone: zod.string().nullish(),
+          email: zod.string().email().nullish(),
+          entityType: zod
+            .union([
+              zod.enum(["individual", "llc", "corp", "partnership"]),
+              zod.null(),
+            ])
+            .optional(),
+          businessName: zod.string().nullish(),
+          eAndOCarrier: zod.string().nullish(),
+          eAndOPolicyNumber: zod.string().nullish(),
+          eAndOExpiresOn: zod.coerce.date().nullish(),
+          backgroundCheckAuthorized: zod.boolean().nullish(),
+        })
+        .describe(
+          "Agent contracting profile (PII). `ssn`, `ein`, and `dob` are returned\neither as plaintext (for PHI-privileged roles or self-on-own-record)\nor as fixed masked sentinels (`\*\*\*-\*\*-\*\*\*\*` \/ `\*\*-\*\*\*\*\*\*\*` \/ null).\n",
+        ),
+      zod.null(),
+    ])
+    .optional(),
+  carrierRequests: zod.array(
+    zod.object({
+      id: zod.string(),
+      orgId: zod.string(),
+      onboardingRunId: zod.string(),
+      agentId: zod.string(),
+      carrierId: zod.string(),
+      states: zod.array(zod.string()),
+      status: zod.enum([
+        "draft",
+        "paperwork_generated",
+        "signed",
+        "submitted",
+        "under_review",
+        "appointed",
+        "rejected",
+        "cancelled",
+        "awaiting_admin_submission",
+        "invite_requested",
+      ]),
+      paperworkDocumentId: zod.string().nullish(),
+      signatureCompletedAt: zod.coerce.date().nullish(),
+      writingNumber: zod.string().nullish(),
+      lastStatusChangeAt: zod.coerce.date().nullish(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * Agent (or admin on behalf of) updates the contracting profile.
+SSN + EIN are AES-256-GCM-encrypted before write; plaintext never
+lands in the database. Auto-advances the run from `draft` →
+`profile_in_progress`.
+
+ * @summary Update the agent's contracting profile
+ */
+export const PatchOnboardingProfileParams = zod.object({
+  agentId: zod.coerce.string(),
+});
+
+export const patchOnboardingProfileBodyHomeAddressLine1Max = 200;
+
+export const patchOnboardingProfileBodyHomeAddressLine2Max = 200;
+
+export const patchOnboardingProfileBodyHomeCityMax = 100;
+
+export const patchOnboardingProfileBodyHomeStateMin = 2;
+export const patchOnboardingProfileBodyHomeStateMax = 2;
+
+export const patchOnboardingProfileBodyHomeZipMax = 10;
+
+export const patchOnboardingProfileBodyMailingAddressLine1Max = 200;
+
+export const patchOnboardingProfileBodyMailingAddressLine2Max = 200;
+
+export const patchOnboardingProfileBodyMailingCityMax = 100;
+
+export const patchOnboardingProfileBodyMailingStateMin = 2;
+export const patchOnboardingProfileBodyMailingStateMax = 2;
+
+export const patchOnboardingProfileBodyMailingZipMax = 10;
+
+export const patchOnboardingProfileBodyPhoneMax = 30;
+
+export const patchOnboardingProfileBodyBusinessNameMax = 200;
+
+export const patchOnboardingProfileBodyEAndOCarrierMax = 200;
+
+export const patchOnboardingProfileBodyEAndOPolicyNumberMax = 100;
+
+export const PatchOnboardingProfileBody = zod
+  .object({
+    ssn: zod.string().nullish(),
+    dob: zod.coerce.date().nullish(),
+    homeAddressLine1: zod
+      .string()
+      .max(patchOnboardingProfileBodyHomeAddressLine1Max)
+      .nullish(),
+    homeAddressLine2: zod
+      .string()
+      .max(patchOnboardingProfileBodyHomeAddressLine2Max)
+      .nullish(),
+    homeCity: zod.string().max(patchOnboardingProfileBodyHomeCityMax).nullish(),
+    homeState: zod
+      .string()
+      .min(patchOnboardingProfileBodyHomeStateMin)
+      .max(patchOnboardingProfileBodyHomeStateMax)
+      .nullish(),
+    homeZip: zod.string().max(patchOnboardingProfileBodyHomeZipMax).nullish(),
+    mailingSameAsHome: zod.boolean().optional(),
+    mailingAddressLine1: zod
+      .string()
+      .max(patchOnboardingProfileBodyMailingAddressLine1Max)
+      .nullish(),
+    mailingAddressLine2: zod
+      .string()
+      .max(patchOnboardingProfileBodyMailingAddressLine2Max)
+      .nullish(),
+    mailingCity: zod
+      .string()
+      .max(patchOnboardingProfileBodyMailingCityMax)
+      .nullish(),
+    mailingState: zod
+      .string()
+      .min(patchOnboardingProfileBodyMailingStateMin)
+      .max(patchOnboardingProfileBodyMailingStateMax)
+      .nullish(),
+    mailingZip: zod
+      .string()
+      .max(patchOnboardingProfileBodyMailingZipMax)
+      .nullish(),
+    phone: zod.string().max(patchOnboardingProfileBodyPhoneMax).nullish(),
+    email: zod.string().email().nullish(),
+    entityType: zod
+      .union([
+        zod.enum(["individual", "llc", "corp", "partnership"]),
+        zod.null(),
+      ])
+      .optional(),
+    businessName: zod
+      .string()
+      .max(patchOnboardingProfileBodyBusinessNameMax)
+      .nullish(),
+    businessEin: zod.string().nullish(),
+    eAndOCarrier: zod
+      .string()
+      .max(patchOnboardingProfileBodyEAndOCarrierMax)
+      .nullish(),
+    eAndOPolicyNumber: zod
+      .string()
+      .max(patchOnboardingProfileBodyEAndOPolicyNumberMax)
+      .nullish(),
+    eAndOExpiresOn: zod.coerce.date().nullish(),
+  })
+  .describe(
+    "Partial patch over the agent contracting profile. `null` clears the\nfield; an omitted key leaves the current value untouched.\n",
+  );
+
+export const PatchOnboardingProfileResponse = zod.object({
+  profile: zod
+    .object({
+      id: zod.string().optional(),
+      orgId: zod.string(),
+      agentId: zod.string(),
+      ssn: zod.string().nullish(),
+      ein: zod.string().nullish(),
+      dob: zod.coerce.date().nullish(),
+      homeAddressLine1: zod.string().nullish(),
+      homeAddressLine2: zod.string().nullish(),
+      homeCity: zod.string().nullish(),
+      homeState: zod.string().nullish(),
+      homeZip: zod.string().nullish(),
+      mailingSameAsHome: zod.boolean().nullish(),
+      mailingAddressLine1: zod.string().nullish(),
+      mailingAddressLine2: zod.string().nullish(),
+      mailingCity: zod.string().nullish(),
+      mailingState: zod.string().nullish(),
+      mailingZip: zod.string().nullish(),
+      phone: zod.string().nullish(),
+      email: zod.string().email().nullish(),
+      entityType: zod
+        .union([
+          zod.enum(["individual", "llc", "corp", "partnership"]),
+          zod.null(),
+        ])
+        .optional(),
+      businessName: zod.string().nullish(),
+      eAndOCarrier: zod.string().nullish(),
+      eAndOPolicyNumber: zod.string().nullish(),
+      eAndOExpiresOn: zod.coerce.date().nullish(),
+      backgroundCheckAuthorized: zod.boolean().nullish(),
+    })
+    .describe(
+      "Agent contracting profile (PII). `ssn`, `ein`, and `dob` are returned\neither as plaintext (for PHI-privileged roles or self-on-own-record)\nor as fixed masked sentinels (`\*\*\*-\*\*-\*\*\*\*` \/ `\*\*-\*\*\*\*\*\*\*` \/ null).\n",
+    ),
+});
+
+/**
+ * @summary Pick carriers + states for an onboarding run
+ */
+export const SelectOnboardingCarriersParams = zod.object({
+  agentId: zod.coerce.string(),
+});
+
+export const selectOnboardingCarriersBodySelectionsItemStatesItemMin = 2;
+export const selectOnboardingCarriersBodySelectionsItemStatesItemMax = 2;
+
+export const selectOnboardingCarriersBodySelectionsItemStatesMax = 56;
+
+export const selectOnboardingCarriersBodySelectionsMax = 50;
+
+export const SelectOnboardingCarriersBody = zod.object({
+  selections: zod
+    .array(
+      zod.object({
+        carrierId: zod.string().min(1),
+        states: zod
+          .array(
+            zod
+              .string()
+              .min(selectOnboardingCarriersBodySelectionsItemStatesItemMin)
+              .max(selectOnboardingCarriersBodySelectionsItemStatesItemMax),
+          )
+          .min(1)
+          .max(selectOnboardingCarriersBodySelectionsItemStatesMax),
+      }),
+    )
+    .min(1)
+    .max(selectOnboardingCarriersBodySelectionsMax),
+});
+
+/**
+ * @summary Cancel the active onboarding run for an agent
+ */
+export const CancelOnboardingParams = zod.object({
+  agentId: zod.coerce.string(),
+});
+
+export const CancelOnboardingResponse = zod.object({
+  run: zod.object({
+    id: zod.string(),
+    orgId: zod.string(),
+    agentId: zod.string(),
+    startedByUserId: zod.string().nullish(),
+    status: zod.enum([
+      "draft",
+      "profile_in_progress",
+      "carriers_selected",
+      "signing",
+      "submitted",
+      "complete",
+      "cancelled",
+      "rejected",
+    ]),
+    poaStatus: zod
+      .enum(["not_applicable", "pending", "signed", "opted_out"])
+      .optional()
+      .describe(
+        "Phase 1.5 POA decision state recorded on agent_onboarding_runs.\n`not_applicable` is the default for runs that have not (yet) reached\nthe POA decision step or for legacy runs that pre-date the pivot.\n",
+      ),
+    poaEnvelopeId: zod.string().nullish(),
+    poaExpiresAt: zod.coerce.date().nullish(),
+    completedSteps: zod.record(zod.string(), zod.boolean()).nullish(),
+    startedAt: zod.coerce.date(),
+    completedAt: zod.coerce.date().nullish(),
+    updatedAt: zod.coerce.date(),
+  }),
+});
+
+/**
+ * @summary Generate carrier paperwork + create sign tasks (admin)
+ */
+export const RequestContractingParams = zod.object({
+  agentId: zod.coerce.string(),
+});
+
+export const RequestContractingResponse = zod.object({
+  run: zod.object({
+    id: zod.string(),
+    orgId: zod.string(),
+    agentId: zod.string(),
+    startedByUserId: zod.string().nullish(),
+    status: zod.enum([
+      "draft",
+      "profile_in_progress",
+      "carriers_selected",
+      "signing",
+      "submitted",
+      "complete",
+      "cancelled",
+      "rejected",
+    ]),
+    poaStatus: zod
+      .enum(["not_applicable", "pending", "signed", "opted_out"])
+      .optional()
+      .describe(
+        "Phase 1.5 POA decision state recorded on agent_onboarding_runs.\n`not_applicable` is the default for runs that have not (yet) reached\nthe POA decision step or for legacy runs that pre-date the pivot.\n",
+      ),
+    poaEnvelopeId: zod.string().nullish(),
+    poaExpiresAt: zod.coerce.date().nullish(),
+    completedSteps: zod.record(zod.string(), zod.boolean()).nullish(),
+    startedAt: zod.coerce.date(),
+    completedAt: zod.coerce.date().nullish(),
+    updatedAt: zod.coerce.date(),
+  }),
+  paperworkGenerated: zod.number(),
+  signTasks: zod.array(
+    zod.object({
+      requestId: zod.string(),
+      taskId: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * Phase 1.5 — agent either accepts the run-wide POA (INSUREitALL
+submits contracts on their behalf) or declines it (carriers email
+the agent invitations to complete each contracting flow directly).
+Idempotent on the run.
+
+ * @summary Record the agent's Power-of-Attorney decision
+ */
+export const RecordPoaDecisionParams = zod.object({
+  agentId: zod.coerce.string(),
+});
+
+export const RecordPoaDecisionBody = zod
+  .object({
+    accepted: zod.boolean(),
+  })
+  .describe(
+    "Phase 1.5 POA decision body. `accepted: true` triggers POA PDF\ngeneration + envelope creation. `accepted: false` flips every\ndraft carrier request to `invite_requested` and queues the\ninvite-request emails to each carrier's appointment desk.\n",
+  );
+
+export const RecordPoaDecisionResponse = zod.object({
+  poaStatus: zod
+    .enum(["not_applicable", "pending", "signed", "opted_out"])
+    .describe(
+      "Phase 1.5 POA decision state recorded on agent_onboarding_runs.\n`not_applicable` is the default for runs that have not (yet) reached\nthe POA decision step or for legacy runs that pre-date the pivot.\n",
+    ),
+  envelopeId: zod.string().nullish(),
+  signingUrl: zod.string().nullish(),
+  transitioned: zod.number().nullish(),
+  idempotent: zod.boolean().nullish(),
+});
+
+/**
+ * `requestId` is the *carrier id* on the contracting request — the route
+looks the request up by `(run, carrierId)`. Returns an e-sign envelope
+id + signing URL the wizard navigates the agent to. Idempotent.
+
+ * @summary Start a signing envelope for a carrier contracting request
+ */
+export const SignOnboardingCarrierParams = zod.object({
+  agentId: zod.coerce.string(),
+  requestId: zod.coerce.string(),
+});
+
+export const SignOnboardingCarrierResponse = zod.object({
+  envelopeId: zod.string(),
+  status: zod.enum(["pending", "signed", "completed", "voided"]),
+  signingUrl: zod.string(),
+  carrierContractingRequestId: zod.string().optional(),
+});
+
+/**
+ * @summary Record carrier writing-number / appointment decision (admin)
+ */
+export const RecordCarrierContractingDecisionParams = zod.object({
+  requestId: zod.coerce.string(),
+});
+
+export const recordCarrierContractingDecisionBodyWritingNumberMax = 64;
+
+export const recordCarrierContractingDecisionBodyNotesMax = 2000;
+
+export const RecordCarrierContractingDecisionBody = zod
+  .object({
+    writingNumber: zod
+      .string()
+      .max(recordCarrierContractingDecisionBodyWritingNumberMax)
+      .optional(),
+    status: zod
+      .enum(["appointed", "rejected", "submitted", "under_review"])
+      .optional(),
+    notes: zod
+      .string()
+      .max(recordCarrierContractingDecisionBodyNotesMax)
+      .optional(),
+  })
+  .describe(
+    "At least one of `writingNumber`, `status`, or `notes` must be set.\nWhen `writingNumber` is provided without an explicit `status`, the\nrequest is transitioned to `appointed`.\n",
+  );
+
+export const RecordCarrierContractingDecisionResponse = zod.object({
+  request: zod.object({
+    id: zod.string(),
+    orgId: zod.string(),
+    onboardingRunId: zod.string(),
+    agentId: zod.string(),
+    carrierId: zod.string(),
+    states: zod.array(zod.string()),
+    status: zod.enum([
+      "draft",
+      "paperwork_generated",
+      "signed",
+      "submitted",
+      "under_review",
+      "appointed",
+      "rejected",
+      "cancelled",
+      "awaiting_admin_submission",
+      "invite_requested",
+    ]),
+    paperworkDocumentId: zod.string().nullish(),
+    signatureCompletedAt: zod.coerce.date().nullish(),
+    writingNumber: zod.string().nullish(),
+    lastStatusChangeAt: zod.coerce.date().nullish(),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  }),
+  idempotent: zod.boolean(),
+});
+
+/**
+ * Idempotent on `(org, carrier_contracting_request_id)` while not
+voided — re-posting returns the existing envelope rather than 409'ing.
+
+ * @summary Create an e-sign envelope for a carrier contracting request
+ */
+
+export const createEsignEnvelopeBodySignersItemDisplayNameMax = 200;
+
+export const createEsignEnvelopeBodySignersItemEmailMax = 200;
+
+export const createEsignEnvelopeBodySignersMax = 10;
+
+export const CreateEsignEnvelopeBody = zod.object({
+  pdfDocumentId: zod.string().min(1),
+  carrierContractingRequestId: zod.string().min(1),
+  signers: zod
+    .array(
+      zod.object({
+        userId: zod.string().min(1),
+        displayName: zod
+          .string()
+          .min(1)
+          .max(createEsignEnvelopeBodySignersItemDisplayNameMax),
+        email: zod
+          .string()
+          .email()
+          .max(createEsignEnvelopeBodySignersItemEmailMax),
+      }),
+    )
+    .min(1)
+    .max(createEsignEnvelopeBodySignersMax),
+});
+
+/**
+ * @summary Fetch an e-sign envelope by id
+ */
+export const GetEsignEnvelopeParams = zod.object({
+  envelopeId: zod.coerce.string(),
+});
+
+export const getEsignEnvelopeResponseSignersItemDisplayNameMax = 200;
+
+export const getEsignEnvelopeResponseSignersItemEmailMax = 200;
+
+export const GetEsignEnvelopeResponse = zod.object({
+  envelopeId: zod.string(),
+  status: zod.enum(["pending", "signed", "completed", "voided"]),
+  carrierContractingRequestId: zod.string(),
+  pdfDocumentId: zod
+    .string()
+    .describe(
+      "Document id of the unsigned PDF the wizard previews before signing.",
+    ),
+  signers: zod.array(
+    zod.object({
+      userId: zod.string().min(1),
+      displayName: zod
+        .string()
+        .min(1)
+        .max(getEsignEnvelopeResponseSignersItemDisplayNameMax),
+      email: zod
+        .string()
+        .email()
+        .max(getEsignEnvelopeResponseSignersItemEmailMax),
+    }),
+  ),
+  signedAt: zod.coerce.date().nullish(),
+  signedPdfDocumentId: zod.string().nullish(),
+  integritySha256: zod.string().nullish(),
+  consentRecord: zod
+    .union([
+      zod.object({
+        consentText: zod.string(),
+        version: zod.string(),
+        acceptedAt: zod.coerce.date(),
+        ipAddress: zod.string().nullish(),
+        userAgent: zod.string().nullish(),
+      }),
+      zod.null(),
+    ])
+    .optional(),
+});
+
+/**
+ * Server captures `req.ip` + `user-agent` itself — the frontend MUST NOT
+send these in the body. Only the signer-userId on the envelope OR
+a `super_admin` / `agency_admin` may sign.
+
+ * @summary Record a signature on an e-sign envelope
+ */
+export const SignEsignEnvelopeParams = zod.object({
+  envelopeId: zod.coerce.string(),
+});
+
+export const signEsignEnvelopeBodyTypedNameMax = 200;
+
+export const signEsignEnvelopeBodySignatureSvgMax = 200000;
+
+export const SignEsignEnvelopeBody = zod
+  .object({
+    typedName: zod.string().min(1).max(signEsignEnvelopeBodyTypedNameMax),
+    signatureSvg: zod.string().min(1).max(signEsignEnvelopeBodySignatureSvgMax),
+    consentToElectronicBusiness: zod.literal(true),
+    intentToSign: zod.literal(true),
+  })
+  .describe(
+    "Server captures `req.ip` + `user-agent` itself; the frontend MUST NOT\nsend these.\n",
+  );
+
+export const SignEsignEnvelopeResponse = zod.object({
+  envelopeId: zod.string(),
+  status: zod.enum(["pending", "signed", "completed", "voided"]),
+  signedPdfDocumentId: zod.string(),
+  integritySha256: zod.string(),
+});
+
+/**
+ * @summary Void an e-sign envelope (admin only)
+ */
+export const VoidEsignEnvelopeParams = zod.object({
+  envelopeId: zod.coerce.string(),
+});
+
+export const voidEsignEnvelopeBodyReasonMax = 500;
+
+export const VoidEsignEnvelopeBody = zod.object({
+  reason: zod.string().min(1).max(voidEsignEnvelopeBodyReasonMax),
+});
+
+export const VoidEsignEnvelopeResponse = zod.object({
+  envelopeId: zod.string(),
+  status: zod.enum(["voided"]),
+});
+
+/**
+ * @summary Download the signed PDF for a completed envelope
+ */
+export const GetEsignSignedPdfParams = zod.object({
+  envelopeId: zod.coerce.string(),
 });

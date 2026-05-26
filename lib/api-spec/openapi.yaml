@@ -67,6 +67,10 @@ tags:
     description: HIPAA/SOC 2 compliance administration
   - name: imports
     description: Data migration importers (Monday.com, GoHighLevel, CSV)
+  - name: onboarding
+    description: Agent contracting/onboarding wizard flows
+  - name: esign
+    description: Native e-signature envelopes for carrier contracting paperwork
 
 paths:
   /healthz:
@@ -4066,8 +4070,616 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  # ---- Onboarding (agent contracting wizard) -------------------------------
+
+  /onboarding/start:
+    post:
+      operationId: startOnboarding
+      tags: [onboarding]
+      summary: Start (or invite) an onboarding run for an agent
+      description: |
+        Admin starts an onboarding run. Idempotent on `(org_id, agent_id)`
+        — re-posting returns the existing active run with `idempotent: true`
+        rather than 409'ing.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartOnboardingBody"
+      responses:
+        "200":
+          description: Existing run (idempotent re-post)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartOnboardingResponse"
+        "201":
+          description: New run created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartOnboardingResponse"
+        "400":
+          description: Invalid body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /onboarding:
+    get:
+      operationId: listOnboardings
+      tags: [onboarding]
+      summary: List onboarding runs (admin)
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: Paginated list of onboarding runs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingListResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /onboarding/{agentId}:
+    get:
+      operationId: getOnboarding
+      tags: [onboarding]
+      summary: Get current onboarding run + profile + carrier requests for an agent
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Current onboarding detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingDetail"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No active onboarding run for the agent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /onboarding/{agentId}/profile:
+    patch:
+      operationId: patchOnboardingProfile
+      tags: [onboarding]
+      summary: Update the agent's contracting profile
+      description: |
+        Agent (or admin on behalf of) updates the contracting profile.
+        SSN + EIN are AES-256-GCM-encrypted before write; plaintext never
+        lands in the database. Auto-advances the run from `draft` →
+        `profile_in_progress`.
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchOnboardingProfileBody"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatchOnboardingProfileResponse"
+        "400":
+          description: Invalid body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Agent / profile not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /onboarding/{agentId}/carriers/select:
+    post:
+      operationId: selectOnboardingCarriers
+      tags: [onboarding]
+      summary: Pick carriers + states for an onboarding run
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SelectCarriersBody"
+      responses:
+        "201":
+          description: Created (or upserted) carrier contracting requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SelectCarriersResponse"
+        "400":
+          description: Invalid body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /onboarding/{agentId}/cancel:
+    post:
+      operationId: cancelOnboarding
+      tags: [onboarding]
+      summary: Cancel the active onboarding run for an agent
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Cancelled run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CancelOnboardingResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Agent / run not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Invalid state transition
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /onboarding/{agentId}/request-contracting:
+    post:
+      operationId: requestContracting
+      tags: [onboarding]
+      summary: Generate carrier paperwork + create sign tasks (admin)
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Paperwork generation summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestContractingResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Agent / run not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: No carrier requests on this run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /onboarding/{agentId}/poa-decision:
+    post:
+      operationId: recordPoaDecision
+      tags: [onboarding]
+      summary: Record the agent's Power-of-Attorney decision
+      description: |
+        Phase 1.5 — agent either accepts the run-wide POA (INSUREitALL
+        submits contracts on their behalf) or declines it (carriers email
+        the agent invitations to complete each contracting flow directly).
+        Idempotent on the run.
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PoaDecisionBody"
+      responses:
+        "200":
+          description: Decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PoaDecisionResponse"
+        "400":
+          description: Invalid body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Caller is neither the owning agent nor an admin
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Agent / run not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: No carriers selected on the run yet
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /onboarding/{agentId}/carriers/{requestId}/sign:
+    post:
+      operationId: signOnboardingCarrier
+      tags: [onboarding]
+      summary: Start a signing envelope for a carrier contracting request
+      description: |
+        `requestId` is the *carrier id* on the contracting request — the route
+        looks the request up by `(run, carrierId)`. Returns an e-sign envelope
+        id + signing URL the wizard navigates the agent to. Idempotent.
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+        - { name: requestId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Envelope created (or existing envelope returned)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignOnboardingCarrierResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Caller is neither the owning agent nor an admin
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Agent / run / request not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Paperwork not yet generated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/contracting/{requestId}:
+    patch:
+      operationId: recordCarrierContractingDecision
+      tags: [onboarding]
+      summary: Record carrier writing-number / appointment decision (admin)
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordContractingDecisionBody"
+      responses:
+        "200":
+          description: Updated carrier contracting request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordContractingDecisionResponse"
+        "400":
+          description: Invalid body or forbidden state transition
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Contracting request not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  # ---- E-signature ---------------------------------------------------------
+
+  /esign/envelopes:
+    post:
+      operationId: createEsignEnvelope
+      tags: [esign]
+      summary: Create an e-sign envelope for a carrier contracting request
+      description: |
+        Idempotent on `(org, carrier_contracting_request_id)` while not
+        voided — re-posting returns the existing envelope rather than 409'ing.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEsignEnvelopeBody"
+      responses:
+        "201":
+          description: Envelope created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateEsignEnvelopeResponse"
+        "400":
+          description: Invalid body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Forbidden role
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          description: Provider failure
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /esign/envelopes/{envelopeId}:
+    get:
+      operationId: getEsignEnvelope
+      tags: [esign]
+      summary: Fetch an e-sign envelope by id
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: envelopeId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Envelope state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Envelope not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /esign/envelopes/{envelopeId}/sign:
+    post:
+      operationId: signEsignEnvelope
+      tags: [esign]
+      summary: Record a signature on an e-sign envelope
+      description: |
+        Server captures `req.ip` + `user-agent` itself — the frontend MUST NOT
+        send these in the body. Only the signer-userId on the envelope OR
+        a `super_admin` / `agency_admin` may sign.
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: envelopeId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignEnvelopeBody"
+      responses:
+        "200":
+          description: Signature recorded; signed PDF persisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignEnvelopeResponse"
+        "400":
+          description: Invalid body / consent not granted / invalid signature input
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Caller is not the signer and not an admin
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Envelope not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Envelope state forbids signing (e.g. already completed / voided)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /esign/envelopes/{envelopeId}/void:
+    post:
+      operationId: voidEsignEnvelope
+      tags: [esign]
+      summary: Void an e-sign envelope (admin only)
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: envelopeId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VoidEnvelopeBody"
+      responses:
+        "200":
+          description: Envelope voided
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoidEnvelopeResponse"
+        "400":
+          description: Invalid body
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Caller is not an admin
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Envelope not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Envelope state forbids voiding
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /esign/envelopes/{envelopeId}/signed-pdf:
+    get:
+      operationId: getEsignSignedPdf
+      tags: [esign]
+      summary: Download the signed PDF for a completed envelope
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: envelopeId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Signed PDF bytes
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Envelope not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Envelope is not yet completed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
 
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: __session
+      description: |
+        Clerk session cookie. Every route under `/api` requires an active
+        authenticated session; routes that need a particular role return
+        403 once authenticated. The healthcheck (`/healthz`) is the only
+        public endpoint.
   schemas:
     HealthStatus:
       type: object
@@ -4692,6 +5304,12 @@ components:
           type: ["string", "null"]
         isActive:
           type: boolean
+        appointmentDeskEmail:
+          type: ["string", "null"]
+          format: email
+          description: Per-carrier appointment-desk address used by the Day-6 email-out worker. NULL until provisioned.
+        appointmentDeskMetadata:
+          $ref: "#/components/schemas/AppointmentDeskMetadata"
         createdAt:
           type: string
           format: date-time
@@ -4702,15 +5320,45 @@ components:
         - isActive
         - createdAt
 
+    AppointmentDeskMetadata:
+      type: object
+      description: |
+        Loosely-typed override bag for the email-out worker. Documented keys
+        (`cc`, `subject`) are validated when present; unknown keys pass
+        through unchanged so carrier-specific notes can be stashed without a
+        schema change.
+      additionalProperties: true
+      properties:
+        cc:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            format: email
+        subject:
+          type: string
+          maxLength: 300
+
     CreateCarrierBody:
       type: object
       properties:
         name:
           type: string
+          minLength: 1
+          maxLength: 200
         cmsContractNumber:
           type: string
+          maxLength: 50
         logoUrl:
           type: string
+          format: uri
+        appointmentDeskEmail:
+          type: string
+          format: email
+          maxLength: 254
+          description: Per-carrier appointment-desk email address. Used by the email-out worker.
+        appointmentDeskMetadata:
+          $ref: "#/components/schemas/AppointmentDeskMetadata"
       required:
         - name
 
@@ -4719,12 +5367,25 @@ components:
       properties:
         name:
           type: string
+          minLength: 1
+          maxLength: 200
         cmsContractNumber:
-          type: string
+          type: ["string", "null"]
+          maxLength: 50
         logoUrl:
-          type: string
+          type: ["string", "null"]
+          format: uri
         isActive:
           type: boolean
+        appointmentDeskEmail:
+          type: ["string", "null"]
+          format: email
+          maxLength: 254
+          description: |
+            Email-out worker (Day 6) reads this. `null` clears the configured
+            address (worker reverts to WARN-and-leave-open).
+        appointmentDeskMetadata:
+          $ref: "#/components/schemas/AppointmentDeskMetadata"
 
     SeedCarriersResponse:
       type: object
@@ -6923,3 +7584,522 @@ components:
         createdAt: { type: string, format: date-time }
         completedAt: { type: string, format: date-time, nullable: true }
       required: [id, orgId, importType, status, totalRows, processedRows, createdCount, updatedCount, skippedCount, errorCount, createdAt]
+
+    # ---- Onboarding ------------------------------------------------------
+
+    OnboardingStatus:
+      type: string
+      enum:
+        - draft
+        - profile_in_progress
+        - carriers_selected
+        - signing
+        - submitted
+        - complete
+        - cancelled
+        - rejected
+
+    ContractingStatus:
+      type: string
+      enum:
+        - draft
+        - paperwork_generated
+        - signed
+        - submitted
+        - under_review
+        - appointed
+        - rejected
+        - cancelled
+        - awaiting_admin_submission
+        - invite_requested
+
+    PoaStatus:
+      type: string
+      description: |
+        Phase 1.5 POA decision state recorded on agent_onboarding_runs.
+        `not_applicable` is the default for runs that have not (yet) reached
+        the POA decision step or for legacy runs that pre-date the pivot.
+      enum:
+        - not_applicable
+        - pending
+        - signed
+        - opted_out
+
+    EntityType:
+      type: string
+      enum: [individual, llc, corp, partnership]
+
+    AgentOnboardingRun:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        agentId: { type: string }
+        startedByUserId:
+          type: ["string", "null"]
+        status:
+          $ref: "#/components/schemas/OnboardingStatus"
+        poaStatus:
+          $ref: "#/components/schemas/PoaStatus"
+        poaEnvelopeId:
+          type: ["string", "null"]
+        poaExpiresAt:
+          type: ["string", "null"]
+          format: date-time
+        completedSteps:
+          type: ["object", "null"]
+          additionalProperties: { type: boolean }
+        startedAt: { type: string, format: date-time }
+        completedAt:
+          type: ["string", "null"]
+          format: date-time
+        updatedAt: { type: string, format: date-time }
+      required:
+        - id
+        - orgId
+        - agentId
+        - status
+        - startedAt
+        - updatedAt
+
+    AgentContractingProfile:
+      type: object
+      description: |
+        Agent contracting profile (PII). `ssn`, `ein`, and `dob` are returned
+        either as plaintext (for PHI-privileged roles or self-on-own-record)
+        or as fixed masked sentinels (`***-**-****` / `**-*******` / null).
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        agentId: { type: string }
+        ssn:
+          type: ["string", "null"]
+        ein:
+          type: ["string", "null"]
+        dob:
+          type: ["string", "null"]
+          format: date
+        homeAddressLine1: { type: ["string", "null"] }
+        homeAddressLine2: { type: ["string", "null"] }
+        homeCity: { type: ["string", "null"] }
+        homeState: { type: ["string", "null"] }
+        homeZip: { type: ["string", "null"] }
+        mailingSameAsHome: { type: ["boolean", "null"] }
+        mailingAddressLine1: { type: ["string", "null"] }
+        mailingAddressLine2: { type: ["string", "null"] }
+        mailingCity: { type: ["string", "null"] }
+        mailingState: { type: ["string", "null"] }
+        mailingZip: { type: ["string", "null"] }
+        phone: { type: ["string", "null"] }
+        email: { type: ["string", "null"], format: email }
+        entityType:
+          oneOf:
+            - $ref: "#/components/schemas/EntityType"
+            - type: "null"
+        businessName: { type: ["string", "null"] }
+        eAndOCarrier: { type: ["string", "null"] }
+        eAndOPolicyNumber: { type: ["string", "null"] }
+        eAndOExpiresOn:
+          type: ["string", "null"]
+          format: date
+        backgroundCheckAuthorized:
+          type: ["boolean", "null"]
+      required:
+        - orgId
+        - agentId
+
+    CarrierContractingRequest:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        onboardingRunId: { type: string }
+        agentId: { type: string }
+        carrierId: { type: string }
+        states:
+          type: array
+          items: { type: string }
+        status:
+          $ref: "#/components/schemas/ContractingStatus"
+        paperworkDocumentId:
+          type: ["string", "null"]
+        signatureCompletedAt:
+          type: ["string", "null"]
+          format: date-time
+        writingNumber:
+          type: ["string", "null"]
+        lastStatusChangeAt:
+          type: ["string", "null"]
+          format: date-time
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required:
+        - id
+        - orgId
+        - onboardingRunId
+        - agentId
+        - carrierId
+        - states
+        - status
+        - createdAt
+        - updatedAt
+
+    OnboardingDetail:
+      type: object
+      properties:
+        run:
+          $ref: "#/components/schemas/AgentOnboardingRun"
+        profile:
+          oneOf:
+            - $ref: "#/components/schemas/AgentContractingProfile"
+            - type: "null"
+        carrierRequests:
+          type: array
+          items:
+            $ref: "#/components/schemas/CarrierContractingRequest"
+      required: [run, carrierRequests]
+
+    OnboardingListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentOnboardingRun"
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+      required: [data, total, limit, offset]
+
+    StartOnboardingBody:
+      type: object
+      properties:
+        agentId:
+          type: string
+          minLength: 1
+      required: [agentId]
+
+    StartOnboardingResponse:
+      type: object
+      properties:
+        run:
+          $ref: "#/components/schemas/AgentOnboardingRun"
+        profile:
+          oneOf:
+            - $ref: "#/components/schemas/AgentContractingProfile"
+            - type: "null"
+        idempotent: { type: boolean }
+      required: [run, idempotent]
+
+    PatchOnboardingProfileBody:
+      type: object
+      description: |
+        Partial patch over the agent contracting profile. `null` clears the
+        field; an omitted key leaves the current value untouched.
+      properties:
+        ssn: { type: ["string", "null"] }
+        dob:
+          type: ["string", "null"]
+          format: date
+        homeAddressLine1: { type: ["string", "null"], maxLength: 200 }
+        homeAddressLine2: { type: ["string", "null"], maxLength: 200 }
+        homeCity: { type: ["string", "null"], maxLength: 100 }
+        homeState: { type: ["string", "null"], minLength: 2, maxLength: 2 }
+        homeZip: { type: ["string", "null"], maxLength: 10 }
+        mailingSameAsHome: { type: boolean }
+        mailingAddressLine1: { type: ["string", "null"], maxLength: 200 }
+        mailingAddressLine2: { type: ["string", "null"], maxLength: 200 }
+        mailingCity: { type: ["string", "null"], maxLength: 100 }
+        mailingState: { type: ["string", "null"], minLength: 2, maxLength: 2 }
+        mailingZip: { type: ["string", "null"], maxLength: 10 }
+        phone: { type: ["string", "null"], maxLength: 30 }
+        email: { type: ["string", "null"], format: email }
+        entityType:
+          oneOf:
+            - $ref: "#/components/schemas/EntityType"
+            - type: "null"
+        businessName: { type: ["string", "null"], maxLength: 200 }
+        businessEin: { type: ["string", "null"] }
+        eAndOCarrier: { type: ["string", "null"], maxLength: 200 }
+        eAndOPolicyNumber: { type: ["string", "null"], maxLength: 100 }
+        eAndOExpiresOn:
+          type: ["string", "null"]
+          format: date
+
+    PatchOnboardingProfileResponse:
+      type: object
+      properties:
+        profile:
+          $ref: "#/components/schemas/AgentContractingProfile"
+      required: [profile]
+
+    CarrierSelection:
+      type: object
+      properties:
+        carrierId:
+          type: string
+          minLength: 1
+        states:
+          type: array
+          minItems: 1
+          maxItems: 56
+          items:
+            type: string
+            minLength: 2
+            maxLength: 2
+      required: [carrierId, states]
+
+    SelectCarriersBody:
+      type: object
+      properties:
+        selections:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/CarrierSelection"
+      required: [selections]
+
+    SelectCarriersResponse:
+      type: object
+      properties:
+        carrierRequests:
+          type: array
+          items:
+            $ref: "#/components/schemas/CarrierContractingRequest"
+      required: [carrierRequests]
+
+    CancelOnboardingResponse:
+      type: object
+      properties:
+        run:
+          $ref: "#/components/schemas/AgentOnboardingRun"
+      required: [run]
+
+    RequestContractingResponse:
+      type: object
+      properties:
+        run:
+          $ref: "#/components/schemas/AgentOnboardingRun"
+        paperworkGenerated: { type: integer }
+        signTasks:
+          type: array
+          items:
+            type: object
+            properties:
+              requestId: { type: string }
+              taskId: { type: string }
+            required: [requestId, taskId]
+      required: [run, paperworkGenerated, signTasks]
+
+    SignOnboardingCarrierResponse:
+      type: object
+      properties:
+        envelopeId: { type: string }
+        status:
+          type: string
+          enum: [pending, signed, completed, voided]
+        signingUrl: { type: string }
+        carrierContractingRequestId: { type: string }
+      required: [envelopeId, status, signingUrl]
+
+    PoaDecisionBody:
+      type: object
+      description: |
+        Phase 1.5 POA decision body. `accepted: true` triggers POA PDF
+        generation + envelope creation. `accepted: false` flips every
+        draft carrier request to `invite_requested` and queues the
+        invite-request emails to each carrier's appointment desk.
+      properties:
+        accepted: { type: boolean }
+      required: [accepted]
+
+    PoaDecisionResponse:
+      type: object
+      properties:
+        poaStatus:
+          $ref: "#/components/schemas/PoaStatus"
+        envelopeId:
+          type: ["string", "null"]
+        signingUrl:
+          type: ["string", "null"]
+        transitioned:
+          type: ["integer", "null"]
+        idempotent:
+          type: ["boolean", "null"]
+      required: [poaStatus]
+
+    RecordContractingDecisionBody:
+      type: object
+      description: |
+        At least one of `writingNumber`, `status`, or `notes` must be set.
+        When `writingNumber` is provided without an explicit `status`, the
+        request is transitioned to `appointed`.
+      properties:
+        writingNumber:
+          type: string
+          maxLength: 64
+        status:
+          type: string
+          enum: [appointed, rejected, submitted, under_review]
+        notes:
+          type: string
+          maxLength: 2000
+
+    RecordContractingDecisionResponse:
+      type: object
+      properties:
+        request:
+          $ref: "#/components/schemas/CarrierContractingRequest"
+        idempotent: { type: boolean }
+      required: [request, idempotent]
+
+    # ---- E-sign ----------------------------------------------------------
+
+    EnvelopeStatus:
+      type: string
+      enum: [pending, signed, completed, voided]
+
+    EnvelopeSigner:
+      type: object
+      properties:
+        userId:
+          type: string
+          minLength: 1
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 200
+        email:
+          type: string
+          format: email
+          maxLength: 200
+      required: [userId, displayName, email]
+
+    EnvelopeConsentRecord:
+      type: object
+      properties:
+        consentText: { type: string }
+        version: { type: string }
+        acceptedAt: { type: string, format: date-time }
+        ipAddress:
+          type: ["string", "null"]
+        userAgent:
+          type: ["string", "null"]
+      required: [consentText, version, acceptedAt]
+
+    Envelope:
+      type: object
+      properties:
+        envelopeId: { type: string }
+        status:
+          $ref: "#/components/schemas/EnvelopeStatus"
+        carrierContractingRequestId: { type: string }
+        pdfDocumentId:
+          type: string
+          description: Document id of the unsigned PDF the wizard previews before signing.
+        signers:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnvelopeSigner"
+        signedAt:
+          type: ["string", "null"]
+          format: date-time
+        signedPdfDocumentId:
+          type: ["string", "null"]
+        integritySha256:
+          type: ["string", "null"]
+        consentRecord:
+          oneOf:
+            - $ref: "#/components/schemas/EnvelopeConsentRecord"
+            - type: "null"
+      required:
+        - envelopeId
+        - status
+        - carrierContractingRequestId
+        - pdfDocumentId
+        - signers
+
+    CreateEsignEnvelopeBody:
+      type: object
+      properties:
+        pdfDocumentId:
+          type: string
+          minLength: 1
+        carrierContractingRequestId:
+          type: string
+          minLength: 1
+        signers:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/EnvelopeSigner"
+      required: [pdfDocumentId, carrierContractingRequestId, signers]
+
+    CreateEsignEnvelopeResponse:
+      type: object
+      properties:
+        envelopeId: { type: string }
+        status:
+          $ref: "#/components/schemas/EnvelopeStatus"
+        signingUrl: { type: string }
+      required: [envelopeId, status, signingUrl]
+
+    SignEnvelopeBody:
+      type: object
+      description: |
+        Server captures `req.ip` + `user-agent` itself; the frontend MUST NOT
+        send these.
+      properties:
+        typedName:
+          type: string
+          minLength: 1
+          maxLength: 200
+        signatureSvg:
+          type: string
+          minLength: 1
+          maxLength: 200000
+        consentToElectronicBusiness:
+          type: boolean
+          enum: [true]
+        intentToSign:
+          type: boolean
+          enum: [true]
+      required:
+        - typedName
+        - signatureSvg
+        - consentToElectronicBusiness
+        - intentToSign
+
+    SignEnvelopeResponse:
+      type: object
+      properties:
+        envelopeId: { type: string }
+        status:
+          $ref: "#/components/schemas/EnvelopeStatus"
+        signedPdfDocumentId: { type: string }
+        integritySha256: { type: string }
+      required:
+        - envelopeId
+        - status
+        - signedPdfDocumentId
+        - integritySha256
+
+    VoidEnvelopeBody:
+      type: object
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+      required: [reason]
+
+    VoidEnvelopeResponse:
+      type: object
+      properties:
+        envelopeId: { type: string }
+        status:
+          type: string
+          enum: [voided]
+      required: [envelopeId, status]

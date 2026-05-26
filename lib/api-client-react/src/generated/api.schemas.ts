@@ -414,6 +414,21 @@ export interface UpdateLicenseBody {
   documentKey?: string;
 }
 
+/**
+ * Loosely-typed override bag for the email-out worker. Documented keys
+(`cc`, `subject`) are validated when present; unknown keys pass
+through unchanged so carrier-specific notes can be stashed without a
+schema change.
+
+ */
+export interface AppointmentDeskMetadata {
+  /** @maxItems 20 */
+  cc?: string[];
+  /** @maxLength 300 */
+  subject?: string;
+  [key: string]: unknown;
+}
+
 export interface Carrier {
   id: string;
   orgId: string;
@@ -423,20 +438,55 @@ export interface Carrier {
   /** @nullable */
   logoUrl?: string | null;
   isActive: boolean;
+  /**
+   * Per-carrier appointment-desk address used by the Day-6 email-out worker. NULL until provisioned.
+   * @nullable
+   */
+  appointmentDeskEmail?: string | null;
+  appointmentDeskMetadata?: AppointmentDeskMetadata;
   createdAt: string;
 }
 
 export interface CreateCarrierBody {
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
   name: string;
+  /** @maxLength 50 */
   cmsContractNumber?: string;
   logoUrl?: string;
+  /**
+   * Per-carrier appointment-desk email address. Used by the email-out worker.
+   * @maxLength 254
+   */
+  appointmentDeskEmail?: string;
+  appointmentDeskMetadata?: AppointmentDeskMetadata;
 }
 
 export interface UpdateCarrierBody {
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
   name?: string;
-  cmsContractNumber?: string;
-  logoUrl?: string;
+  /**
+   * @maxLength 50
+   * @nullable
+   */
+  cmsContractNumber?: string | null;
+  /** @nullable */
+  logoUrl?: string | null;
   isActive?: boolean;
+  /**
+   * Email-out worker (Day 6) reads this. `null` clears the configured
+address (worker reverts to WARN-and-leave-open).
+
+   * @maxLength 254
+   * @nullable
+   */
+  appointmentDeskEmail?: string | null;
+  appointmentDeskMetadata?: AppointmentDeskMetadata;
 }
 
 export interface SeedCarriersResponse {
@@ -2253,6 +2303,501 @@ export interface ImportJob {
   completedAt?: string | null;
 }
 
+export type OnboardingStatus =
+  (typeof OnboardingStatus)[keyof typeof OnboardingStatus];
+
+export const OnboardingStatus = {
+  draft: "draft",
+  profile_in_progress: "profile_in_progress",
+  carriers_selected: "carriers_selected",
+  signing: "signing",
+  submitted: "submitted",
+  complete: "complete",
+  cancelled: "cancelled",
+  rejected: "rejected",
+} as const;
+
+export type ContractingStatus =
+  (typeof ContractingStatus)[keyof typeof ContractingStatus];
+
+export const ContractingStatus = {
+  draft: "draft",
+  paperwork_generated: "paperwork_generated",
+  signed: "signed",
+  submitted: "submitted",
+  under_review: "under_review",
+  appointed: "appointed",
+  rejected: "rejected",
+  cancelled: "cancelled",
+  awaiting_admin_submission: "awaiting_admin_submission",
+  invite_requested: "invite_requested",
+} as const;
+
+/**
+ * Phase 1.5 POA decision state recorded on agent_onboarding_runs.
+`not_applicable` is the default for runs that have not (yet) reached
+the POA decision step or for legacy runs that pre-date the pivot.
+
+ */
+export type PoaStatus = (typeof PoaStatus)[keyof typeof PoaStatus];
+
+export const PoaStatus = {
+  not_applicable: "not_applicable",
+  pending: "pending",
+  signed: "signed",
+  opted_out: "opted_out",
+} as const;
+
+export type EntityType = (typeof EntityType)[keyof typeof EntityType];
+
+export const EntityType = {
+  individual: "individual",
+  llc: "llc",
+  corp: "corp",
+  partnership: "partnership",
+} as const;
+
+/**
+ * @nullable
+ */
+export type AgentOnboardingRunCompletedSteps = {
+  [key: string]: boolean;
+} | null;
+
+export interface AgentOnboardingRun {
+  id: string;
+  orgId: string;
+  agentId: string;
+  /** @nullable */
+  startedByUserId?: string | null;
+  status: OnboardingStatus;
+  poaStatus?: PoaStatus;
+  /** @nullable */
+  poaEnvelopeId?: string | null;
+  /** @nullable */
+  poaExpiresAt?: string | null;
+  /** @nullable */
+  completedSteps?: AgentOnboardingRunCompletedSteps;
+  startedAt: string;
+  /** @nullable */
+  completedAt?: string | null;
+  updatedAt: string;
+}
+
+/**
+ * Agent contracting profile (PII). `ssn`, `ein`, and `dob` are returned
+either as plaintext (for PHI-privileged roles or self-on-own-record)
+or as fixed masked sentinels (`***-**-****` / `**-*******` / null).
+
+ */
+export interface AgentContractingProfile {
+  id?: string;
+  orgId: string;
+  agentId: string;
+  /** @nullable */
+  ssn?: string | null;
+  /** @nullable */
+  ein?: string | null;
+  /** @nullable */
+  dob?: string | null;
+  /** @nullable */
+  homeAddressLine1?: string | null;
+  /** @nullable */
+  homeAddressLine2?: string | null;
+  /** @nullable */
+  homeCity?: string | null;
+  /** @nullable */
+  homeState?: string | null;
+  /** @nullable */
+  homeZip?: string | null;
+  /** @nullable */
+  mailingSameAsHome?: boolean | null;
+  /** @nullable */
+  mailingAddressLine1?: string | null;
+  /** @nullable */
+  mailingAddressLine2?: string | null;
+  /** @nullable */
+  mailingCity?: string | null;
+  /** @nullable */
+  mailingState?: string | null;
+  /** @nullable */
+  mailingZip?: string | null;
+  /** @nullable */
+  phone?: string | null;
+  /** @nullable */
+  email?: string | null;
+  entityType?: EntityType | null;
+  /** @nullable */
+  businessName?: string | null;
+  /** @nullable */
+  eAndOCarrier?: string | null;
+  /** @nullable */
+  eAndOPolicyNumber?: string | null;
+  /** @nullable */
+  eAndOExpiresOn?: string | null;
+  /** @nullable */
+  backgroundCheckAuthorized?: boolean | null;
+}
+
+export interface CarrierContractingRequest {
+  id: string;
+  orgId: string;
+  onboardingRunId: string;
+  agentId: string;
+  carrierId: string;
+  states: string[];
+  status: ContractingStatus;
+  /** @nullable */
+  paperworkDocumentId?: string | null;
+  /** @nullable */
+  signatureCompletedAt?: string | null;
+  /** @nullable */
+  writingNumber?: string | null;
+  /** @nullable */
+  lastStatusChangeAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OnboardingDetail {
+  run: AgentOnboardingRun;
+  profile?: AgentContractingProfile | null;
+  carrierRequests: CarrierContractingRequest[];
+}
+
+export interface OnboardingListResponse {
+  data: AgentOnboardingRun[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface StartOnboardingBody {
+  /** @minLength 1 */
+  agentId: string;
+}
+
+export interface StartOnboardingResponse {
+  run: AgentOnboardingRun;
+  profile?: AgentContractingProfile | null;
+  idempotent: boolean;
+}
+
+/**
+ * Partial patch over the agent contracting profile. `null` clears the
+field; an omitted key leaves the current value untouched.
+
+ */
+export interface PatchOnboardingProfileBody {
+  /** @nullable */
+  ssn?: string | null;
+  /** @nullable */
+  dob?: string | null;
+  /**
+   * @maxLength 200
+   * @nullable
+   */
+  homeAddressLine1?: string | null;
+  /**
+   * @maxLength 200
+   * @nullable
+   */
+  homeAddressLine2?: string | null;
+  /**
+   * @maxLength 100
+   * @nullable
+   */
+  homeCity?: string | null;
+  /**
+   * @minLength 2
+   * @maxLength 2
+   * @nullable
+   */
+  homeState?: string | null;
+  /**
+   * @maxLength 10
+   * @nullable
+   */
+  homeZip?: string | null;
+  mailingSameAsHome?: boolean;
+  /**
+   * @maxLength 200
+   * @nullable
+   */
+  mailingAddressLine1?: string | null;
+  /**
+   * @maxLength 200
+   * @nullable
+   */
+  mailingAddressLine2?: string | null;
+  /**
+   * @maxLength 100
+   * @nullable
+   */
+  mailingCity?: string | null;
+  /**
+   * @minLength 2
+   * @maxLength 2
+   * @nullable
+   */
+  mailingState?: string | null;
+  /**
+   * @maxLength 10
+   * @nullable
+   */
+  mailingZip?: string | null;
+  /**
+   * @maxLength 30
+   * @nullable
+   */
+  phone?: string | null;
+  /** @nullable */
+  email?: string | null;
+  entityType?: EntityType | null;
+  /**
+   * @maxLength 200
+   * @nullable
+   */
+  businessName?: string | null;
+  /** @nullable */
+  businessEin?: string | null;
+  /**
+   * @maxLength 200
+   * @nullable
+   */
+  eAndOCarrier?: string | null;
+  /**
+   * @maxLength 100
+   * @nullable
+   */
+  eAndOPolicyNumber?: string | null;
+  /** @nullable */
+  eAndOExpiresOn?: string | null;
+}
+
+export interface PatchOnboardingProfileResponse {
+  profile: AgentContractingProfile;
+}
+
+export interface CarrierSelection {
+  /** @minLength 1 */
+  carrierId: string;
+  /**
+   * @minItems 1
+   * @maxItems 56
+   */
+  states: string[];
+}
+
+export interface SelectCarriersBody {
+  /**
+   * @minItems 1
+   * @maxItems 50
+   */
+  selections: CarrierSelection[];
+}
+
+export interface SelectCarriersResponse {
+  carrierRequests: CarrierContractingRequest[];
+}
+
+export interface CancelOnboardingResponse {
+  run: AgentOnboardingRun;
+}
+
+export type RequestContractingResponseSignTasksItem = {
+  requestId: string;
+  taskId: string;
+};
+
+export interface RequestContractingResponse {
+  run: AgentOnboardingRun;
+  paperworkGenerated: number;
+  signTasks: RequestContractingResponseSignTasksItem[];
+}
+
+export type SignOnboardingCarrierResponseStatus =
+  (typeof SignOnboardingCarrierResponseStatus)[keyof typeof SignOnboardingCarrierResponseStatus];
+
+export const SignOnboardingCarrierResponseStatus = {
+  pending: "pending",
+  signed: "signed",
+  completed: "completed",
+  voided: "voided",
+} as const;
+
+export interface SignOnboardingCarrierResponse {
+  envelopeId: string;
+  status: SignOnboardingCarrierResponseStatus;
+  signingUrl: string;
+  carrierContractingRequestId?: string;
+}
+
+/**
+ * Phase 1.5 POA decision body. `accepted: true` triggers POA PDF
+generation + envelope creation. `accepted: false` flips every
+draft carrier request to `invite_requested` and queues the
+invite-request emails to each carrier's appointment desk.
+
+ */
+export interface PoaDecisionBody {
+  accepted: boolean;
+}
+
+export interface PoaDecisionResponse {
+  poaStatus: PoaStatus;
+  /** @nullable */
+  envelopeId?: string | null;
+  /** @nullable */
+  signingUrl?: string | null;
+  /** @nullable */
+  transitioned?: number | null;
+  /** @nullable */
+  idempotent?: boolean | null;
+}
+
+export type RecordContractingDecisionBodyStatus =
+  (typeof RecordContractingDecisionBodyStatus)[keyof typeof RecordContractingDecisionBodyStatus];
+
+export const RecordContractingDecisionBodyStatus = {
+  appointed: "appointed",
+  rejected: "rejected",
+  submitted: "submitted",
+  under_review: "under_review",
+} as const;
+
+/**
+ * At least one of `writingNumber`, `status`, or `notes` must be set.
+When `writingNumber` is provided without an explicit `status`, the
+request is transitioned to `appointed`.
+
+ */
+export interface RecordContractingDecisionBody {
+  /** @maxLength 64 */
+  writingNumber?: string;
+  status?: RecordContractingDecisionBodyStatus;
+  /** @maxLength 2000 */
+  notes?: string;
+}
+
+export interface RecordContractingDecisionResponse {
+  request: CarrierContractingRequest;
+  idempotent: boolean;
+}
+
+export type EnvelopeStatus =
+  (typeof EnvelopeStatus)[keyof typeof EnvelopeStatus];
+
+export const EnvelopeStatus = {
+  pending: "pending",
+  signed: "signed",
+  completed: "completed",
+  voided: "voided",
+} as const;
+
+export interface EnvelopeSigner {
+  /** @minLength 1 */
+  userId: string;
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
+  displayName: string;
+  /** @maxLength 200 */
+  email: string;
+}
+
+export interface EnvelopeConsentRecord {
+  consentText: string;
+  version: string;
+  acceptedAt: string;
+  /** @nullable */
+  ipAddress?: string | null;
+  /** @nullable */
+  userAgent?: string | null;
+}
+
+export interface Envelope {
+  envelopeId: string;
+  status: EnvelopeStatus;
+  carrierContractingRequestId: string;
+  /** Document id of the unsigned PDF the wizard previews before signing. */
+  pdfDocumentId: string;
+  signers: EnvelopeSigner[];
+  /** @nullable */
+  signedAt?: string | null;
+  /** @nullable */
+  signedPdfDocumentId?: string | null;
+  /** @nullable */
+  integritySha256?: string | null;
+  consentRecord?: EnvelopeConsentRecord | null;
+}
+
+export interface CreateEsignEnvelopeBody {
+  /** @minLength 1 */
+  pdfDocumentId: string;
+  /** @minLength 1 */
+  carrierContractingRequestId: string;
+  /**
+   * @minItems 1
+   * @maxItems 10
+   */
+  signers: EnvelopeSigner[];
+}
+
+export interface CreateEsignEnvelopeResponse {
+  envelopeId: string;
+  status: EnvelopeStatus;
+  signingUrl: string;
+}
+
+/**
+ * Server captures `req.ip` + `user-agent` itself; the frontend MUST NOT
+send these.
+
+ */
+export interface SignEnvelopeBody {
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
+  typedName: string;
+  /**
+   * @minLength 1
+   * @maxLength 200000
+   */
+  signatureSvg: string;
+  consentToElectronicBusiness: boolean;
+  intentToSign: boolean;
+}
+
+export interface SignEnvelopeResponse {
+  envelopeId: string;
+  status: EnvelopeStatus;
+  signedPdfDocumentId: string;
+  integritySha256: string;
+}
+
+export interface VoidEnvelopeBody {
+  /**
+   * @minLength 1
+   * @maxLength 500
+   */
+  reason: string;
+}
+
+export type VoidEnvelopeResponseStatus =
+  (typeof VoidEnvelopeResponseStatus)[keyof typeof VoidEnvelopeResponseStatus];
+
+export const VoidEnvelopeResponseStatus = {
+  voided: "voided",
+} as const;
+
+export interface VoidEnvelopeResponse {
+  envelopeId: string;
+  status: VoidEnvelopeResponseStatus;
+}
+
 export type GetUsersParams = {
   role?: string;
   isActive?: boolean;
@@ -2710,4 +3255,10 @@ export type UploadContactsImportBody = {
 export type ConfirmContactsImportBody = {
   file: Blob;
   mapping?: string;
+};
+
+export type ListOnboardingsParams = {
+  status?: string;
+  limit?: number;
+  offset?: number;
 };

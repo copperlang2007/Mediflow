@@ -1,139 +1,148 @@
 /**
- * Onboarding + carrier-contracting REST helpers + React Query hooks.
+ * Onboarding + carrier-contracting React Query hooks.
  *
- * The Day-1/2/3 routes (`/onboarding/*`) are not yet in
- * `lib/api-spec/openapi.yaml`, so we don't have generated hooks for them
- * yet (Day 7+ task — see TODO below). Until then we go through the same
- * `apiFetch` wrapper that `admin-compliance.tsx` uses; auth + base path
- * are handled by `apiFetch` already.
+ * The transport layer (fetchers, query keys, mutation options) is now
+ * generated from `lib/api-spec/openapi.yaml` (PR: openapi-regen). This file
+ * thin-wraps the generated hooks to:
  *
- * TODO(insureitall-day7): once the routes land in openapi.yaml, swap each
- * hook below to its generated equivalent + delete this file.
+ *   1. Preserve the public hook names that consumer pages + tests have
+ *      historically imported (e.g. `useOnboarding`, `useStartOnboarding`).
+ *   2. Layer on React Query cache invalidation + the "404 → null" swallow
+ *      that the wizard depends on (codegen doesn't model that behaviour).
+ *   3. Surface UI-only helpers (status-label maps, the `wizardStepForRun`
+ *      state machine) that are pure-TS utilities, not API calls.
+ *
+ * Anything that IS a clean swap to a generated hook is done here. Anything
+ * that is NOT auto-generated (label maps, state machine, query-key seed
+ * after `start`) stays in this file.
  */
-import { useQuery, useMutation, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
-import { apiFetch } from "@/lib/api";
+import {
+  useQuery,
+  useQueryClient,
+  type UseQueryOptions,
+} from "@tanstack/react-query";
+import {
+  useStartOnboarding as useStartOnboardingGenerated,
+  useListOnboardings,
+  useGetOnboarding,
+  usePatchOnboardingProfile as usePatchOnboardingProfileGenerated,
+  useSelectOnboardingCarriers,
+  useCancelOnboarding as useCancelOnboardingGenerated,
+  useRequestContracting as useRequestContractingGenerated,
+  useSignOnboardingCarrier,
+  useRecordCarrierContractingDecision,
+  useRecordPoaDecision as useRecordPoaDecisionGenerated,
+  useCreateEsignEnvelope,
+  useGetEsignEnvelope,
+  useSignEsignEnvelope,
+  getListOnboardingsQueryKey,
+  getGetOnboardingQueryKey,
+  getGetEsignEnvelopeQueryKey,
+  getOnboarding as getOnboardingFetcher,
+  getEsignEnvelope as getEsignEnvelopeFetcher,
+} from "@workspace/api-client-react";
+import type {
+  AgentOnboardingRun as GeneratedAgentOnboardingRun,
+  AgentContractingProfile as GeneratedAgentContractingProfile,
+  CarrierContractingRequest as GeneratedCarrierContractingRequest,
+  OnboardingDetail as GeneratedOnboardingDetail,
+  OnboardingListResponse as GeneratedOnboardingListResponse,
+  OnboardingStatus as GeneratedOnboardingStatus,
+  ContractingStatus as GeneratedContractingStatus,
+  PoaStatus as GeneratedPoaStatus,
+  EntityType as GeneratedEntityType,
+  PatchOnboardingProfileBody,
+  RecordContractingDecisionBody,
+  PoaDecisionBody,
+  PoaDecisionResponse,
+  Envelope as GeneratedEnvelope,
+  EnvelopeSigner as GeneratedEnvelopeSigner,
+  EnvelopeConsentRecord as GeneratedEnvelopeConsentRecord,
+  EnvelopeStatus as GeneratedEnvelopeStatus,
+  CreateEsignEnvelopeBody,
+  SignEnvelopeBody as GeneratedSignEnvelopeBody,
+  SignEnvelopeResponse as GeneratedSignEnvelopeResponse,
+} from "@workspace/api-client-react";
 
-// ---------- Shared types ----------------------------------------------------
+// ---------- Re-exported types ----------------------------------------------
+// Surface generated types under the historically-stable names so consumer
+// pages don't have to change their imports.
 
-export type OnboardingStatus =
-  | "draft"
-  | "profile_in_progress"
-  | "carriers_selected"
-  | "signing"
-  | "submitted"
-  | "complete"
-  | "cancelled"
-  | "rejected";
-
-export type ContractingStatus =
-  | "draft"
-  | "paperwork_generated"
-  | "signed"
-  | "submitted"
-  | "under_review"
-  | "appointed"
-  | "rejected"
-  | "cancelled";
-
-export type EntityType = "individual" | "llc" | "corp" | "partnership";
-
-export interface AgentOnboardingRun {
-  id: string;
-  orgId: string;
-  agentId: string;
-  startedByUserId: string | null;
-  status: OnboardingStatus;
-  completedSteps?: Record<string, boolean> | null;
-  startedAt: string;
-  completedAt: string | null;
-  updatedAt: string;
-}
-
-export interface AgentContractingProfile {
-  id?: string;
-  orgId: string;
-  agentId: string;
-  // SSN/EIN come back as either the formatted plaintext (privileged role
-  // OR self-on-own-record) or a fixed masked sentinel.
-  ssn: string | null;
-  ein: string | null;
-  dob: string | null;
-  homeAddressLine1: string | null;
-  homeAddressLine2: string | null;
-  homeCity: string | null;
-  homeState: string | null;
-  homeZip: string | null;
-  mailingSameAsHome: boolean | null;
-  mailingAddressLine1: string | null;
-  mailingAddressLine2: string | null;
-  mailingCity: string | null;
-  mailingState: string | null;
-  mailingZip: string | null;
-  phone: string | null;
-  email: string | null;
-  entityType: EntityType | null;
-  businessName: string | null;
-  eAndOCarrier: string | null;
-  eAndOPolicyNumber: string | null;
-  eAndOExpiresOn: string | null;
-  backgroundCheckAuthorized?: boolean | null;
-}
-
-export interface CarrierContractingRequest {
-  id: string;
-  orgId: string;
-  onboardingRunId: string;
-  agentId: string;
-  carrierId: string;
-  states: string[];
-  status: ContractingStatus;
-  paperworkDocumentId: string | null;
-  signatureCompletedAt: string | null;
-  writingNumber?: string | null;
-  lastStatusChangeAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
+export type OnboardingStatus = GeneratedOnboardingStatus;
+export type ContractingStatus = GeneratedContractingStatus;
+export type PoaStatus = GeneratedPoaStatus;
+export type EntityType = GeneratedEntityType;
+export type AgentOnboardingRun = GeneratedAgentOnboardingRun;
+export type AgentContractingProfile = GeneratedAgentContractingProfile;
+export type CarrierContractingRequest = GeneratedCarrierContractingRequest;
+// Tighter typing than the generated `OnboardingDetail` (which marks
+// `profile` as optional-and-nullable). `useOnboarding` normalises the field
+// to `null` so consumer code can rely on a non-undefined value.
 export interface OnboardingDetail {
-  run: AgentOnboardingRun;
-  profile: AgentContractingProfile | null;
-  carrierRequests: CarrierContractingRequest[];
+  run: GeneratedAgentOnboardingRun;
+  profile: GeneratedAgentContractingProfile | null;
+  carrierRequests: GeneratedCarrierContractingRequest[];
+}
+export type OnboardingListResponse = GeneratedOnboardingListResponse;
+export type EnvelopeStatus = GeneratedEnvelopeStatus;
+export type EnvelopeSigner = GeneratedEnvelopeSigner;
+export type EnvelopeConsentRecord = GeneratedEnvelopeConsentRecord;
+export type Envelope = GeneratedEnvelope;
+
+// ---------- Local-only types ------------------------------------------------
+
+export type ProfilePatch = PatchOnboardingProfileBody;
+export type CarrierSelection = { carrierId: string; states: string[] };
+
+export interface StartCarrierSignBody {
+  pdfDocumentId: string;
+  carrierContractingRequestId: string;
+  signers: EnvelopeSigner[];
 }
 
-export interface OnboardingListResponse {
-  data: AgentOnboardingRun[];
-  total: number;
-  limit: number;
-  offset: number;
+export interface StartCarrierSignResponse {
+  envelopeId: string;
+  status: EnvelopeStatus;
+  signingUrl: string;
 }
 
-// ---------- Query keys ------------------------------------------------------
+export interface SignEnvelopeBody extends GeneratedSignEnvelopeBody {
+  consentToElectronicBusiness: true;
+  intentToSign: true;
+}
 
-export const onboardingKeys = {
-  all: ["onboarding"] as const,
-  list: (params: { status?: string; limit?: number; offset?: number }) =>
-    ["onboarding", "list", params] as const,
-  detail: (agentId: string) => ["onboarding", "detail", agentId] as const,
-};
+export type SignEnvelopeResponse = GeneratedSignEnvelopeResponse;
+
+export interface RecordWritingNumberInput {
+  requestId: string;
+  writingNumber?: string;
+  status?: "appointed" | "rejected" | "submitted" | "under_review";
+  notes?: string;
+}
 
 // ---------- Hooks -----------------------------------------------------------
 
 /**
  * GET /onboarding/:agentId — current run, profile, carrier requests for an
- * agent. Returns `null` (via 404 swallow) when no active run exists, so
- * the UI can branch on "no onboarding in progress" without try/catch.
+ * agent. Returns `null` when no active run exists (the generated hook would
+ * throw on 404; the wizard depends on the swallow to branch on "no
+ * onboarding in progress").
  */
 export function useOnboarding(
   agentId: string | null | undefined,
   options?: Partial<UseQueryOptions<OnboardingDetail | null>>,
 ) {
   return useQuery<OnboardingDetail | null>({
-    queryKey: onboardingKeys.detail(agentId ?? ""),
+    queryKey: getGetOnboardingQueryKey(agentId ?? ""),
     enabled: Boolean(agentId) && options?.enabled !== false,
     queryFn: async () => {
       try {
-        return await apiFetch<OnboardingDetail>(`/api/onboarding/${agentId}`);
+        const data = await getOnboardingFetcher(agentId ?? "");
+        return {
+          run: data.run,
+          profile: data.profile ?? null,
+          carrierRequests: data.carrierRequests,
+        };
       } catch (err) {
         const e = err as { status?: number } | undefined;
         if (e?.status === 404) return null;
@@ -152,18 +161,10 @@ export function useOnboardingList(params: {
   enabled?: boolean;
 }) {
   const { enabled = true, ...rest } = params;
-  return useQuery<OnboardingListResponse>({
-    queryKey: onboardingKeys.list(rest),
-    enabled,
-    queryFn: async () => {
-      const sp = new URLSearchParams();
-      if (rest.status) sp.set("status", rest.status);
-      if (rest.limit != null) sp.set("limit", String(rest.limit));
-      if (rest.offset != null) sp.set("offset", String(rest.offset));
-      const q = sp.toString();
-      return apiFetch<OnboardingListResponse>(
-        `/api/onboarding${q ? `?${q}` : ""}`,
-      );
+  return useListOnboardings(rest, {
+    query: {
+      enabled,
+      queryKey: getListOnboardingsQueryKey(rest),
     },
   });
 }
@@ -171,129 +172,100 @@ export function useOnboardingList(params: {
 /** POST /onboarding/start — admin starts a run for an agent. Idempotent. */
 export function useStartOnboarding() {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: { agentId: string }) =>
-      apiFetch<{
-        run: AgentOnboardingRun;
-        profile: AgentContractingProfile | null;
-        idempotent: boolean;
-      }>(`/api/onboarding/start`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(vars),
-      }),
-    onSuccess: (data) => {
-      void qc.invalidateQueries({ queryKey: ["onboarding"] });
-      // Seed the detail query so the caller can immediately navigate to it.
-      qc.setQueryData(onboardingKeys.detail(data.run.agentId), {
-        run: data.run,
-        profile: data.profile,
-        carrierRequests: [],
-      } satisfies OnboardingDetail);
+  const mutation = useStartOnboardingGenerated({
+    mutation: {
+      onSuccess: (data) => {
+        void qc.invalidateQueries({ queryKey: ["/api/onboarding"] });
+        // Seed the detail query so the caller can immediately navigate to it.
+        qc.setQueryData(getGetOnboardingQueryKey(data.run.agentId), {
+          run: data.run,
+          profile: data.profile ?? null,
+          carrierRequests: [],
+        } satisfies OnboardingDetail);
+      },
     },
   });
+  return {
+    ...mutation,
+    mutateAsync: (vars: { agentId: string }) =>
+      mutation.mutateAsync({ data: { agentId: vars.agentId } }),
+    mutate: (vars: { agentId: string }) =>
+      mutation.mutate({ data: { agentId: vars.agentId } }),
+  };
 }
 
 /** PATCH /onboarding/:agentId/profile. */
-export type ProfilePatch = Partial<{
-  ssn: string | null;
-  dob: string | null;
-  homeAddressLine1: string | null;
-  homeAddressLine2: string | null;
-  homeCity: string | null;
-  homeState: string | null;
-  homeZip: string | null;
-  mailingSameAsHome: boolean;
-  mailingAddressLine1: string | null;
-  mailingAddressLine2: string | null;
-  mailingCity: string | null;
-  mailingState: string | null;
-  mailingZip: string | null;
-  phone: string | null;
-  email: string | null;
-  entityType: EntityType | null;
-  businessName: string | null;
-  businessEin: string | null;
-  eAndOCarrier: string | null;
-  eAndOPolicyNumber: string | null;
-  eAndOExpiresOn: string | null;
-}>;
-
 export function usePatchOnboardingProfile(agentId: string) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (patch: ProfilePatch) =>
-      apiFetch<{ profile: AgentContractingProfile }>(
-        `/api/onboarding/${agentId}/profile`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(patch),
-        },
-      ),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: onboardingKeys.detail(agentId) });
+  const mutation = usePatchOnboardingProfileGenerated({
+    mutation: {
+      onSuccess: () => {
+        void qc.invalidateQueries({ queryKey: getGetOnboardingQueryKey(agentId) });
+      },
     },
   });
+  return {
+    ...mutation,
+    mutateAsync: (patch: ProfilePatch) =>
+      mutation.mutateAsync({ agentId, data: patch }),
+    mutate: (patch: ProfilePatch) => mutation.mutate({ agentId, data: patch }),
+  };
 }
 
 /** POST /onboarding/:agentId/carriers/select. */
-export type CarrierSelection = { carrierId: string; states: string[] };
-
 export function useSelectCarriers(agentId: string) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: { selections: CarrierSelection[] }) =>
-      apiFetch<{ carrierRequests: CarrierContractingRequest[] }>(
-        `/api/onboarding/${agentId}/carriers/select`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(vars),
-        },
-      ),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: onboardingKeys.detail(agentId) });
-      void qc.invalidateQueries({ queryKey: ["onboarding", "list"] });
+  const mutation = useSelectOnboardingCarriers({
+    mutation: {
+      onSuccess: () => {
+        void qc.invalidateQueries({ queryKey: getGetOnboardingQueryKey(agentId) });
+        void qc.invalidateQueries({ queryKey: ["/api/onboarding"] });
+      },
     },
   });
+  return {
+    ...mutation,
+    mutateAsync: (vars: { selections: CarrierSelection[] }) =>
+      mutation.mutateAsync({ agentId, data: { selections: vars.selections } }),
+    mutate: (vars: { selections: CarrierSelection[] }) =>
+      mutation.mutate({ agentId, data: { selections: vars.selections } }),
+  };
 }
 
 /** POST /onboarding/:agentId/cancel. */
 export function useCancelOnboarding(agentId: string) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async () =>
-      apiFetch<{ run: AgentOnboardingRun }>(
-        `/api/onboarding/${agentId}/cancel`,
-        { method: "POST" },
-      ),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: onboardingKeys.detail(agentId) });
-      void qc.invalidateQueries({ queryKey: ["onboarding", "list"] });
+  const mutation = useCancelOnboardingGenerated({
+    mutation: {
+      onSuccess: () => {
+        void qc.invalidateQueries({ queryKey: getGetOnboardingQueryKey(agentId) });
+        void qc.invalidateQueries({ queryKey: ["/api/onboarding"] });
+      },
     },
   });
+  return {
+    ...mutation,
+    mutateAsync: () => mutation.mutateAsync({ agentId }),
+    mutate: () => mutation.mutate({ agentId }),
+  };
 }
 
 /** POST /onboarding/:agentId/request-contracting (admin). */
 export function useRequestContracting(agentId: string) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async () =>
-      apiFetch<{
-        run: AgentOnboardingRun;
-        paperworkGenerated: number;
-        signTasks: Array<{ requestId: string; taskId: string }>;
-      }>(`/api/onboarding/${agentId}/request-contracting`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: onboardingKeys.detail(agentId) });
-      void qc.invalidateQueries({ queryKey: ["onboarding", "list"] });
+  const mutation = useRequestContractingGenerated({
+    mutation: {
+      onSuccess: () => {
+        void qc.invalidateQueries({ queryKey: getGetOnboardingQueryKey(agentId) });
+        void qc.invalidateQueries({ queryKey: ["/api/onboarding"] });
+      },
     },
   });
+  return {
+    ...mutation,
+    mutateAsync: () => mutation.mutateAsync({ agentId }),
+    mutate: () => mutation.mutate({ agentId }),
+  };
 }
 
 /**
@@ -305,89 +277,46 @@ export function useRequestContracting(agentId: string) {
  */
 export function useSignCarrier(agentId: string) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: { carrierId: string }) =>
-      apiFetch<{
-        request: CarrierContractingRequest;
-        submitTaskId: string;
-        idempotent: boolean;
-      }>(
-        `/api/onboarding/${agentId}/carriers/${vars.carrierId}/sign`,
-        { method: "POST" },
-      ),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: onboardingKeys.detail(agentId) });
+  const mutation = useSignOnboardingCarrier({
+    mutation: {
+      onSuccess: () => {
+        void qc.invalidateQueries({ queryKey: getGetOnboardingQueryKey(agentId) });
+      },
     },
   });
+  return {
+    ...mutation,
+    mutateAsync: (vars: { carrierId: string }) =>
+      mutation.mutateAsync({ agentId, requestId: vars.carrierId }),
+    mutate: (vars: { carrierId: string }) =>
+      mutation.mutate({ agentId, requestId: vars.carrierId }),
+  };
 }
 
 // ---------- E-Sign (Beta) ---------------------------------------------------
 
-export type EnvelopeStatus = "pending" | "signed" | "completed" | "voided";
-
-export interface EnvelopeSigner {
-  userId: string;
-  displayName: string;
-  email: string;
-}
-
-export interface EnvelopeConsentRecord {
-  consentText: string;
-  version: string;
-  acceptedAt: string;
-  ipAddress: string | null;
-  userAgent: string | null;
-}
-
-export interface Envelope {
-  envelopeId: string;
-  status: EnvelopeStatus;
-  carrierContractingRequestId: string;
-  pdfDocumentId: string;
-  signers: EnvelopeSigner[];
-  signedAt: string | null;
-  signedPdfDocumentId: string | null;
-  integritySha256: string | null;
-  consentRecord: EnvelopeConsentRecord | null;
-}
-
-export const esignKeys = {
-  all: ["esign"] as const,
-  envelope: (envelopeId: string) => ["esign", "envelope", envelopeId] as const,
-};
-
-export interface StartCarrierSignBody {
-  pdfDocumentId: string;
-  carrierContractingRequestId: string;
-  signers: EnvelopeSigner[];
-}
-
-export interface StartCarrierSignResponse {
-  envelopeId: string;
-  status: "pending";
-  signingUrl: string;
-}
-
 /**
  * POST /esign/envelopes — create a signing envelope for a carrier contracting
- * request. Returns the envelopeId + signing URL that the wizard should
- * navigate the agent to.
+ * request. Returns the envelopeId + signing URL the wizard navigates to.
  */
 export function useStartCarrierSign(agentId: string, _requestId?: string) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: StartCarrierSignBody) =>
-      apiFetch<StartCarrierSignResponse>(`/api/esign/envelopes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(vars),
-      }),
-    onSuccess: () => {
-      // Invalidate so the wizard reflects any status side-effects when the
-      // user comes back after signing.
-      void qc.invalidateQueries({ queryKey: onboardingKeys.detail(agentId) });
+  const mutation = useCreateEsignEnvelope({
+    mutation: {
+      onSuccess: () => {
+        void qc.invalidateQueries({ queryKey: getGetOnboardingQueryKey(agentId) });
+      },
     },
   });
+  return {
+    ...mutation,
+    mutateAsync: (vars: StartCarrierSignBody) =>
+      mutation.mutateAsync({
+        data: vars satisfies CreateEsignEnvelopeBody,
+      }),
+    mutate: (vars: StartCarrierSignBody) =>
+      mutation.mutate({ data: vars satisfies CreateEsignEnvelopeBody }),
+  };
 }
 
 /** GET /esign/envelopes/:envelopeId. */
@@ -396,47 +325,69 @@ export function useEnvelope(
   options?: Partial<UseQueryOptions<Envelope>>,
 ) {
   return useQuery<Envelope>({
-    queryKey: esignKeys.envelope(envelopeId ?? ""),
+    queryKey: getGetEsignEnvelopeQueryKey(envelopeId ?? ""),
     enabled: Boolean(envelopeId) && options?.enabled !== false,
-    queryFn: async () =>
-      apiFetch<Envelope>(`/api/esign/envelopes/${envelopeId}`),
+    queryFn: async () => getEsignEnvelopeFetcher(envelopeId ?? ""),
     ...options,
   });
-}
-
-export interface SignEnvelopeBody {
-  typedName: string;
-  signatureSvg: string;
-  consentToElectronicBusiness: true;
-  intentToSign: true;
-}
-
-export interface SignEnvelopeResponse {
-  envelopeId: string;
-  status: "completed";
-  signedPdfDocumentId: string;
-  integritySha256: string;
 }
 
 /** POST /esign/envelopes/:envelopeId/sign. */
 export function useSignEnvelope(envelopeId: string) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: SignEnvelopeBody) =>
-      apiFetch<SignEnvelopeResponse>(
-        `/api/esign/envelopes/${envelopeId}/sign`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(vars),
-        },
-      ),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: esignKeys.envelope(envelopeId) });
-      void qc.invalidateQueries({ queryKey: ["onboarding"] });
+  const mutation = useSignEsignEnvelope({
+    mutation: {
+      onSuccess: () => {
+        void qc.invalidateQueries({ queryKey: getGetEsignEnvelopeQueryKey(envelopeId) });
+        void qc.invalidateQueries({ queryKey: ["/api/onboarding"] });
+      },
     },
   });
+  return {
+    ...mutation,
+    mutateAsync: (vars: SignEnvelopeBody) =>
+      mutation.mutateAsync({ envelopeId, data: vars }),
+    mutate: (vars: SignEnvelopeBody) =>
+      mutation.mutate({ envelopeId, data: vars }),
+  };
 }
+
+/**
+ * POST /onboarding/:agentId/poa-decision (Phase 1.5)
+ *
+ * Returns one of:
+ *   - `{ poaStatus: "pending", envelopeId, signingUrl }` for `accepted: true`
+ *   - `{ poaStatus: "opted_out", transitioned }` for `accepted: false`
+ *
+ * The wizard navigates to `signingUrl` on accept, or to the post-decline
+ * confirmation view.
+ */
+export function usePoaDecision(agentId: string) {
+  const qc = useQueryClient();
+  const mutation = useRecordPoaDecisionGenerated({
+    mutation: {
+      onSuccess: () => {
+        void qc.invalidateQueries({ queryKey: getGetOnboardingQueryKey(agentId) });
+        void qc.invalidateQueries({ queryKey: ["/api/onboarding"] });
+      },
+    },
+  });
+  return {
+    ...mutation,
+    mutateAsync: (vars: { accepted: boolean }) =>
+      mutation.mutateAsync({
+        agentId,
+        data: { accepted: vars.accepted } satisfies PoaDecisionBody,
+      }),
+    mutate: (vars: { accepted: boolean }) =>
+      mutation.mutate({
+        agentId,
+        data: { accepted: vars.accepted } satisfies PoaDecisionBody,
+      }),
+  };
+}
+
+export type { PoaDecisionResponse };
 
 /**
  * PATCH /admin/contracting/:requestId (admin/compliance)
@@ -450,38 +401,38 @@ export function useSignEnvelope(envelopeId: string) {
  * The hook invalidates the onboarding detail query on success so the
  * detail page refetches and shows the new writing number + status badge.
  * When the LAST outstanding carrier request flips to `appointed` the
- * backend rolls the onboarding run → `complete` — the detail-page header
- * badge updates naturally via the same refetch.
+ * backend rolls the onboarding run → `complete`.
  */
-export interface RecordWritingNumberInput {
-  requestId: string;
-  writingNumber?: string;
-  status?: "appointed" | "rejected" | "submitted" | "under_review";
-  notes?: string;
-}
-
 export function useRecordWritingNumber(agentId: string) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: RecordWritingNumberInput) => {
-      const { requestId, ...body } = vars;
-      return apiFetch<{
-        request: CarrierContractingRequest;
-        idempotent: boolean;
-      }>(`/api/admin/contracting/${requestId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    },
-    onSuccess: () => {
-      // Refetch both the agent's detail (run/profile/requests) AND the
-      // admin list — the list shows aggregate status badges that flip
-      // when a run completes.
-      void qc.invalidateQueries({ queryKey: onboardingKeys.detail(agentId) });
-      void qc.invalidateQueries({ queryKey: ["onboarding", "list"] });
+  const mutation = useRecordCarrierContractingDecision({
+    mutation: {
+      onSuccess: () => {
+        // Refetch both the agent's detail (run/profile/requests) AND the
+        // admin list — the list shows aggregate status badges that flip
+        // when a run completes.
+        void qc.invalidateQueries({ queryKey: getGetOnboardingQueryKey(agentId) });
+        void qc.invalidateQueries({ queryKey: ["/api/onboarding"] });
+      },
     },
   });
+  return {
+    ...mutation,
+    mutateAsync: (vars: RecordWritingNumberInput) => {
+      const { requestId, ...body } = vars;
+      return mutation.mutateAsync({
+        requestId,
+        data: body satisfies RecordContractingDecisionBody,
+      });
+    },
+    mutate: (vars: RecordWritingNumberInput) => {
+      const { requestId, ...body } = vars;
+      return mutation.mutate({
+        requestId,
+        data: body satisfies RecordContractingDecisionBody,
+      });
+    },
+  };
 }
 
 // ---------- Helpers ---------------------------------------------------------
@@ -510,7 +461,21 @@ const CONTRACTING_LABELS: Record<ContractingStatus, string> = {
   appointed: "Appointed",
   rejected: "Rejected",
   cancelled: "Cancelled",
+  awaiting_admin_submission: "Awaiting submission",
+  invite_requested: "Invite requested",
 };
+
+const POA_LABELS: Record<PoaStatus, string> = {
+  not_applicable: "Not yet decided",
+  pending: "POA pending signature",
+  signed: "POA signed",
+  opted_out: "Opted out",
+};
+
+export function poaStatusLabel(s: PoaStatus | string | null | undefined): string {
+  if (!s) return POA_LABELS.not_applicable;
+  return POA_LABELS[s as PoaStatus] ?? s;
+}
 
 export function contractingStatusLabel(s: ContractingStatus | string): string {
   return CONTRACTING_LABELS[s as ContractingStatus] ?? s;
@@ -526,6 +491,7 @@ export type WizardStep =
   | "profile"
   | "carriers"
   | "review"
+  | "poa"
   | "signing"
   | "done";
 
@@ -535,13 +501,35 @@ export function wizardStepForRun(
 ): WizardStep {
   if (run.status === "complete") return "done";
   if (run.status === "submitted") return "done";
-  if (run.status === "signing") return "signing";
+
+  // Phase 1.5 POA branch — when the run has reached a decision, route
+  // to the right view regardless of the underlying onboarding status.
+  if (run.poaStatus === "opted_out") return "done";
+  if (run.poaStatus === "signed") return "done";
+
+  if (run.status === "signing") {
+    // POA flow: agent should be on the POA step until they sign;
+    // legacy per-carrier flow: agent should be on the per-carrier
+    // signing step.
+    if (run.poaStatus === "pending") return "poa";
+    if (run.poaStatus === "not_applicable") return "signing";
+    return "poa";
+  }
   if (run.status === "carriers_selected") {
-    // If any paperwork has been generated already, jump to signing.
-    if (carrierRequests.some((r) => r.status !== "draft" && r.status !== "cancelled")) {
+    // Phase 1.5: with carriers selected, the natural next step is the POA
+    // decision. If carrier requests have any non-draft status (legacy
+    // per-carrier flow), keep the old behaviour.
+    if (
+      carrierRequests.some(
+        (r) =>
+          r.status === "paperwork_generated" ||
+          r.status === "signed" ||
+          r.status === "submitted",
+      )
+    ) {
       return "signing";
     }
-    return "review";
+    return "poa";
   }
   if (run.status === "profile_in_progress") {
     if (carrierRequests.length > 0) return "review";

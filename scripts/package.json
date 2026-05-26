@@ -9,6 +9,7 @@
   "scripts": {
     "hello": "tsx ./src/hello.ts",
     "backfill:payout-contributions": "tsx ./src/backfill-payout-contributions.ts",
+    "seed:demo": "tsx ./src/seed-demo.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

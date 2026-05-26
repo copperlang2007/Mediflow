@@ -5,7 +5,8 @@ import { useGetCarriers, useGetMe } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, Clock, PenTool } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { CheckCircle2, Clock, Inbox, PenTool } from "lucide-react";
 import {
   type CarrierContractingRequest,
   contractingStatusLabel,
@@ -29,7 +30,7 @@ export function SigningStep({
   carrierRequests: CarrierContractingRequest[];
   onContinue: () => void;
 }) {
-  const { data: carriers } = useGetCarriers();
+  const { data: carriers, isLoading: carriersLoading } = useGetCarriers();
   const { data: me } = useGetMe();
   const [, setLocation] = useLocation();
   const carrierName = useMemo(() => {
@@ -78,12 +79,40 @@ export function SigningStep({
     }
   };
 
+  // Show a layout-matching skeleton while we wait on the carrier list. The
+  // step parent has already resolved by this point — this is the tail call
+  // on the carriers fetch.
+  if (carriersLoading && !carriers) {
+    return (
+      <Card data-testid="signing-step-skeleton">
+        <CardHeader>
+          <Skeleton className="h-5 w-48" />
+          <Skeleton className="h-3 w-72 mt-2" />
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {[...Array(3)].map((_, i) => (
+            <Skeleton key={i} className="h-14 w-full rounded-lg" />
+          ))}
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (active.length === 0) {
+    // Friendly empty state — replaces a blank card. Says exactly what
+    // happens next so the agent isn't left wondering whether something broke.
     return (
       <Card data-testid="signing-step">
-        <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          No carrier paperwork has been generated yet. An administrator will
-          create the packets after reviewing your selections.
+        <CardContent className="py-10 px-4 sm:px-6 text-center space-y-3">
+          <Inbox className="h-10 w-10 text-muted-foreground mx-auto" />
+          <div>
+            <p className="text-sm font-medium">Nothing to sign yet</p>
+            <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+              Your admin will review your carrier selections and request
+              contracting. You'll get a notification when paperwork is ready
+              to sign.
+            </p>
+          </div>
         </CardContent>
       </Card>
     );

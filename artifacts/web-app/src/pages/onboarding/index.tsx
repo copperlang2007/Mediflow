@@ -25,6 +25,7 @@ import { WelcomeStep } from "./steps/WelcomeStep";
 import { ProfileStep } from "./steps/ProfileStep";
 import { CarriersStep } from "./steps/CarriersStep";
 import { ReviewStep } from "./steps/ReviewStep";
+import { PoaDecisionStep } from "./steps/PoaDecisionStep";
 import { SigningStep } from "./steps/SigningStep";
 import { DoneStep } from "./steps/DoneStep";
 
@@ -33,6 +34,7 @@ const STEP_ORDER: WizardStep[] = [
   "profile",
   "carriers",
   "review",
+  "poa",
   "signing",
   "done",
 ];
@@ -42,6 +44,7 @@ const STEP_LABEL: Record<WizardStep, string> = {
   profile: "Your profile",
   carriers: "Carriers",
   review: "Review",
+  poa: "Authorize",
   signing: "Sign",
   done: "Done",
 };
@@ -108,10 +111,23 @@ export default function OnboardingPage() {
     stepOverride ?? naturalStep ?? "welcome";
 
   if (meLoading || agentsLoading || obLoading) {
+    // Skeleton mirrors the real layout (header + progress pills + step card)
+    // so the page shape stops jumping when data lands.
     return (
-      <div className="p-6 space-y-4 max-w-3xl mx-auto">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-40 w-full" />
+      <div
+        className="p-4 sm:p-6 space-y-6 max-w-4xl mx-auto"
+        data-testid="onboarding-loading"
+      >
+        <div className="space-y-2">
+          <Skeleton className="h-7 w-3/4 sm:w-64" />
+          <Skeleton className="h-4 w-1/2 sm:w-48" />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {[...Array(STEP_ORDER.length)].map((_, i) => (
+            <Skeleton key={i} className="h-7 w-24" />
+          ))}
+        </div>
+        <Skeleton className="h-48 w-full rounded-lg" />
       </div>
     );
   }
@@ -174,7 +190,7 @@ export default function OnboardingPage() {
   const stepIndex = STEP_ORDER.indexOf(activeStep);
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-6">
       <header className="space-y-1">
         <h1 className="text-2xl font-bold">Carrier contracting onboarding</h1>
         <p className="text-sm text-muted-foreground">
@@ -240,7 +256,14 @@ export default function OnboardingPage() {
             profile={onboarding.profile}
             carrierRequests={onboarding.carrierRequests}
             onBack={() => setStepOverride("carriers")}
-            onContinue={() => setStepOverride("signing")}
+            onContinue={() => setStepOverride("poa")}
+          />
+        )}
+        {activeStep === "poa" && (
+          <PoaDecisionStep
+            agentId={myAgent.id}
+            carrierRequests={onboarding.carrierRequests}
+            onContinue={() => setStepOverride("done")}
           />
         )}
         {activeStep === "signing" && (

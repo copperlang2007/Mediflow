@@ -42,8 +42,33 @@ export const CONTRACTING_STATUSES = [
   "appointed",
   "rejected",
   "cancelled",
+  // Phase 1.5 POA pivot. `awaiting_admin_submission` is reached when the
+  // agent signs the run-wide POA — INSUREitALL admins handle the off-system
+  // carrier submissions and flip each row to `submitted` manually.
+  // `invite_requested` is reached when the agent OPTS OUT of the POA — the
+  // email-out worker sends a "please email the agent a contracting invite"
+  // request to each carrier's appointment desk, and the admin flips each
+  // row to `submitted` once the agent confirms they've completed the
+  // carrier's web flow.
+  "awaiting_admin_submission",
+  "invite_requested",
 ] as const;
 export type ContractingStatus = (typeof CONTRACTING_STATUSES)[number];
+
+// Phase 1.5 POA pivot — string-enum tracked on `agent_onboarding_runs.poa_status`.
+// Not enforced by a DB enum; the column is plain text and this module is
+// the source of truth.
+export const POA_STATUSES = [
+  "not_applicable",
+  "pending",
+  "signed",
+  "opted_out",
+] as const;
+export type PoaStatus = (typeof POA_STATUSES)[number];
+
+export function isPoaStatus(s: string): s is PoaStatus {
+  return (POA_STATUSES as readonly string[]).includes(s);
+}
 
 // ---- Transition tables ------------------------------------------------------
 
@@ -85,7 +110,16 @@ const ONBOARDING_TRANSITIONS: Record<OnboardingStatus, ReadonlySet<OnboardingSta
  * polling. `cancelled` is again reachable from anywhere non-terminal.
  */
 const CONTRACTING_TRANSITIONS: Record<ContractingStatus, ReadonlySet<ContractingStatus>> = {
-  draft: new Set(["paperwork_generated", "cancelled"]),
+  // `draft` can now branch three ways:
+  //   - `paperwork_generated`         legacy per-carrier signing flow
+  //   - `awaiting_admin_submission`   Phase 1.5 POA path
+  //   - `invite_requested`            Phase 1.5 opt-out path
+  draft: new Set([
+    "paperwork_generated",
+    "awaiting_admin_submission",
+    "invite_requested",
+    "cancelled",
+  ]),
   paperwork_generated: new Set(["signed", "draft", "cancelled"]),
   signed: new Set(["submitted", "cancelled"]),
   submitted: new Set(["under_review", "appointed", "rejected", "cancelled"]),
@@ -93,6 +127,14 @@ const CONTRACTING_TRANSITIONS: Record<ContractingStatus, ReadonlySet<Contracting
   appointed: new Set([]),
   rejected: new Set(["draft", "cancelled"]),
   cancelled: new Set([]),
+  // POA path: admin submits off-system, marks the row `submitted` once
+  // they've handed it off to the carrier. From there the existing
+  // submitted → under_review/appointed/rejected branches drive the rest.
+  awaiting_admin_submission: new Set(["submitted", "cancelled"]),
+  // Opt-out path: admin records carrier-confirmed completion as
+  // `submitted` once the agent verifies they've finished the carrier's
+  // own web flow.
+  invite_requested: new Set(["submitted", "cancelled"]),
 };
 
 // ---- Public predicates ------------------------------------------------------

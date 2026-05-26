@@ -94,16 +94,20 @@ describe("wizardStepForRun", () => {
     ).toBe("review");
   });
 
-  it("returns 'review' when carriers_selected without paperwork yet", () => {
+  it("returns 'poa' when carriers_selected without paperwork yet (Phase 1.5)", () => {
+    // After the Phase 1.5 pivot, the natural next step after carrier
+    // selection is the POA decision rather than per-carrier sign.
     expect(
       wizardStepForRun(
         mkRun({ status: "carriers_selected" }),
         [mkRequest({ status: "draft" })],
       ),
-    ).toBe("review");
+    ).toBe("poa");
   });
 
-  it("returns 'signing' when carriers_selected and paperwork has been generated", () => {
+  it("returns 'signing' when carriers_selected and per-carrier paperwork has been generated (legacy)", () => {
+    // Legacy per-carrier flow: paperwork already generated → still
+    // surface the per-carrier signing step rather than the new POA step.
     expect(
       wizardStepForRun(
         mkRun({ status: "carriers_selected" }),
@@ -112,13 +116,40 @@ describe("wizardStepForRun", () => {
     ).toBe("signing");
   });
 
-  it("returns 'signing' for an actively-signing run", () => {
+  it("returns 'signing' for a legacy actively-signing run (poa_status not_applicable)", () => {
     expect(
       wizardStepForRun(
-        mkRun({ status: "signing" }),
+        mkRun({ status: "signing", poaStatus: "not_applicable" }),
         [mkRequest({ status: "paperwork_generated" })],
       ),
     ).toBe("signing");
+  });
+
+  it("returns 'poa' for a signing run whose POA is still pending (Phase 1.5)", () => {
+    expect(
+      wizardStepForRun(
+        mkRun({ status: "signing", poaStatus: "pending" }),
+        [mkRequest({ status: "draft" })],
+      ),
+    ).toBe("poa");
+  });
+
+  it("returns 'done' for a run whose POA was signed", () => {
+    expect(
+      wizardStepForRun(
+        mkRun({ status: "signing", poaStatus: "signed" }),
+        [mkRequest({ status: "awaiting_admin_submission" })],
+      ),
+    ).toBe("done");
+  });
+
+  it("returns 'done' for an opted-out run", () => {
+    expect(
+      wizardStepForRun(
+        mkRun({ status: "signing", poaStatus: "opted_out" }),
+        [mkRequest({ status: "invite_requested" })],
+      ),
+    ).toBe("done");
   });
 
   it("returns 'done' for a submitted run", () => {
@@ -133,15 +164,14 @@ describe("wizardStepForRun", () => {
     ).toBe("done");
   });
 
-  it("ignores cancelled carrier requests when deciding the signing step", () => {
-    // Only a cancelled request → fallback to 'review' on carriers_selected.
+  it("ignores cancelled carrier requests when deciding the next step (Phase 1.5: → 'poa')", () => {
+    // Only a cancelled request → fallback to 'poa' on carriers_selected
+    // since the new natural next step after selection is the POA decision.
     expect(
       wizardStepForRun(
         mkRun({ status: "carriers_selected" }),
         [mkRequest({ status: "cancelled" })],
       ),
-      // Note: the function currently uses ".some(r => r.status !== 'draft' && r.status !== 'cancelled')"
-      // so a sole cancelled request shouldn't trigger 'signing'.
-    ).toBe("review");
+    ).toBe("poa");
   });
 });

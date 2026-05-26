@@ -20,13 +20,15 @@
  * Idempotent: if the request is already past `signed`, this is a no-op
  * (the state-machine same-status check + task close gating handle that).
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import {
   db,
   agentOnboardingRunsTable,
+  agentsTable,
   carrierContractingRequestsTable,
   carriersTable,
   notificationsTable,
+  taskInstancesTable,
   type CarrierContractingRequest,
   type AgentOnboardingRun,
 } from "@workspace/db";
@@ -35,6 +37,10 @@ import {
   closeContractingTask,
   createCarrierSubmitTask,
   adminReviewTaskKey,
+  poaDecisionTaskKey,
+  adminPoaSubmitTaskKey,
+  adminOptOutTrackTaskKey,
+  agentDisplayName,
 } from "../../workers/contractingTasks";
 import {
   canTransitionContracting,
@@ -45,6 +51,7 @@ import {
 } from "../../workers/contractingStateMachine";
 import { enqueue, JOB_NAMES } from "../jobs";
 import { logger } from "../logger";
+import { readPoaConfig } from "../contractingPdf/poaTemplate";
 import { randomUUID } from "node:crypto";
 
 /**
@@ -262,6 +269,158 @@ export async function maybeAdvanceRunForRequests(
   if (allSubmitted && run.status === "signing") {
     await applyOnboardingTransition(run, orgId, "signing", "submitted");
   }
+}
+
+// ---- POA path (Phase 1.5) --------------------------------------------------
+
+/**
+ * Apply the run-wide state changes that fire when the agent signs the POA
+ * envelope:
+ *
+ *   1. Mark `agent_onboarding_runs.poa_status = signed`, set `poa_expires_at`.
+ *   2. Transition every `carrier_contracting_request` on the run from `draft`
+ *      → `awaiting_admin_submission`. Requests already past `draft` are left
+ *      alone — they're either cancelled or in some other flow (legacy /
+ *      manually edited).
+ *   3. Close the agent's "Decide POA" task (idempotent).
+ *   4. Create a single admin task: "Submit contracts for {agent}".
+ *
+ * Org-scoped + idempotent. Re-completion of the same envelope (e.g. after a
+ * pg-boss redelivery) is a no-op for all four steps.
+ */
+export async function completePoaSigningTransition(
+  orgId: string,
+  onboardingRunId: string,
+): Promise<{ run: AgentOnboardingRun | null; transitioned: number }> {
+  const [run] = await db
+    .select()
+    .from(agentOnboardingRunsTable)
+    .where(
+      and(
+        eq(agentOnboardingRunsTable.id, onboardingRunId),
+        eq(agentOnboardingRunsTable.orgId, orgId),
+      ),
+    )
+    .limit(1);
+  if (!run) return { run: null, transitioned: 0 };
+
+  // Idempotent fast path. Once the run is in `poa_status = signed` we still
+  // want to ensure the admin submission task exists (in case a prior call
+  // crashed between status update + task create), but we don't rewrite the
+  // expiry timestamp.
+  const alreadySigned = run.poaStatus === "signed";
+
+  let updatedRun: AgentOnboardingRun = run;
+  if (!alreadySigned) {
+    const { daysToExpire } = readPoaConfig();
+    const expiresAt = new Date(Date.now() + daysToExpire * 24 * 60 * 60 * 1000);
+    const [next] = await db
+      .update(agentOnboardingRunsTable)
+      .set({
+        poaStatus: "signed",
+        poaExpiresAt: expiresAt,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(agentOnboardingRunsTable.id, onboardingRunId),
+          eq(agentOnboardingRunsTable.orgId, orgId),
+        ),
+      )
+      .returning();
+    if (next) updatedRun = next;
+  }
+
+  // Transition every draft carrier request on the run → awaiting_admin_submission.
+  const requests = await db
+    .select()
+    .from(carrierContractingRequestsTable)
+    .where(
+      and(
+        eq(carrierContractingRequestsTable.onboardingRunId, onboardingRunId),
+        eq(carrierContractingRequestsTable.orgId, orgId),
+      ),
+    );
+
+  let transitioned = 0;
+  for (const r of requests) {
+    if (r.status !== "draft") continue;
+    if (!canTransitionContracting(r.status as ContractingStatus, "awaiting_admin_submission")) {
+      continue;
+    }
+    const now = new Date();
+    const [updated] = await db
+      .update(carrierContractingRequestsTable)
+      .set({
+        status: "awaiting_admin_submission",
+        lastStatusChangeAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(carrierContractingRequestsTable.id, r.id),
+          eq(carrierContractingRequestsTable.orgId, orgId),
+          eq(carrierContractingRequestsTable.status, "draft"),
+        ),
+      )
+      .returning();
+    if (updated) transitioned += 1;
+  }
+
+  // Advance the run: carriers_selected → signing. Same-status no-op safe
+  // (the state machine allows same-state writes). Failure here is
+  // logged-and-skipped — the carrier-request transitions above already
+  // succeeded and that's the source-of-truth.
+  await applyOnboardingTransition(
+    updatedRun,
+    orgId,
+    "carriers_selected",
+    "signing",
+  );
+
+  // Close the agent's POA decision task (if any).
+  await closeContractingTask(orgId, poaDecisionTaskKey(onboardingRunId));
+
+  // Look up agent name for the admin task title.
+  const [agent] = await db
+    .select({
+      id: agentsTable.id,
+      firstName: agentsTable.firstName,
+      lastName: agentsTable.lastName,
+      userId: agentsTable.userId,
+    })
+    .from(agentsTable)
+    .where(eq(agentsTable.id, updatedRun.agentId))
+    .limit(1);
+
+  // Create the admin "submit contracts" task — keyed off the run so a
+  // re-completion collapses into the existing row.
+  await db
+    .insert(taskInstancesTable)
+    .values({
+      id: randomUUID(),
+      orgId,
+      agentId: updatedRun.agentId,
+      title: agent
+        ? `Submit contracts for ${agentDisplayName(agent)} to selected carriers (POA-authorized)`
+        : "Submit contracts for agent to selected carriers (POA-authorized)",
+      description:
+        "The agent has signed the run-wide Power of Attorney. Submit each carrier's contracting application off-system (carrier portal / appointment-desk email) and mark each carrier request as submitted via the admin dashboard.",
+      status: "open",
+      priority: "high",
+      assignedToUserId: updatedRun.startedByUserId ?? null,
+      createdBy: null,
+      contractingTaskKey: adminPoaSubmitTaskKey(onboardingRunId),
+    })
+    .onConflictDoNothing({
+      target: [
+        taskInstancesTable.orgId,
+        taskInstancesTable.contractingTaskKey,
+      ],
+      where: isNotNull(taskInstancesTable.contractingTaskKey),
+    });
+
+  return { run: updatedRun, transitioned };
 }
 
 async function applyOnboardingTransition(

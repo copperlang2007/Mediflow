@@ -252,6 +252,11 @@ describe("SignPage", () => {
     expect(body).not.toHaveProperty("ipAddress");
     expect(body).not.toHaveProperty("userAgent");
 
+    // Integrity hash now lives behind a <details> disclosure so it doesn't
+    // dominate the confirmation copy. The element is still in the DOM
+    // (jsdom doesn't gate `display` on `<details>` content), so we can
+    // assert against it directly.
+    expect(screen.getByTestId("integrity-hash-trigger")).toBeInTheDocument();
     expect(screen.getByTestId("integrity-hash").textContent).toBe(
       "abc123def456",
     );
@@ -311,6 +316,7 @@ describe("SignPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("sign-confirmation")).toBeInTheDocument();
     });
+    expect(screen.getByTestId("integrity-hash-trigger")).toBeInTheDocument();
     expect(screen.getByTestId("integrity-hash").textContent).toBe(
       "preexisting-hash",
     );

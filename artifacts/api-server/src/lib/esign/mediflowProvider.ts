@@ -1,22 +1,30 @@
 /**
  * Mediflow native e-signature provider (Beta).
  *
- * PHASE 3 HARDENING — not yet implemented in this Beta provider:
- *   - PKI signing of the final PDF with an org-owned certificate (true
- *     tamper-evident sealing per ESIGN §101(g))
- *   - Knowledge-based authentication (KBA) — DOB / SSN-last-4 / OFAC-style
- *     identity proofing before the signer can sign
- *   - Voice + SMS verification (multi-channel identity binding)
- *   - Long-term-validation (LTV) timestamp authority for documents
- *     intended to outlive the signing certificate
- *   - Certificate-of-completion email delivery to every party with a
- *     hosted-link copy of the signed PDF
- *   - PDF-level anti-tamper stamping beyond the SHA-256 hash + the
- *     audit-trail certificate page
+ * PHASE 3 HARDENING — status:
+ *   Shipped:
+ *     - DB-level append-only enforcement on `esign_signing_events`
+ *       (BEFORE UPDATE / BEFORE DELETE triggers, migration 0022) so the
+ *       audit trail cannot be tampered with even by application code.
+ *     - Certificate-of-completion email delivery: each signer with a
+ *       non-empty email receives the signed PDF + integrity hash after
+ *       envelope completion. Fire-and-forget — failures are logged +
+ *       captured to Sentry but never fail the signing flow.
+ *   Still pending (shipping in dedicated post-demo PRs):
+ *     - PKI signing of the final PDF with an org-owned certificate (true
+ *       tamper-evident sealing per ESIGN §101(g))
+ *     - Knowledge-based authentication (KBA) — DOB / SSN-last-4 / OFAC-style
+ *       identity proofing before the signer can sign
+ *     - Voice + SMS verification (multi-channel identity binding)
+ *     - Long-term-validation (LTV) timestamp authority for documents
+ *       intended to outlive the signing certificate
+ *     - PDF-level anti-tamper stamping beyond the SHA-256 hash + the
+ *       audit-trail certificate page
  *
  * Today's tamper-evidence story is the `integrity_sha256` column +
- * `esign_signing_events` granular audit trail + the visible
- * certificate-of-completion page appended to every signed PDF.
+ * the DB-enforced append-only `esign_signing_events` audit trail +
+ * the visible certificate-of-completion page appended to every signed
+ * PDF + the certificate-of-completion email to every signer.
  *
  * Single-signer assumption: the MVP routes every envelope to exactly one
  * signer (the agent). Multi-signer routing is a Phase-3 swap behind the
@@ -47,8 +55,13 @@ import {
 import { ESIGN_CONSENT_TEXT, ESIGN_CONSENT_VERSION } from "./consent";
 import { renderSignatureCertificate } from "../contractingPdf/signatureCertificate";
 import { ObjectStorageService } from "../objectStorage";
-import { completeCarrierSigningTransition } from "./carrierSignCallback";
+import {
+  completeCarrierSigningTransition,
+  completePoaSigningTransition,
+} from "./carrierSignCallback";
+import { sendCertificateOfCompletion } from "./completionEmail";
 import { logger } from "../logger";
+import { captureWorkerError } from "../sentry";
 
 /**
  * Storage facade so tests can swap a fake implementation in without
@@ -96,6 +109,13 @@ export class MediflowESignProvider implements ESignProvider {
   private readonly storage: EsignStorage;
   private readonly consentText: string;
   private readonly consentVersion: string;
+  /**
+   * Tracks the fire-and-forget certificate-of-completion email promise
+   * from the most recent `recordSignature` call. Production code should
+   * NOT await this — the email is intentionally fire-and-forget. Tests
+   * can await it to assert email side-effects deterministically.
+   */
+  public lastCompletionEmailPromise: Promise<unknown> | undefined;
 
   constructor(opts: MediflowProviderOptions = {}) {
     this.storage = opts.storage ?? new GcsEsignStorage();
@@ -106,23 +126,34 @@ export class MediflowESignProvider implements ESignProvider {
   // ---- createEnvelope ------------------------------------------------------
 
   async createEnvelope(input: CreateEnvelopeInput): Promise<EsignEnvelope> {
-    // Idempotency: re-creating an envelope for the same
-    // (org, carrier_contracting_request) while a non-voided envelope
-    // exists returns the existing row. The partial-unique index on the
-    // table would otherwise raise — we catch + return-existing so the
+    // Polymorphic parent: exactly one of `carrierContractingRequestId` or
+    // `onboardingRunId` must be set. Surface a clear error instead of
+    // letting the DB check constraint reject the insert with an opaque
+    // message — routes catch this and translate to a 400.
+    const hasCarrier = Boolean(input.carrierContractingRequestId);
+    const hasRun = Boolean(input.onboardingRunId);
+    if (hasCarrier === hasRun) {
+      throw new InvalidSignatureInputError(
+        "createEnvelope: exactly one of carrierContractingRequestId or onboardingRunId must be set",
+      );
+    }
+
+    // Idempotency: re-creating an envelope for the same parent while a
+    // non-voided envelope exists returns the existing row. The partial-
+    // unique indexes (esign_envelopes_active_per_request_unique for the
+    // per-carrier flow; esign_envelopes_active_per_run_unique for the POA
+    // flow) would otherwise raise — we catch + return-existing so the
     // route surface stays clean.
+    const parentClause = hasCarrier
+      ? eq(
+          esignEnvelopesTable.carrierContractingRequestId,
+          input.carrierContractingRequestId!,
+        )
+      : eq(esignEnvelopesTable.onboardingRunId, input.onboardingRunId!);
     const [existing] = await db
       .select()
       .from(esignEnvelopesTable)
-      .where(
-        and(
-          eq(esignEnvelopesTable.orgId, input.orgId),
-          eq(
-            esignEnvelopesTable.carrierContractingRequestId,
-            input.carrierContractingRequestId,
-          ),
-        ),
-      )
+      .where(and(eq(esignEnvelopesTable.orgId, input.orgId), parentClause))
       .orderBy(desc(esignEnvelopesTable.createdAt))
       .limit(1);
     if (existing && existing.status !== "voided") return existing;
@@ -133,7 +164,8 @@ export class MediflowESignProvider implements ESignProvider {
       .values({
         id,
         orgId: input.orgId,
-        carrierContractingRequestId: input.carrierContractingRequestId,
+        carrierContractingRequestId: input.carrierContractingRequestId ?? null,
+        onboardingRunId: input.onboardingRunId ?? null,
         unsignedPdfDocumentId: input.pdfDocumentId,
         signers: input.signers,
         status: "pending",
@@ -188,20 +220,25 @@ export class MediflowESignProvider implements ESignProvider {
       );
     }
     if (envelope.status === "completed") {
-      // Idempotent re-completion. We still call the carrier-side
-      // transition (it's no-op-safe via the same-status short-circuit
-      // in completeCarrierSigningTransition + its run aggregator) so a
-      // re-call after the Day-6 worker flipped requests forward to
-      // `appointed` can roll the onboarding run forward to `complete`.
+      // Idempotent re-completion. We still call the appropriate
+      // workflow transition (it's no-op-safe via the same-status
+      // short-circuit in completeCarrierSigningTransition / its run
+      // aggregator) so a re-call after a downstream worker flipped
+      // requests forward can roll the onboarding run forward.
       try {
-        await completeCarrierSigningTransition(
-          orgId,
-          envelope.carrierContractingRequestId,
-        );
+        if (envelope.onboardingRunId) {
+          // POA path — Phase 1.5.
+          await completePoaSigningTransition(orgId, envelope.onboardingRunId);
+        } else if (envelope.carrierContractingRequestId) {
+          await completeCarrierSigningTransition(
+            orgId,
+            envelope.carrierContractingRequestId,
+          );
+        }
       } catch (err) {
         logger.error(
           { err, envelopeId, orgId },
-          "Idempotent re-completion: carrier transition failed",
+          "Idempotent re-completion: workflow transition failed",
         );
       }
       return envelope;
@@ -351,20 +388,60 @@ export class MediflowESignProvider implements ESignProvider {
       signedPdfDocumentId: signedDocId,
     });
 
-    // 11. Carrier-contracting workflow handoff. Errors here do NOT undo
-    //     the envelope completion — the signature is captured and the
-    //     audit trail is durable; the contracting row can be retried.
+    // 11. Workflow handoff. Errors here do NOT undo the envelope
+    //     completion — the signature is captured and the audit trail is
+    //     durable; the contracting row can be retried. The dispatch is
+    //     polymorphic: POA envelopes route to the run-wide POA transition,
+    //     legacy per-carrier envelopes route to the per-carrier
+    //     transition. Phase 1.5 onwards creates only POA envelopes; the
+    //     carrier branch remains for in-flight legacy data.
     try {
-      await completeCarrierSigningTransition(
-        orgId,
-        updated.carrierContractingRequestId,
-      );
+      if (updated.onboardingRunId) {
+        await completePoaSigningTransition(orgId, updated.onboardingRunId);
+      } else if (updated.carrierContractingRequestId) {
+        await completeCarrierSigningTransition(
+          orgId,
+          updated.carrierContractingRequestId,
+        );
+      } else {
+        logger.warn(
+          { envelopeId, orgId },
+          "Envelope completed with neither carrier nor run parent — skipping workflow transition",
+        );
+      }
     } catch (err) {
       logger.error(
         { err, envelopeId, orgId },
-        "Carrier-contracting transition failed after envelope completion",
+        "Workflow transition failed after envelope completion",
       );
     }
+
+    // 12. Certificate-of-completion email — fire-and-forget. Failures
+    //     here MUST NOT undo the completed envelope. We `.catch` rather
+    //     than `await`-throw so a Resend outage / config-missing cannot
+    //     surface to the route caller. Same observability convention as
+    //     `enqueue` from PR #73: log + Sentry-capture + continue.
+    //
+    //     The promise is stashed on the provider so tests can await it
+    //     deterministically. The re-completion (`completed`) branch
+    //     above does NOT enter this code path, so an idempotent re-sign
+    //     never triggers a duplicate email.
+    this.lastCompletionEmailPromise = sendCertificateOfCompletion(
+      updated,
+      signedPdfBuffer,
+      integritySha256,
+      { documentName: doc.name },
+    ).catch((err: unknown) => {
+      logger.warn(
+        { err, envelopeId, orgId },
+        "Certificate-of-completion email hook threw",
+      );
+      captureWorkerError(err, {
+        worker: "esignCompletionEmail",
+        envelopeId,
+        orgId,
+      });
+    });
 
     return updated;
   }
@@ -490,9 +567,10 @@ export class MediflowESignProvider implements ESignProvider {
 
   /**
    * Apply the visible signature mark to the unsigned PDF + append the
-   * certificate page. Signature placement: top-right of the last page.
-   * (An anchor-string strategy ships in Phase 3 once the INSUREitALL
-   * templates land with reliable signature anchors.)
+   * certificate page.
+   *
+   * Placement: top-right of the last page. Same behavior the Day-5 e-sign
+   * rollout shipped with.
    */
   private async applySignatureToPdf(args: {
     unsignedBytes: Buffer;
@@ -505,30 +583,32 @@ export class MediflowESignProvider implements ESignProvider {
   }): Promise<Buffer> {
     const pdf = await PDFDocument.load(args.unsignedBytes);
     const pages = pdf.getPages();
-    const lastPage = pages[pages.length - 1];
-    if (lastPage) {
+
+    const targetPage = pages[pages.length - 1];
+
+    if (targetPage) {
       const fontItalic = await pdf.embedFont(StandardFonts.HelveticaOblique);
       const font = await pdf.embedFont(StandardFonts.Helvetica);
 
-      const { width, height } = lastPage.getSize();
+      const { width, height } = targetPage.getSize();
       const sigX = width - 250;
       const sigY = height - 100;
 
-      lastPage.drawText("Signed electronically by:", {
+      targetPage.drawText("Signed electronically by:", {
         x: sigX,
         y: sigY + 30,
         size: 9,
         font,
         color: rgb(0, 0, 0),
       });
-      lastPage.drawText(args.typedName, {
+      targetPage.drawText(args.typedName, {
         x: sigX,
         y: sigY + 12,
         size: 16,
         font: fontItalic,
         color: rgb(0, 0, 0.6),
       });
-      lastPage.drawText(args.signedAt.toISOString(), {
+      targetPage.drawText(args.signedAt.toISOString(), {
         x: sigX,
         y: sigY - 4,
         size: 8,
@@ -629,4 +709,29 @@ export function setMediflowProvider(
   provider: MediflowESignProvider | undefined,
 ): void {
   _singleton = provider;
+}
+
+/**
+ * Storage facade selector used by callers OUTSIDE the e-sign provider that
+ * need to upload a generated PDF (e.g. the Phase 1.5 POA generator, which
+ * persists the unsigned POA before creating an envelope). Reuses the same
+ * GCS vs. InMemory branch the provider uses, so tests transparently see
+ * the in-memory store without provisioning GCS.
+ *
+ * One singleton per process — the in-memory blob store needs cross-call
+ * visibility for the test harness (the provider's `loadUnsignedPdfBytes`
+ * later reads what this stored).
+ */
+let _storageSingleton: EsignStorage | undefined;
+export function getEsignStorage(): EsignStorage {
+  if (!_storageSingleton) {
+    _storageSingleton = process.env.PRIVATE_OBJECT_DIR
+      ? new GcsEsignStorage()
+      : new InMemoryEsignStorage();
+  }
+  return _storageSingleton;
+}
+/** Test-only: reset between tests when the storage backend is overridden. */
+export function setEsignStorage(storage: EsignStorage | undefined): void {
+  _storageSingleton = storage;
 }

@@ -3,24 +3,23 @@
  * Render + interaction tests for the inline WritingNumberCell on the
  * admin onboarding detail page.
  *
- * The cell wraps `useRecordWritingNumber`, which hits
- * `PATCH /admin/contracting/:requestId`. We stub `apiFetch` so the
- * mutation resolves synchronously, then assert on:
+ * The cell wraps `useRecordWritingNumber`, which delegates to the generated
+ * `useRecordCarrierContractingDecision` hook → `PATCH /admin/contracting/:requestId`.
+ * We stub the global `fetch` so the mutation resolves synchronously, then
+ * assert on:
  *   - The cell only exposes the entry input once the request is in
  *     submitted/under_review/appointed.
  *   - Save fires PATCH with the right body.
  *   - The empty/whitespace case is rejected client-side without firing
  *     a request.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const apiFetchMock = vi.fn();
-vi.mock("@/lib/api", () => ({
-  apiFetch: (...args: unknown[]) => apiFetchMock(...args),
-}));
+const fetchMock = vi.fn();
+const originalFetch = globalThis.fetch;
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
 vi.mock("sonner", () => ({
@@ -66,10 +65,23 @@ function renderCell(req: CarrierContractingRequest) {
   );
 }
 
+function jsonResponse(body: unknown, init: { status?: number } = {}): Response {
+  const status = init.status ?? 200;
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 beforeEach(() => {
-  apiFetchMock.mockReset();
+  fetchMock.mockReset();
   toastSuccess.mockReset();
   toastError.mockReset();
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
 });
 
 describe("WritingNumberCell", () => {
@@ -86,14 +98,16 @@ describe("WritingNumberCell", () => {
 
   it("PATCHes the backend with the entered writing number", async () => {
     const user = userEvent.setup();
-    apiFetchMock.mockResolvedValueOnce({
-      request: {
-        ...mkReq({}),
-        writingNumber: "W-123456",
-        status: "appointed",
-      },
-      idempotent: false,
-    });
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        request: {
+          ...mkReq({}),
+          writingNumber: "W-123456",
+          status: "appointed",
+        },
+        idempotent: false,
+      }),
+    );
 
     renderCell(mkReq({ status: "submitted" }));
     await user.click(screen.getByTestId("add-writing-num-req-test-1"));
@@ -102,11 +116,13 @@ describe("WritingNumberCell", () => {
     await user.type(input, "W-123456");
     await user.click(screen.getByTestId("save-writing-num-req-test-1"));
 
-    expect(apiFetchMock).toHaveBeenCalledTimes(1);
-    const [path, init] = apiFetchMock.mock.calls[0];
-    expect(path).toBe("/api/admin/contracting/req-test-1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(String(url)).toBe("/api/admin/contracting/req-test-1");
     expect(init.method).toBe("PATCH");
-    expect(JSON.parse(init.body)).toEqual({ writingNumber: "W-123456" });
+    expect(JSON.parse(init.body as string)).toEqual({
+      writingNumber: "W-123456",
+    });
     expect(toastSuccess).toHaveBeenCalled();
   });
 
@@ -116,7 +132,7 @@ describe("WritingNumberCell", () => {
     await user.click(screen.getByTestId("add-writing-num-req-test-1"));
     await user.click(screen.getByTestId("save-writing-num-req-test-1"));
 
-    expect(apiFetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledWith("Writing number is required");
   });
 
@@ -132,7 +148,9 @@ describe("WritingNumberCell", () => {
 
   it("surfaces a backend error via toast and keeps the editor open", async () => {
     const user = userEvent.setup();
-    apiFetchMock.mockRejectedValueOnce(new Error("Boom"));
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ error: "Boom" }, { status: 500 }),
+    );
 
     renderCell(mkReq({ status: "submitted" }));
     await user.click(screen.getByTestId("add-writing-num-req-test-1"));
@@ -142,7 +160,9 @@ describe("WritingNumberCell", () => {
     );
     await user.click(screen.getByTestId("save-writing-num-req-test-1"));
 
-    expect(toastError).toHaveBeenCalledWith("Boom");
+    expect(toastError).toHaveBeenCalledWith(
+      expect.stringContaining("Boom"),
+    );
     // Editor is still open (Save button still rendered).
     expect(
       screen.getByTestId("save-writing-num-req-test-1"),
