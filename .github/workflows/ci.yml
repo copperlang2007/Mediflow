@@ -37,7 +37,7 @@ jobs:
         run: pnpm test
 
   pnpm-audit:
-    name: pnpm audit (critical)
+    name: pnpm audit (high)
     runs-on: ubuntu-latest
     continue-on-error: false
     steps:
@@ -57,18 +57,10 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
 
-      # Fail the build on any critical-severity advisory in the resolved
-      # dependency tree. We currently gate at `critical` rather than `high`
-      # because of a known high-severity transitive advisory on `js-cookie`
-      # (GHSA-qjx8-664m-686j) reached via `@clerk/shared` — there is no
-      # upstream patch path yet without bumping Clerk. Re-tighten this to
-      # `--audit-level=high` once that resolves.
+      # Fail the build on any high-or-above-severity advisory in the
+      # resolved dependency tree. Moderate advisories are tracked but not
+      # gated; tighten this further once the remaining transitives
+      # (ws/jsdom, uuid/@google-cloud/storage, qs/supertest, esbuild,
+      # ip-address/express-rate-limit) are cleared.
       - name: pnpm audit
-        run: pnpm audit --audit-level=critical
-
-      # Informational: surface high-and-above advisories in the job log
-      # so they remain visible while the gate is parked at `critical`.
-      - name: pnpm audit (informational, high+)
-        if: always()
-        continue-on-error: true
         run: pnpm audit --audit-level=high
