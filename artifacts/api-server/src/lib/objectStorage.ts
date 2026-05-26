@@ -19,8 +19,28 @@ import {
 //     workload identity, or `gcloud auth application-default login`). This
 //     is the production path — there is no BAA on the Replit sidecar, so
 //     real PHI must not flow through it.
+//
+// In production (`NODE_ENV === "production"`) `assertStorageBackendHipaaCompliant`
+// hard-fails at boot unless STORAGE_MODE === "gcs". Mirrors the AI provider
+// guard in `lib/aiProvider.ts`.
 const STORAGE_MODE = (process.env.STORAGE_MODE ?? "replit").toLowerCase();
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
+
+/**
+ * Boot-time assertion. Call once at app/worker bootstrap so a
+ * misconfigured production deploy fails fast — before any upload, download,
+ * or signed-URL operation can route PHI through the Replit sidecar (which
+ * has no HIPAA BAA). Allowed in non-production so local dev keeps working.
+ */
+export function assertStorageBackendHipaaCompliant(): void {
+  if (process.env.NODE_ENV === "production" && STORAGE_MODE !== "gcs") {
+    throw new Error(
+      "FATAL: STORAGE_MODE must be 'gcs' in production — the Replit Object " +
+        "Storage sidecar has no HIPAA BAA and must not receive PHI. " +
+        `Got: ${process.env.STORAGE_MODE ?? "<unset>"}`,
+    );
+  }
+}
 
 export const objectStorageClient =
   STORAGE_MODE === "gcs"

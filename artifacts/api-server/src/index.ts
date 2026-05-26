@@ -13,6 +13,7 @@ import { captureWorkerError } from "./lib/sentry";
 import { markWorkersReady } from "./lib/readiness";
 import { shutdown } from "./lib/shutdown";
 import { assertAiProviderHipaaCompliant } from "./lib/aiProvider";
+import { assertStorageBackendHipaaCompliant } from "./lib/objectStorage";
 
 const rawPort = process.env["PORT"];
 
@@ -40,6 +41,10 @@ async function bootstrap(): Promise<void> {
   // dies at boot rather than leaking PHI on the first patient
   // interaction. Mirrors the PHI_ENCRYPTION_KEY boot check (PR #64).
   assertAiProviderHipaaCompliant();
+
+  // HIPAA guard: uploaded documents (signed PDFs, etc.) routinely embed PHI.
+  // In production STORAGE_MODE MUST be 'gcs' — the Replit sidecar has no BAA.
+  assertStorageBackendHipaaCompliant();
 
   // Start pg-boss job queue and register workers.
   //
