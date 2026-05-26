@@ -25,6 +25,7 @@ import { shutdown } from "./lib/shutdown";
 import { assertAiProviderHipaaCompliant } from "./lib/aiProvider";
 import { assertStorageBackendHipaaCompliant } from "./lib/objectStorage";
 import { assertEsignProviderHipaaCompliant } from "./lib/esign/factory";
+import { assertEsignSigningCredsAreProd } from "./lib/esign/pkiSigner";
 
 const rawPort = process.env["PORT"];
 
@@ -61,6 +62,13 @@ async function bootstrap(): Promise<void> {
   // guard once the DocuSign implementation lands). Today this only catches
   // a misspelled ESIGN_PROVIDER value.
   assertEsignProviderHipaaCompliant();
+
+  // ESIGN §101(g) guard: in production, the e-sign provider MUST seal
+  // completed envelopes with a real org-owned certificate. The ephemeral
+  // dev sentinel cert (CN "Mediflow ESign DEV ONLY") is generated only
+  // for local + CI and is refused here. Mirrors the medicareId.ts PHI key
+  // guard pattern.
+  assertEsignSigningCredsAreProd();
 
   // Operational nudge: if Twilio is configured but the webhook public
   // host pin isn't, log a one-time WARN. Header-based URL reconstruction
