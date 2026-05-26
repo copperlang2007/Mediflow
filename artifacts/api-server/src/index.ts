@@ -24,6 +24,7 @@ import { markWorkersReady } from "./lib/readiness";
 import { shutdown } from "./lib/shutdown";
 import { assertAiProviderHipaaCompliant } from "./lib/aiProvider";
 import { assertStorageBackendHipaaCompliant } from "./lib/objectStorage";
+import { assertEsignProviderHipaaCompliant } from "./lib/esign/factory";
 
 const rawPort = process.env["PORT"];
 
@@ -55,6 +56,11 @@ async function bootstrap(): Promise<void> {
   // HIPAA guard: uploaded documents (signed PDFs, etc.) routinely embed PHI.
   // In production STORAGE_MODE MUST be 'gcs' — the Replit sidecar has no BAA.
   assertStorageBackendHipaaCompliant();
+
+  // E-sign provider sanity check (and seam for the prod-must-be-docusign
+  // guard once the DocuSign implementation lands). Today this only catches
+  // a misspelled ESIGN_PROVIDER value.
+  assertEsignProviderHipaaCompliant();
 
   // Operational nudge: if Twilio is configured but the webhook public
   // host pin isn't, log a one-time WARN. Header-based URL reconstruction
