@@ -53,10 +53,8 @@ import {
   generatePoaPdf,
   readPoaConfig,
 } from "../lib/contractingPdf/poaTemplate";
-import {
-  getMediflowProvider,
-  getEsignStorage,
-} from "../lib/esign/mediflowProvider";
+import { getEsignStorage } from "../lib/esign/mediflowProvider";
+import { getEsignProvider } from "../lib/esign/factory";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import {
   requireAuth,
@@ -1333,7 +1331,7 @@ async function handlePoaAccept(
 
   // Create the envelope. The POA-flow branch in createEnvelope links it
   // to the onboarding run rather than a single carrier request.
-  const envelope = await getMediflowProvider().createEnvelope({
+  const envelope = await getEsignProvider().createEnvelope({
     orgId: authReq.orgId,
     onboardingRunId: run.id,
     pdfDocumentId: docId,
@@ -1772,7 +1770,7 @@ router.post(
     const signerEmail =
       profile?.email ?? agentRow?.email ?? "unknown@example.com";
 
-    const envelope = await getMediflowProvider().createEnvelope({
+    const envelope = await getEsignProvider().createEnvelope({
       orgId: authReq.orgId,
       carrierContractingRequestId: request.id,
       pdfDocumentId: request.paperworkDocumentId,

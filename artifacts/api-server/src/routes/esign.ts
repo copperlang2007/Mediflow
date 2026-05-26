@@ -35,8 +35,9 @@ import {
   ConsentRequiredError,
   InvalidSignatureInputError,
   type EnvelopeSigner,
+  type ESignProvider,
 } from "../lib/esign/provider";
-import { getMediflowProvider } from "../lib/esign/mediflowProvider";
+import { getEsignProvider } from "../lib/esign/factory";
 
 const router: IRouter = Router();
 
@@ -85,7 +86,7 @@ function clientUserAgent(req: Request): string | null {
   return typeof ua === "string" ? ua : null;
 }
 
-function serializeEnvelope(env: Awaited<ReturnType<ReturnType<typeof getMediflowProvider>["getEnvelope"]>>): Record<string, unknown> {
+function serializeEnvelope(env: Awaited<ReturnType<ESignProvider["getEnvelope"]>>): Record<string, unknown> {
   return {
     envelopeId: env.id,
     status: env.status,
@@ -152,7 +153,7 @@ router.post(
     }));
 
     try {
-      const envelope = await getMediflowProvider().createEnvelope({
+      const envelope = await getEsignProvider().createEnvelope({
         orgId: authReq.orgId,
         carrierContractingRequestId: parsed.data.carrierContractingRequestId,
         pdfDocumentId: parsed.data.pdfDocumentId,
@@ -186,7 +187,7 @@ router.get(
     const authReq = req as AuthenticatedRequest;
     const envelopeId = String(req.params.envelopeId);
     try {
-      const env = await getMediflowProvider().getEnvelope(
+      const env = await getEsignProvider().getEnvelope(
         envelopeId,
         authReq.orgId,
       );
@@ -229,7 +230,7 @@ router.post(
     // signer-userId. Cross-org / missing → 404.
     let envelope;
     try {
-      envelope = await getMediflowProvider().getEnvelope(
+      envelope = await getEsignProvider().getEnvelope(
         envelopeId,
         authReq.orgId,
       );
@@ -252,7 +253,7 @@ router.post(
     }
 
     try {
-      const updated = await getMediflowProvider().recordSignature(
+      const updated = await getEsignProvider().recordSignature(
         envelopeId,
         authReq.orgId,
         parsed.data,
@@ -317,7 +318,7 @@ router.post(
     }
 
     try {
-      await getMediflowProvider().voidEnvelope(
+      await getEsignProvider().voidEnvelope(
         envelopeId,
         authReq.orgId,
         parsed.data.reason,
@@ -353,7 +354,7 @@ router.get(
     const authReq = req as AuthenticatedRequest;
     const envelopeId = String(req.params.envelopeId);
     try {
-      const buf = await getMediflowProvider().getSignedPdf(
+      const buf = await getEsignProvider().getSignedPdf(
         envelopeId,
         authReq.orgId,
       );
