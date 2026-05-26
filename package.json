@@ -28,5 +28,10 @@
     "supertest": "^7.2.2",
     "typescript": "~5.9.2",
     "vitest": "^3.2.4"
+  },
+  "pnpm": {
+    "overrides": {
+      "js-cookie@<3.0.7": "^3.0.7"
+    }
   }
 }
