@@ -30,7 +30,7 @@ import { resolveAiProvider } from "../lib/aiProvider";
 // resolved through `resolveAiProvider()`, which hard-fails in production
 // unless `AI_INTEGRATIONS_PROVIDER=azure` — see `lib/aiProvider.ts`.
 let _openai: OpenAI | null = null;
-function getOpenAI(): OpenAI | null {
+export function getOpenAI(): OpenAI | null {
   if (_openai) return _openai;
   const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
   if (!apiKey) return null;
