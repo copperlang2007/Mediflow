@@ -6301,6 +6301,10 @@ components:
           format: date-time
         actionUrl:
           type: ["string", "null"]
+        resourceType:
+          type: ["string", "null"]
+        resourceId:
+          type: ["string", "null"]
         metadata:
           type: object
         createdAt:

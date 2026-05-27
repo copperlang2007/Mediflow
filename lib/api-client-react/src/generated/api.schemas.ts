@@ -1160,6 +1160,10 @@ export interface Notification {
   readAt?: string | null;
   /** @nullable */
   actionUrl?: string | null;
+  /** @nullable */
+  resourceType?: string | null;
+  /** @nullable */
+  resourceId?: string | null;
   metadata?: NotificationMetadata;
   createdAt: string;
 }
