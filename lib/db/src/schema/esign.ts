@@ -94,6 +94,16 @@ export const esignEnvelopesTable = pgTable(
     // text + an app-side validator so adding a new state is one PR rather
     // than a follow-up migration.
     status: text("status").notNull().default("pending"),
+    // Which provider owns this envelope. String-enum validated by the
+    // app-side ESignProvider factory (see lib/esign/factory.ts). Existing
+    // rows default to 'mediflow' via the migration; new rows from a
+    // non-native provider write the provider's name (e.g. 'docusign').
+    provider: text("provider").notNull().default("mediflow"),
+    // Provider-side identifier (e.g. DocuSign envelopeId). NULL for
+    // provider='mediflow' — the native flow has no external identity.
+    // Used by inbound-webhook handlers to correlate provider events with
+    // our envelope row, and by outbound provider API calls.
+    externalEnvelopeId: text("external_envelope_id"),
     // SHA-256 hex of the final signed PDF bytes. Tamper detection — the
     // tests verify the stored hash matches a fresh hash of the document
     // we read back from storage.
