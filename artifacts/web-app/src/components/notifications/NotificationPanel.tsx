@@ -25,6 +25,11 @@ interface Props {
  * types we don't have a destination for — the row stays non-clickable (only
  * the mark-as-read side effect fires).
  *
+ * Every clickable case deep-links to the resource's detail page using
+ * `resourceId` directly; resource types whose landing page is a list (license,
+ * certification, lead, deal, task, document, org) return the list URL because
+ * those pages don't yet have per-row detail routes.
+ *
  * Keep this list in sync with the `resourceType` values written by API-server
  * notification inserts (search the codebase for `notificationsTable`).
  */
@@ -32,11 +37,10 @@ export function resourceUrlFor(n: Notification): string | null {
   if (!n.resourceType) return null;
   switch (n.resourceType) {
     case "agent_onboarding":
-      // `/admin-onboarding/:agentId` is keyed by agentId — but the writers
-      // store `run.id` (not the agent's id) in resourceId, so we can't
-      // deep-link to the run's detail page. Fall back to the list view,
-      // which surfaces every run in flight.
-      return "/admin-onboarding";
+      // resourceId is the agent id (writers in routes/onboarding.ts and
+      // lib/esign/carrierSignCallback.ts both store `run.agentId`), which
+      // matches the `/admin-onboarding/:agentId` route key.
+      return n.resourceId ? `/admin-onboarding/${n.resourceId}` : null;
     case "agent":
       return n.resourceId ? `/agents/${n.resourceId}` : null;
     case "contact":

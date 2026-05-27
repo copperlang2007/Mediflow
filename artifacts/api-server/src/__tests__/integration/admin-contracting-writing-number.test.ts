@@ -439,6 +439,8 @@ describe("PATCH /admin/contracting/:requestId — writing number", () => {
     expect(run.completedAt).toBeTruthy();
 
     // Notification row written for the admin who started the run.
+    // resourceId is the agent id (not the run id) so the panel deep-link
+    // matches the `/admin-onboarding/:agentId` route.
     const notifs = await handle.db
       .select()
       .from(notificationsTable)
@@ -446,11 +448,12 @@ describe("PATCH /admin/contracting/:requestId — writing number", () => {
         and(
           eq(notificationsTable.orgId, ctx.orgId),
           eq(notificationsTable.userId, ctx.admin.id),
-          eq(notificationsTable.resourceId, ctx.runId),
+          eq(notificationsTable.resourceId, ctx.agentId),
           eq(notificationsTable.type, "onboarding_complete"),
         ),
       );
     expect(notifs).toHaveLength(1);
+    expect(notifs[0].resourceType).toBe("agent_onboarding");
   });
 
   it("notes are replaced (not appended) — second PATCH overwrites", async () => {

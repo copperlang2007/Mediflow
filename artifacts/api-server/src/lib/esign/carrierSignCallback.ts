@@ -251,6 +251,9 @@ export async function maybeAdvanceRunForRequests(
     );
     await closeContractingTask(orgId, adminReviewTaskKey(run.id));
     if (run.startedByUserId) {
+      // resourceId is the agent id (not the run id) so the notification
+      // panel can deep-link to `/admin-onboarding/:agentId`, which is
+      // keyed by agent. See the matching writer in routes/onboarding.ts.
       await db.insert(notificationsTable).values({
         id: randomUUID(),
         orgId,
@@ -260,7 +263,7 @@ export async function maybeAdvanceRunForRequests(
         body: "All carrier appointments have been recorded — the agent is fully onboarded.",
         priority: "normal",
         resourceType: "agent_onboarding",
-        resourceId: run.id,
+        resourceId: run.agentId,
       });
     }
     return;

@@ -496,6 +496,8 @@ describe("INSUREitALL onboarding — full end-to-end flow", () => {
     expect(completedRun.completedAt).toBeTruthy();
 
     // Notification row written for the admin who started the run.
+    // resourceId is the agent id (not the run id) so the panel deep-link
+    // matches the `/admin-onboarding/:agentId` route.
     const notifs = await handle.db
       .select()
       .from(notificationsTable)
@@ -503,11 +505,12 @@ describe("INSUREitALL onboarding — full end-to-end flow", () => {
         and(
           eq(notificationsTable.orgId, orgA.orgId),
           eq(notificationsTable.userId, orgA.admin.id),
-          eq(notificationsTable.resourceId, runId),
+          eq(notificationsTable.resourceId, orgA.agentId),
           eq(notificationsTable.type, "onboarding_complete"),
         ),
       );
     expect(notifs).toHaveLength(1);
+    expect(notifs[0].resourceType).toBe("agent_onboarding");
 
     // Any outstanding admin tasks for the run are closed.
     const openAdminTasks = await handle.db

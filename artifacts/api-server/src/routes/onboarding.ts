@@ -1065,6 +1065,9 @@ async function maybeAdvanceRunForRequests(runId: string, orgId: string): Promise
     await closeContractingTask(orgId, adminReviewTaskKey(run.id));
 
     // Write a single notification row for the admin who started the run.
+    // resourceId is the agent id (not the run id) because the destination
+    // page `/admin-onboarding/:agentId` is keyed by agent — this lets the
+    // notification panel deep-link straight to the run's detail view.
     if (run.startedByUserId) {
       await db.insert(notificationsTable).values({
         id: randomUUID(),
@@ -1075,7 +1078,7 @@ async function maybeAdvanceRunForRequests(runId: string, orgId: string): Promise
         body: "All carrier appointments have been recorded — the agent is fully onboarded.",
         priority: "normal",
         resourceType: "agent_onboarding",
-        resourceId: run.id,
+        resourceId: run.agentId,
       });
     }
     return;
