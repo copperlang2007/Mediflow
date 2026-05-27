@@ -88,6 +88,7 @@ import {
   KeyRound,
   Handshake,
   ClipboardCheck,
+  Activity,
 } from "lucide-react";
 import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
 import NotificationPanel from "@/components/notifications/NotificationPanel";
@@ -183,6 +184,10 @@ const navItems: NavGroup[] = [
       },
       {
         href: "/data-migration", label: "Data Migration", icon: Database,
+        roles: ["super_admin", "agency_admin"],
+      },
+      {
+        href: "/admin/health", label: "System Health", icon: Activity,
         roles: ["super_admin", "agency_admin"],
       },
     ],
