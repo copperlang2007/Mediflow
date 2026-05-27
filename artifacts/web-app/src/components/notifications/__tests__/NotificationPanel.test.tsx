@@ -102,10 +102,18 @@ describe("resourceUrlFor", () => {
       resourceUrlFor(
         makeNotification({
           resourceType: "agent_onboarding",
-          resourceId: "run-1",
+          // writers store the agent id (not the run id) in resourceId so
+          // the destination route `/admin-onboarding/:agentId` matches.
+          resourceId: "agent-1",
         }),
       ),
-    ).toBe("/admin-onboarding");
+    ).toBe("/admin-onboarding/agent-1");
+    // agent_onboarding without a resourceId is null (no fallback list view).
+    expect(
+      resourceUrlFor(
+        makeNotification({ resourceType: "agent_onboarding", resourceId: null }),
+      ),
+    ).toBeNull();
     expect(
       resourceUrlFor(
         makeNotification({ resourceType: "contact", resourceId: "ct-1" }),
@@ -280,6 +288,31 @@ describe("NotificationPanel click behavior", () => {
       String(c[0]).includes("/notifications/n-read/read"),
     );
     expect(readCalls).toHaveLength(0);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("clicking an agent_onboarding notification deep-links to /admin-onboarding/:agentId", async () => {
+    // Regression test for the resourceId fix: writers now store the agent id
+    // (not the run id) so the click navigates to the per-agent detail page.
+    const n = makeNotification({
+      id: "n-onb",
+      resourceType: "agent_onboarding",
+      resourceId: "agent-77",
+      readAt: null,
+    });
+    const { onClose, history } = setup([n]);
+
+    const row = screen.getByTestId("notification-row-n-onb");
+    expect(row.className).toContain("cursor-pointer");
+
+    fireEvent.click(row);
+
+    await waitFor(() => {
+      expect(history).toContain("/admin-onboarding/agent-77");
+    });
+    // Not the list-view fallback the old behaviour produced.
+    expect(history).not.toContain("/admin-onboarding");
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });

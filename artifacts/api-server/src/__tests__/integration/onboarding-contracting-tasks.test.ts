@@ -807,6 +807,8 @@ describe("Run completion + notification", () => {
     expect(adminTask.status).toBe("completed");
 
     // Notification written for the admin who started the run.
+    // resourceId is the agent id (not the run id) so the panel deep-link
+    // matches the `/admin-onboarding/:agentId` route.
     const notifs = await handle.db
       .select()
       .from(notificationsTable)
@@ -814,12 +816,13 @@ describe("Run completion + notification", () => {
         and(
           eq(notificationsTable.orgId, org.id),
           eq(notificationsTable.userId, admin.id),
-          eq(notificationsTable.resourceId, runId),
+          eq(notificationsTable.resourceId, agent.id),
         ),
       );
     expect(notifs.length).toBeGreaterThanOrEqual(1);
     const notif = notifs.find((n) => n.type === "onboarding_complete");
     expect(notif).toBeTruthy();
     expect(notif!.title).toMatch(/onboarding complete/i);
+    expect(notif!.resourceType).toBe("agent_onboarding");
   });
 });
