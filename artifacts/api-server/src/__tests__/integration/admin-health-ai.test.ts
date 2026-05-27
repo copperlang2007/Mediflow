@@ -75,6 +75,7 @@ let resetOpenAIClient: () => void;
 let org: { id: string };
 let superAdmin: { id: string };
 let agencyAdmin: { id: string };
+let complianceManager: { id: string };
 let nonAdmin: { id: string };
 
 // We use the API_KEY value `super-secret-test-key-bytes-abc123` to assert
@@ -114,6 +115,7 @@ beforeAll(async () => {
   org = await seedOrg(handle.db, { id: "admin-health-ai-org" });
   superAdmin = await seedUser(handle.db, { orgId: org.id, role: "super_admin" });
   agencyAdmin = await seedUser(handle.db, { orgId: org.id, role: "agency_admin" });
+  complianceManager = await seedUser(handle.db, { orgId: org.id, role: "compliance_manager" });
   nonAdmin = await seedUser(handle.db, { orgId: org.id, role: "agent_support" });
 });
 
@@ -185,6 +187,20 @@ describe("GET /admin/health/ai — auth & RBAC", () => {
     const res = await request(app)
       .get("/api/admin/health/ai")
       .set(withAuth(agencyAdmin.id));
+
+    expect(res.status).toBe(200);
+    expect(res.body.ping.ok).toBe(true);
+  });
+
+  it("returns 200 for compliance_manager (parity with other /admin pages)", async () => {
+    openaiState.createImpl = async () => ({
+      model: "gpt-4o",
+      choices: [{ message: { content: "ok" } }],
+    });
+
+    const res = await request(app)
+      .get("/api/admin/health/ai")
+      .set(withAuth(complianceManager.id));
 
     expect(res.status).toBe(200);
     expect(res.body.ping.ok).toBe(true);

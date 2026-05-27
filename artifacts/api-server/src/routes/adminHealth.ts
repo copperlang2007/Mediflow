@@ -12,7 +12,7 @@
  * this route.
  *
  * Defense in depth:
- *   - super_admin / agency_admin only
+ *   - super_admin / agency_admin / compliance_manager only
  *   - 6 calls/minute per user, in-memory store
  *   - 10s upstream timeout via AbortController
  *   - try/catch wraps the upstream call; raw provider error never returned
@@ -185,7 +185,7 @@ const healthAiLimiter = rateLimit({
 router.get(
   "/admin/health/ai",
   requireAuth,
-  requireRole("super_admin", "agency_admin"),
+  requireRole("super_admin", "agency_admin", "compliance_manager"),
   healthAiLimiter,
   auditMiddleware("audit_log", "read", { includeReads: true }),
   async (req: Request, res: Response): Promise<void> => {

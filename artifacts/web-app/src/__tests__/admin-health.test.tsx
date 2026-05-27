@@ -142,6 +142,12 @@ describe("AdminHealthPage role gating", () => {
     expect(screen.getByTestId("ai-health-card")).toBeInTheDocument();
     expect(screen.queryByTestId("admin-health-forbidden")).not.toBeInTheDocument();
   });
+
+  it("renders the AI provider card for compliance_manager", () => {
+    renderPage(makeClient({ ...ADMIN_USER, role: "compliance_manager" }));
+    expect(screen.getByTestId("ai-health-card")).toBeInTheDocument();
+    expect(screen.queryByTestId("admin-health-forbidden")).not.toBeInTheDocument();
+  });
 });
 
 describe("AiProviderCard fetch + render", () => {
