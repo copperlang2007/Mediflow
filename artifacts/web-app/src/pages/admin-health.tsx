@@ -4,17 +4,18 @@
  * Tiny admin-only convenience page that calls the backend
  * `GET /api/admin/health/ai` endpoint introduced in PR #119 and renders the
  * structured response. The server already enforces the role gate (super_admin
- * / agency_admin) and rate-limits the upstream ping; we mirror the role check
- * client-side so non-admins see a clean "no access" panel instead of an
- * opaque 403, and we only render the documented fields so an unexpected
- * server response shape can't accidentally surface PHI-adjacent metadata.
+ * / agency_admin / compliance_manager) and rate-limits the upstream ping; we
+ * mirror the role check client-side so non-admins see a clean "no access"
+ * panel instead of an opaque 403, and we only render the documented fields so
+ * an unexpected server response shape can't accidentally surface PHI-adjacent
+ * metadata.
  *
  * The endpoint is GET — the request body is never used by the server — so we
  * call it as GET via the shared `apiFetch` helper that already adds
  * `credentials: include` and normalises error responses.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useIsAdmin } from "@/lib/auth/useIsAdmin";
+import { useIsAdmin, ADMIN_OR_COMPLIANCE_ROLES } from "@/lib/auth/useIsAdmin";
 import {
   Card,
   CardContent,
@@ -76,7 +77,7 @@ const ERROR_LABEL: Record<PingErrorCategory, string> = {
 };
 
 export default function AdminHealthPage() {
-  const { isAdmin, isLoading: meLoading } = useIsAdmin();
+  const { isAdmin, isLoading: meLoading } = useIsAdmin(ADMIN_OR_COMPLIANCE_ROLES);
 
   if (!meLoading && !isAdmin) {
     return (

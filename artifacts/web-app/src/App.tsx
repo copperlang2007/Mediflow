@@ -367,6 +367,13 @@ function ClerkProviderWithRoutes() {
               <Route path="/reports">
                 <ProtectedLayout><ReportsPage /></ProtectedLayout>
               </Route>
+              {/*
+                ADMIN ROUTES — convention going forward: `/admin/<feature>` (nested).
+                Pre-existing `/admin-<feature>` routes (admin-onboarding, admin-carriers,
+                admin-compliance) are NOT being migrated for URL stability — links may be
+                bookmarked or embedded in onboarding emails. New admin routes should use
+                `/admin/<feature>`.
+              */}
               <Route path="/admin-compliance">
                 <ProtectedLayout><AdminCompliancePage /></ProtectedLayout>
               </Route>
