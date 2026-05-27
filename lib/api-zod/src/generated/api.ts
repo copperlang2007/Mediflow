@@ -1800,6 +1800,8 @@ export const GetNotificationsResponseItem = zod.object({
   body: zod.string().nullish(),
   readAt: zod.coerce.date().nullish(),
   actionUrl: zod.string().nullish(),
+  resourceType: zod.string().nullish(),
+  resourceId: zod.string().nullish(),
   metadata: zod.object({}).passthrough().optional(),
   createdAt: zod.coerce.date(),
 });
@@ -1835,6 +1837,8 @@ export const MarkNotificationReadResponse = zod.object({
   body: zod.string().nullish(),
   readAt: zod.coerce.date().nullish(),
   actionUrl: zod.string().nullish(),
+  resourceType: zod.string().nullish(),
+  resourceId: zod.string().nullish(),
   metadata: zod.object({}).passthrough().optional(),
   createdAt: zod.coerce.date(),
 });
