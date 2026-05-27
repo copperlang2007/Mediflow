@@ -275,6 +275,86 @@ describe("AiProviderCard fetch + render", () => {
   });
 });
 
+describe("AiProviderCard AbortController wiring", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.clearAllMocks();
+  });
+
+  it("aborts the in-flight probe on unmount with no setState warning", async () => {
+    // Hold the fetch promise open and reject only when the signal aborts —
+    // mirrors what a real cancelled XHR looks like. If the component still
+    // tries to setState after unmount, React logs a console.error which we
+    // assert was never written.
+    let abortReject: ((err: Error) => void) | null = null;
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit = {}) =>
+        new Promise((_resolve, reject) => {
+          abortReject = reject;
+          init.signal?.addEventListener("abort", () => {
+            const err = new Error("The user aborted a request.");
+            err.name = "AbortError";
+            reject(err);
+          });
+        }),
+    );
+
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = renderCard();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ai-health-test-btn"));
+    });
+
+    // Probe is in flight; unmount the component.
+    unmount();
+
+    // Give the aborted promise a chance to settle so any stray setState would
+    // have fired by now.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    // No React "setState on unmounted component" warning (or any other error).
+    const reactErrors = errSpy.mock.calls.filter((args) => {
+      const msg = String(args[0] ?? "");
+      return (
+        msg.includes("unmounted") ||
+        msg.includes("memory leak") ||
+        msg.includes("act(")
+      );
+    });
+    expect(reactErrors).toEqual([]);
+    expect(abortReject).not.toBeNull();
+    errSpy.mockRestore();
+  });
+
+  it("passes an AbortSignal through to fetch", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(HEALTH_OK));
+
+    renderCard();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ai-health-test-btn"));
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect((init as RequestInit).signal).toBeInstanceOf(AbortSignal);
+    expect((init as RequestInit).signal?.aborted).toBe(false);
+  });
+});
+
 describe("normalizeResult", () => {
   it("coerces an empty/garbage response to a safe defaulted shape", () => {
     const r = normalizeResult({});

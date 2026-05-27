@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useGetMe } from "@workspace/api-client-react";
 import { apiFetch } from "@/lib/api";
+import { useIsAdmin, ADMIN_OR_COMPLIANCE_ROLES } from "@/lib/auth/useIsAdmin";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -922,9 +922,9 @@ type ClerkSession = { sessionId: string; createdAt: string; lastActiveAt: string
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function AdminCompliancePage() {
-  const { data: me } = useGetMe();
+  const { isAdmin, isLoading: meLoading } = useIsAdmin(ADMIN_OR_COMPLIANCE_ROLES);
 
-  if (me && !["super_admin", "agency_admin", "compliance_manager"].includes(me.role)) {
+  if (!meLoading && !isAdmin) {
     return <div className="p-8 text-center text-muted-foreground">You don't have access to this page.</div>;
   }
 

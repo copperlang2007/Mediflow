@@ -23,7 +23,6 @@
  */
 import { useMemo, useState } from "react";
 import {
-  useGetMe,
   useGetCarriers,
   useCreateCarrier,
   useUpdateCarrier,
@@ -32,6 +31,7 @@ import {
   type CreateCarrierBody,
   type UpdateCarrierBody,
 } from "@workspace/api-client-react";
+import { useIsAdmin } from "@/lib/auth/useIsAdmin";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
@@ -155,14 +155,11 @@ export function carrierToForm(c: AdminCarrier): CarrierFormValues {
 // ---- Page -------------------------------------------------------------------
 
 export default function AdminCarriersPage() {
-  const { data: me } = useGetMe();
+  const { isAdmin, isLoading: meLoading } = useIsAdmin();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [editing, setEditing] = useState<AdminCarrier | "new" | null>(null);
   const PAGE_SIZE = 20;
-
-  const isAdmin =
-    me && (me.role === "super_admin" || me.role === "agency_admin");
 
   const carriersQuery = useGetCarriers({
     query: {
@@ -190,7 +187,7 @@ export default function AdminCarriersPage() {
   const pageRows = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const total = filtered.length;
 
-  if (me && !isAdmin) {
+  if (!meLoading && !isAdmin) {
     return (
       <div className="p-6 max-w-3xl mx-auto">
         <Card>
