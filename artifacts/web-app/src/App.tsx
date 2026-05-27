@@ -29,6 +29,7 @@ const RenewalsPage = lazy(() => import("@/pages/renewals"));
 const AutomationsPage = lazy(() => import("@/pages/automations"));
 const ReportsPage = lazy(() => import("@/pages/reports"));
 const AdminCompliancePage = lazy(() => import("@/pages/admin-compliance"));
+const AdminHealthPage = lazy(() => import("@/pages/admin-health"));
 const AdminOnboardingPage = lazy(() => import("@/pages/admin-onboarding"));
 const AdminCarriersPage = lazy(() => import("@/pages/admin-carriers"));
 const OnboardingPage = lazy(() => import("@/pages/onboarding"));
@@ -368,6 +369,9 @@ function ClerkProviderWithRoutes() {
               </Route>
               <Route path="/admin-compliance">
                 <ProtectedLayout><AdminCompliancePage /></ProtectedLayout>
+              </Route>
+              <Route path="/admin/health">
+                <ProtectedLayout><AdminHealthPage /></ProtectedLayout>
               </Route>
               <Route path="/admin-onboarding/:agentId">
                 <ProtectedLayout><AdminOnboardingPage /></ProtectedLayout>
