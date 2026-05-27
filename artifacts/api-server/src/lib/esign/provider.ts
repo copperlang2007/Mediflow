@@ -106,8 +106,70 @@ export class InvalidSignatureInputError extends Error {
   }
 }
 
+/**
+ * Thrown by providers that don't support a particular `ESignProvider`
+ * method — e.g. DocuSign cannot fulfil `recordSignature` because signing
+ * happens in DocuSign's hosted UI and is reported back via webhook, not
+ * the route. Callers map this to a 4xx with a routing hint.
+ */
+export class UnsupportedOperationError extends Error {
+  constructor(operation: string, provider: string) {
+    super(
+      `Operation '${operation}' is not supported by the '${provider}' e-sign provider`,
+    );
+    this.name = "UnsupportedOperationError";
+  }
+}
+
+/**
+ * Input for `startSigningSession`. The route resolves these before
+ * calling the provider — the provider does not look up the signer from
+ * a request header, only from this input.
+ */
+export interface SigningSessionInput {
+  envelopeId: string;
+  orgId: string;
+  /**
+   * Clerk userId of the signer who is about to sign. Must match an
+   * `EnvelopeSigner.userId` on the envelope. External providers need
+   * this to map our user to a DocuSign recipient client-user-id.
+   */
+  signerUserId: string;
+  /**
+   * Fully-qualified URL the provider should redirect to after the signer
+   * completes or declines. REQUIRED for external providers (DocuSign);
+   * IGNORED by the native provider (which redirects in-app via
+   * react-router). Provider implementations that require it but receive
+   * `undefined` throw `InvalidSignatureInputError`.
+   */
+  returnUrl?: string;
+}
+
+export interface SigningSession {
+  /**
+   * URL the frontend navigates to so the signer can sign.
+   *
+   *  - Native provider: in-app path (e.g. `/sign/:envelopeId`). The
+   *    frontend treats it as a router-internal navigation.
+   *  - External providers (DocuSign): fully-qualified https URL. The
+   *    frontend MUST detect external URLs (scheme check) and use
+   *    `window.location.href` rather than the router — wouter does not
+   *    handle cross-origin URLs.
+   */
+  signingUrl: string;
+}
+
 export interface ESignProvider {
   createEnvelope(input: CreateEnvelopeInput): Promise<EsignEnvelope>;
+
+  /**
+   * Resolve a URL the signer should navigate to in order to sign. For
+   * external providers this typically corresponds to a recipient-view /
+   * embedded-signing session that may be short-lived (DocuSign default
+   * is 5 minutes) — call this fresh each time the frontend needs to
+   * resume signing, do not cache the URL.
+   */
+  startSigningSession(input: SigningSessionInput): Promise<SigningSession>;
 
   /**
    * Apply the signature to the unsigned PDF, persist the signed copy,

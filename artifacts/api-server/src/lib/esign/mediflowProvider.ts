@@ -51,6 +51,8 @@ import {
   type ESignProvider,
   type SignerContext,
   type SignerInput,
+  type SigningSession,
+  type SigningSessionInput,
   ConsentRequiredError,
   EnvelopeNotFoundError,
   EnvelopeStateError,
@@ -195,6 +197,26 @@ export class MediflowESignProvider implements ESignProvider {
     });
 
     return row;
+  }
+
+  // ---- startSigningSession ------------------------------------------------
+
+  /**
+   * Native flow: the signing UI lives at `/sign/:envelopeId` in our own
+   * frontend. No DocuSign-style short-lived recipient view; the URL is
+   * stable for the lifetime of the envelope. `returnUrl` is ignored
+   * because the native UI navigates back inside the React app after the
+   * signer hits the success state — no out-of-app redirect needed.
+   *
+   * `signerUserId` is accepted on the interface for parity with external
+   * providers but not validated here — the route's permission narrowing
+   * already proves the caller is either the signer or an admin. Doing a
+   * second envelope lookup just to validate would be wasted IO.
+   */
+  async startSigningSession(
+    input: SigningSessionInput,
+  ): Promise<SigningSession> {
+    return { signingUrl: `/sign/${input.envelopeId}` };
   }
 
   // ---- recordSignature ----------------------------------------------------

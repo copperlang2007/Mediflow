@@ -190,6 +190,13 @@
       "when": 1778470000000,
       "tag": "0023_poa_and_state_pivot",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1778480000000,
+      "tag": "0024_esign_provider_columns",
+      "breakpoints": true
     }
   ]
 }

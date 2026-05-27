@@ -153,7 +153,8 @@ router.post(
     }));
 
     try {
-      const envelope = await getEsignProvider().createEnvelope({
+      const provider = getEsignProvider();
+      const envelope = await provider.createEnvelope({
         orgId: authReq.orgId,
         carrierContractingRequestId: parsed.data.carrierContractingRequestId,
         pdfDocumentId: parsed.data.pdfDocumentId,
@@ -163,10 +164,23 @@ router.post(
         userAgent: clientUserAgent(req),
       });
 
+      // Native provider returns `/sign/${envelope.id}`. External providers
+      // (DocuSign) return a fully-qualified https URL pointing at the
+      // provider's hosted signing page. The frontend MUST detect external
+      // URLs (scheme check) and use `window.location.href` instead of the
+      // router — wouter does not handle cross-origin URLs.
+      const session = await provider.startSigningSession({
+        envelopeId: envelope.id,
+        orgId: authReq.orgId,
+        // v1 is single-signer (the agent who hit this route). Multi-signer
+        // routing would resolve the active recipient here.
+        signerUserId: authReq.userId,
+      });
+
       res.status(201).json({
         envelopeId: envelope.id,
         status: envelope.status,
-        signingUrl: `/sign/${envelope.id}`,
+        signingUrl: session.signingUrl,
       });
     } catch (err) {
       authReq.log.error({ err }, "Failed to create esign envelope");
