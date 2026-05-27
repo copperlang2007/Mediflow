@@ -10,9 +10,13 @@
  *       non-empty email receives the signed PDF + integrity hash after
  *       envelope completion. Fire-and-forget — failures are logged +
  *       captured to Sentry but never fail the signing flow.
- *   Still pending (shipping in dedicated post-demo PRs):
  *     - PKI signing of the final PDF with an org-owned certificate (true
- *       tamper-evident sealing per ESIGN §101(g))
+ *       tamper-evident sealing per ESIGN §101(g)). Implemented via
+ *       `./pkiSigner.ts` — PKCS#7/CMS detached signature over the
+ *       signed-doc bytes; `getSignedPdf` re-verifies on every read and
+ *       hard-fails an `EnvelopeStateError` if the bytes have been
+ *       tampered with at rest.
+ *   Still pending (shipping in dedicated post-demo PRs):
  *     - Knowledge-based authentication (KBA) — DOB / SSN-last-4 / OFAC-style
  *       identity proofing before the signer can sign
  *     - Voice + SMS verification (multi-channel identity binding)
@@ -60,6 +64,7 @@ import {
   completePoaSigningTransition,
 } from "./carrierSignCallback";
 import { sendCertificateOfCompletion } from "./completionEmail";
+import { pkiSignPdf, verifyPdfSignature } from "./pkiSigner";
 import { logger } from "../logger";
 import { captureWorkerError } from "../sentry";
 
@@ -293,7 +298,7 @@ export class MediflowESignProvider implements ESignProvider {
       userAgent: ctx.userAgent,
     };
 
-    const signedPdfBuffer = await this.applySignatureToPdf({
+    const visibleSignedPdf = await this.applySignatureToPdf({
       unsignedBytes,
       signer,
       typedName: signerInput.typedName,
@@ -303,7 +308,17 @@ export class MediflowESignProvider implements ESignProvider {
       documentName: doc.name,
     });
 
-    // 6. Integrity hash of the final signed PDF.
+    // 5b. PKI seal the visibly-signed PDF. The PKCS#7/CMS detached
+    //     signature is inserted into a /Sig dictionary by
+    //     `@signpdf/placeholder-plain` and signed via `@signpdf/signpdf`
+    //     with the org cert (or the dev sentinel in non-prod). Tamper
+    //     evidence: `getSignedPdf` re-verifies the embedded signature on
+    //     every read and refuses to hand bytes back if the check fails.
+    const signedPdfBuffer = await pkiSignPdf(visibleSignedPdf, { signingTime: signedAt });
+
+    // 6. Integrity hash of the FINAL PKI-signed PDF — must be computed on
+    //    the same bytes we hand back from `getSignedPdf`, otherwise a
+    //    tamper detection downstream couldn't tell us which side broke.
     const integritySha256 = sha256Hex(signedPdfBuffer);
 
     // 7. Upload to storage + create a `documents` row pointing at it.
@@ -528,7 +543,26 @@ export class MediflowESignProvider implements ESignProvider {
         "Signed PDF row missing",
       );
     }
-    return this.storage.readPdf(doc.storageKey);
+    const bytes = await this.storage.readPdf(doc.storageKey);
+
+    // Tamper-evidence gate: re-verify the embedded PKCS#7/CMS signature
+    // against the bytes we just read. If the bytes were modified at rest
+    // (or in transit between writer and reader), the messageDigest check
+    // fails and we refuse to hand them back. The integrity_sha256 column
+    // is a second, independent check — but a tamper-evident PKI seal is
+    // what makes ESIGN §101(g) defensible.
+    const verdict = verifyPdfSignature(bytes);
+    if (!verdict.valid) {
+      logger.error(
+        { envelopeId, orgId, reason: verdict.reason },
+        "Signed PDF failed PKI verification on read — refusing to release bytes",
+      );
+      throw new EnvelopeStateError(
+        envelope.status,
+        "Signed PDF failed integrity verification",
+      );
+    }
+    return bytes;
   }
 
   // ---- internals ----------------------------------------------------------
