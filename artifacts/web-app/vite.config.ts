@@ -5,26 +5,24 @@ import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 import compression from "vite-plugin-compression2";
 
+// Env-var policy:
+// - `vite build` needs only `BASE_PATH` (used as the asset/`base` URL). Default
+//   `"/"` if unset so Vercel (and any host that doesn't set Replit conventions)
+//   can build the project without configuration.
+// - `vite` (dev server) + `vite preview` need a `PORT`. Default `5173` (Vite's
+//   own default) if unset; only validate when the value is bad. The Replit
+//   workflow that sets `PORT=8080` keeps working unchanged.
+//
+// The strict runtime guards live on the api-server side (`artifacts/api-server/src/index.ts`).
+// The build config should NOT crash CI/preview deploys for an env var that's
+// only relevant at serve time.
+
+const basePath = process.env.BASE_PATH ?? "/";
+
 const rawPort = process.env.PORT;
-
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
-
-const port = Number(rawPort);
-
-if (Number.isNaN(port) || port <= 0) {
+const port = rawPort ? Number(rawPort) : 5173;
+if (rawPort !== undefined && (Number.isNaN(port) || port <= 0)) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
-}
-
-const basePath = process.env.BASE_PATH;
-
-if (!basePath) {
-  throw new Error(
-    "BASE_PATH environment variable is required but was not provided.",
-  );
 }
 
 export default defineConfig({
