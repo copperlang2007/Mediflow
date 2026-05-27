@@ -332,3 +332,5 @@
 {"at":"2026-05-27T16:10:20.117Z","tick":82,"phase":"inbox","action":"scan_complete","detail":{"healthy":1,"stalled":0,"dead":0}}
 {"at":"2026-05-27T16:10:20.136Z","tick":0,"phase":"dispatch","action":"work_dispatched","detail":{"taskId":"next-claude-code","vendor":"claude-code"}}
 {"at":"2026-05-27T16:10:20.585Z","tick":82,"phase":"log","action":"tick_complete","detail":{"durationMs":1030,"workFound":1,"dispatched":1,"errors":0}}
+{"at":"2026-05-27T16:10:51.346Z","tick":83,"phase":"health","action":"tick_start"}
+{"at":"2026-05-27T16:12:14.358Z","tick":84,"phase":"health","action":"tick_start"}
