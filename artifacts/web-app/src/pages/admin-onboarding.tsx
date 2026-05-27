@@ -12,7 +12,8 @@
  */
 import { useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { useGetMe, useGetAgents, getGetAgentsQueryKey } from "@workspace/api-client-react";
+import { useGetAgents, getGetAgentsQueryKey } from "@workspace/api-client-react";
+import { useIsAdmin, ADMIN_OR_COMPLIANCE_ROLES } from "@/lib/auth/useIsAdmin";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -83,14 +84,12 @@ export default function AdminOnboardingPage() {
 }
 
 function AdminOnboardingIndex() {
-  const { data: me } = useGetMe();
+  const { isAdmin, isLoading: meLoading } = useIsAdmin(ADMIN_OR_COMPLIANCE_ROLES);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<string>("all");
   const [offset, setOffset] = useState(0);
   const [startOpen, setStartOpen] = useState(false);
   const limit = 25;
-
-  const isAdmin = me && ["super_admin", "agency_admin", "compliance_manager"].includes(me.role);
 
   const { data, isLoading } = useOnboardingList({
     status: status === "all" ? undefined : status,
@@ -117,7 +116,7 @@ function AdminOnboardingIndex() {
     return m;
   }, [agentsData]);
 
-  if (me && !isAdmin) {
+  if (!meLoading && !isAdmin) {
     return (
       <div className="p-6 max-w-3xl mx-auto">
         <Card>

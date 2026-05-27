@@ -15,10 +15,10 @@ import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { toast } from "sonner";
 import {
-  useGetMe,
   useGetAgent,
   useGetCarriers,
 } from "@workspace/api-client-react";
+import { useIsAdmin, ADMIN_OR_COMPLIANCE_ROLES } from "@/lib/auth/useIsAdmin";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,9 +56,8 @@ import {
 } from "@/lib/onboarding/api";
 
 export default function AdminOnboardingDetail({ agentId }: { agentId: string }) {
-  const { data: me } = useGetMe();
+  const { isAdmin, isLoading: meLoading } = useIsAdmin(ADMIN_OR_COMPLIANCE_ROLES);
   const [, navigate] = useLocation();
-  const isAdmin = me && ["super_admin", "agency_admin", "compliance_manager"].includes(me.role);
 
   const { data: onboarding, isLoading: obLoading } = useOnboarding(agentId, {
     enabled: Boolean(isAdmin),
@@ -69,7 +68,7 @@ export default function AdminOnboardingDetail({ agentId }: { agentId: string }) 
   const requestContracting = useRequestContracting(agentId);
   const cancelOnboarding = useCancelOnboarding(agentId);
 
-  if (me && !isAdmin) {
+  if (!meLoading && !isAdmin) {
     return (
       <div className="p-6 max-w-3xl mx-auto">
         <Card>

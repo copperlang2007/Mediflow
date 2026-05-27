@@ -13,8 +13,8 @@
  * call it as GET via the shared `apiFetch` helper that already adds
  * `credentials: include` and normalises error responses.
  */
-import { useCallback, useState } from "react";
-import { useGetMe } from "@workspace/api-client-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useIsAdmin } from "@/lib/auth/useIsAdmin";
 import {
   Card,
   CardContent,
@@ -75,13 +75,10 @@ const ERROR_LABEL: Record<PingErrorCategory, string> = {
   unknown: "Unknown error",
 };
 
-const ADMIN_ROLES = ["super_admin", "agency_admin"];
-
 export default function AdminHealthPage() {
-  const { data: me } = useGetMe();
-  const isAdmin = Boolean(me && ADMIN_ROLES.includes(me.role));
+  const { isAdmin, isLoading: meLoading } = useIsAdmin();
 
-  if (me && !isAdmin) {
+  if (!meLoading && !isAdmin) {
     return (
       <div className="p-6 max-w-3xl mx-auto">
         <Card>
@@ -130,11 +127,25 @@ const INITIAL_STATE: AiProbeState = {
 
 export function AiProviderCard() {
   const [state, setState] = useState<AiProbeState>(INITIAL_STATE);
+  // Track the in-flight AbortController so we can cancel on unmount or when
+  // the user triggers a Refresh while the previous probe hasn't returned.
+  // Without this an unmount mid-fetch logs a setState-on-unmounted warning.
+  const controllerRef = useRef<AbortController | null>(null);
 
   const runProbe = useCallback(async () => {
+    // Cancel any prior in-flight call before kicking off a new one.
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const result = await apiFetch<AiHealthResult>("/api/admin/health/ai");
+      const result = await apiFetch<AiHealthResult>("/api/admin/health/ai", {
+        signal: controller.signal,
+      });
+      // If the request was superseded or unmounted, skip the state write —
+      // the next runner (or unmount cleanup) already owns the UI.
+      if (controller.signal.aborted) return;
       setState({
         loading: false,
         result: normalizeResult(result),
@@ -142,6 +153,7 @@ export function AiProviderCard() {
         checkedAt: Date.now(),
       });
     } catch (err) {
+      if (controller.signal.aborted) return;
       const message =
         err instanceof Error
           ? err.message
@@ -153,6 +165,15 @@ export function AiProviderCard() {
         checkedAt: Date.now(),
       });
     }
+  }, []);
+
+  // On unmount, abort any in-flight probe so we don't setState into a
+  // component that's already gone. `apiFetch` rejects with an AbortError
+  // which the catch above swallows because `signal.aborted` is true.
+  useEffect(() => {
+    return () => {
+      controllerRef.current?.abort();
+    };
   }, []);
 
   const reset = useCallback(() => {
