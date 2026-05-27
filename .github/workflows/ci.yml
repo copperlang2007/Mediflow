@@ -37,7 +37,7 @@ jobs:
         run: pnpm test
 
   pnpm-audit:
-    name: pnpm audit (high)
+    name: pnpm audit (moderate)
     runs-on: ubuntu-latest
     continue-on-error: false
     steps:
@@ -57,10 +57,10 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
 
-      # Fail the build on any high-or-above-severity advisory in the
-      # resolved dependency tree. Moderate advisories are tracked but not
-      # gated; tighten this further once the remaining transitives
-      # (ws/jsdom, uuid/@google-cloud/storage, qs/supertest, esbuild,
-      # ip-address/express-rate-limit) are cleared.
+      # Fail the build on any moderate-or-above-severity advisory in the
+      # resolved dependency tree. The previously-tracked transitives
+      # (ws/jsdom, uuid/@google-cloud/storage, qs/supertest, esbuild via
+      # drizzle-kit, ip-address/express-rate-limit) have all been cleared
+      # via direct bumps and narrow pnpm.overrides pins in package.json.
       - name: pnpm audit
-        run: pnpm audit --audit-level=high
+        run: pnpm audit --audit-level=moderate
