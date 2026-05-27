@@ -334,3 +334,9 @@
 {"at":"2026-05-27T16:10:20.585Z","tick":82,"phase":"log","action":"tick_complete","detail":{"durationMs":1030,"workFound":1,"dispatched":1,"errors":0}}
 {"at":"2026-05-27T16:10:51.346Z","tick":83,"phase":"health","action":"tick_start"}
 {"at":"2026-05-27T16:12:14.358Z","tick":84,"phase":"health","action":"tick_start"}
+{"at":"2026-05-27T16:12:52.901Z","tick":85,"phase":"health","action":"tick_start"}
+{"at":"2026-05-27T16:13:52.745Z","tick":86,"phase":"health","action":"tick_start"}
+{"at":"2026-05-27T16:15:58.669Z","tick":86,"phase":"inbox","action":"scan_complete","detail":{"healthy":1,"stalled":0,"dead":0}}
+{"at":"2026-05-27T16:16:00.314Z","tick":87,"phase":"health","action":"tick_start"}
+{"at":"2026-05-27T16:16:37.557Z","tick":88,"phase":"health","action":"tick_start"}
+{"at":"2026-05-27T16:17:12.363Z","tick":89,"phase":"health","action":"tick_start"}
