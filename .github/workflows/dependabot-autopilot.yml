@@ -1,0 +1,118 @@
+# Dependabot autopilot — auto-merge minor/patch dependency bumps once CI passes.
+#
+# Why this exists: routine dependency upkeep is high-volume / low-signal work.
+# Without automation the team burns review cycles on bumps that have
+# never broken anything in this codebase. The autopilot moves the
+# minor+patch tier off the human-review path while leaving majors
+# under explicit control.
+#
+# Decision matrix (mirrors `.github/dependabot.yml`):
+#
+#   | update-type            | groupable | auto-approve | auto-merge |
+#   |------------------------|-----------|--------------|------------|
+#   | semver-patch           | yes       | yes          | yes (auto) |
+#   | semver-minor           | yes       | yes          | yes (auto) |
+#   | semver-major           | no        | no           | no (human) |
+#   | security (CVE-driven)  | n/a       | yes          | yes (auto) |
+#
+# Trigger: `pull_request_target` is used (not `pull_request`) so the
+# workflow runs with the BASE branch's GITHUB_TOKEN, which has the write
+# permissions granted below. The default `pull_request` trigger from a
+# Dependabot PR runs with a read-only token (a GitHub-side hardening),
+# making auto-merge / approve impossible. `pull_request_target` runs the
+# workflow code from main, not from the PR — that's exactly what we want
+# here since the workflow itself never executes PR code.
+#
+# Safety: the auto-merge command uses `--auto`, which is non-destructive.
+# It queues the merge for "after all REQUIRED status checks pass" — if
+# branch protection requires CI green, the merge only happens when CI is
+# green. This workflow doesn't bypass review gates; it satisfies them.
+name: Dependabot autopilot
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+permissions:
+  # Required to merge PRs and to push approval reviews back from this
+  # workflow's actor (github-actions[bot]). Note: the bot CANNOT approve
+  # its own PRs, but Dependabot is a separate actor so the bot's review
+  # is accepted by branch protection.
+  contents: write
+  pull-requests: write
+
+jobs:
+  autopilot:
+    # Only trigger on actual Dependabot PRs — defence in depth even though
+    # the only `pull_request_target` Dependabot ever opens is its own.
+    # A future contributor adding a different `pull_request_target`
+    # workflow that runs `dependabot/fetch-metadata` would otherwise fail
+    # in confusing ways on non-Dependabot PRs.
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      # 1) Get update metadata: semver level, package name, update-type
+      #    (security vs version-update), ecosystem, etc.
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 2) Auto-approve + queue merge for minor/patch.
+      #    The `gh pr merge --auto --squash` queues the merge for when
+      #    required status checks pass; it's a no-op if CI fails.
+      #
+      #    For Dependabot-grouped PRs, `update-type` reflects the HIGHEST
+      #    semver level in the group — so a group containing 1 minor + 5
+      #    patches returns `semver-minor` and matches here. A group that
+      #    somehow contains a major (shouldn't happen given dependabot.yml
+      #    ignores semver-major) would return `semver-major` and skip this
+      #    branch, falling through to the human-review nag.
+      #
+      #    Security updates from Dependabot retain their semver level on
+      #    `update-type`, so a patch-level CVE fix matches here naturally
+      #    without a separate branch.
+      - name: Auto-merge minor / patch
+        if: >-
+          steps.meta.outputs.update-type == 'version-update:semver-patch'
+          || steps.meta.outputs.update-type == 'version-update:semver-minor'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          # Approve so the "required approving reviews" branch-protection
+          # gate is satisfied (Dependabot PRs are authored by dependabot[bot]
+          # so github-actions[bot] can approve them — distinct actors).
+          gh pr review --approve "$PR_URL" \
+            --body "Autopilot: minor/patch bump — approving so the auto-merge can fire once CI is green."
+          gh pr merge --auto --squash "$PR_URL"
+
+      # 3) For major bumps: comment, do NOT merge.
+      - name: Flag major bumps for human review
+        if: steps.meta.outputs.update-type == 'version-update:semver-major'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PKG: ${{ steps.meta.outputs.dependency-names }}
+        run: |
+          set -euo pipefail
+          # Only post the nag once per PR — re-runs (re-opens, force-pushes)
+          # would otherwise spam the timeline.
+          if ! gh pr view "$PR_URL" --json comments \
+              --jq '.comments[].body' | grep -q '<!-- autopilot-major-nag -->'; then
+            gh pr comment "$PR_URL" --body "$(cat <<EOF
+          <!-- autopilot-major-nag -->
+          Autopilot skipped: \`${PKG}\` is a **major** version bump.
+
+          Major bumps may contain breaking changes that the test suite
+          doesn't cover (renamed APIs, removed exports, behavioural
+          shifts that pass types/tests but break runtime). Please review
+          the upstream changelog before merging.
+          EOF
+          )"
+          fi

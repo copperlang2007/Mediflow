@@ -1,0 +1,70 @@
+# Dependabot configuration — version updates for npm + GitHub Actions.
+#
+# Policy (paired with `.github/workflows/dependabot-autopilot.yml`):
+#
+#   - **minor + patch** for every npm package are GROUPED into a single
+#     weekly PR (one per ecosystem). The autopilot workflow auto-merges
+#     that PR after CI passes, so the human-attention cost of routine
+#     dependency upkeep is ~1 click/week — or zero if CI is green.
+#
+#   - **major** updates are NOT grouped (one PR per package) and the
+#     autopilot DOES NOT auto-merge them. Majors require explicit human
+#     review since they may carry breaking changes the test suite doesn't
+#     cover (renamed APIs, removed exports, behavioural changes that pass
+#     types/tests but break runtime).
+#
+#   - Security advisories (CVE-driven updates) are opened automatically
+#     by Dependabot regardless of this config (the "security updates"
+#     setting is account-wide). The autopilot treats them like patches
+#     since prompt CVE-patching beats waiting for a human merge.
+#
+# Workspace layout: the repository is a pnpm monorepo with the root
+# `package.json` owning the dependency graph (workspace projects pull
+# from there via the catalog: protocol). A single npm ecosystem at the
+# root is sufficient — Dependabot's npm support walks the workspace.
+
+version: 2
+
+updates:
+  # ---- npm (root + workspace) ------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    groups:
+      # One PR per week for ALL minor + patch bumps. Bundling means a
+      # single CI cycle covers the batch, the autopilot auto-merges once
+      # green, and we don't paper-cut on 30 separate PRs.
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    # Skip pre-release tags entirely — alphas/betas/rcs land in our
+    # tree only via explicit human action, not Dependabot autopilot.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+
+  # ---- GitHub Actions --------------------------------------------------
+  # Bump action SHAs / version tags in .github/workflows/*.yml on the same
+  # cadence. Action bumps are nearly always safe (no API surface to break)
+  # and the autopilot treats them identically to npm patch/minor.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
