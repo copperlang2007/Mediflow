@@ -64,3 +64,30 @@ jobs:
       # via direct bumps and narrow pnpm.overrides pins in package.json.
       - name: pnpm audit
         run: pnpm audit --audit-level=moderate
+
+  migration-journal:
+    name: migration journal consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      # Catch the easy-to-miss drift where a new migration *.sql file is
+      # added without a matching entry in meta/_journal.json (or vice
+      # versa). Drizzle's migrator reads ONLY the journal — an
+      # unregistered SQL file silently fails to run in production.
+      - name: Verify migration journal is in sync
+        run: pnpm --filter @workspace/scripts check:migration-journal
