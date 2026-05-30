@@ -20,6 +20,8 @@ import {
   metricsRegistry,
   refreshQueueGaugesIfPossible,
 } from "./lib/metrics";
+import { buildShaHeader } from "./middlewares/buildShaHeader";
+import { getBuildInfo } from "./lib/buildInfo";
 
 const app: Express = express();
 
@@ -59,6 +61,10 @@ app.use(
 );
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+
+// Stamp every response with the build SHA so ops can debug-by-curl.
+// Registered before routing so even 404s + error responses carry it.
+app.use(buildShaHeader);
 
 // Per-request HTTP metrics. Registered EARLY so the response-finish
 // listener observes the full request lifecycle (including time spent in
@@ -139,6 +145,24 @@ app.use("/api", userLimiter);
 // Twilio inbound webhooks — mounted at root so Twilio can reach them without
 // API auth middleware. Signature validation is enforced inside the handler.
 app.use(webhooksRouter);
+
+/**
+ * GET /version — release identity for monitoring probes.
+ *
+ * Public (same info that X-Build-Sha already leaks on every response).
+ * No state checks, no DB hit — meant to be cheap enough to scrape from
+ * an external uptime monitor every few seconds without thinking about it.
+ */
+app.get("/version", (_req: Request, res: Response): void => {
+  const build = getBuildInfo();
+  res.json({
+    version: build.version,
+    sha: build.sha,
+    builtAt: build.builtAt,
+    nodeVersion: build.nodeVersion,
+    uptimeSeconds: Math.floor(process.uptime()),
+  });
+});
 
 /**
  * GET /metrics — Prometheus scrape endpoint.

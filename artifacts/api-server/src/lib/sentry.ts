@@ -11,6 +11,7 @@ import {
   scrubSentryEvent,
   scrubSentryBreadcrumb,
 } from "./sentryPhiScrubber";
+import { getBuildInfo } from "./buildInfo";
 
 let initialized = false;
 
@@ -19,10 +20,16 @@ export function initSentry(): void {
   if (!dsn) return;
   if (initialized) return;
 
+  const build = getBuildInfo();
   Sentry.init({
     dsn,
     tracesSampleRate: 0.1,
     environment: process.env.NODE_ENV ?? "development",
+    // Tie events to the deploy artifact. The cascade in buildInfo.ts
+    // falls back to "unknown" — Sentry accepts that as a release name,
+    // so local dev / untagged builds still ship events (just bucketed
+    // under "unknown" rather than a SHA).
+    release: build.sha,
     // PHI scrubbing — see lib/sentryPhiScrubber.ts. Strips MBI, SSN,
     // email, phone, bank routing patterns from event payloads + breadcrumbs
     // before they leave the process. Defense-in-depth so a thrown DB / Zod
