@@ -71,6 +71,41 @@ export const httpRequestsTotal = new Counter({
   registers: [metricsRegistry],
 });
 
+// ---- pg-boss enqueue + dead-letter counters --------------------------------
+
+/**
+ * Total jobs successfully enqueued via `enqueue()`, labelled by queue
+ * name + outcome (`accepted` | `failed`). `failed` covers the
+ * never-throws fallback path inside `enqueue()` — pg-boss returned an
+ * error, we logged it, and returned null. Alert on a sustained non-zero
+ * rate of `outcome="failed"` — it means the queue infra is unhealthy and
+ * job intake is being silently dropped.
+ */
+export const jobEnqueueTotal = new Counter({
+  name: "pg_boss_jobs_enqueued_total",
+  help: "Total jobs enqueued via enqueue(), labelled by queue and outcome",
+  labelNames: ["queue", "outcome"] as const,
+  registers: [metricsRegistry],
+});
+
+/**
+ * Total jobs that exhausted their retry budget and landed in the
+ * dead-letter queue. Labelled by the ORIGINAL queue name (what was
+ * trying to run when it died), not the dead-letter queue itself —
+ * that's the signal you actually want to alert on:
+ * `rate(pg_boss_jobs_dead_lettered_total{queue="X"}[5m]) > 0` means
+ * queue X is permanently losing jobs.
+ *
+ * Bumped from the dead-letter handler. Already-logged + Sentry-captured;
+ * this counter is the structured signal Prometheus can alert on.
+ */
+export const jobDeadLetterTotal = new Counter({
+  name: "pg_boss_jobs_dead_lettered_total",
+  help: "Total jobs that exhausted retries and were dead-lettered, labelled by original queue",
+  labelNames: ["queue"] as const,
+  registers: [metricsRegistry],
+});
+
 // ---- pg-boss queue gauges --------------------------------------------------
 
 /**
