@@ -15,6 +15,11 @@ import webhooksRouter from "./routes/webhooks";
 import { logger } from "./lib/logger";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "./middlewares/requireAuth";
 import { addSseSubscriber, removeSseSubscriber } from "./lib/sseManager";
+import { metricsMiddleware } from "./middlewares/metricsMiddleware";
+import {
+  metricsRegistry,
+  refreshQueueGaugesIfPossible,
+} from "./lib/metrics";
 
 const app: Express = express();
 
@@ -54,6 +59,13 @@ app.use(
 );
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+
+// Per-request HTTP metrics. Registered EARLY so the response-finish
+// listener observes the full request lifecycle (including time spent in
+// rate limiters, auth, etc.). The /metrics endpoint itself is excluded
+// inside the middleware so Prometheus scrape latency doesn't loop into
+// the histogram. See lib/metrics.ts for cardinality discipline.
+app.use(metricsMiddleware);
 
 // CORS — locked to exact known origin; never falls back to wildcard
 app.use(
@@ -127,6 +139,46 @@ app.use("/api", userLimiter);
 // Twilio inbound webhooks — mounted at root so Twilio can reach them without
 // API auth middleware. Signature validation is enforced inside the handler.
 app.use(webhooksRouter);
+
+/**
+ * GET /metrics — Prometheus scrape endpoint.
+ *
+ * Auth: bearer token via `Authorization: Bearer <METRICS_TOKEN>`. In
+ * production METRICS_TOKEN MUST be set — without it the endpoint returns
+ * 503 (refuse rather than expose). In non-production missing token is
+ * permitted to keep local-dev observability frictionless.
+ *
+ * The handler refreshes the pg-boss queue gauges on each scrape — that's
+ * cheaper than polling on a timer and matches Prometheus's pull model.
+ */
+app.get("/metrics", async (req: Request, res: Response): Promise<void> => {
+  const expected = process.env.METRICS_TOKEN?.trim();
+  if (!expected) {
+    if (process.env.NODE_ENV === "production") {
+      res
+        .status(503)
+        .json({ error: "Metrics endpoint not configured (METRICS_TOKEN unset)" });
+      return;
+    }
+    // Non-prod fall-through to ungated access.
+  } else {
+    const header = req.headers.authorization ?? "";
+    const supplied = header.startsWith("Bearer ") ? header.slice(7) : "";
+    if (supplied !== expected) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+  }
+  try {
+    await refreshQueueGaugesIfPossible();
+    const body = await metricsRegistry.metrics();
+    res.set("Content-Type", metricsRegistry.contentType);
+    res.send(body);
+  } catch (err) {
+    req.log.error({ err }, "Failed to serialize Prometheus metrics");
+    res.status(500).json({ error: "Failed to serialize metrics" });
+  }
+});
 
 // SSE spec alias: GET /sse/notifications (mirrors /api/notifications/stream)
 app.get(
