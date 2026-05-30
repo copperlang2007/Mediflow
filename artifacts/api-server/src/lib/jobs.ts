@@ -40,6 +40,7 @@
 import { PgBoss, type Job, type Queue, type WorkHandler } from "pg-boss";
 import { logger } from "./logger";
 import { captureWorkerError } from "./sentry";
+import { jobEnqueueTotal, jobDeadLetterTotal } from "./metrics";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
@@ -274,9 +275,14 @@ export async function enqueue<T extends Record<string, unknown>>(
 ): Promise<string | null> {
   try {
     const boss = await getQueue();
-    return await boss.send(name, data, options);
+    const id = await boss.send(name, data, options);
+    jobEnqueueTotal.inc({ queue: name, outcome: "accepted" });
+    return id;
   } catch (err) {
     logger.error({ err, name }, "Failed to enqueue job");
+    // Silent enqueue failures are how queue-infra incidents stay
+    // invisible — surface them as a counter Ops can alert on.
+    jobEnqueueTotal.inc({ queue: name, outcome: "failed" });
     return null;
   }
 }
@@ -320,6 +326,9 @@ export async function deadLetterHandler(
       new Error(`Job permanently failed after retries: ${originalQueue}`),
       context,
     );
+    // Structured signal for alerting: rate() of this counter scoped to
+    // a specific queue tells Ops which worker is permanently failing.
+    jobDeadLetterTotal.inc({ queue: originalQueue });
   }
 }
 
