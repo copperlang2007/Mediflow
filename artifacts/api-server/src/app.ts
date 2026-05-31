@@ -27,19 +27,17 @@ const app: Express = express();
 
 /**
  * Derive the exact origin that browsers will send.
- * In production this is the app's public domain; in dev it's the Replit proxy.
+ * In production this is the app's public domain, set via ALLOWED_ORIGIN.
  *
  * Security policy: if no origin can be resolved, CORS is DENIED (false),
- * not opened. This is intentionally strict — set ALLOWED_ORIGIN or ensure
- * REPLIT_DEV_DOMAIN is present in the environment.
+ * not opened. This is intentionally strict — set ALLOWED_ORIGIN (the app's
+ * public origin) explicitly.
  */
 function resolveAllowedOrigin(): string | false {
   const explicit = process.env.ALLOWED_ORIGIN;
   if (explicit) return explicit;
-  const replDomain = process.env.REPLIT_DEV_DOMAIN;
-  if (replDomain) return `https://${replDomain}`;
   logger.warn(
-    "CORS: neither ALLOWED_ORIGIN nor REPLIT_DEV_DOMAIN is set — cross-origin requests will be denied",
+    "CORS: ALLOWED_ORIGIN is not set — cross-origin requests will be denied",
   );
   return false;
 }
