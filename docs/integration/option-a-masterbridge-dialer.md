@@ -150,6 +150,7 @@ MediFlow exposes **`POST /api/dialer/v1/events`** (new route, sibling to `webhoo
 ```json
 {
   "eventId": "evt_01J9…",
+  "schemaVersion": 1,
   "type": "call.completed",
   "occurredAt": "2026-05-31T17:09:44Z",
   "orgId": "org_2abc…",
@@ -170,9 +171,29 @@ Event types & `data` payloads:
 | `call.failed` | `{ reason }` ("NO_ANSWER"\|"BUSY"\|"FAILED"\|"VOICEMAIL") | record outcome, schedule retry per MediFlow cooldown |
 | `call.disposition.recorded` | `{ code, category, notes }` | map to canonical disposition; if `category=COMPLIANCE` raise oversight task |
 | `call.transcript.ready` | `{ transcriptText, redacted: bool, segments? }` | store (encrypted), kick AI parsing **in MediFlow** (§8) |
+| `call.transcript.purged` | `{ purgedAt, transcriptHash }` | mark transcript purge-confirmed on the call record (§6.1) |
 | `call.compliance.flagged` | `{ rule, detail }` ("TCPA"\|"DNC"\|"CALLING_HOURS"\|"MAX_ATTEMPTS"\|"COOLDOWN") | block, alert compliance_manager, audit |
 
-> **Transcript/PHI rule:** the dialer pushes the transcript to MediFlow and **purges its own copy** within the call-session retention window (default 24h). AI parsing/agent-assist runs inside MediFlow so PHI stays within the BAA-covered platform (§8).
+### 6.1 Transcript handling & purge (operational)
+
+The dialer pushes the transcript to MediFlow and then **purges its own copy**. AI parsing/agent-assist runs inside MediFlow so PHI stays within the BAA-covered platform (§8). To make this enforceable rather than aspirational:
+
+- **Configurable retention knob.** Dialer env `DIALER_TRANSCRIPT_RETENTION_HOURS` (default `24`, max `72`). A background sweep purges any transcript older than the window whose `call.transcript.ready` has been **acknowledged** by MediFlow (2xx on the webhook). Transcripts are never purged before a confirmed handoff, to avoid data loss.
+- **Purge confirmation is an event, not a hope.** On successful purge the dialer emits `call.transcript.purged` carrying `purgedAt` and a `transcriptHash` (SHA-256 of the transcript text MediFlow received). MediFlow verifies the hash matches the stored transcript and sets a `transcriptPurgeConfirmedAt` timestamp on the call record. A call whose transcript was delivered but lacks a purge confirmation past `retention + grace` is flagged.
+- **Failure surfacing.** A purge failure (or a missing confirmation past the grace window, default 6h) raises a **compliance alert** to `compliance_manager` via MediFlow notifications and writes an audit row — it is treated as a compliance incident, not a silent retry.
+- **Verification / reconciliation.** A scheduled MediFlow job (`pg-boss`) reconciles: for every `call.transcript.ready` it expects a matching `call.transcript.purged` within the window; gaps are surfaced on the compliance dashboard. The dialer also exposes `GET /dialer/v1/calls/{dialerCallId}` (§5.4) returning `transcriptRetained: bool` so MediFlow can spot-audit that no copy lingers.
+- **Belt-and-suspenders:** transcripts at rest in the dialer (within the retention window) are encrypted; the dialer holds no other PHI, and the MBI never reaches it (§3.1).
+
+### 6.2 API versioning & backward-compatibility
+
+`/dialer/v1` (§5), the event types and envelope (§6), and the Dial Ticket payload (§5.1) form a **formal boundary contract** between two independently deployed services. Rules:
+
+- **Versioned in the path + the envelope.** The HTTP surface is versioned in the URI (`/dialer/v1`, `/api/dialer/v1`). Every event also carries an explicit `schemaVersion` field in the envelope (add to §6) so consumers can branch without sniffing shape.
+- **Additive changes are non-breaking and require no version bump.** Adding a new optional field, a new event `type`, or a new disposition code is backward-compatible. **Consumers must ignore unknown fields and unknown event types** (forward-compatible parsing) — this is a hard requirement on both sides and is asserted in the contract tests (§10, Phase 2).
+- **Breaking changes bump the major version.** Removing/renaming a field, changing a type/enum's meaning, or changing required-ness is breaking and ships as `/dialer/v2` (and `schemaVersion: 2`). `v1` and `v2` run **side by side** through a deprecation window; the issuer negotiates via an `Accept-Version`/`X-MB-Api-Version` header, defaulting to the lowest still-supported major.
+- **Deprecation policy.** A deprecated version is announced in this doc's changelog and signalled at runtime with a `Deprecation` + `Sunset` response header (RFC 8594) and a structured warning in logs/audit. Minimum support window: **2 minor releases or 90 days**, whichever is longer, after the successor ships.
+- **Discovery & drift detection.** The contract lives in MediFlow's OpenAPI spec (`lib/api-spec`, consumed by Orval). CI runs a **schema-diff gate** on the spec: any non-additive change fails the build unless the major version is bumped, so breaking changes can't merge silently. The dialer pins the contract version it implements and reports it via `GET /dialer/v1/healthz` (`{ contractVersion }`) so MediFlow can detect a mismatched deploy.
+- **Idempotency & ordering are part of the contract, not the version.** `Idempotency-Key` (requests) and `eventId` (events) dedupe across retries; consumers must tolerate out-of-order and duplicate delivery regardless of version.
 
 ---
 
