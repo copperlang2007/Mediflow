@@ -3,10 +3,10 @@
 ## Overview
 MediFlow is a production-grade Medicare agency management platform designed to replace disparate systems like Monday.com and GoHighLevel. It aims to support 25-100 agents by providing a comprehensive suite of tools including AI integrations, automations, two-way SMS/email communication, and retention features. The platform is built with a strong emphasis on HIPAA and SOC 2 compliance, ensuring secure and efficient operations for Medicare sales agencies.
 
-## User Preferences
-- I prefer clear and concise explanations.
-- Please ask for confirmation before implementing major changes or complex features.
-- I value a modular and maintainable codebase.
+## Conventions
+- Prefer clear and concise explanations.
+- Ask for confirmation before implementing major changes or complex features.
+- Keep the codebase modular and maintainable.
 - Avoid making changes to the `lib/api-zod/src/index.ts` file directly, except for the explicit `export * from "./generated/api"` fix after codegen.
 - When generating API hooks and Zod schemas from the OpenAPI spec, ensure the `lib/api-zod/src/index.ts` file only contains `export * from "./generated/api"` afterward.
 
@@ -24,7 +24,7 @@ The project is structured as a pnpm monorepo using Node.js 24 and TypeScript 5.9
 - **Authentication**: Handled by Clerk, with a proxy at `/api/__clerk`.
 - **Validation**: Zod v4 with drizzle-zod for schema validation.
 - **API Codegen**: Orval generates API client hooks (React Query v5) and Zod validation schemas from an OpenAPI specification (`lib/api-spec/openapi.yaml`).
-- **Storage**: Utilizes Replit Object Storage for file management.
+- **Storage**: S3-compatible object storage (AWS S3 in production, MinIO in local development) for file management. See `artifacts/api-server/src/lib/objectStorage.ts`.
 - **Background Jobs**: `pg-boss` (PostgreSQL-backed job queue) handles scheduled and ad-hoc tasks.
 - **Email**: Resend is integrated for transactional email services.
 - **SMS**: Twilio powers two-way SMS communication.
@@ -47,11 +47,10 @@ The project is structured as a pnpm monorepo using Node.js 24 and TypeScript 5.9
 ## External Dependencies
 - **Clerk**: User authentication and authorization service.
 - **PostgreSQL**: Primary database for all application data, including background job queue data (`pg-boss`).
-- **Drizzle ORM**: TypeScript ORM for interacting with PostgreSQL.
-- **Replit Object Storage**: Cloud storage for application assets and documents.
+- **S3-compatible Object Storage (AWS S3 / MinIO)**: Cloud storage for application assets and documents.
 - **Resend**: Email sending service.
 - **Twilio**: SMS messaging service.
-- **OpenAI**: AI model services, accessed via Replit AI Integrations proxy for chat, drafting, and compliance reporting features.
+- **OpenAI**: AI model services for chat, drafting, and compliance reporting. Azure OpenAI is used in production as the HIPAA BAA-covered provider; the standard OpenAI API is used only in development. A single provider is configured via `AI_INTEGRATIONS_PROVIDER` (see `lib/integrations-openai-ai-server/src/buildClient.ts`).
 - **Vite**: Frontend build tool.
 - **Tailwind CSS**: Utility-first CSS framework.
 - **shadcn/ui**: Reusable UI components.
