@@ -17,13 +17,28 @@ import {
 // `gcloud auth application-default login`).
 
 /**
- * Boot-time assertion, invoked once at app/worker bootstrap. GCS is the
- * only supported backend and is BAA-covered, so this currently passes
- * unconditionally. It is retained as the single, obvious gate to fail
- * fast on if a non-BAA backend is ever reintroduced.
+ * Boot-time storage sanity guard, invoked once at app/worker bootstrap.
+ *
+ * GCS is the only supported backend and is BAA-covered, so there is no
+ * non-BAA backend to reject. What this DOES enforce, in production, is that
+ * the private document bucket is actually configured: every PHI-bearing
+ * upload/download resolves through `PRIVATE_OBJECT_DIR`, so a prod deploy
+ * that forgot to set it would otherwise fail only on the first document
+ * operation. Fail fast and visibly at boot instead. Mirrors the AI provider
+ * guard in `lib/aiProvider.ts`.
+ *
+ * Lenient in non-production so local dev / tests that never touch storage
+ * keep working without the env var.
  */
 export function assertStorageBackendHipaaCompliant(): void {
-  // GCS-only: no non-BAA backend exists to guard against.
+  if (process.env.NODE_ENV !== "production") return;
+  if (!process.env.PRIVATE_OBJECT_DIR?.trim()) {
+    throw new Error(
+      "FATAL: PRIVATE_OBJECT_DIR must be set in production — it is the GCS " +
+        "location for private, PHI-bearing documents. Refusing to boot " +
+        "without it so document operations cannot fail open later.",
+    );
+  }
 }
 
 export const objectStorageClient = new Storage();
@@ -51,8 +66,8 @@ export class ObjectStorageService {
     );
     if (paths.length === 0) {
       throw new Error(
-        "PUBLIC_OBJECT_SEARCH_PATHS not set. Create a bucket in 'Object Storage' " +
-          "tool and set PUBLIC_OBJECT_SEARCH_PATHS env var (comma-separated paths)."
+        "PUBLIC_OBJECT_SEARCH_PATHS not set. Provision a GCS bucket and set " +
+          "the PUBLIC_OBJECT_SEARCH_PATHS env var (comma-separated paths)."
       );
     }
     return paths;
@@ -62,8 +77,8 @@ export class ObjectStorageService {
     const dir = process.env.PRIVATE_OBJECT_DIR || "";
     if (!dir) {
       throw new Error(
-        "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
-          "tool and set PRIVATE_OBJECT_DIR env var."
+        "PRIVATE_OBJECT_DIR not set. Provision a GCS bucket and set the " +
+          "PRIVATE_OBJECT_DIR env var."
       );
     }
     return dir;
@@ -109,8 +124,8 @@ export class ObjectStorageService {
     const privateObjectDir = this.getPrivateObjectDir();
     if (!privateObjectDir) {
       throw new Error(
-        "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
-          "tool and set PRIVATE_OBJECT_DIR env var."
+        "PRIVATE_OBJECT_DIR not set. Provision a GCS bucket and set the " +
+          "PRIVATE_OBJECT_DIR env var."
       );
     }
 
