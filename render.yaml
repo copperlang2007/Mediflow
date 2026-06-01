@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: mediflow-early-access
+    runtime: node
+    plan: starter
+    buildCommand: corepack enable && corepack prepare pnpm@10.28.1 --activate && pnpm install --frozen-lockfile && pnpm --filter @workspace/web-app run build && pnpm --filter @workspace/api-server run build
+    startCommand: pnpm --filter @workspace/api-server run start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 24.15.0
+      - key: WEB_STATIC_DIR
+        value: /opt/render/project/src/artifacts/web-app/dist/public
+      - key: DATABASE_URL
+        value: postgres://mediflow:mediflow@127.0.0.1:5432/mediflow_demo_boot
+      - key: ALLOWED_ORIGIN
+        sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: VITE_CLERK_PUBLISHABLE_KEY
+        sync: false

@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
@@ -25,6 +27,20 @@ import { buildShaHeader } from "./middlewares/buildShaHeader";
 import { getBuildInfo } from "./lib/buildInfo";
 
 const app: Express = express();
+
+function resolveWebStaticDir(): string | undefined {
+  const explicit = process.env.WEB_STATIC_DIR?.trim();
+  const candidates = [
+    explicit,
+    // Render/root start command: repo root is the process cwd.
+    path.resolve(process.cwd(), "artifacts/web-app/dist/public"),
+    // Package-local start command: cwd is artifacts/api-server.
+    path.resolve(process.cwd(), "../web-app/dist/public"),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  return candidates.find((candidate) => fs.existsSync(path.join(candidate, "index.html")));
+}
+
 
 /**
  * Derive the exact origin that browsers will send.
@@ -125,6 +141,31 @@ app.use(
   }),
 );
 app.use(express.urlencoded({ extended: true }));
+
+const webStaticDir = resolveWebStaticDir();
+
+if (webStaticDir) {
+  logger.info({ webStaticDir }, "Serving bundled web app");
+  app.use(
+    express.static(webStaticDir, {
+      index: false,
+      maxAge: "1y",
+      immutable: true,
+    }),
+  );
+
+  // SPA fallback for client-side routes on single-service hosts (Render,
+  // Fly, Railway). Register before Clerk's API middleware so the shell can
+  // render even when API credentials are still being wired. Keep API/ops
+  // endpoints out so failed API paths surface as API failures, not index.html.
+  app.get(/^(?!\/api(?:\/|$)|\/metrics$|\/version$).*/, (_req, res) => {
+    res.sendFile(path.join(webStaticDir, "index.html"));
+  });
+} else {
+  logger.warn(
+    "Web static bundle not found; API-only mode. Run `pnpm --filter @workspace/web-app run build` or set WEB_STATIC_DIR.",
+  );
+}
 
 app.use(
   clerkMiddleware((req) => ({

@@ -73,10 +73,6 @@ function stripBase(path: string): string {
     : path;
 }
 
-if (!clerkPubKey) {
-  throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY");
-}
-
 const clerkAppearance = {
   theme: shadcn,
   cssLayerName: "clerk",
@@ -162,6 +158,32 @@ function SignUpPage() {
         path={`${basePath}/sign-up`}
         signInUrl={`${basePath}/sign-in`}
       />
+    </div>
+  );
+}
+
+function DeploymentConfigRequired() {
+  return (
+    <div className="flex min-h-[100dvh] items-center justify-center bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 px-4">
+      <div className="max-w-xl rounded-2xl border border-white/10 bg-white/10 p-8 text-center text-white shadow-2xl backdrop-blur">
+        <div className="flex justify-center mb-6">
+          <img src={`${basePath}/logo.svg`} alt="MediFlow" className="h-16 w-16" />
+        </div>
+        <p className="mb-3 text-sm font-semibold uppercase tracking-[0.24em] text-blue-200">Early access deployment</p>
+        <h1 className="mb-4 text-4xl font-bold tracking-tight">MediFlow is deployed</h1>
+        <p className="mb-6 text-base leading-7 text-blue-100">
+          The web shell is rendering. Add <code className="rounded bg-black/30 px-2 py-1 text-blue-50">VITE_CLERK_PUBLISHABLE_KEY</code>
+          {" "}in the deployment environment to enable the authenticated walkthrough.
+        </p>
+        <div className="rounded-xl border border-blue-300/20 bg-blue-950/50 p-4 text-left text-sm text-blue-100">
+          <p className="font-semibold text-white">Demo readiness checklist</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>Set Clerk publishable and secret keys.</li>
+            <li>Point <code>ALLOWED_ORIGIN</code> at the Render URL.</li>
+            <li>Attach the demo database before exercising API-backed pages.</li>
+          </ul>
+        </div>
+      </div>
     </div>
   );
 }
@@ -450,6 +472,10 @@ function ClerkProviderWithRoutes() {
 }
 
 function App() {
+  if (!clerkPubKey) {
+    return <DeploymentConfigRequired />;
+  }
+
   return (
     <WouterRouter base={basePath}>
       <ClerkProviderWithRoutes />
