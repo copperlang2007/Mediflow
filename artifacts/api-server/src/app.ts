@@ -187,7 +187,10 @@ if (!isDemoMode()) {
 // Falls back to IP for unauthenticated requests.
 const userLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
+  // Demo mode keys by IP (no Clerk userId), so multiple walkthrough viewers
+  // behind one office/VPN egress share a budget — raise it so they aren't
+  // throttled. Real deploys key by userId and keep the tighter per-user cap.
+  max: isDemoMode() ? 2000 : 100,
   standardHeaders: true,
   legacyHeaders: false,
   validate: { keyGeneratorIpFallback: false },
