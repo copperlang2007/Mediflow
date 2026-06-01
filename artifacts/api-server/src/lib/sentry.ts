@@ -12,6 +12,7 @@ import {
   scrubSentryBreadcrumb,
 } from "./sentryPhiScrubber";
 import { getBuildInfo } from "./buildInfo";
+import { logger } from "./logger";
 
 let initialized = false;
 
@@ -35,25 +36,39 @@ export function initSentry(): void {
     // before they leave the process. Defense-in-depth so a thrown DB / Zod
     // error containing a Medicare ID never crosses the BAA boundary.
     beforeSend(event) {
+      if (!initialized) return null;
       try {
-        // The scrubber mutates a structural subset of Sentry's ErrorEvent;
-        // we cast to the structural shape, mutate, and return the original
-        // event reference so the SDK's discriminator (`type` etc.) survives.
-        scrubSentryEvent(event as unknown as Parameters<typeof scrubSentryEvent>[0]);
+        // Type-safe scrub
+        const eventShape = event as unknown as Record<string, any>;
+        scrubSentryEvent(eventShape);
+        // If scrubbing succeeded, send the event
         return event;
-      } catch {
-        // Never let scrubbing crash the SDK — drop the event on failure
-        // (safer than shipping unscrubbed).
+      } catch (err) {
+        // CRITICAL: Scrubber failed — log and HALT transmission
+        logger.error(
+          { 
+            err, 
+            eventKeys: Object.keys(event || {}),
+            scrubberError: err instanceof Error ? err.message : String(err),
+          },
+          "PHI SCRUBBER FAILED — HALTING SENTRY EVENT TRANSMISSION"
+        );
+        // Return null to DROP event (safer than shipping unscrubbed PHI)
         return null;
       }
     },
     beforeBreadcrumb(breadcrumb) {
+      if (!initialized) return breadcrumb;
       try {
         scrubSentryBreadcrumb(
           breadcrumb as unknown as Parameters<typeof scrubSentryBreadcrumb>[0],
         );
         return breadcrumb;
-      } catch {
+      } catch (err) {
+        logger.warn(
+          { err, breadcrumbType: (breadcrumb as any)?.type },
+          "PHI scrubber: breadcrumb scrub failed — dropping"
+        );
         return null;
       }
     },

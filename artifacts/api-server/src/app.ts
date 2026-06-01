@@ -3,6 +3,7 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import { v4 as randomUUID } from "uuid";
 import { clerkMiddleware, getAuth } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import {
@@ -134,7 +135,21 @@ const userLimiter = rateLimit({
   keyGenerator: (req) => {
     const { userId } = getAuth(req);
     if (userId) return `user:${userId}`;
-    return req.ip ?? "unknown";
+    
+    // FAIL CLOSED: require valid IP from reverse proxy
+    const ip = req.ip;
+    if (!ip) {
+      logger.error(
+        { 
+          headers: req.headers,
+          xForwardedFor: req.headers["x-forwarded-for"],
+        },
+        "RATE LIMIT: Missing IP address — verify X-Forwarded-For or trusted proxy config"
+      );
+      // Throw error so this request gets a 429 + ops alert
+      throw new Error("Rate limit key generation failed: no IP");
+    }
+    return ip;
   },
   message: { error: "Request rate limit exceeded." },
 });
@@ -192,10 +207,19 @@ app.get("/metrics", async (req: Request, res: Response): Promise<void> => {
     }
   }
   try {
-    await refreshQueueGaugesIfPossible();
-    const body = await metricsRegistry.metrics();
+    // Race with 5s timeout to prevent Prometheus scrape hangs
+    const metrics = await Promise.race([
+      (async () => {
+        await refreshQueueGaugesIfPossible();
+        return await metricsRegistry.metrics();
+      })(),
+      new Promise<string>((_, reject) => 
+        setTimeout(() => reject(new Error("Metrics scrape timeout")), 5000)
+      ),
+    ]);
+    
     res.set("Content-Type", metricsRegistry.contentType);
-    res.send(body);
+    res.send(metrics);
   } catch (err) {
     req.log.error({ err }, "Failed to serialize Prometheus metrics");
     res.status(500).json({ error: "Failed to serialize metrics" });
@@ -215,13 +239,36 @@ app.get(
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
     res.write(": connected\n\n");
-    const heartbeat = setInterval(() => {
-      try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
-    }, 25_000);
-    addSseSubscriber(authReq.userId, res);
-    req.on("close", () => {
-      clearInterval(heartbeat);
+    
+    let closed = false;
+    let heartbeat: NodeJS.Timeout | null = null;
+    
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (heartbeat) {
+        clearInterval(heartbeat);
+        heartbeat = null;
+      }
       removeSseSubscriber(authReq.userId, res);
+      try { res.end(); } catch { /* already closed */ }
+    };
+    
+    heartbeat = setInterval(() => {
+      if (closed) return;
+      try {
+        res.write(": heartbeat\n\n");
+      } catch (err) {
+        req.log.debug({ err }, "SSE write failed — closing connection");
+        cleanup();
+      }
+    }, 25_000);
+    
+    addSseSubscriber(authReq.userId, res);
+    req.on("close", cleanup);
+    res.on("error", (err) => {
+      req.log.warn({ err }, "SSE response error");
+      cleanup();
     });
   },
 );
@@ -229,18 +276,35 @@ app.get(
 app.use("/api", router);
 
 // Global typed error handler — must be registered last, after all routes.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err: unknown, req: Request, res: Response, _next: NextFunction): void => {
-  req.log.error({ err }, "Unhandled error");
-  const httpErr = err as { status?: number; statusCode?: number };
-  const status = httpErr.status ?? httpErr.statusCode ?? 500;
-  const message =
-    process.env.NODE_ENV === "production"
-      ? "Internal server error"
-      : err instanceof Error
-        ? err.message
-        : "Internal server error";
-  res.status(status).json({ error: message });
+  const errorId = randomUUID();
+  
+  // ALWAYS log full details server-side for debugging
+  req.log.error(
+    { 
+      err, 
+      errorId, 
+      path: req.path, 
+      method: req.method,
+      userId: (req as any).auth?.userId,
+    },
+    "Unhandled error"
+  );
+
+  const httpErr = err as { status?: number; statusCode?: number; message?: string } | null;
+  const status = httpErr?.status ?? httpErr?.statusCode ?? 500;
+  
+  // In production: NEVER expose implementation details
+  if (process.env.NODE_ENV === "production") {
+    res.status(status).json({ 
+      error: "An error occurred. Please reference ID: " + errorId,
+      errorId,
+    });
+  } else {
+    // Dev/staging: show the actual message for debugging
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(status).json({ error: message, errorId });
+  }
 });
 
 export default app;
