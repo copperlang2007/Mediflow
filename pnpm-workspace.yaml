@@ -27,6 +27,20 @@
 # ============================================================================
 minimumReleaseAge: 1440
 
+# Audit suppressions (`pnpm audit` / the `pnpm audit (moderate)` CI gate).
+# Each entry MUST carry a justification and be revisited when a non-breaking
+# upgrade path exists.
+auditConfig:
+  ignoreGhsas:
+    # GHSA-5xrq-8626-4rwp — vitest <4.1.0: when the Vitest UI server is
+    # listening, an arbitrary file can be read/executed. The only patched
+    # line is vitest >=4.1.0 (a major bump from our 3.2.4). We are NOT
+    # exposed in practice: CI and local test runs use `vitest run` (no UI
+    # server; the UI is opt-in via `vitest --ui`, used only in interactive
+    # local dev). Suppressed to keep the audit gate meaningful for real,
+    # exploitable advisories. REMOVE when we upgrade to vitest >=4.1.0.
+    - GHSA-5xrq-8626-4rwp
+
 packages:
   - artifacts/*
   - lib/*
