@@ -44,7 +44,7 @@ describe("storage boot guard — production", () => {
     delete process.env.PRIVATE_OBJECT_DIR;
 
     expect(() => assertStorageBackendHipaaCompliant()).toThrow(
-      /PRIVATE_OBJECT_DIR must be set in production/,
+      /PRIVATE_OBJECT_DIR must be set/,
     );
   });
 
@@ -53,7 +53,7 @@ describe("storage boot guard — production", () => {
     process.env.PRIVATE_OBJECT_DIR = "   ";
 
     expect(() => assertStorageBackendHipaaCompliant()).toThrow(
-      /PRIVATE_OBJECT_DIR must be set in production/,
+      /PRIVATE_OBJECT_DIR must be set/,
     );
   });
 

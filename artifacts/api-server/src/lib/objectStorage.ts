@@ -17,28 +17,41 @@ import {
 // `gcloud auth application-default login`).
 
 /**
+ * The single source of truth for the `PRIVATE_OBJECT_DIR` requirement.
+ * `PRIVATE_OBJECT_DIR` is the GCS location for private, PHI-bearing
+ * documents; every upload/download resolves through it. Returns the trimmed
+ * value, or throws a consistent error when it is unset/blank. Used by both
+ * the boot guard and the runtime getter so the rule and its message stay in
+ * one place.
+ */
+function requirePrivateObjectDir(): string {
+  const dir = process.env.PRIVATE_OBJECT_DIR?.trim();
+  if (!dir) {
+    throw new Error(
+      "PRIVATE_OBJECT_DIR must be set — it is the GCS location for private, " +
+        "PHI-bearing documents. Provision a GCS bucket and set the " +
+        "PRIVATE_OBJECT_DIR env var.",
+    );
+  }
+  return dir;
+}
+
+/**
  * Boot-time storage sanity guard, invoked once at app/worker bootstrap.
  *
  * GCS is the only supported backend and is BAA-covered, so there is no
  * non-BAA backend to reject. What this DOES enforce, in production, is that
- * the private document bucket is actually configured: every PHI-bearing
- * upload/download resolves through `PRIVATE_OBJECT_DIR`, so a prod deploy
- * that forgot to set it would otherwise fail only on the first document
- * operation. Fail fast and visibly at boot instead. Mirrors the AI provider
- * guard in `lib/aiProvider.ts`.
+ * the private document bucket is actually configured: a prod deploy that
+ * forgot to set `PRIVATE_OBJECT_DIR` would otherwise fail only on the first
+ * document operation. Fail fast and visibly at boot instead. Mirrors the AI
+ * provider guard in `lib/aiProvider.ts`.
  *
  * Lenient in non-production so local dev / tests that never touch storage
  * keep working without the env var.
  */
 export function assertStorageBackendHipaaCompliant(): void {
   if (process.env.NODE_ENV !== "production") return;
-  if (!process.env.PRIVATE_OBJECT_DIR?.trim()) {
-    throw new Error(
-      "FATAL: PRIVATE_OBJECT_DIR must be set in production — it is the GCS " +
-        "location for private, PHI-bearing documents. Refusing to boot " +
-        "without it so document operations cannot fail open later.",
-    );
-  }
+  requirePrivateObjectDir();
 }
 
 export const objectStorageClient = new Storage();
@@ -74,14 +87,7 @@ export class ObjectStorageService {
   }
 
   getPrivateObjectDir(): string {
-    const dir = process.env.PRIVATE_OBJECT_DIR || "";
-    if (!dir) {
-      throw new Error(
-        "PRIVATE_OBJECT_DIR not set. Provision a GCS bucket and set the " +
-          "PRIVATE_OBJECT_DIR env var."
-      );
-    }
-    return dir;
+    return requirePrivateObjectDir();
   }
 
   async searchPublicObject(filePath: string): Promise<File | null> {
