@@ -49,13 +49,26 @@ export default defineConfig({
     // hookTimeout is only a backstop for a pathologically loaded CI runner.
     testTimeout: 30000,
     hookTimeout: 60000,
+    // Bounded retry for the integration suite. 52 test files each boot a
+    // pglite instance per file; under a heavily loaded CI runner a boot
+    // hook or a read-after-write can transiently lose the CPU race and fail
+    // even though the code is correct (observed intermittently on the
+    // `typecheck + test` job for changes that pass cleanly locally). A retry
+    // of 2 re-runs only the *failed* test a couple times, which absorbs
+    // load-induced transients without masking a deterministic failure — a
+    // real bug fails all 3 attempts. This is a CI-stability backstop, not a
+    // license to write flaky tests; the per-file pglite snapshot remains the
+    // primary flake mitigation.
+    retry: 2,
     pool: "forks",
     poolOptions: {
       forks: {
         // Bound worker count so a CI box with few cores can't oversubscribe
-        // the CPU badly enough to starve a boot hook. The snapshot restore is
-        // cheap, but capping fan-out keeps the safety margin wide.
-        maxForks: 4,
+        // the CPU badly enough to starve a boot hook. Lowered from 4 to 2:
+        // the recurring transient failures point at CPU contention on the CI
+        // runner, and a tighter cap trades a little wall-clock time for a
+        // much wider scheduling safety margin.
+        maxForks: 2,
         minForks: 1,
       },
     },
