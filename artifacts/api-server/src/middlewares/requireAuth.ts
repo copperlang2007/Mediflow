@@ -3,6 +3,7 @@ import { getAuth } from "@clerk/express";
 import { db, usersTable, orgSettingsTable, sessionActivityTable } from "@workspace/db";
 import { eq, lt } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
+import { isDemoMode, demoUserId } from "../lib/demoMode";
 
 // TTL cache for org session timeout settings (refresh every 60 s)
 const orgTimeoutCache = new Map<string, { timeoutMinutes: number; fetchedAt: number }>();
@@ -121,6 +122,37 @@ export const requireAuth = async (
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
+  // Demo mode: bypass Clerk entirely and resolve every request to the seeded
+  // demo user. Gated by isDemoMode() which is a hard no-op under
+  // NODE_ENV=production, so this branch can never run in a real deploy.
+  if (isDemoMode()) {
+    const [demoUser] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, demoUserId()))
+      .limit(1);
+
+    if (!demoUser || !demoUser.isActive) {
+      res.status(401).json({
+        error: "Demo user not found — run `pnpm seed:demo` against this database",
+      });
+      return;
+    }
+
+    const authReq = req as AuthenticatedRequest;
+    authReq.userId = demoUser.id;
+    authReq.orgId = demoUser.orgId;
+    authReq.userRole = demoUser.role as Role;
+    // Treat the demo principal as MFA-enrolled so privileged routes (which
+    // gate on this via requireMfa) are reachable in the walkthrough. No real
+    // credentials exist in demo mode, so this only affects the seeded org.
+    authReq.mfaEnrolled = true;
+    authReq.log = req.log.child({ userId: demoUser.id, orgId: demoUser.orgId, role: demoUser.role, demo: true });
+
+    next();
+    return;
+  }
+
   const auth = getAuth(req);
   const clerkUserId = auth?.userId;
 

@@ -153,3 +153,44 @@ describe("assertProdEnvIntegrity", () => {
     expect(calls[0].msg).toMatch(/FATAL/);
   });
 });
+
+describe("assertProdEnvIntegrity — DEMO_MODE", () => {
+  it("allows a remote demo DB when DEMO_MODE is on and no real creds present", () => {
+    // The demo runs on a managed host, so a non-loopback DATABASE_URL is
+    // expected and must NOT block boot on its own.
+    expect(() =>
+      assertProdEnvIntegrity({
+        DEMO_MODE: "true",
+        NODE_ENV: "development",
+        DATABASE_URL: PROD_DB,
+      }),
+    ).not.toThrow();
+  });
+
+  it("refuses to boot when DEMO_MODE is paired with NODE_ENV=production", () => {
+    expect(() =>
+      assertProdEnvIntegrity({ DEMO_MODE: "true", NODE_ENV: "production" }),
+    ).toThrow(/DEMO_MODE/);
+  });
+
+  it("refuses to boot when DEMO_MODE is paired with a live Clerk secret key", () => {
+    // The auth-bypassing demo build must never sit in front of real creds.
+    expect(() =>
+      assertProdEnvIntegrity({
+        DEMO_MODE: "true",
+        NODE_ENV: "development",
+        CLERK_SECRET_KEY: PROD_CLERK_SK,
+      }),
+    ).toThrow(/DEMO_MODE/);
+  });
+
+  it("refuses to boot when DEMO_MODE is paired with an explicit PHI key", () => {
+    expect(() =>
+      assertProdEnvIntegrity({
+        DEMO_MODE: "true",
+        NODE_ENV: "development",
+        PHI_ENCRYPTION_KEY: PROD_PHI_KEY,
+      }),
+    ).toThrow(/DEMO_MODE/);
+  });
+});

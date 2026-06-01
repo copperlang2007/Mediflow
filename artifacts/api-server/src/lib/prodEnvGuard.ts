@@ -43,6 +43,7 @@ export interface ProdEnvGuardEnv {
   CLERK_SECRET_KEY?: string | undefined;
   CLERK_PUBLISHABLE_KEY?: string | undefined;
   PHI_ENCRYPTION_KEY?: string | undefined;
+  DEMO_MODE?: string | undefined;
 }
 
 /**
@@ -98,6 +99,32 @@ export function assertProdEnvIntegrity(
   env: ProdEnvGuardEnv = process.env,
   logger?: FatalLogger,
 ): void {
+  // Demo mode is an auth-bypassing walkthrough build. It must never run as
+  // production, and must never sit in front of real auth/PHI credentials.
+  // A remote demo DATABASE_URL is expected and allowed (the demo DB lives on
+  // the host), but live Clerk keys or an explicit PHI key are hard failures.
+  if (env.DEMO_MODE === "true") {
+    if (env.NODE_ENV === "production") {
+      const message =
+        "FATAL: DEMO_MODE=true must never run with NODE_ENV=production. " +
+        "Demo mode bypasses authentication — refusing to boot.";
+      logger?.fatal({ nodeEnv: env.NODE_ENV }, message);
+      throw new Error(message);
+    }
+    const dangerous = detectProdLikeCredentials(env).filter(
+      (reason) => !reason.startsWith("DATABASE_URL host"),
+    );
+    if (dangerous.length > 0) {
+      const message =
+        "FATAL: DEMO_MODE=true paired with production-looking credentials. " +
+        "The auth-bypassing demo build must never see real Clerk/PHI secrets. " +
+        `Reasons: ${dangerous.join("; ")}`;
+      logger?.fatal({ reasons: dangerous }, message);
+      throw new Error(message);
+    }
+    return;
+  }
+
   const reasons = detectProdLikeCredentials(env);
   if (reasons.length === 0) {
     // Looks like a dev/test deploy — nothing to do.
