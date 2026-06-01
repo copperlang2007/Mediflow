@@ -55,8 +55,9 @@ async function bootstrap(): Promise<void> {
   assertAiProviderHipaaCompliant();
 
   // HIPAA guard: uploaded documents (signed PDFs, etc.) routinely embed PHI.
-  // Storage is GCS-only (BAA-covered); the guard is the gate for any future
-  // non-BAA backend reintroduction.
+  // Storage is GCS-only (BAA-covered); in production this fails fast unless
+  // the private document bucket (PRIVATE_OBJECT_DIR) is configured, so a
+  // misconfigured deploy dies at boot rather than on the first upload.
   assertStorageBackendHipaaCompliant();
 
   // E-sign provider sanity check (and seam for the prod-must-be-docusign
