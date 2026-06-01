@@ -3,7 +3,6 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-import { v4 as randomUUID } from "uuid";
 import { clerkMiddleware, getAuth } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import {
@@ -277,7 +276,8 @@ app.use("/api", router);
 
 // Global typed error handler — must be registered last, after all routes.
 app.use((err: unknown, req: Request, res: Response, _next: NextFunction): void => {
-  const errorId = randomUUID();
+  // Generate a simple error ID from timestamp + random bytes
+  const errorId = `err_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
   
   // ALWAYS log full details server-side for debugging
   req.log.error(
