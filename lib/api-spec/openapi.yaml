@@ -71,6 +71,8 @@ tags:
     description: Agent contracting/onboarding wizard flows
   - name: esign
     description: Native e-signature envelopes for carrier contracting paperwork
+  - name: dialer
+    description: masterBRIDGE dialer integration — inbound lifecycle events (Option A)
 
 paths:
   /healthz:
@@ -4668,6 +4670,51 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /dialer/v1/events:
+    post:
+      tags: [dialer]
+      summary: Inbound masterBRIDGE dialer lifecycle event (HMAC-signed webhook)
+      description: |
+        Receives Dialer → MediFlow lifecycle events (spec §6). Authenticated
+        by the `X-MB-Signature` HMAC (not a Clerk session). Idempotent on
+        `eventId`; duplicate / out-of-order deliveries are deduped. Unknown
+        event `type` values and unknown fields are ignored (forward-compat,
+        §6.2). Every event lands in the MediFlow audit log.
+      security:
+        - mbWebhookSignature: []
+      parameters:
+        - name: X-MB-Signature
+          in: header
+          required: true
+          description: "t=<unixSeconds>,v1=<hex HMAC-SHA256 of `${t}.${rawBody}`>"
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DialerEventEnvelope" }
+      responses:
+        "200":
+          description: Event accepted, ignored (unknown type), or deduped
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DialerEventAck" }
+        "400":
+          description: Invalid event envelope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Missing / invalid signature
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Stale signature timestamp (outside ±5 min)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
 
 components:
   securitySchemes:
@@ -4680,6 +4727,15 @@ components:
         authenticated session; routes that need a particular role return
         403 once authenticated. The healthcheck (`/healthz`) is the only
         public endpoint.
+    mbWebhookSignature:
+      type: apiKey
+      in: header
+      name: X-MB-Signature
+      description: |
+        Per-tenant HMAC-SHA256 webhook signature (spec §4.2). Format
+        `t=<unixSeconds>,v1=<hex>`; the HMAC is over `${t}.${rawBody}` keyed
+        with the org's shared secret, timestamp-bound to ±5 min (replay
+        protection).
   schemas:
     HealthStatus:
       type: object
@@ -8107,3 +8163,114 @@ components:
           type: string
           enum: [voided]
       required: [envelopeId, status]
+
+    DialerEventEnvelope:
+      type: object
+      description: |
+        Dialer → MediFlow event envelope (spec §6). Additional/unknown
+        properties are permitted and ignored by consumers (forward-compat,
+        §6.2), hence `additionalProperties: true`.
+      additionalProperties: true
+      properties:
+        eventId:
+          type: string
+          description: Unique event id; the receiver dedupes on this.
+        schemaVersion:
+          type: integer
+          description: Envelope schema version (currently 1).
+        type:
+          type: string
+          description: |
+            Event type. Known values include call.initiated, call.ringing,
+            call.in_progress, call.completed, call.failed,
+            call.disposition.recorded, call.transcript.ready,
+            call.transcript.purged, call.compliance.flagged. Unknown values
+            are ignored.
+        occurredAt:
+          type: string
+          format: date-time
+        orgId:
+          type: string
+        dialTicketId:
+          type: string
+        dialerCallId:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+      required:
+        - eventId
+        - type
+        - orgId
+
+    DialerEventAck:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [accepted, ignored, duplicate]
+        eventId:
+          type: string
+      required: [status, eventId]
+
+    DialTicket:
+      type: object
+      description: |
+        Minimal, time-boxed, pre-cleared Dial Ticket MediFlow provisions to
+        the dialer (spec §5.1). The MBI is NEVER included (§3.1).
+      properties:
+        dialTicketId:
+          type: string
+          description: UUID correlation key across both systems.
+        orgId: { type: string }
+        agentId: { type: string }
+        contactRef:
+          type: string
+          description: Opaque MediFlow contact id (never the MBI).
+        callee: { $ref: "#/components/schemas/DialTicketCallee" }
+        compliance: { $ref: "#/components/schemas/DialTicketCompliance" }
+        campaignId: { type: string }
+        callbackUrl:
+          type: string
+          format: uri
+      required:
+        - dialTicketId
+        - orgId
+        - agentId
+        - contactRef
+        - callee
+        - compliance
+        - callbackUrl
+
+    DialTicketCallee:
+      type: object
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        phone:
+          type: string
+          description: E.164.
+        stateCode: { type: string }
+        zipCode: { type: string }
+        preferredLanguage: { type: string }
+      required: [phone]
+
+    DialTicketCompliance:
+      type: object
+      description: MediFlow's preclearance DECISION (not raw flags).
+      properties:
+        precleared: { type: boolean }
+        preclearedAt: { type: string, format: date-time }
+        preclearanceId: { type: string }
+        tcpaConsentOnFile: { type: boolean }
+        dncClear: { type: boolean }
+        withinCallingHours: { type: boolean }
+        soaRequired: { type: boolean }
+        soaOnFile: { type: boolean }
+        agentEligible: { type: boolean }
+        expiresAt: { type: string, format: date-time }
+      required:
+        - precleared
+        - preclearedAt
+        - preclearanceId
+        - expiresAt
