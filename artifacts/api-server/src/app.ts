@@ -17,6 +17,7 @@ import webhooksRouter from "./routes/webhooks";
 import dialerEventsRouter from "./routes/dialerEvents";
 import { logger } from "./lib/logger";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "./middlewares/requireAuth";
+import { isDemoMode } from "./lib/demoMode";
 import { addSseSubscriber, removeSseSubscriber } from "./lib/sseManager";
 import { metricsMiddleware } from "./middlewares/metricsMiddleware";
 import {
@@ -167,28 +168,40 @@ if (webStaticDir) {
   );
 }
 
-app.use(
-  clerkMiddleware((req) => ({
-    publishableKey: publishableKeyFromHost(
-      getClerkProxyHost(req) ?? "",
-      process.env.CLERK_PUBLISHABLE_KEY,
-    ),
-  })),
-);
+// Demo mode bypasses Clerk entirely (requireAuth injects the seeded demo
+// user). Mounting clerkMiddleware without a secret key throws per-request, so
+// skip it. isDemoMode() is a hard no-op under NODE_ENV=production.
+if (!isDemoMode()) {
+  app.use(
+    clerkMiddleware((req) => ({
+      publishableKey: publishableKeyFromHost(
+        getClerkProxyHost(req) ?? "",
+        process.env.CLERK_PUBLISHABLE_KEY,
+      ),
+    })),
+  );
+}
 
 // Per-user rate limit: 100 requests / minute, keyed by Clerk userId.
 // Applied AFTER clerkMiddleware so getAuth(req) is populated.
 // Falls back to IP for unauthenticated requests.
 const userLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
+  // Demo mode keys by IP (no Clerk userId), so multiple walkthrough viewers
+  // behind one office/VPN egress share a budget — raise it so they aren't
+  // throttled. Real deploys key by userId and keep the tighter per-user cap.
+  max: isDemoMode() ? 2000 : 100,
   standardHeaders: true,
   legacyHeaders: false,
   validate: { keyGeneratorIpFallback: false },
   keyGenerator: (req) => {
-    const { userId } = getAuth(req);
-    if (userId) return `user:${userId}`;
-    
+    // In demo mode clerkMiddleware is not mounted, so getAuth() is unavailable
+    // — key by IP. Real deploys key by Clerk userId.
+    if (!isDemoMode()) {
+      const { userId } = getAuth(req);
+      if (userId) return `user:${userId}`;
+    }
+
     // FAIL CLOSED: require valid IP from reverse proxy
     const ip = req.ip;
     if (!ip) {
