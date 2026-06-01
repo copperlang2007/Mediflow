@@ -1,0 +1,111 @@
+#!/bin/bash
+# Nuke all stale development branches in parallel
+# Execution: bash .github/scripts/nuke-branches.sh
+
+set +e  # Continue on errors
+
+BRANCHES=(
+  \"claude/audit-ignore-vitest-ghsa\"
+  \"claude/batch-2-issues-13-1-17\"
+  \"claude/batch-3-issues-2-9-16\"
+  \"claude/batch-4-issues-4-18-15\"
+  \"claude/carrier-template-scaffolding\"
+  \"claude/chore-fix-orval-codegen\"
+  \"claude/chore-gitignore-claude-dir\"
+  \"claude/ci-github-actions\"
+  \"claude/cleanup-dead-ai-panel-and-tsconfig\"
+  \"claude/compliance-hardening\"
+  \"claude/contracting-email-worker\"
+  \"claude/drop-plaintext-medicare-id\"
+  \"claude/esign-backend\"
+  \"claude/esign-frontend\"
+  \"claude/esign-immutability-and-completion-email\"
+  \"claude/feat-commissions-backend\"
+  \"claude/feat-commissions-ui\"
+  \"claude/feat-dev-console-db-env\"
+  \"claude/feat-feature-builder-backend\"
+  \"claude/feat-feature-builder-ui\"
+  \"claude/fix-bulk-export-phi-gap\"
+  \"claude/fix-commissions-bugs-and-drift\"
+  \"claude/fix-contacts-pagination-guards\"
+  \"claude/hipaa-azure-openai\"
+  \"claude/hipaa-azure-openai-required-in-prod\"
+  \"claude/hipaa-export-anomaly-cron\"
+  \"claude/hipaa-session-and-mfa\"
+  \"claude/hotfix-commissions-schema-export\"
+  \"claude/hotfix-migration-idempotency\"
+  \"claude/insureitall-demo-prep\"
+  \"claude/issue-5-two-way-thread-view\"
+  \"claude/issue-6-sequence-step-builder\"
+  \"claude/issue-7-documents-upload\"
+  \"claude/issue-10-automations-engine-ui\"
+  \"claude/issue-11-crm-contacts-leads\"
+  \"claude/issue-15-test-framework-setup\"
+  \"claude/load-test-infra\"
+  \"claude/onboarding-day1\"
+  \"claude/onboarding-day3-tasks\"
+  \"claude/onboarding-writing-number-and-e2e\"
+  \"claude/openapi-regen-and-phi-roles-extract\"
+  \"claude/ops-pagination-and-concurrency\"
+  \"claude/ops-sentry-worker-errors\"
+  \"claude/perf-reports-and-indexes\"
+  \"claude/refactor-agent-profile-decompose\"
+  \"claude/refactor-crm-page-decompose\"
+  \"claude/refactor-reports-route-decompose\"
+  \"claude/resolve-issues-merge-prs-TlQ9J\"
+  \"claude/retention-sweep-concurrent-lock\"
+  \"claude/scale-indexes-and-pool-config\"
+  \"claude/sec-ai-hardening\"
+  \"claude/sec-dependabot-sweep\"
+  \"claude/sec-doc-acl-fix\"
+  \"claude/sec-phi-mask-contacts\"
+  \"claude/stabilize-flaky-tests\"
+  \"claude/test-integration-suite\"
+  \"claude/tests-fix-migration-drift\"
+  \"claude/tests-t1-ai-hardening\"
+  \"claude/tests-t1-commissions\"
+  \"claude/tests-t1-compliance-and-pagination\"
+  \"claude/tests-t1-documents\"
+  \"claude/tests-t2-react-component\"
+  \"claude/tests-t3-playwright-smoke\"
+  \"claude/weekly-sweep-replay-guard\"
+  \"claude/worker-liveness-and-job-retries\"
+  \"codex/repo-quality-batch4-20260522\"
+)
+
+deleted=0
+failed=0
+
+echo \"🔥 Starting parallel branch deletion...\"
+echo \"Total branches to delete: ${#BRANCHES[@]}\"
+echo
+
+# Parallel deletion (up to 10 at a time)
+for branch in \"${BRANCHES[@]}\"; do
+  (
+    git push origin --delete \"$branch\" 2>/dev/null && echo \"✅ $branch\" || echo \"❌ $branch\"
+  ) &
+  
+  # Limit parallelism to 10 concurrent pushes
+  if (( $(jobs -r -p | wc -l) >= 10 )); then
+    wait -n
+  fi
+done
+
+# Wait for all background jobs
+wait
+
+echo
+echo \"✅ Branch deletion complete\"
+echo \"Verifying...\"
+sleep 2
+REMAINING=$(git branch -r | grep -E \"claude/|codex/\" | wc -l)
+echo \"Remaining branches with claude/codex prefix: $REMAINING (should be 0)\"
+
+if [ \"$REMAINING\" -eq 0 ]; then
+  echo \"✅ SUCCESS: All stale branches deleted\"
+  exit 0
+else
+  echo \"⚠️  Some branches may still exist, check manually\"
+  exit 1
+fi
