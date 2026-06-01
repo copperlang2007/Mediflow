@@ -12,6 +12,7 @@ import {
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import webhooksRouter from "./routes/webhooks";
+import dialerEventsRouter from "./routes/dialerEvents";
 import { logger } from "./lib/logger";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "./middlewares/requireAuth";
 import { addSseSubscriber, removeSseSubscriber } from "./lib/sseManager";
@@ -110,7 +111,19 @@ app.use("/api/auth", authLimiter);
 
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
-app.use(express.json({ limit: "10mb" }));
+// Capture the raw request body so signed webhooks (the dialer event
+// receiver) can recompute their HMAC over the exact bytes received. The
+// hook runs for every JSON request but only stashes a Buffer — negligible
+// overhead, and it keeps signature verification independent of JSON
+// re-serialization (key ordering / whitespace would otherwise break it).
+app.use(
+  express.json({
+    limit: "10mb",
+    verify: (req, _res, buf) => {
+      (req as Request & { rawBody?: Buffer }).rawBody = buf;
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true }));
 
 app.use(
@@ -157,6 +170,12 @@ app.use("/api", userLimiter);
 // Twilio inbound webhooks — mounted at root so Twilio can reach them without
 // API auth middleware. Signature validation is enforced inside the handler.
 app.use(webhooksRouter);
+
+// masterBRIDGE dialer event receiver (spec §6). Path lives under /api/dialer/v1
+// to match the contract's callbackUrl, but is mounted HERE — above the
+// Clerk-guarded `/api` router below — because trust is established by the
+// X-MB-Signature HMAC, not a Clerk session.
+app.use(dialerEventsRouter);
 
 /**
  * GET /version — release identity for monitoring probes.
