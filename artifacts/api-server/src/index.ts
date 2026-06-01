@@ -55,7 +55,8 @@ async function bootstrap(): Promise<void> {
   assertAiProviderHipaaCompliant();
 
   // HIPAA guard: uploaded documents (signed PDFs, etc.) routinely embed PHI.
-  // In production STORAGE_MODE MUST be 'gcs' — the Replit sidecar has no BAA.
+  // Storage is GCS-only (BAA-covered); the guard is the gate for any future
+  // non-BAA backend reintroduction.
   assertStorageBackendHipaaCompliant();
 
   // E-sign provider sanity check (and seam for the prod-must-be-docusign

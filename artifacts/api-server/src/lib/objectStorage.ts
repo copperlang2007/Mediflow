@@ -10,58 +10,23 @@ import {
   setObjectAclPolicy,
 } from "./objectAcl";
 
-// Storage backend selector.
+// Storage backend: Google Cloud Storage, the BAA-covered path for PHI.
 //
-//   STORAGE_MODE=replit (default) → use the Replit Object Storage sidecar
-//     at 127.0.0.1:1106. Convenient for sandbox/dev iteration on Replit.
-//   STORAGE_MODE=gcs              → talk to Google Cloud Storage directly
-//     via Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS,
-//     workload identity, or `gcloud auth application-default login`). This
-//     is the production path — there is no BAA on the Replit sidecar, so
-//     real PHI must not flow through it.
-//
-// In production (`NODE_ENV === "production"`) `assertStorageBackendHipaaCompliant`
-// hard-fails at boot unless STORAGE_MODE === "gcs". Mirrors the AI provider
-// guard in `lib/aiProvider.ts`.
-const STORAGE_MODE = (process.env.STORAGE_MODE ?? "replit").toLowerCase();
-const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
+// Credentials come from Application Default Credentials
+// (GOOGLE_APPLICATION_CREDENTIALS, workload identity, or
+// `gcloud auth application-default login`).
 
 /**
- * Boot-time assertion. Call once at app/worker bootstrap so a
- * misconfigured production deploy fails fast — before any upload, download,
- * or signed-URL operation can route PHI through the Replit sidecar (which
- * has no HIPAA BAA). Allowed in non-production so local dev keeps working.
+ * Boot-time assertion, invoked once at app/worker bootstrap. GCS is the
+ * only supported backend and is BAA-covered, so this currently passes
+ * unconditionally. It is retained as the single, obvious gate to fail
+ * fast on if a non-BAA backend is ever reintroduced.
  */
 export function assertStorageBackendHipaaCompliant(): void {
-  if (process.env.NODE_ENV === "production" && STORAGE_MODE !== "gcs") {
-    throw new Error(
-      "FATAL: STORAGE_MODE must be 'gcs' in production — the Replit Object " +
-        "Storage sidecar has no HIPAA BAA and must not receive PHI. " +
-        `Got: ${process.env.STORAGE_MODE ?? "<unset>"}`,
-    );
-  }
+  // GCS-only: no non-BAA backend exists to guard against.
 }
 
-export const objectStorageClient =
-  STORAGE_MODE === "gcs"
-    ? new Storage()
-    : new Storage({
-        credentials: {
-          audience: "replit",
-          subject_token_type: "access_token",
-          token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
-          type: "external_account",
-          credential_source: {
-            url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
-            format: {
-              type: "json",
-              subject_token_field_name: "access_token",
-            },
-          },
-          universe_domain: "googleapis.com",
-        },
-        projectId: "",
-      });
+export const objectStorageClient = new Storage();
 
 export class ObjectNotFoundError extends Error {
   constructor() {
@@ -197,6 +162,12 @@ export class ObjectStorageService {
     const rawObjectPath = url.pathname;
 
     let objectEntityDir = this.getPrivateObjectDir();
+    // Normalize to a leading slash so the prefix match against the GCS URL
+    // pathname (always "/bucket/...") is robust even when PRIVATE_OBJECT_DIR
+    // is configured without one (e.g. "my-bucket/private").
+    if (!objectEntityDir.startsWith("/")) {
+      objectEntityDir = `/${objectEntityDir}`;
+    }
     if (!objectEntityDir.endsWith("/")) {
       objectEntityDir = `${objectEntityDir}/`;
     }
@@ -349,49 +320,18 @@ async function signObjectURL({
   method: "GET" | "PUT" | "DELETE" | "HEAD";
   ttlSec: number;
 }): Promise<string> {
-  if (STORAGE_MODE === "gcs") {
-    const [url] = await objectStorageClient
-      .bucket(bucketName)
-      .file(objectName)
-      .getSignedUrl({
-        version: "v4",
-        action:
-          method === "GET"
-            ? "read"
-            : method === "PUT"
-              ? "write"
-              : method === "DELETE"
-                ? "delete"
-                : "resumable",
-        expires: Date.now() + ttlSec * 1000,
-      });
-    return url;
-  }
-
-  const request = {
-    bucket_name: bucketName,
-    object_name: objectName,
-    method,
-    expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
-  };
-  const response = await fetch(
-    `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(request),
-      signal: AbortSignal.timeout(30_000),
-    }
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Failed to sign object URL, errorcode: ${response.status}, ` +
-        `make sure you're running on Replit`
-    );
-  }
-
-  const body = await response.json() as { signed_url: string };
-  return body.signed_url;
+  const [url] = await objectStorageClient
+    .bucket(bucketName)
+    .file(objectName)
+    .getSignedUrl({
+      version: "v4",
+      action:
+        method === "GET" || method === "HEAD"
+          ? "read"
+          : method === "PUT"
+            ? "write"
+            : "delete",
+      expires: Date.now() + ttlSec * 1000,
+    });
+  return url;
 }

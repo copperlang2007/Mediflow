@@ -53,10 +53,7 @@ router.post(
     } else {
       const proto =
         (req.headers["x-forwarded-proto"] as string | undefined) ?? "https";
-      const host =
-        (req.headers["host"] as string | undefined) ??
-        process.env.REPLIT_DEV_DOMAIN ??
-        "";
+      const host = (req.headers["host"] as string | undefined) ?? "";
       fullUrl = `${proto}://${host}${req.originalUrl}`;
     }
 
