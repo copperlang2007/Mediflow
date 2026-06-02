@@ -22,6 +22,7 @@ import { db, dialTicketsTable, auditLogTable } from "@workspace/db";
 import { logger } from "../logger";
 import { isKnownEventType, type DialerEventEnvelope } from "./events";
 import { raiseComplianceOversightTask } from "./oversight";
+import { applyTerminalOutcome } from "./terminalOutcome";
 import {
   parseTranscript,
   type TranscriptAiClient,
@@ -246,6 +247,42 @@ async function handleDispositionRecorded(
 }
 
 /**
+ * `call.completed` / `call.failed` (§6) — the terminal lifecycle events.
+ *
+ * Routes through the shared `applyTerminalOutcome` so the webhook and the
+ * Phase-6 reconciliation job (§5.4) apply the SAME terminal status + downstream
+ * effects, guarded so they can never double-apply (§6.2). A duplicate or
+ * out-of-order terminal webhook collapses to a no-op there. (The eventId ledger
+ * in the route already dedupes exact duplicates; this guard additionally covers
+ * two DIFFERENT events — e.g. a late webhook after the reconciler already
+ * closed the ticket, or `call.failed` arriving after `call.completed`.)
+ */
+async function handleTerminalLifecycle(
+  env: DialerEventEnvelope,
+): Promise<HandlerResult> {
+  await recordCallId(env);
+  if (!env.dialTicketId) {
+    // No ticket to anchor the outcome to; still acknowledged + audited.
+    return { ok: true, handled: true, note: "terminal_no_ticket" };
+  }
+  const status = env.type === "call.completed" ? "COMPLETED" : "FAILED";
+  const result = await applyTerminalOutcome({
+    orgId: env.orgId,
+    dialTicketId: env.dialTicketId,
+    dialerCallId: env.dialerCallId ?? null,
+    status,
+    source: "webhook",
+    eventId: env.eventId,
+    detail: (env.data ?? {}) as Record<string, unknown>,
+  });
+  return {
+    ok: true,
+    handled: true,
+    note: result.applied ? "terminal_applied" : "terminal_already_final",
+  };
+}
+
+/**
  * Dispatch a known event to its handler. Unknown types are ignored
  * (forward-compat, §6.2) and reported as `handled: false`.
  */
@@ -266,13 +303,15 @@ export async function dispatchEvent(
       return handleComplianceFlagged(env);
     case "call.disposition.recorded":
       return handleDispositionRecorded(env);
+    case "call.completed":
+    case "call.failed":
+      return handleTerminalLifecycle(env);
     case "call.initiated":
     case "call.ringing":
     case "call.in_progress":
-    case "call.completed":
-    case "call.failed":
-      // Thin: correlate the dialer call id where present; the call-activity /
-      // pipeline wiring lands in later phases.
+      // Pre-terminal: correlate the dialer call id where present; the
+      // call-activity / pipeline wiring lands with the dialer service. The
+      // terminal flip happens only on call.completed / call.failed.
       await recordCallId(env);
       return { ok: true, handled: true };
     default:
