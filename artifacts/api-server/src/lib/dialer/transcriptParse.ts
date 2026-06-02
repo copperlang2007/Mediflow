@@ -143,7 +143,9 @@ Goals:
 Return JSON shaped exactly as:
 {"summary": string, "suggestedDisposition": {"code": string|null, "category": string, "confidence": number|null}, "riskFlags": [{"kind": string, "severity": string, "detail": string}], "actionItems": [string]}`;
 
-const PARSE_MODEL = "gpt-5.4";
+// Model id is overridable via env so it can be rotated / A/B-tested without a
+// code change; the default matches the rest of the AI surface (routes/ai.ts).
+const PARSE_MODEL = process.env["AI_INTEGRATIONS_TRANSCRIPT_PARSE_MODEL"] ?? "gpt-5.4";
 const MAX_TRANSCRIPT_CHARS = 24_000;
 
 function buildUserPrompt(

@@ -25,6 +25,7 @@ import { raiseComplianceOversightTask } from "./oversight";
 import {
   parseTranscript,
   type TranscriptAiClient,
+  type TranscriptParseResult,
 } from "./transcriptParse";
 
 /**
@@ -115,7 +116,7 @@ async function handleTranscriptReady(
  */
 async function auditTranscriptParsed(
   env: DialerEventEnvelope,
-  parsed: { riskFlags: unknown[]; actionItems: unknown[] },
+  parsed: TranscriptParseResult,
 ): Promise<void> {
   try {
     await db.insert(auditLogTable).values({
