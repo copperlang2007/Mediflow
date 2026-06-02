@@ -49,6 +49,10 @@ export type PreclearanceFailureCode =
   | "NO_CONSENT"
   | "DNC"
   | "OUTSIDE_CALLING_HOURS"
+  // Data-quality: the callee timezone couldn't be resolved, so calling-hours
+  // could not be evaluated. Distinct from OUTSIDE_CALLING_HOURS (a real
+  // time-window violation) and from MISSING_INPUT (which gates agentEligible).
+  | "TIMEZONE_UNRESOLVED"
   | "MISSING_INPUT";
 
 export interface PreclearanceFailure {
@@ -399,7 +403,7 @@ export async function runPreclearance(
   let withinCallingHours = false;
   if (!tz) {
     failures.push({
-      code: "OUTSIDE_CALLING_HOURS",
+      code: "TIMEZONE_UNRESOLVED",
       detail: "could not resolve callee timezone from state/zip",
     });
   } else {

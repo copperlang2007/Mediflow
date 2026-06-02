@@ -22,6 +22,10 @@ import { db as defaultDb, auditLogTable } from "@workspace/db";
 import { logger } from "../logger";
 import { signServiceJwt } from "./serviceJwt";
 import { runPreclearance } from "./preclearance";
+// Type-only import — no runtime edge, so the existing value cycle
+// (issuance → preclearance) is unaffected. Single source of truth for the
+// failure shape; re-exported below for existing consumers.
+import type { PreclearanceFailure } from "./preclearance";
 
 /**
  * Driver-agnostic drizzle handle so the pglite test db and the production
@@ -31,14 +35,11 @@ import { runPreclearance } from "./preclearance";
 export type IssuanceDb = PgDatabase<any, any, any>;
 
 /**
- * Machine-readable preclearance failure (Phase 4). Mirrors the shape in
- * `preclearance.ts`; kept structural here to avoid an import cycle on the
- * value side (issuance imports the function, preclearance imports the types).
+ * Machine-readable preclearance failure (Phase 4). Single source of truth is
+ * `preclearance.ts`; re-exported here so existing consumers of this module's
+ * type keep working.
  */
-export interface PreclearanceFailureEntry {
-  code: string;
-  detail: string;
-}
+export type PreclearanceFailureEntry = PreclearanceFailure;
 
 export interface PreclearanceDecision {
   precleared: boolean;

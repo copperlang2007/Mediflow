@@ -115,7 +115,7 @@ async function handleComplianceFlagged(
   const rule = typeof data.rule === "string" ? data.rule : null;
   const detail = typeof data.detail === "string" ? data.detail : null;
   logger.warn(
-    { dialTicketId: env.dialTicketId, rule },
+    { dialTicketId: env.dialTicketId, rule, detail },
     "Dialer compliance flag received",
   );
   await recordCallId(env);
