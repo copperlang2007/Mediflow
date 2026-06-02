@@ -16,11 +16,26 @@
  * Unknown event types never reach here — the dispatcher ignores them (§6.2).
  */
 import crypto from "crypto";
+import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
-import { db, dialTicketsTable } from "@workspace/db";
+import { db, dialTicketsTable, auditLogTable } from "@workspace/db";
 import { logger } from "../logger";
 import { isKnownEventType, type DialerEventEnvelope } from "./events";
 import { raiseComplianceOversightTask } from "./oversight";
+import {
+  parseTranscript,
+  type TranscriptAiClient,
+  type TranscriptParseResult,
+} from "./transcriptParse";
+
+/**
+ * Per-dispatch options. `aiClient` lets tests inject a mock AI client so the
+ * `call.transcript.ready` parse runs fully offline; production passes nothing
+ * and the BAA-gated default client is built inside `parseTranscript`.
+ */
+export interface DispatchOptions {
+  aiClient?: TranscriptAiClient | null;
+}
 
 /** SHA-256 hex of the transcript text MediFlow received (§6.1). */
 export function transcriptHash(text: string): string {
@@ -45,8 +60,12 @@ async function recordCallId(env: DialerEventEnvelope): Promise<void> {
 
 async function handleTranscriptReady(
   env: DialerEventEnvelope,
+  opts: DispatchOptions = {},
 ): Promise<HandlerResult> {
-  const data = (env.data ?? {}) as { transcriptText?: unknown };
+  const data = (env.data ?? {}) as {
+    transcriptText?: unknown;
+    redacted?: unknown;
+  };
   const text =
     typeof data.transcriptText === "string" ? data.transcriptText : null;
   if (!env.dialTicketId || text === null) {
@@ -61,8 +80,70 @@ async function handleTranscriptReady(
       dialerCallId: env.dialerCallId ?? undefined,
     })
     .where(eq(dialTicketsTable.id, env.dialTicketId));
-  // TODO(Phase 5): store transcript (encrypted) + kick Azure-OpenAI parsing.
-  return { ok: true, handled: true };
+
+  // Phase 5 (§8): parse the transcript IN-PLATFORM via the MediFlow AI
+  // provider for agent-assist. This is the only place PHI meets an LLM, and it
+  // is the BAA-covered MediFlow provider — the dialer never sees the parsed
+  // result. The parse is best-effort: a failure must not 5xx the webhook (the
+  // dialer would needlessly retry, and the hash is already stored so the purge
+  // can still be verified). We do NOT retain the raw transcript text beyond the
+  // existing design (only its hash + the derived agent-assist result).
+  const parsed = await parseTranscript(
+    text,
+    {
+      dialTicketId: env.dialTicketId,
+      orgId: env.orgId,
+      redacted: typeof data.redacted === "boolean" ? data.redacted : undefined,
+    },
+    { aiClient: opts.aiClient },
+  );
+
+  if (parsed) {
+    await db
+      .update(dialTicketsTable)
+      .set({ transcriptParsed: parsed, transcriptParsedAt: new Date() })
+      .where(eq(dialTicketsTable.id, env.dialTicketId));
+    await auditTranscriptParsed(env, parsed);
+    return { ok: true, handled: true, note: "transcript_parsed" };
+  }
+
+  return { ok: true, handled: true, note: "transcript_ready_unparsed" };
+}
+
+/**
+ * Audit the in-platform parse (§9). Records derived, non-PHI metadata about the
+ * agent-assist result — never the raw transcript or the MBI.
+ */
+async function auditTranscriptParsed(
+  env: DialerEventEnvelope,
+  parsed: TranscriptParseResult,
+): Promise<void> {
+  try {
+    await db.insert(auditLogTable).values({
+      id: randomUUID(),
+      orgId: env.orgId,
+      userId: null,
+      userRole: null,
+      action: "create",
+      resourceType: "dialer_transcript_parsed",
+      resourceId: env.dialTicketId ?? env.eventId,
+      changes: {
+        eventId: env.eventId,
+        dialTicketId: env.dialTicketId ?? null,
+        dialerCallId: env.dialerCallId ?? null,
+        riskFlagCount: parsed.riskFlags.length,
+        actionItemCount: parsed.actionItems.length,
+        // The parse ran in MediFlow via the BAA-covered AI provider; the
+        // result is never returned to the dialer (Phase 5 exit criterion).
+        parsedInPlatform: true,
+      },
+    });
+  } catch (err) {
+    logger.error(
+      { err, dialTicketId: env.dialTicketId },
+      "Transcript parse: failed to write audit log entry",
+    );
+  }
 }
 
 async function handleTranscriptPurged(
@@ -170,6 +251,7 @@ async function handleDispositionRecorded(
  */
 export async function dispatchEvent(
   env: DialerEventEnvelope,
+  opts: DispatchOptions = {},
 ): Promise<HandlerResult> {
   if (!isKnownEventType(env.type)) {
     return { ok: true, handled: false, note: "unknown_type_ignored" };
@@ -177,7 +259,7 @@ export async function dispatchEvent(
 
   switch (env.type) {
     case "call.transcript.ready":
-      return handleTranscriptReady(env);
+      return handleTranscriptReady(env, opts);
     case "call.transcript.purged":
       return handleTranscriptPurged(env);
     case "call.compliance.flagged":

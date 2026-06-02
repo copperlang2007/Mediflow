@@ -204,6 +204,13 @@
       "when": 1778490000000,
       "tag": "0025_dialer_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1778500000000,
+      "tag": "0026_dialer_transcript_parsed",
+      "breakpoints": true
     }
   ]
 }
