@@ -37,12 +37,24 @@ export const dialTicketsTable = pgTable(
     // dialer's world, and never the MBI.
     contactRef: text("contact_ref"),
     campaignId: text("campaign_id"),
-    // QUEUED | ISSUED | REVOKED | FAILED — lifecycle of the ticket itself.
+    // Lifecycle of the ticket itself:
+    //   QUEUED | ISSUED | CALLING            — pre-terminal
+    //   COMPLETED | FAILED | REVOKED         — terminal
+    // The terminal call outcome (`COMPLETED`/`FAILED`) is applied exactly once,
+    // by whichever of the inbound webhook (`call.completed`/`call.failed`) or
+    // the Phase-6 reconciliation job (§5.4) arrives first. A terminal-state
+    // guard makes the second arrival a no-op so the two never double-apply.
     status: text("status").notNull().default("QUEUED"),
     // Auditable preclearance decision id (references an audit row).
     preclearanceId: text("preclearance_id"),
     // Dialer's returned id for the underlying call (filled on call.* events).
     dialerCallId: text("dialer_call_id"),
+    // Phase 6 (§5.4): set when the terminal outcome was applied by the
+    // reconciliation job (a missed webhook recovered via GET /calls/{id})
+    // rather than by the inbound webhook. NULL when the webhook delivered the
+    // outcome normally. Lets MediFlow distinguish recovered calls and audit
+    // the missed-webhook recovery rate.
+    reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
     // Transcript purge bookkeeping (§6.1).
     transcriptHash: text("transcript_hash"),
     transcriptReadyAt: timestamp("transcript_ready_at", { withTimezone: true }),
@@ -71,6 +83,9 @@ export const dialTicketsTable = pgTable(
   (t) => [
     index("dial_tickets_org_id_idx").on(t.orgId),
     index("dial_tickets_org_id_status_idx").on(t.orgId, t.status),
+    // Phase 6: the reconciliation scan filters pre-terminal tickets by
+    // staleness (status + updated_at) across orgs (§5.4).
+    index("dial_tickets_status_updated_at_idx").on(t.status, t.updatedAt),
   ],
 );
 

@@ -8,6 +8,7 @@
  *    check-ahip-deadlines        weekly Monday 08:10 UTC
  *    automation-daily-sweep      nightly 01:00 UTC
  *    export-anomaly-check        daily 02:15 UTC
+ *    dialer-reconcile            every 15 min (missed-webhook recovery, §5.4)
  *
  *  Ad-hoc (enqueue via `enqueue(JOB_NAMES.X, data)`):
  *    task-auto-assign            on agent creation / status change
@@ -91,6 +92,9 @@ export const JOB_NAMES = {
   RETENTION_ENFORCEMENT: "retention-enforcement",
   COMMISSION_MISSED_PAYMENT_CHECK: "commission-missed-payment-check",
   EXPORT_ANOMALY_CHECK: "export-anomaly-check",
+  // Phase 6 (§5.4): recover missed dialer terminal webhooks by reconciling
+  // stuck dial tickets against the dialer's GET /calls/{id}. Runs every 15 min.
+  DIALER_RECONCILE: "dialer-reconcile",
   // Import workers (ad-hoc, enqueued from import routes)
   IMPORT_MONDAY: "import-monday",
   IMPORT_GHL: "import-ghl",
@@ -374,6 +378,11 @@ export async function startWorkers(): Promise<void> {
   // Daily export-volume anomaly check — 02:15 UTC (off-peak, after retention
   // enforcement at 02:00 but before missed-payment at 02:30).
   await boss.schedule(JOB_NAMES.EXPORT_ANOMALY_CHECK, "15 2 * * *", {}, { tz: "UTC" });
+  // Dialer reconciliation — every 15 minutes (§5.4). Missed terminal webhooks
+  // must be recovered promptly so a dropped delivery doesn't leave a call's
+  // outcome unrecorded for long. Idempotent vs. a late webhook, so a frequent
+  // sweep is safe.
+  await boss.schedule(JOB_NAMES.DIALER_RECONCILE, "*/15 * * * *", {}, { tz: "UTC" });
 
   // ---- Workers ----
 
@@ -614,6 +623,17 @@ export async function startWorkers(): Promise<void> {
     JOB_NAMES.EXPORT_ANOMALY_CHECK,
     { batchSize: 1, localConcurrency: 1 },
     exportAnomalyHandler,
+  );
+
+  const dialerReconcileHandler: WorkHandler<Record<string, never>> = async () => {
+    const { dialerReconcileWorker } = await import("../workers/dialerReconcile");
+    await dialerReconcileWorker();
+  };
+  // Scheduled cron — singleton; one reconciliation pass per node, no fan-out.
+  await boss.work<Record<string, never>>(
+    JOB_NAMES.DIALER_RECONCILE,
+    { batchSize: 1, localConcurrency: 1 },
+    dialerReconcileHandler,
   );
 
   logger.info("All background workers registered");
