@@ -38,7 +38,7 @@ vi.mock("@clerk/express", clerkF);
 vi.mock("../../lib/jobs", jobsF);
 
 import { bootTestDb, shutdownTestDb } from "../helpers/testApp";
-import { seedOrg } from "../helpers/testDb";
+import { seedOrg, seedUser } from "../helpers/testDb";
 import type { Express } from "express";
 import type { TestDb } from "../helpers/testDb";
 
@@ -51,6 +51,7 @@ let db: TestDb;
 let dialerEventsTable: typeof import("@workspace/db").dialerEventsTable;
 let dialTicketsTable: typeof import("@workspace/db").dialTicketsTable;
 let auditLogTable: typeof import("@workspace/db").auditLogTable;
+let taskInstancesTable: typeof import("@workspace/db").taskInstancesTable;
 
 beforeAll(async () => {
   process.env.DIALER_WEBHOOK_SECRET = SECRET;
@@ -63,6 +64,7 @@ beforeAll(async () => {
   dialerEventsTable = dbExports.dialerEventsTable;
   dialTicketsTable = dbExports.dialTicketsTable;
   auditLogTable = dbExports.auditLogTable;
+  taskInstancesTable = dbExports.taskInstancesTable;
 });
 
 afterAll(async () => {
@@ -303,5 +305,91 @@ describe("Dialer event receiver — transcript purge (§6.1)", () => {
       .from(dialTicketsTable)
       .where(eq(dialTicketsTable.id, ticketId));
     expect(ticket?.transcriptPurgeConfirmedAt).toBeNull();
+  });
+});
+
+describe("Dialer event receiver — compliance oversight tasks (Phase 4, §6)", () => {
+  it("raises an oversight task for a COMPLIANCE-category disposition, assigned to the compliance manager", async () => {
+    const org = await seedOrg(db, { id: `org-${randomUUID().slice(0, 8)}` });
+    const cm = await seedUser(db, {
+      orgId: org.id,
+      role: "compliance_manager",
+    });
+    const { raw, envelope } = buildEvent({
+      orgId: org.id,
+      type: "call.disposition.recorded",
+      dialerCallId: `call_${randomUUID().slice(0, 8)}`,
+      data: {
+        code: "DNC_REQUEST",
+        category: "COMPLIANCE",
+        notes: "Caller asked to be placed on the do-not-call list.",
+      },
+    });
+    const res = await postEvent(raw, sign(raw));
+    expect(res.status).toBe(200);
+
+    const tasks = await db
+      .select()
+      .from(taskInstancesTable)
+      .where(eq(taskInstancesTable.orgId, org.id));
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].status).toBe("open");
+    expect(tasks[0].priority).toBe("urgent");
+    expect(tasks[0].assignedToUserId).toBe(cm.id);
+    expect(tasks[0].title.toLowerCase()).toContain("compliance");
+
+    // Audited as a compliance oversight task.
+    const audit = await db
+      .select()
+      .from(auditLogTable)
+      .where(
+        and(
+          eq(auditLogTable.orgId, org.id),
+          eq(auditLogTable.resourceType, "compliance_oversight_task"),
+          eq(auditLogTable.resourceId, tasks[0].id),
+        ),
+      );
+    expect(audit).toHaveLength(1);
+    expect(
+      (audit[0].changes as Record<string, unknown>).eventId,
+    ).toBe(envelope.eventId);
+  });
+
+  it("does NOT raise a task for a non-compliance disposition", async () => {
+    const org = await seedOrg(db, { id: `org-${randomUUID().slice(0, 8)}` });
+    await seedUser(db, { orgId: org.id, role: "compliance_manager" });
+    const { raw } = buildEvent({
+      orgId: org.id,
+      type: "call.disposition.recorded",
+      data: { code: "SALE", category: "POSITIVE", notes: "enrolled" },
+    });
+    const res = await postEvent(raw, sign(raw));
+    expect(res.status).toBe(200);
+
+    const tasks = await db
+      .select()
+      .from(taskInstancesTable)
+      .where(eq(taskInstancesTable.orgId, org.id));
+    expect(tasks).toHaveLength(0);
+  });
+
+  it("raises an oversight task for call.compliance.flagged", async () => {
+    const org = await seedOrg(db, { id: `org-${randomUUID().slice(0, 8)}` });
+    await seedUser(db, { orgId: org.id, role: "agency_admin" });
+    const { raw } = buildEvent({
+      orgId: org.id,
+      type: "call.compliance.flagged",
+      data: { rule: "DNC", detail: "number on the federal DNC registry" },
+    });
+    const res = await postEvent(raw, sign(raw));
+    expect(res.status).toBe(200);
+
+    const tasks = await db
+      .select()
+      .from(taskInstancesTable)
+      .where(eq(taskInstancesTable.orgId, org.id));
+    expect(tasks).toHaveLength(1);
+    // Falls back to agency_admin when no compliance_manager exists.
+    expect(tasks[0].assignedToUserId).not.toBeNull();
   });
 });

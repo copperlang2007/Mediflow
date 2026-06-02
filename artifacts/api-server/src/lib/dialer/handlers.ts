@@ -20,6 +20,7 @@ import { eq } from "drizzle-orm";
 import { db, dialTicketsTable } from "@workspace/db";
 import { logger } from "../logger";
 import { isKnownEventType, type DialerEventEnvelope } from "./events";
+import { raiseComplianceOversightTask } from "./oversight";
 
 /** SHA-256 hex of the transcript text MediFlow received (§6.1). */
 export function transcriptHash(text: string): string {
@@ -111,15 +112,56 @@ async function handleComplianceFlagged(
   env: DialerEventEnvelope,
 ): Promise<HandlerResult> {
   const data = (env.data ?? {}) as { rule?: unknown; detail?: unknown };
+  const rule = typeof data.rule === "string" ? data.rule : null;
+  const detail = typeof data.detail === "string" ? data.detail : null;
   logger.warn(
-    {
-      dialTicketId: env.dialTicketId,
-      rule: data.rule,
-    },
+    { dialTicketId: env.dialTicketId, rule },
     "Dialer compliance flag received",
   );
-  // TODO(Phase 4): block, alert compliance_manager, raise oversight task.
+  await recordCallId(env);
+  // Raise an oversight task for a compliance manager / agency admin (§6, §9).
+  await raiseComplianceOversightTask({
+    orgId: env.orgId,
+    eventId: env.eventId,
+    dialTicketId: env.dialTicketId ?? null,
+    dialerCallId: env.dialerCallId ?? null,
+    trigger: "flag",
+    reason: rule,
+    detail,
+  });
   return { ok: true, handled: true };
+}
+
+/**
+ * `call.disposition.recorded` (§6). A COMPLIANCE-category disposition raises
+ * an oversight task; any other category is correlated and acknowledged.
+ */
+async function handleDispositionRecorded(
+  env: DialerEventEnvelope,
+): Promise<HandlerResult> {
+  await recordCallId(env);
+  const data = (env.data ?? {}) as {
+    code?: unknown;
+    category?: unknown;
+    notes?: unknown;
+  };
+  const category =
+    typeof data.category === "string" ? data.category.toUpperCase() : null;
+  if (category !== "COMPLIANCE") {
+    return { ok: true, handled: true };
+  }
+  const code = typeof data.code === "string" ? data.code : null;
+  const notes = typeof data.notes === "string" ? data.notes : null;
+  await raiseComplianceOversightTask({
+    orgId: env.orgId,
+    eventId: env.eventId,
+    dialTicketId: env.dialTicketId ?? null,
+    dialerCallId: env.dialerCallId ?? null,
+    trigger: "disposition",
+    reason: code,
+    detail: notes,
+  });
+  return { ok: true, handled: true, note: "compliance_disposition" };
 }
 
 /**
@@ -140,14 +182,15 @@ export async function dispatchEvent(
       return handleTranscriptPurged(env);
     case "call.compliance.flagged":
       return handleComplianceFlagged(env);
+    case "call.disposition.recorded":
+      return handleDispositionRecorded(env);
     case "call.initiated":
     case "call.ringing":
     case "call.in_progress":
     case "call.completed":
     case "call.failed":
-    case "call.disposition.recorded":
-      // Thin in Phase 2: correlate the dialer call id where present; the
-      // call-activity / pipeline wiring lands in Phase 4.
+      // Thin: correlate the dialer call id where present; the call-activity /
+      // pipeline wiring lands in later phases.
       await recordCallId(env);
       return { ok: true, handled: true };
     default:

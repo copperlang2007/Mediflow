@@ -10,8 +10,17 @@
  * No network, no real keys: an ephemeral keypair is generated in-process and
  * the HTTP client is injected.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import crypto from "node:crypto";
+
+// issuance.ts statically imports `@workspace/db`, whose module-load guard
+// requires DATABASE_URL. These contract tests inject their own db and never
+// query the real pool (the pg Pool connects lazily), so a dummy URL is enough
+// to satisfy the guard. `vi.hoisted` runs before the static imports below.
+vi.hoisted(() => {
+  process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";
+});
+
 import {
   DialerIssuanceService,
   type HttpClient,
@@ -54,6 +63,33 @@ function mockDialer(captured: Captured[]): HttpClient {
   };
 }
 
+/**
+ * An approving preclearance override. These contract tests exercise the JWT /
+ * HTTP wire contract, not the Phase-4 preclearance checks (those have their
+ * own pglite-backed suite in dialer-preclearance.test.ts), so we inject a
+ * deterministic "approve" decision rather than touching a database.
+ */
+/** A no-op db whose audit-log insert resolves without touching Postgres. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const noopDb: any = {
+  insert: () => ({ values: async () => undefined }),
+};
+
+const approvePreclear = async (): Promise<
+  import("../../lib/dialer/issuance").PreclearanceDecision
+> => ({
+  precleared: true,
+  preclearedAt: new Date().toISOString(),
+  preclearanceId: `pc_${crypto.randomUUID()}`,
+  tcpaConsentOnFile: true,
+  dncClear: true,
+  withinCallingHours: true,
+  soaRequired: true,
+  soaOnFile: false,
+  agentEligible: true,
+  expiresAt: new Date(Date.now() + 60_000).toISOString(),
+});
+
 const baseInput: IssueTicketInput = {
   orgId: "org_2abc",
   agentId: "agt_2def",
@@ -79,6 +115,8 @@ describe("Dial-ticket issuance → mock dialer", () => {
       signingPrivateKey: privateKey,
       signingKeyId: "key-1",
       httpClient: mockDialer(captured),
+      preclear: approvePreclear,
+      db: noopDb,
     });
 
     const result = await svc.issueTicket(baseInput);
@@ -134,6 +172,8 @@ describe("Dial-ticket issuance → mock dialer", () => {
       dialerBaseUrl: "https://dialer.internal",
       signingPrivateKey: signer.privateKey,
       httpClient: mockDialer(captured),
+      preclear: approvePreclear,
+      db: noopDb,
     });
     await svc.issueTicket(baseInput);
     const token = captured[0].headers["Authorization"].slice("Bearer ".length);
@@ -149,6 +189,7 @@ describe("Dial-ticket issuance → mock dialer", () => {
       dialerBaseUrl: "https://dialer.internal",
       signingPrivateKey: privateKey,
       httpClient: mockDialer(captured),
+      db: noopDb,
       preclear: async () => ({
         precleared: false,
         preclearedAt: new Date().toISOString(),

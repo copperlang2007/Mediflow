@@ -17,7 +17,28 @@
  * The MBI is NEVER placed in the ticket (§3.1).
  */
 import { randomUUID } from "crypto";
+import type { PgDatabase } from "drizzle-orm/pg-core";
+import { db as defaultDb, auditLogTable } from "@workspace/db";
+import { logger } from "../logger";
 import { signServiceJwt } from "./serviceJwt";
+import { runPreclearance } from "./preclearance";
+
+/**
+ * Driver-agnostic drizzle handle so the pglite test db and the production
+ * node-postgres handle are both assignable.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type IssuanceDb = PgDatabase<any, any, any>;
+
+/**
+ * Machine-readable preclearance failure (Phase 4). Mirrors the shape in
+ * `preclearance.ts`; kept structural here to avoid an import cycle on the
+ * value side (issuance imports the function, preclearance imports the types).
+ */
+export interface PreclearanceFailureEntry {
+  code: string;
+  detail: string;
+}
 
 export interface PreclearanceDecision {
   precleared: boolean;
@@ -30,6 +51,11 @@ export interface PreclearanceDecision {
   soaOnFile: boolean;
   agentEligible: boolean;
   expiresAt: string;
+  /**
+   * Why the call was blocked (Phase 4). Empty / omitted when `precleared`.
+   * Never carries PHI — only check codes + human-readable detail.
+   */
+  failures?: PreclearanceFailureEntry[];
 }
 
 export interface DialTicketCallee {
@@ -64,6 +90,19 @@ export interface IssueTicketInput {
   dialTicketId?: string;
   /** Ticket TTL in seconds (default 30 min). */
   ttlSeconds?: number;
+  /**
+   * Product / plan line for agent-eligibility checks (Phase 4, §2). One of
+   * MA | PDP | MAPD | supp | other. Defaults to MAPD (the strictest, AHIP-
+   * required line) when omitted. PHI-safe: a product class, never the MBI.
+   */
+  productLine?: "MA" | "PDP" | "MAPD" | "supp" | "other";
+  /** Plan year for AHIP / carrier-cert checks (defaults to the current year). */
+  planYear?: number;
+  /**
+   * Explicit IANA timezone for the callee, when known. When omitted the
+   * calling-hours check derives it from `callee.stateCode` (§9).
+   */
+  calleeTimezone?: string;
 }
 
 /** Minimal fetch-shaped client so tests can inject a mock. */
@@ -83,11 +122,22 @@ export interface IssuanceConfig {
   signingPrivateKey: string;
   signingKeyId?: string;
   httpClient: HttpClient;
-  /** Override the preclearance decision (Phase 4 wiring / tests). */
+  /**
+   * Override the preclearance decision (tests / custom wiring). When omitted
+   * the service runs the REAL Phase-4 preclearance (`runPreclearance`) against
+   * MediFlow's licensing/cert/AHIP + consent/DNC/calling-hours data.
+   */
   preclear?: (input: IssueTicketInput) => Promise<PreclearanceDecision>;
   /** JWT TTL override (default from serviceJwt). */
   jwtTtlSeconds?: number;
   nowMs?: () => number;
+  /**
+   * Drizzle handle for the audit-log write (and, when no `preclear` override
+   * is supplied, the default preclearance queries). Defaults to the shared
+   * `@workspace/db` pool; injectable so pglite integration tests can pass
+   * their in-process handle.
+   */
+  db?: IssuanceDb;
 }
 
 export interface IssueTicketResult {
@@ -97,36 +147,6 @@ export interface IssueTicketResult {
   status: number;
   response: unknown;
   payload: DialTicketPayload;
-}
-
-/**
- * Default Phase-2 preclearance: approves and records an auditable id.
- *
- * TODO(Phase 4): replace with real checks —
- *   - consent ledger + DNC (MediFlow truth, §9)
- *   - DST-correct calling-hours per callee timezone (§9)
- *   - agent licensing/cert/AHIP eligibility for state+product (§2)
- * On any failure the ticket must NOT be issued and the block is audited.
- */
-async function defaultPreclear(
-  input: IssueTicketInput,
-  nowMs: () => number,
-  ttlSeconds: number,
-): Promise<PreclearanceDecision> {
-  const now = new Date(nowMs());
-  const expires = new Date(now.getTime() + ttlSeconds * 1000);
-  return {
-    precleared: true,
-    preclearedAt: now.toISOString(),
-    preclearanceId: `pc_${randomUUID()}`,
-    tcpaConsentOnFile: true,
-    dncClear: true,
-    withinCallingHours: true,
-    soaRequired: true,
-    soaOnFile: false,
-    agentEligible: true,
-    expiresAt: expires.toISOString(),
-  };
 }
 
 /**
@@ -161,16 +181,62 @@ export function buildDialTicketPayload(
 export class DialerIssuanceService {
   constructor(private readonly config: IssuanceConfig) {}
 
+  /**
+   * Audit a preclearance outcome (§9: every block/issue lands in the audit
+   * trail). Best-effort — an audit-write failure must not crash issuance, but
+   * is logged. Never carries PHI (no MBI, no transcript) — only the decision
+   * and machine-readable failure codes.
+   */
+  private async auditDecision(
+    input: IssueTicketInput,
+    decision: PreclearanceDecision,
+    dialTicketId: string,
+  ): Promise<void> {
+    const db = this.config.db ?? defaultDb;
+    try {
+      await db.insert(auditLogTable).values({
+        id: randomUUID(),
+        orgId: input.orgId,
+        userId: input.agentId,
+        userRole: null,
+        action: decision.precleared ? "create" : "block",
+        resourceType: "dial_preclearance",
+        resourceId: decision.preclearanceId,
+        changes: {
+          dialTicketId,
+          contactRef: input.contactRef,
+          agentId: input.agentId,
+          stateCode: input.callee.stateCode ?? null,
+          productLine: input.productLine ?? null,
+          precleared: decision.precleared,
+          agentEligible: decision.agentEligible,
+          tcpaConsentOnFile: decision.tcpaConsentOnFile,
+          dncClear: decision.dncClear,
+          withinCallingHours: decision.withinCallingHours,
+          failures: decision.failures ?? [],
+        },
+      });
+    } catch (err) {
+      logger.error(
+        { err, dialTicketId, orgId: input.orgId },
+        "Dial preclearance: failed to write audit log entry",
+      );
+    }
+  }
+
   async issueTicket(input: IssueTicketInput): Promise<IssueTicketResult> {
     const nowMs = this.config.nowMs ?? (() => Date.now());
-    const ttlSeconds = input.ttlSeconds ?? 30 * 60;
     const dialTicketId = input.dialTicketId ?? randomUUID();
 
     const decision = await (this.config.preclear
       ? this.config.preclear(input)
-      : defaultPreclear(input, nowMs, ttlSeconds));
+      : runPreclearance(input, { db: this.config.db, nowMs }));
 
     const payload = buildDialTicketPayload(input, decision, dialTicketId);
+
+    // Audit the decision either way — a block AND a successful issue land in
+    // the immutable trail (§9, exit criterion: blocked dials are audited).
+    await this.auditDecision(input, decision, dialTicketId);
 
     // If preclearance denies the call, do not contact the dialer at all —
     // MediFlow decides, the dialer enforces (§5/§9).
@@ -179,7 +245,11 @@ export class DialerIssuanceService {
         dialTicketId,
         precleared: false,
         status: 0,
-        response: { blocked: true, preclearanceId: decision.preclearanceId },
+        response: {
+          blocked: true,
+          preclearanceId: decision.preclearanceId,
+          failures: decision.failures ?? [],
+        },
         payload,
       };
     }
