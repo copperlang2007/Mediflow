@@ -19,13 +19,13 @@ import type { ReactNode } from "react";
 const env = import.meta.env as Record<string, string | undefined>;
 
 const DEMO_USER = {
-  id: env.VITE_DEMO_USER_ID ?? "00000000-0000-4000-8000-000000000010",
-  firstName: env.VITE_DEMO_USER_FIRST_NAME ?? "Sarah",
-  lastName: env.VITE_DEMO_USER_LAST_NAME ?? "Stevens",
-  fullName: env.VITE_DEMO_USER_NAME ?? "Sarah Stevens",
+  id: env.VITE_DEMO_USER_ID ?? "00000000-0000-4000-8000-000000000011",
+  firstName: env.VITE_DEMO_USER_FIRST_NAME ?? "Marcus",
+  lastName: env.VITE_DEMO_USER_LAST_NAME ?? "Lee",
+  fullName: env.VITE_DEMO_USER_NAME ?? "Marcus Lee",
   imageUrl: undefined as string | undefined,
   primaryEmailAddress: {
-    emailAddress: env.VITE_DEMO_USER_EMAIL ?? "sarah@insureitall.example",
+    emailAddress: env.VITE_DEMO_USER_EMAIL ?? "marcus@insureitall.example",
   },
 };
 
