@@ -49,6 +49,16 @@ export const dialTicketsTable = pgTable(
     transcriptPurgeConfirmedAt: timestamp("transcript_purge_confirmed_at", {
       withTimezone: true,
     }),
+    // Phase 5 (§5, §8): structured agent-assist output produced in-platform by
+    // the MediFlow AI provider (Azure OpenAI in prod — the only BAA-covered
+    // path) on `call.transcript.ready`. This is the PARSED result, not the raw
+    // transcript: it carries a summary, suggested disposition, risk flags and
+    // action items — never the MBI. Parsing happens entirely MediFlow-side; the
+    // result is never sent back to the dialer.
+    transcriptParsed: jsonb("transcript_parsed"),
+    transcriptParsedAt: timestamp("transcript_parsed_at", {
+      withTimezone: true,
+    }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
