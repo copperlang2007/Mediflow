@@ -17,10 +17,11 @@
  * (`scripts/seed-demo.ts`); override with `DEMO_USER_ID` if the seed changes.
  */
 
-// Seeded INSUREitALL "agency_admin" (marcus@insureitall.example) — the
-// natural agency-owner persona for a walkthrough. Mirrors the fixed UUID in
-// scripts/src/seed-demo.ts.
-export const DEFAULT_DEMO_USER_ID = "00000000-0000-4000-8000-000000000011";
+// Seeded INSUREitALL "super_admin" (sarah@insureitall.example) — the fullest
+// view for a walkthrough (all admin/agency surfaces). Mirrors the fixed UUID
+// in scripts/src/seed-demo.ts. Override with DEMO_USER_ID for a narrower
+// persona (e.g. the agency_admin ...011 or an agent).
+export const DEFAULT_DEMO_USER_ID = "00000000-0000-4000-8000-000000000010";
 
 /**
  * True only when demo mode is explicitly enabled AND this is not a
