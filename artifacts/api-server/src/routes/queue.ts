@@ -1,33 +1,38 @@
 /**
- * Inbound lead queue API.
+ * Inbound lead queue API (Clerk-authed, in-app surface).
  *
  * Replaces the standalone `atlas-call-router` stub (which returned a
  * hard-coded number) with a real, data-backed router that filters agents by
- * "ready to sell" status for the lead's carrier + state and ranks the
- * eligible pool by current workload. See lib/leadQueue/readyToSell.ts and
+ * "ready to sell" status for the lead's carrier + state, intersects with live
+ * presence, and ranks by current workload. See lib/leadQueue/* and
  * docs/inbound-lead-queue.md.
  *
- *   GET  /api/queue/ready-to-sell   — list eligible agents for state+carrier
- *   POST /api/queue/route-inbound   — pick the next agent for an inbound lead
+ *   GET  /api/queue/ready-to-sell      — list eligible agents for state+carrier
+ *   POST /api/queue/route-inbound      — pick the next agent for an inbound lead
+ *   POST /api/queue/presence/heartbeat — agent reports availability (self)
  *
- * `route-inbound` doubles as the drop-in replacement for the GHL HTTP-Request
- * step: it accepts `{contactState, carrierId}` and returns a `target_phone`,
- * matching the field the old Atlas service produced, so the GHL "Connect
- * Call" action can point straight at MediFlow.
+ * The EXTERNAL GHL/Atlas entry point is the HMAC-authed sibling in
+ * routes/queuePublic.ts (`POST /api/queue/v1/route-inbound`); GHL has no Clerk
+ * session. Both share lib/leadQueue/service.ts so routing can't drift.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { db, contactsTable } from "@workspace/db";
+import { db, agentsTable } from "@workspace/db";
 import {
   requireAuth,
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { findReadyToSellAgents } from "../lib/leadQueue/readyToSell";
+import { resolveAndRouteInbound } from "../lib/leadQueue/service";
+import { resolveCarrier } from "../lib/leadQueue/carriers";
 import {
-  findReadyToSellAgents,
-  routeInboundLead,
-} from "../lib/leadQueue/readyToSell";
+  recordHeartbeat,
+  getAvailableAgentIds,
+  HEARTBEAT_STATUSES,
+  type PresenceStatus,
+} from "../lib/leadQueue/presence";
 
 const router: IRouter = Router();
 
@@ -44,17 +49,24 @@ const certificationYear = z.coerce
   .max(2100)
   .optional();
 
-const requireAhip = z
+const boolish = z
   .union([z.boolean(), z.enum(["true", "false"])])
   .transform((v) => v === true || v === "true")
   .optional();
 
-// GET /queue/ready-to-sell?stateCode=FL&carrierId=...&certificationYear=2026
+// A carrier is referenced by id OR name (name resolved server-side, org-scoped).
+const carrierRef = {
+  carrierId: z.string().min(1).optional(),
+  carrierName: z.string().min(1).optional(),
+};
+
+// GET /queue/ready-to-sell?stateCode=FL&carrierId=...&availableOnly=true
 const ReadyToSellQuerySchema = z.object({
   stateCode,
-  carrierId: z.string().min(1),
+  ...carrierRef,
   certificationYear,
-  requireAhip,
+  requireAhip: boolish,
+  availableOnly: boolish,
 });
 
 router.get(
@@ -70,38 +82,70 @@ router.get(
         .json({ error: "Invalid query", details: parsed.error.issues });
       return;
     }
-    const { stateCode, carrierId, certificationYear, requireAhip } =
-      parsed.data;
+    const {
+      stateCode,
+      carrierId,
+      carrierName,
+      certificationYear,
+      requireAhip,
+      availableOnly,
+    } = parsed.data;
+
+    // Resolve the carrier (id or name) up front so the listing matches what
+    // route-inbound would consider.
+    const carrier = await resolveCarrier({
+      orgId: authReq.orgId,
+      carrierId,
+      carrierName,
+    });
+    if (!carrier.ok) {
+      const status =
+        carrier.reason === "ambiguous"
+          ? 409
+          : carrier.reason === "not_found"
+            ? 404
+            : 400;
+      res.status(status).json({ error: `carrier ${carrier.reason}` });
+      return;
+    }
+
+    // This listing is "who is eligible". Presence filtering is opt-in here
+    // (default off) since the list is also used for reporting, not just live
+    // routing.
+    let availableAgentIds: string[] | undefined;
+    if (availableOnly) {
+      const presence = await getAvailableAgentIds(authReq.orgId);
+      availableAgentIds = presence.ids;
+    }
 
     const agents = await findReadyToSellAgents({
       orgId: authReq.orgId,
       stateCode,
-      carrierId,
+      carrierId: carrier.carrierId,
       certificationYear,
       requireAhip,
+      availableAgentIds,
     });
 
     res.json({
       data: agents,
       total: agents.length,
       stateCode,
-      carrierId,
+      carrierId: carrier.carrierId,
       certificationYear: certificationYear ?? new Date().getUTCFullYear(),
+      availableOnly: Boolean(availableOnly),
     });
   },
 );
 
 // POST /queue/route-inbound
-// Body: { carrierId, contactState?, contactId?, certificationYear?, requireAhip? }
-// When `contactId` is supplied, the lead's state is read from the contact
-// record (the GHL payload usually carries the raw state instead — either works,
-// and an explicit `contactState` always wins).
 const RouteInboundSchema = z.object({
-  carrierId: z.string().min(1),
+  ...carrierRef,
   contactState: stateCode.optional(),
   contactId: z.string().min(1).optional(),
   certificationYear,
-  requireAhip,
+  requireAhip: boolish,
+  availableOnly: boolish,
 });
 
 router.post(
@@ -117,63 +161,74 @@ router.post(
         .json({ error: "Invalid request body", details: parsed.error.issues });
       return;
     }
-    const {
-      carrierId,
-      contactState,
-      contactId,
-      certificationYear,
-      requireAhip,
-    } = parsed.data;
-
-    // Resolve the lead's state: explicit `contactState` wins; otherwise fall
-    // back to the contact record (org-scoped lookup).
-    let resolvedState = contactState ?? null;
-    if (!resolvedState && contactId) {
-      const [contact] = await db
-        .select({ stateCode: contactsTable.stateCode })
-        .from(contactsTable)
-        .where(
-          and(
-            eq(contactsTable.id, contactId),
-            eq(contactsTable.orgId, authReq.orgId),
-          ),
-        )
-        .limit(1);
-      if (!contact) {
-        res.status(404).json({ error: "Contact not found" });
-        return;
-      }
-      resolvedState = contact.stateCode
-        ? contact.stateCode.toUpperCase()
-        : null;
+    const outcome = await resolveAndRouteInbound({
+      orgId: authReq.orgId,
+      ...parsed.data,
+    });
+    if (!outcome.ok) {
+      res.status(outcome.status).json({ error: outcome.error });
+      return;
     }
+    res.json(outcome.body);
+  },
+);
 
-    if (!resolvedState) {
-      res.status(400).json({
-        error:
-          "Could not determine the lead's state — provide `contactState` or a `contactId` whose contact has a stateCode.",
-      });
+// POST /queue/presence/heartbeat — the authenticated agent reports their own
+// availability. The web app calls this on Available/Away toggles and on an
+// interval (well inside HEARTBEAT_TTL) so the queue knows who is reachable.
+const HeartbeatSchema = z.object({
+  status: z
+    .enum(["available", "away", "offline"])
+    .optional()
+    .default("available"),
+});
+
+router.post(
+  "/queue/presence/heartbeat",
+  requireAuth,
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const parsed = HeartbeatSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ error: "Invalid request body", details: parsed.error.issues });
       return;
     }
 
-    const result = await routeInboundLead({
-      orgId: authReq.orgId,
-      stateCode: resolvedState,
-      carrierId,
-      certificationYear,
-      requireAhip,
-    });
+    // Map the Clerk user to their agent record (presence is per-agent).
+    const [agent] = await db
+      .select({ id: agentsTable.id })
+      .from(agentsTable)
+      .where(
+        and(
+          eq(agentsTable.userId, authReq.userId),
+          eq(agentsTable.orgId, authReq.orgId),
+        ),
+      )
+      .limit(1);
+    if (!agent) {
+      res
+        .status(404)
+        .json({ error: "No agent record is linked to this user." });
+      return;
+    }
 
+    const status = parsed.data.status as PresenceStatus;
+    if (!HEARTBEAT_STATUSES.includes(status)) {
+      res.status(400).json({ error: "Unsupported heartbeat status." });
+      return;
+    }
+
+    const row = await recordHeartbeat({
+      orgId: authReq.orgId,
+      agentId: agent.id,
+      status,
+    });
     res.json({
-      status: result.status,
-      stateCode: resolvedState,
-      carrierId,
-      candidatePool: result.candidatePool,
-      agent: result.agent,
-      // Atlas/GHL-compatible flat fields for the "Connect Call" step. Null
-      // when no agent is available so the workflow can branch on it.
-      target_phone: result.agent?.phone ?? null,
-      target_user_id: result.agent?.agentId ?? null,
+      agentId: row.agentId,
+      status: row.status,
+      expiresAt: row.expiresAt,
     });
   },
 );

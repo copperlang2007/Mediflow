@@ -165,9 +165,27 @@ just not presence-aware.
 
 ## Status
 
-- **Phase 1 (this change):** RTS eligibility + load-balanced ranking +
-  `ready-to-sell` / `route-inbound` endpoints + tests. ✅
-- **Phase 2:** `agent_presence` table, dialer-event presence updates,
-  heartbeat + TTL, `availableAgentIds` wired into the route.
-- **Phase 3:** retire/redeploy `atlas-call-router` as a thin proxy (or point
-  GHL directly at MediFlow).
+- **Phase 1:** RTS eligibility + load-balanced ranking + `ready-to-sell` /
+  `route-inbound` endpoints + tests. ✅
+- **Phase 2:** `agent_presence` table + read-time TTL, dialer-event presence
+  updates (`on_call`/`wrap`), `POST /api/queue/presence/heartbeat`, and the
+  `availableOnly` filter wired into routing (with a "presence not adopted ⇒
+  don't filter" fallback). Plus the HMAC-authed public route
+  `POST /api/queue/v1/route-inbound` for GHL/Atlas and server-side
+  carrier-name resolution. ✅
+- **Phase 3:** `atlas-call-router` rewired as a thin signed proxy to the
+  public route. ✅ (Atlas repo PR.)
+
+### Notes for operators
+
+- **Secrets:** the public route is authenticated by `LEAD_QUEUE_WEBHOOK_SECRET`
+  (or per-org `LEAD_QUEUE_WEBHOOK_SECRET_<ORGID>`). Set the same secret on the
+  Atlas side. Fail-closed: an unset secret rejects all calls.
+- **TTL tuning:** `LEAD_QUEUE_HEARTBEAT_TTL_SECONDS` (default 90) and
+  `LEAD_QUEUE_DIALER_TTL_SECONDS` (default 900). TTL is enforced at read time —
+  no sweeper job. A cosmetic "flip expired rows to offline" cron can be added
+  later but is not required for correctness.
+- **Presence semantics:** only a heartbeat sets `available`. Dialer events only
+  ever remove an agent from the pool (`on_call` during a call, `wrap` after).
+  This biases fail-closed — a missed terminal event leaves the agent excluded,
+  not wrongly routable.

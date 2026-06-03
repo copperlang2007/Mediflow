@@ -28,6 +28,7 @@ import {
   type TranscriptAiClient,
   type TranscriptParseResult,
 } from "./transcriptParse";
+import { markPresenceForTicket } from "../leadQueue/presence";
 
 /**
  * Per-dispatch options. `aiClient` lets tests inject a mock AI client so the
@@ -57,6 +58,30 @@ async function recordCallId(env: DialerEventEnvelope): Promise<void> {
     .update(dialTicketsTable)
     .set({ dialerCallId: env.dialerCallId })
     .where(eq(dialTicketsTable.id, env.dialTicketId));
+}
+
+/**
+ * Apply a lead-queue presence status derived from a call event, best-effort.
+ * A presence write failure must never fail the webhook (the dialer would
+ * needlessly retry), so errors are logged and swallowed.
+ */
+async function updatePresenceSafe(
+  env: DialerEventEnvelope,
+  status: "on_call" | "wrap",
+): Promise<void> {
+  if (!env.dialTicketId) return;
+  try {
+    await markPresenceForTicket({
+      dialTicketId: env.dialTicketId,
+      status,
+      eventId: env.eventId,
+    });
+  } catch (err) {
+    logger.warn(
+      { err, dialTicketId: env.dialTicketId, status },
+      "Lead-queue presence update from dialer event failed (ignored)",
+    );
+  }
 }
 
 async function handleTranscriptReady(
@@ -275,6 +300,10 @@ async function handleTerminalLifecycle(
     eventId: env.eventId,
     detail: (env.data ?? {}) as Record<string, unknown>,
   });
+  // Lead-queue presence: the call ended, so the agent moves to `wrap` (NOT
+  // `available` — only their heartbeat returns them to the routable pool).
+  // Best-effort: a presence failure must never 5xx the webhook.
+  await updatePresenceSafe(env, "wrap");
   return {
     ok: true,
     handled: true,
@@ -306,9 +335,14 @@ export async function dispatchEvent(
     case "call.completed":
     case "call.failed":
       return handleTerminalLifecycle(env);
+    case "call.in_progress":
+      // The agent is now on a live call — remove them from the routable pool
+      // (lead-queue presence). Best-effort; never 5xx the webhook.
+      await recordCallId(env);
+      await updatePresenceSafe(env, "on_call");
+      return { ok: true, handled: true };
     case "call.initiated":
     case "call.ringing":
-    case "call.in_progress":
       // Pre-terminal: correlate the dialer call id where present; the
       // call-activity / pipeline wiring lands with the dialer service. The
       // terminal flip happens only on call.completed / call.failed.
