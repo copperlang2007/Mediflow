@@ -16,3 +16,4 @@ export * from "./commissions";
 export * from "./onboarding";
 export * from "./esign";
 export * from "./dialer";
+export * from "./presence";

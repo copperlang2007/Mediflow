@@ -15,6 +15,7 @@ import {
 import router from "./routes";
 import webhooksRouter from "./routes/webhooks";
 import dialerEventsRouter from "./routes/dialerEvents";
+import queuePublicRouter from "./routes/queuePublic";
 import { logger } from "./lib/logger";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "./middlewares/requireAuth";
 import { isDemoMode } from "./lib/demoMode";
@@ -230,6 +231,12 @@ app.use(webhooksRouter);
 // Clerk-guarded `/api` router below — because trust is established by the
 // X-MB-Signature HMAC, not a Clerk session.
 app.use(dialerEventsRouter);
+
+// Public inbound-lead routing for GoHighLevel / the Atlas proxy. Mounted here
+// (path `/api/queue/v1/route-inbound`) for the same reason as the dialer
+// receiver: external callers authenticate with an X-MB-Signature HMAC, not a
+// Clerk session. See routes/queuePublic.ts.
+app.use(queuePublicRouter);
 
 /**
  * GET /version — release identity for monitoring probes.

@@ -2,12 +2,18 @@
 
 **Audience:** the next Claude (or engineer) session picking this up.
 **Companion doc:** [`inbound-lead-queue.md`](./inbound-lead-queue.md) (design + RTS definition).
-**Shipped so far:** PR #152 — Phase 1 (RTS eligibility + ranking + endpoints + tests).
+
+> **UPDATE — §§2–5 below are now IMPLEMENTED.** The auth blocker, carrier-name
+> resolution, Phase-2 presence, and the Atlas proxy have all landed. This doc
+> is retained for the design rationale; the "remaining work" framing is
+> historical. What's actually left is operational: set `LEAD_QUEUE_WEBHOOK_SECRET`
+> (same value on MediFlow + Atlas), point GHL at the Atlas/MediFlow URL, and
+> have the web app call `POST /api/queue/presence/heartbeat`. See the
+> "Status / Notes for operators" section of the companion doc.
 
 This document is the bridge between "the endpoints exist and are tested" and
 "an inbound GoHighLevel call actually reaches a ready-to-sell agent in
-production." Read it top to bottom before writing code — there is one hard
-blocker (auth) that changes how you approach everything else.
+production."
 
 ---
 
