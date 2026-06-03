@@ -215,13 +215,16 @@ export async function findReadyToSellAgents(
 
   // In-flight load — recent `routed` claims not yet reflected as open leads.
   // `sql\`0\`` when no window is supplied, so ordering collapses to open leads
-  // and existing (presence-only / read-only) callers are unchanged.
+  // and existing (presence-only / read-only) callers are unchanged. The
+  // `orgId` predicate is leading so the `(org_id, agent_id, created_at)` index
+  // is a usable prefix (agents never change org, so it doesn't alter results).
   const inFlightCount = inFlightSince
     ? sql<number>`(${db
         .select({ c: count() })
         .from(leadRoutingTable)
         .where(
           and(
+            eq(leadRoutingTable.orgId, orgId),
             eq(leadRoutingTable.agentId, agentsTable.id),
             eq(leadRoutingTable.status, "routed"),
             gt(leadRoutingTable.createdAt, inFlightSince),
