@@ -164,6 +164,7 @@ router.post(
     const outcome = await resolveAndRouteInbound({
       orgId: authReq.orgId,
       ...parsed.data,
+      source: "in_app",
     });
     if (!outcome.ok) {
       res.status(outcome.status).json({ error: outcome.error });

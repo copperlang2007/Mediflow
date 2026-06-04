@@ -60,6 +60,30 @@ ascending** (`leads` in status `new`/`contacted`/`qualified`), tie-broken on
 `lastName`. The lightest-loaded eligible agent is offered the next inbound —
 a self-balancing distribution rather than always hitting whoever sorts first.
 
+## Routing claims — audit, load balancing, and idempotency
+
+`route-inbound` is **not** a read-only suggestion: every decision writes a
+`lead_routing` row (`lib/db/src/schema/leadRouting.ts`). That row does three
+jobs:
+
+- **Audit trail** — who was routed where, for which carrier × state, the
+  candidate-pool size, and which channel (`in_app` / `public`) asked. This is
+  the compliance record that an inbound went to a ready-to-sell agent.
+  `no_agent_available` decisions are recorded too (coverage/staffing signal).
+- **In-flight load** — recent `routed` claims count toward an agent's load
+  alongside open leads (window `LEAD_QUEUE_INFLIGHT_SECONDS`, default 120s), so
+  a burst of inbounds that haven't yet produced assigned-lead rows still
+  spreads across the pool instead of stacking on whoever sorts first.
+- **Idempotency** — a repeat route for the same `(orgId, contactId, carrier)`
+  inside `LEAD_QUEUE_IDEMPOTENCY_SECONDS` (default 60s) replays the original
+  decision and writes no second row, so GoHighLevel's at-least-once webhook
+  retries don't route one contact to two agents. The response carries
+  `routingId` and `idempotent: true` on a replay.
+
+Note: this balances and dedupes via committed claims; two *exactly*-simultaneous
+routes can still tie on load (no row locks, by design). The idempotency key and
+the in-flight window keep that window small and self-correcting.
+
 ## API
 
 Both endpoints require auth and `lead:read`.

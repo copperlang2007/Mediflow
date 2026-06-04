@@ -66,6 +66,7 @@ import {
   carrierCertificationsTable,
   ahipRecordsTable,
   leadsTable,
+  leadRoutingTable,
 } from "@workspace/db";
 
 /** Open-lead statuses that count toward an agent's current workload. */
@@ -95,6 +96,14 @@ export interface ReadyToSellQuery {
    * `null` to rank the full eligible pool (presence not yet wired).
    */
   availableAgentIds?: readonly string[] | null;
+  /**
+   * In-flight load window. When set, `routed` lead_routing rows created after
+   * this instant count toward each agent's load alongside their open leads —
+   * so a burst of inbounds that haven't yet produced assigned-lead rows still
+   * spreads across the pool instead of stacking on whoever sorts first. Omit /
+   * `null` to rank on open leads only.
+   */
+  inFlightSince?: Date | null;
   /** Injectable clock for deterministic expiry checks in tests. */
   now?: Date;
 }
@@ -107,6 +116,12 @@ export interface ReadyToSellAgent {
   npn: string | null;
   /** Count of open leads currently assigned to this agent. */
   openLeadCount: number;
+  /**
+   * Count of recent `routed` claims for this agent within the in-flight window
+   * (0 when no window was supplied). Surfaced so callers can see why ordering
+   * moved without re-deriving it.
+   */
+  inFlightCount: number;
 }
 
 /**
@@ -123,6 +138,7 @@ export async function findReadyToSellAgents(
     certificationYear = new Date().getUTCFullYear(),
     requireAhip = true,
     availableAgentIds,
+    inFlightSince,
     now = new Date(),
   } = query;
 
@@ -197,6 +213,28 @@ export async function findReadyToSellAgents(
       ),
     )})`;
 
+  // In-flight load — recent `routed` claims not yet reflected as open leads.
+  // `sql\`0\`` when no window is supplied, so ordering collapses to open leads
+  // and existing (presence-only / read-only) callers are unchanged. The
+  // `orgId` predicate is leading so the `(org_id, agent_id, created_at)` index
+  // is a usable prefix (agents never change org, so it doesn't alter results).
+  const inFlightCount = inFlightSince
+    ? sql<number>`(${db
+        .select({ c: count() })
+        .from(leadRoutingTable)
+        .where(
+          and(
+            eq(leadRoutingTable.orgId, orgId),
+            eq(leadRoutingTable.agentId, agentsTable.id),
+            eq(leadRoutingTable.status, "routed"),
+            gt(leadRoutingTable.createdAt, inFlightSince),
+          ),
+        )})`
+    : sql<number>`0`;
+
+  // Rank by total committed + in-flight load so back-to-back routes balance.
+  const effectiveLoad = sql<number>`(${openLeadCount} + ${inFlightCount})`;
+
   const conditions: SQL[] = [
     eq(agentsTable.orgId, orgId),
     eq(agentsTable.status, "active"),
@@ -216,13 +254,18 @@ export async function findReadyToSellAgents(
       phone: agentsTable.phone,
       npn: agentsTable.npn,
       openLeadCount,
+      inFlightCount,
     })
     .from(agentsTable)
     .where(and(...conditions))
-    .orderBy(asc(openLeadCount), asc(agentsTable.lastName));
+    .orderBy(asc(effectiveLoad), asc(agentsTable.lastName));
 
-  // pg returns COUNT(*) as a string; normalise to a number for callers.
-  return rows.map((r) => ({ ...r, openLeadCount: Number(r.openLeadCount) }));
+  // pg returns COUNT(*) as a string; normalise to numbers for callers.
+  return rows.map((r) => ({
+    ...r,
+    openLeadCount: Number(r.openLeadCount),
+    inFlightCount: Number(r.inFlightCount),
+  }));
 }
 
 export interface RouteInboundResult {

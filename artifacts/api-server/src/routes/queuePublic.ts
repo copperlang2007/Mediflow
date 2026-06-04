@@ -96,6 +96,7 @@ router.post(
       certificationYear: body.certificationYear,
       requireAhip: body.requireAhip,
       availableOnly: body.availableOnly,
+      source: "public",
     });
     if (!outcome.ok) {
       res.status(outcome.status).json({ error: outcome.error });

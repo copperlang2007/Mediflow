@@ -5,11 +5,37 @@
  * routing policy can never drift between them — they differ only in how the
  * caller is authenticated and how `orgId` is established.
  */
-import { and, eq } from "drizzle-orm";
-import { db, contactsTable } from "@workspace/db";
+import { randomUUID } from "node:crypto";
+import { and, desc, eq, gt } from "drizzle-orm";
+import {
+  db,
+  agentsTable,
+  contactsTable,
+  leadRoutingTable,
+} from "@workspace/db";
 import { resolveCarrier } from "./carriers";
 import { getAvailableAgentIds } from "./presence";
 import { routeInboundLead, type ReadyToSellAgent } from "./readyToSell";
+
+/**
+ * How long a recent `routed` claim counts as in-flight load when ranking the
+ * next inbound. Generous enough to cover the gap between routing and an actual
+ * assigned-lead row appearing; bounded so it self-clears. 0 disables.
+ */
+const INFLIGHT_SECONDS = ttlFromEnv("LEAD_QUEUE_INFLIGHT_SECONDS", 120);
+/**
+ * Idempotency window: a repeat route for the same `(orgId, contactId, carrier)`
+ * inside this window replays the original decision instead of routing again
+ * (GHL delivers at-least-once). 0 disables.
+ */
+const IDEMPOTENCY_SECONDS = ttlFromEnv("LEAD_QUEUE_IDEMPOTENCY_SECONDS", 60);
+
+function ttlFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+}
 
 export interface RouteInboundParams {
   orgId: string;
@@ -21,6 +47,8 @@ export interface RouteInboundParams {
   requireAhip?: boolean;
   /** Intersect with live presence. Defaults to true. */
   availableOnly?: boolean;
+  /** Which channel asked — recorded on the routing claim for the audit trail. */
+  source?: "in_app" | "public";
   now?: Date;
 }
 
@@ -32,6 +60,10 @@ export interface RouteInboundBody {
   agent: ReadyToSellAgent | null;
   /** Whether a live-presence filter was applied to the pool. */
   presenceFiltered: boolean;
+  /** Id of the recorded routing claim (or the replayed one). */
+  routingId: string;
+  /** True when this response replays a prior decision (idempotent retry). */
+  idempotent: boolean;
   // Atlas/GHL-compatible flat fields for the "Connect Call" step.
   target_phone: string | null;
   target_user_id: string | null;
@@ -102,6 +134,31 @@ export async function resolveAndRouteInbound(
     };
   }
 
+  const now = p.now ?? new Date();
+
+  // 2b. Idempotency — a repeat route for the same contact + carrier inside the
+  // window replays the original decision (GHL delivers at-least-once, so a
+  // retried webhook must not route the same person to a second agent).
+  if (p.contactId && IDEMPOTENCY_SECONDS > 0) {
+    const since = new Date(now.getTime() - IDEMPOTENCY_SECONDS * 1000);
+    const [prior] = await db
+      .select()
+      .from(leadRoutingTable)
+      .where(
+        and(
+          eq(leadRoutingTable.orgId, p.orgId),
+          eq(leadRoutingTable.contactId, p.contactId),
+          eq(leadRoutingTable.carrierId, carrier.carrierId),
+          gt(leadRoutingTable.createdAt, since),
+        ),
+      )
+      .orderBy(desc(leadRoutingTable.createdAt))
+      .limit(1);
+    if (prior) {
+      return { ok: true, body: await replayBody(prior) };
+    }
+  }
+
   // 3. Live presence. `availableOnly` defaults to true. When the org has no
   // presence rows at all (feature not adopted yet) we DON'T filter, so routing
   // keeps working before any agent has ever checked in. Once presence is in
@@ -116,7 +173,12 @@ export async function resolveAndRouteInbound(
     }
   }
 
-  // 4. Rank ready-to-sell ∩ available, pick the head.
+  // 4. Rank ready-to-sell ∩ available, counting recent claims as in-flight
+  // load so a burst spreads across the pool, and pick the head.
+  const inFlightSince =
+    INFLIGHT_SECONDS > 0
+      ? new Date(now.getTime() - INFLIGHT_SECONDS * 1000)
+      : null;
   const result = await routeInboundLead({
     orgId: p.orgId,
     stateCode: state,
@@ -124,7 +186,26 @@ export async function resolveAndRouteInbound(
     certificationYear: p.certificationYear,
     requireAhip: p.requireAhip,
     availableAgentIds,
-    now: p.now,
+    inFlightSince,
+    now,
+  });
+
+  // 5. Record the claim — the audit trail, the in-flight load signal the next
+  // route balances on, and the idempotency anchor for retries.
+  const routingId = randomUUID();
+  await db.insert(leadRoutingTable).values({
+    id: routingId,
+    orgId: p.orgId,
+    contactId: p.contactId ?? null,
+    carrierId: carrier.carrierId,
+    stateCode: state,
+    certificationYear: p.certificationYear ?? null,
+    agentId: result.agent?.agentId ?? null,
+    status: result.status,
+    candidatePool: result.candidatePool,
+    source: p.source ?? null,
+    presenceFiltered,
+    createdAt: now,
   });
 
   return {
@@ -136,8 +217,48 @@ export async function resolveAndRouteInbound(
       candidatePool: result.candidatePool,
       agent: result.agent,
       presenceFiltered,
+      routingId,
+      idempotent: false,
       target_phone: result.agent?.phone ?? null,
       target_user_id: result.agent?.agentId ?? null,
     },
+  };
+}
+
+/**
+ * Rebuild a response body from a previously-recorded routing claim (idempotent
+ * replay). The agent's display fields are re-read so the caller gets a live
+ * phone number; load counts are reported as 0 because this is a replay of a
+ * past decision, not a fresh ranking.
+ */
+async function replayBody(
+  prior: typeof leadRoutingTable.$inferSelect,
+): Promise<RouteInboundBody> {
+  let agent: ReadyToSellAgent | null = null;
+  if (prior.agentId) {
+    const [row] = await db
+      .select({
+        agentId: agentsTable.id,
+        firstName: agentsTable.firstName,
+        lastName: agentsTable.lastName,
+        phone: agentsTable.phone,
+        npn: agentsTable.npn,
+      })
+      .from(agentsTable)
+      .where(eq(agentsTable.id, prior.agentId))
+      .limit(1);
+    if (row) agent = { ...row, openLeadCount: 0, inFlightCount: 0 };
+  }
+  return {
+    status: prior.status as "routed" | "no_agent_available",
+    stateCode: prior.stateCode,
+    carrierId: prior.carrierId,
+    candidatePool: prior.candidatePool,
+    agent,
+    presenceFiltered: prior.presenceFiltered,
+    routingId: prior.id,
+    idempotent: true,
+    target_phone: agent?.phone ?? null,
+    target_user_id: agent?.agentId ?? null,
   };
 }
