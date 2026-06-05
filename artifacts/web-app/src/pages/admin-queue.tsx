@@ -102,9 +102,9 @@ export default function AdminQueuePage() {
         <CardContent className="p-4 space-y-3">
           <div className="flex items-center gap-2">
             <Radio className="h-4 w-4 text-emerald-500" />
-            <span className="font-semibold text-sm">Available now</span>
+            <span className="font-semibold text-sm">Agent presence</span>
             <Badge variant="secondary" className="ml-1">
-              {availableCount}
+              {availableCount} available
             </Badge>
           </div>
           {presence.isLoading ? (

@@ -239,12 +239,13 @@ router.post(
 );
 
 // GET /queue/presence — admin oversight: every agent's presence row + the live
-// `availableNow` verdict. Read-only; the page is admin-gated client-side and
-// the endpoint requires lead:read (consistent with the rest of this surface).
+// `availableNow` verdict. Read-only oversight: gated to the admin tier
+// (`agent:admin` = super_admin / agency_admin) so the API matches the
+// admin-only Live Queue page rather than the broader lead:read surface.
 router.get(
   "/queue/presence",
   requireAuth,
-  requirePermission("lead", "read"),
+  requirePermission("agent", "admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     res.json(await getPresenceOverview(authReq.orgId));
@@ -252,14 +253,14 @@ router.get(
 );
 
 // GET /queue/routing/recent?limit=50 — recent routing decisions (the
-// lead_routing audit trail) for the live-queue view.
+// lead_routing audit trail) for the live-queue view. Admin-tier (see above).
 const RecentRoutingQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });
 router.get(
   "/queue/routing/recent",
   requireAuth,
-  requirePermission("lead", "read"),
+  requirePermission("agent", "admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const parsed = RecentRoutingQuerySchema.safeParse(req.query);
