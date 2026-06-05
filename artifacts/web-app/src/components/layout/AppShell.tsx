@@ -90,6 +90,7 @@ import {
   Handshake,
   ClipboardCheck,
   Activity,
+  Radio,
 } from "lucide-react";
 import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
 import NotificationPanel from "@/components/notifications/NotificationPanel";
@@ -141,6 +142,10 @@ const navItems: NavGroup[] = [
       {
         href: "/crm", label: "CRM", icon: PhoneCall,
         roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
+      },
+      {
+        href: "/admin/queue", label: "Live Queue", icon: Radio,
+        roles: ["super_admin", "agency_admin"],
       },
       { href: "/tasks", label: "Tasks", icon: CheckSquare, roles: ALL_ROLES },
       {

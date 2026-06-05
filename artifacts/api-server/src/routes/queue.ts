@@ -28,6 +28,10 @@ import { findReadyToSellAgents } from "../lib/leadQueue/readyToSell";
 import { resolveAndRouteInbound } from "../lib/leadQueue/service";
 import { resolveCarrier } from "../lib/leadQueue/carriers";
 import {
+  getPresenceOverview,
+  getRecentRouting,
+} from "../lib/leadQueue/overview";
+import {
   recordHeartbeat,
   getAvailableAgentIds,
   HEARTBEAT_STATUSES,
@@ -231,6 +235,42 @@ router.post(
       status: row.status,
       expiresAt: row.expiresAt,
     });
+  },
+);
+
+// GET /queue/presence — admin oversight: every agent's presence row + the live
+// `availableNow` verdict. Read-only; the page is admin-gated client-side and
+// the endpoint requires lead:read (consistent with the rest of this surface).
+router.get(
+  "/queue/presence",
+  requireAuth,
+  requirePermission("lead", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    res.json(await getPresenceOverview(authReq.orgId));
+  },
+);
+
+// GET /queue/routing/recent?limit=50 — recent routing decisions (the
+// lead_routing audit trail) for the live-queue view.
+const RecentRoutingQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+});
+router.get(
+  "/queue/routing/recent",
+  requireAuth,
+  requirePermission("lead", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const parsed = RecentRoutingQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ error: "Invalid query", details: parsed.error.issues });
+      return;
+    }
+    const rows = await getRecentRouting(authReq.orgId, parsed.data.limit ?? 50);
+    res.json({ data: rows, total: rows.length });
   },
 );
 
