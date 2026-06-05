@@ -9,6 +9,7 @@ import {
   getGetDashboardStatsQueryKey,
 } from "@workspace/api-client-react";
 import type { AiContext } from "@/components/ai-assistant";
+import { PresenceToggle } from "@/components/layout/PresenceToggle";
 import { cn } from "@/lib/utils";
 
 type Role =
@@ -451,6 +452,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           icon={Settings}
           collapsed={collapsed}
         />
+
+        {/* Agents mark themselves Available/Away for inbound lead routing. */}
+        {userRole === "agent" && (
+          <div className={cn("mt-1", collapsed ? "flex justify-center" : "")}>
+            <PresenceToggle collapsed={collapsed} />
+          </div>
+        )}
 
         <div className={cn("mt-2", collapsed ? "flex justify-center" : "")}>
           <DropdownMenu>
