@@ -73,6 +73,8 @@ export const leadRoutingTable = pgTable(
       t.contactId,
       t.createdAt,
     ),
+    // Audit-trail read (admin Live Queue): an org's decisions newest-first.
+    index("lead_routing_org_created_idx").on(t.orgId, t.createdAt),
   ],
 );
 

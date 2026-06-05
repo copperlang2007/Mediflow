@@ -170,3 +170,22 @@ describe("GET /queue/routing/recent", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("Live Queue endpoints — admin-only access", () => {
+  it("403s a lead:read role that is not admin-tier (agent_support)", async () => {
+    // agent_support holds lead:read but NOT agent:admin, so it can no longer
+    // reach the oversight endpoints (they used to require only lead:read).
+    const support = await seedUser(testDb, {
+      orgId: org.id,
+      role: "agent_support",
+    });
+    const presence = await request(app)
+      .get("/api/queue/presence")
+      .set(withAuth(support.id));
+    const routing = await request(app)
+      .get("/api/queue/routing/recent")
+      .set(withAuth(support.id));
+    expect(presence.status).toBe(403);
+    expect(routing.status).toBe(403);
+  });
+});
