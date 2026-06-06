@@ -205,6 +205,27 @@ just not presence-aware.
 - **Secrets:** the public route is authenticated by `LEAD_QUEUE_WEBHOOK_SECRET`
   (or per-org `LEAD_QUEUE_WEBHOOK_SECRET_<ORGID>`). Set the same secret on the
   Atlas side. Fail-closed: an unset secret rejects all calls.
+- **Verifying the signature contract:** the proxy and MediFlow must HMAC the
+  same bytes or every call is rejected. Use the reference signer to check
+  parity and smoke-test the live endpoint — it mirrors the server verifier
+  (`lib/dialer/signature.ts`) exactly:
+
+  ```bash
+  # Parity: sign the EXACT body the proxy sends, with a fixed timestamp, then
+  # compare the printed v1 to the proxy's for the same (t, body).
+  pnpm --filter @workspace/scripts lq:sign -- \
+    --secret "$LEAD_QUEUE_WEBHOOK_SECRET" --org org_123 --t 1780000000 \
+    --body '{"orgId":"org_123","carrierName":"Acme Health","contactState":"FL"}'
+
+  # Smoke: POST a correctly-signed request to the live endpoint.
+  pnpm --filter @workspace/scripts lq:sign -- \
+    --org org_123 --carrier-name "Acme Health" --state FL \
+    --url https://<host>/api/queue/v1/route-inbound --send
+  ```
+
+  A mismatched `v1` for the same `(t, body)` means the proxy is signing
+  different bytes — almost always a re-serialized body (key order / whitespace)
+  rather than the exact bytes it transmits.
 - **TTL tuning:** `LEAD_QUEUE_HEARTBEAT_TTL_SECONDS` (default 90) and
   `LEAD_QUEUE_DIALER_TTL_SECONDS` (default 900). TTL is enforced at read time —
   no sweeper job. A cosmetic "flip expired rows to offline" cron can be added
