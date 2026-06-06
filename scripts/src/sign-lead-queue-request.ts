@@ -15,7 +15,11 @@
  *  1. PARITY — confirm the Atlas proxy signs identically. Run with a fixed
  *     `--t` and the exact body the proxy sends; compare the printed `v1` to the
  *     proxy's. If they differ, the proxy is signing different bytes (usually a
- *     re-serialized body or a different base string).
+ *     re-serialized body or a different base string). For strict byte-for-byte
+ *     parity always pass `--body` with the exact bytes the proxy transmits —
+ *     flag-built bodies use a FIXED key order (orgId, carrierId|carrierName,
+ *     contactState|contactId, certificationYear, requireAhip, availableOnly),
+ *     which a differently-ordered client serializer would not match.
  *
  *  2. SMOKE — prove the live endpoint accepts a correctly-signed request. Add
  *     `--send --url https://<host>/api/queue/v1/route-inbound`; the script
@@ -29,11 +33,12 @@
  * Examples:
  *   # Build a body from flags, print the signed request (no network):
  *   pnpm --filter @workspace/scripts lq:sign -- \
- *     --secret s3cr3t --org org_123 --carrier-name "Acme Health" --state FL
+ *     --secret "$LEAD_QUEUE_WEBHOOK_SECRET" --org org_123 \
+ *     --carrier-name "Acme Health" --state FL
  *
  *   # Sign the EXACT bytes the proxy sends, with a fixed timestamp, to diff v1:
  *   pnpm --filter @workspace/scripts lq:sign -- \
- *     --secret s3cr3t --org org_123 --t 1780000000 \
+ *     --secret "$LEAD_QUEUE_WEBHOOK_SECRET" --org org_123 --t 1780000000 \
  *     --body '{"orgId":"org_123","carrierName":"Acme Health","contactState":"FL"}'
  *
  *   # Smoke-test the live endpoint:
@@ -77,6 +82,11 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
+/** POSIX-safe single-quoting for the previewed curl command (handles `'`). */
+function shq(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
 /** Mirror of the server's per-tenant secret resolution. */
 function resolveSecret(orgId: string, explicit?: string): string | undefined {
   if (explicit) return explicit;
@@ -109,6 +119,9 @@ async function main(): Promise<void> {
 
   // Body: either an exact raw JSON string (best for parity), or built from
   // flags. When built, we serialize once and sign/send those exact bytes.
+  // `--body` with no following value parses as boolean `true`; treat that as a
+  // usage error rather than silently falling back to flag-building.
+  if (args.body === true) fail("--body requires a JSON string value");
   let rawBody = str(args.body);
   if (!rawBody) {
     const body: Record<string, unknown> = { orgId };
@@ -155,10 +168,10 @@ async function main(): Promise<void> {
   if (url) {
     console.log("curl:");
     console.log(
-      `  curl -sS -X POST '${url}' \\\n` +
+      `  curl -sS -X POST ${shq(url)} \\\n` +
         `    -H 'Content-Type: application/json' \\\n` +
-        `    -H 'X-MB-Signature: ${sigHeader}' \\\n` +
-        `    --data '${rawBody}'`,
+        `    -H ${shq(`X-MB-Signature: ${sigHeader}`)} \\\n` +
+        `    --data ${shq(rawBody)}`,
     );
     console.log("");
   } else {
