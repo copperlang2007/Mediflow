@@ -18,6 +18,7 @@ export TEST_CARRIER_NAME="Acme Health"                         # a carrier that 
 export TEST_STATE="FL"                                         # a 2-letter state with a ready-to-sell agent
 export MEDIFLOW_REPO="$HOME/Mediflow"                          # local clone of copperlang2007/mediflow
 export ATLAS_REPO="$HOME/atlas-call-routing"                   # local clone of copperlang2007/atlas-call-routing
+export MEDIFLOW_API_DIR="$MEDIFLOW_REPO/artifacts/api-server"  # Vercel-linked API project dir (only used for the Vercel CLI path in Phase 2)
 # Per-tenant env var name MediFlow expects (orgId upper-cased, non-alphanumerics -> _):
 export SECRET_ENV_NAME="LEAD_QUEUE_WEBHOOK_SECRET_$(printf '%s' "$ORG_ID" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')"
 ```
@@ -43,7 +44,12 @@ Atlas proxy (to set env vars), and edit access to the GoHighLevel workflow.
 
 ```bash
 export LQ_SECRET="$(openssl rand -hex 32)"
-echo "Shared secret (store in your secret manager): $LQ_SECRET"
+# SECURITY: do NOT echo $LQ_SECRET in a shared terminal or CI — it lands in
+# shell history and logs. Write it straight into your secret manager / the
+# platform env vars in Phase 2. To confirm length without revealing it:
+printf '%s' "$LQ_SECRET" | wc -c   # expect 64
+# If you must view it once, do so on a trusted machine, then clear the line:
+#   history -d "$(history 1 | awk '{print $1}')"   # bash
 ```
 
 Gate: `LQ_SECRET` is 64 hex chars. Both sides must use this exact value.
