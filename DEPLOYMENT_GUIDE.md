@@ -1,0 +1,1 @@
+Deployment instructions for Bridget widget and MediFlow dashboard

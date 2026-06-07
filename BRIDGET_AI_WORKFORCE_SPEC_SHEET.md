@@ -1,0 +1,1 @@
+Full spec with deployment sections updated
