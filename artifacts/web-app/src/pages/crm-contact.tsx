@@ -36,10 +36,16 @@ import {
   StickyNote, PhoneCall, Activity as ActivityIcon, CheckSquare, FolderOpen,
   Workflow, Heart, Calendar,
   Shield, DollarSign, Clock, Edit, User, MapPin, Sparkles, Loader2,
+  Phone, AlertTriangle, ListChecks,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import {
+  useContactCallSummaries,
+  type CallSummary,
+  type SuggestedDisposition,
+} from "@/lib/crm/callSummaries";
 
 // ──────────────────────────────────────────────
 // Helpers
@@ -623,6 +629,156 @@ function SequencesTab({ contactId }: { contactId: string }) {
 }
 
 // ──────────────────────────────────────────────
+// Call Summaries Tab (post-call agent-assist)
+// ──────────────────────────────────────────────
+
+// Advisory disposition category styling. These are SUGGESTIONS produced by the
+// in-platform transcript parse — the agent confirms before anything is applied.
+const DISPOSITION_STYLES: Record<SuggestedDisposition["category"], string> = {
+  POSITIVE: "bg-green-100 text-green-800",
+  NEUTRAL: "bg-slate-100 text-slate-700",
+  NEGATIVE: "bg-red-100 text-red-800",
+  COMPLIANCE: "bg-amber-100 text-amber-900",
+  FOLLOW_UP: "bg-blue-100 text-blue-800",
+  UNKNOWN: "bg-muted text-muted-foreground",
+};
+
+const RISK_SEVERITY_STYLES: Record<string, string> = {
+  low: "bg-yellow-100 text-yellow-800",
+  medium: "bg-orange-100 text-orange-800",
+  high: "bg-red-100 text-red-800",
+};
+
+function CallSummaryCard({ summary }: { summary: CallSummary }) {
+  const disp = summary.suggestedDisposition;
+  const confidencePct =
+    disp && typeof disp.confidence === "number"
+      ? Math.round(disp.confidence * 100)
+      : null;
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-3">
+        {/* Headline: the advisory suggested disposition, clearly labeled. */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Phone className="h-4 w-4 text-blue-500 shrink-0" />
+            <span className="text-xs uppercase tracking-wide text-muted-foreground">
+              Suggested disposition
+            </span>
+            {disp ? (
+              <Badge className={cn("text-xs border-0", DISPOSITION_STYLES[disp.category] ?? "")}>
+                {disp.category.replace(/_/g, " ")}
+                {confidencePct != null ? ` · ${confidencePct}%` : ""}
+              </Badge>
+            ) : (
+              <Badge className="text-xs border-0 bg-muted text-muted-foreground">
+                Not available
+              </Badge>
+            )}
+            {disp?.code && (
+              <span className="text-xs text-muted-foreground">({disp.code})</span>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground shrink-0">
+            {summary.parsedAt
+              ? `${formatDistanceToNow(new Date(summary.parsedAt))} ago`
+              : "—"}
+          </p>
+        </div>
+
+        {/* Advisory disclaimer — this is a suggestion, not an applied status. */}
+        <p className="text-[11px] italic text-muted-foreground">
+          Advisory — generated from the call transcript. Review before acting.
+        </p>
+
+        {/* Summary text. */}
+        {summary.summary && (
+          <p className="text-sm whitespace-pre-line">{summary.summary}</p>
+        )}
+
+        {/* Risk-flag chips, severity-colored. */}
+        {summary.riskFlags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {summary.riskFlags.map((flag, i) => (
+              <span
+                key={`${flag.kind}-${i}`}
+                title={flag.detail}
+                className={cn(
+                  "inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full",
+                  RISK_SEVERITY_STYLES[flag.severity] ?? "bg-muted text-muted-foreground",
+                )}
+              >
+                <AlertTriangle className="h-3 w-3" />
+                {flag.kind}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Action items. */}
+        {summary.actionItems.length > 0 && (
+          <div className="space-y-1">
+            <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+              <ListChecks className="h-3.5 w-3.5" />
+              Action items
+            </div>
+            <ul className="list-disc list-inside space-y-0.5">
+              {summary.actionItems.map((item, i) => (
+                <li key={i} className="text-sm text-muted-foreground">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* TODO: wire a "Log as note" / "Apply disposition" action once a
+            canonical disposition endpoint exists. Today the contact-status
+            model (lead/prospect/…) does not map cleanly to these advisory
+            categories, and there is no disposition write API — so this panel
+            is intentionally read-only rather than inventing a mapping. */}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CallSummariesTab({ contactId }: { contactId: string }) {
+  const { data, isLoading } = useContactCallSummaries(contactId);
+  const summaries: CallSummary[] = data?.data ?? [];
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        {[...Array(2)].map((_, i) => (
+          <Skeleton key={i} className="h-40 rounded-xl" />
+        ))}
+      </div>
+    );
+  }
+
+  if (summaries.length === 0) {
+    return (
+      <div className="text-center py-10 text-sm text-muted-foreground">
+        No post-call summaries yet — they appear here after a dialer call
+        transcript is parsed.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground text-right">
+        {summaries.length} call{summaries.length !== 1 ? "s" : ""} summarized
+      </p>
+      {summaries.map((s) => (
+        <CallSummaryCard key={s.ticketId} summary={s} />
+      ))}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
 // Main Contact Detail Page
 // ──────────────────────────────────────────────
 
@@ -741,11 +897,13 @@ export default function ContactDetailPage() {
       <Tabs defaultValue="timeline" className="space-y-4">
         <TabsList>
           <TabsTrigger value="timeline"><ActivityIcon className="h-4 w-4 mr-1" />Timeline</TabsTrigger>
+          <TabsTrigger value="call-summaries"><Phone className="h-4 w-4 mr-1" />Call summaries</TabsTrigger>
           <TabsTrigger value="deals"><DollarSign className="h-4 w-4 mr-1" />Deals</TabsTrigger>
           <TabsTrigger value="tasks"><CheckSquare className="h-4 w-4 mr-1" />Tasks</TabsTrigger>
           <TabsTrigger value="sequences"><Workflow className="h-4 w-4 mr-1" />Sequences</TabsTrigger>
         </TabsList>
         <TabsContent value="timeline"><TimelineTab contactId={id} /></TabsContent>
+        <TabsContent value="call-summaries"><CallSummariesTab contactId={id} /></TabsContent>
         <TabsContent value="deals"><DealsTab contactId={id} /></TabsContent>
         <TabsContent value="tasks"><TasksTab contactId={id} /></TabsContent>
         <TabsContent value="sequences"><SequencesTab contactId={id} /></TabsContent>
