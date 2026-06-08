@@ -33,12 +33,10 @@ import { format } from "date-fns";
 
 // Roles allowed to see this page. Agents are the primary audience; admins
 // are permitted too (they'll see their own statements if linked).
-const ALLOWED_ROLES = [
-  "agent",
-  "super_admin",
-  "agency_admin",
-  "compliance_manager",
-] as const;
+// Agent self-serve portal: scoped to the `agent` role to match the nav item
+// exactly (admins/managers use the org-wide /commissions view). Keeping these
+// aligned avoids a role being able to reach the route but not see the nav.
+const ALLOWED_ROLES = ["agent"] as const;
 
 const PAID_STATUS = "paid";
 
@@ -143,6 +141,27 @@ export default function MyCommissionsPage() {
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
             You don't have access to commission statements.
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Distinguish "no agent record linked" (404) from a genuine load failure, so
+  // an agent without a commission account sees an explanatory panel rather than
+  // a misleading "$0 / no statements" view or an opaque error.
+  if (query.isError) {
+    const status = (query.error as { status?: number } | null)?.status;
+    return (
+      <div className="p-6 max-w-3xl mx-auto">
+        <Card>
+          <CardContent
+            className="py-10 text-center text-sm text-muted-foreground"
+            data-testid="my-commissions-error"
+          >
+            {status === 404
+              ? "No commission account is linked to your profile yet. Contact your agency admin if you expect to see commissions here."
+              : "Couldn't load your commissions right now. Please try again shortly."}
           </CardContent>
         </Card>
       </div>
