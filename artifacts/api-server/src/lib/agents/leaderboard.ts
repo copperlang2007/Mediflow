@@ -57,10 +57,9 @@ import {
   leadCallbacksTable,
 } from "@workspace/db";
 import { getOrgReadiness } from "./readiness";
-
-/** Open-lead statuses that count toward an agent's current plate. Kept in
- * sync with lib/leadQueue/readyToSell.ts's OPEN_LEAD_STATUSES. */
-const OPEN_LEAD_STATUSES = ["new", "contacted", "qualified"] as const;
+// Single source of truth for "open lead" statuses — shared with the router so
+// the leaderboard's open-lead count can never drift from eligibility ranking.
+import { OPEN_LEAD_STATUSES } from "../leadQueue/readyToSell";
 
 export interface AgentLeaderboardEntry {
   agentId: string;
