@@ -60,6 +60,22 @@ export const transcriptParseResultSchema = z.object({
     .default([]),
   /** Concrete next steps for the agent. */
   actionItems: z.array(z.string()).default([]),
+  /**
+   * Scope of Appointment (SOA) detection. These are inbound MA sales calls
+   * where the scope is captured verbally on the recording (no signed form).
+   * `required` = the call was a sales/enrollment discussion of specific plan
+   * types that requires a documented scope; `captured` = the agent actually
+   * confirmed/obtained the scope on this call. `products` = the Medicare
+   * product types discussed (PHI-free, never the MBI). Defaulted so older
+   * persisted parses without this field still validate.
+   */
+  scopeOfAppointment: z
+    .object({
+      required: z.boolean(),
+      captured: z.boolean(),
+      products: z.array(z.string()).default([]),
+    })
+    .default({ required: false, captured: false, products: [] }),
 });
 
 export type TranscriptParseResult = z.infer<typeof transcriptParseResultSchema>;
@@ -139,9 +155,10 @@ Goals:
 2. Suggest a disposition: an advisory code (or null), a category from POSITIVE | NEUTRAL | NEGATIVE | COMPLIANCE | FOLLOW_UP | UNKNOWN, and a confidence in [0,1] (or null).
 3. Detect compliance / risk signals (TCPA consent issues, do-not-call requests, calling-hours problems, scope-of-appointment gaps, pressure/misrepresentation, etc.). For each: a short kind, a severity of low | medium | high, and a brief detail.
 4. List concrete action items for the agent.
+5. Scope of Appointment (SOA): set "required" to true when the call was a sales/enrollment discussion of specific Medicare plan types that requires a documented scope of appointment; set "captured" to true ONLY if the agent confirmed/obtained the scope on this call (the beneficiary agreed to discuss the listed product types). Set "products" to the Medicare product types discussed (e.g. MAPD, PDP, MedSupp, DSNP) — never the MBI. A purely informational/service call needs no scope ("required": false).
 
 Return JSON shaped exactly as:
-{"summary": string, "suggestedDisposition": {"code": string|null, "category": string, "confidence": number|null}, "riskFlags": [{"kind": string, "severity": string, "detail": string}], "actionItems": [string]}`;
+{"summary": string, "suggestedDisposition": {"code": string|null, "category": string, "confidence": number|null}, "riskFlags": [{"kind": string, "severity": string, "detail": string}], "actionItems": [string], "scopeOfAppointment": {"required": boolean, "captured": boolean, "products": [string]}}`;
 
 // Model id is overridable via env so it can be rotated / A/B-tested without a
 // code change; the default matches the rest of the AI surface (routes/ai.ts).

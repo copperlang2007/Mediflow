@@ -136,6 +136,7 @@ async function handleTranscriptReady(
     // when the parse surfaces a compliance concern (below). Both happen; the
     // raise is best-effort and never changes the result note / webhook status.
     await raiseTranscriptComplianceSafe(env, parsed);
+    await raiseScopeGapSafe(env, parsed);
     return { ok: true, handled: true, note: "transcript_parsed" };
   }
 
@@ -227,6 +228,47 @@ async function raiseTranscriptComplianceSafe(
     logger.error(
       { err, dialTicketId: env.dialTicketId, eventId: env.eventId },
       "Transcript compliance: failed to raise oversight task (ignored)",
+    );
+  }
+}
+
+/**
+ * Best-effort: when the in-platform parse finds a sales call that REQUIRED a
+ * Scope of Appointment but none was CAPTURED on the recording, auto-raise a
+ * compliance oversight task. These are inbound MA sales calls where the scope
+ * is captured verbally (no signed form), so this is the safety net for a
+ * missed/forgotten verbal scope.
+ *
+ * Same posture as raiseTranscriptComplianceSafe: a failure is logged and
+ * swallowed (never 5xx the webhook), and the oversight task dedups on
+ * (eventId, "scope_missing") — so re-processing the same event, AND the sibling
+ * transcript-compliance raise on the same event, never collide or duplicate.
+ */
+async function raiseScopeGapSafe(
+  env: DialerEventEnvelope,
+  parsed: TranscriptParseResult,
+): Promise<void> {
+  const soa = parsed.scopeOfAppointment;
+  // Only flag a sales call that needed a scope and didn't capture one. Purely
+  // informational / service calls (required=false) never flag.
+  if (!soa.required || soa.captured) return;
+
+  const products =
+    soa.products.length > 0 ? soa.products.join(", ") : "unspecified plan type(s)";
+  try {
+    await raiseComplianceOversightTask({
+      orgId: env.orgId,
+      eventId: env.eventId,
+      dialTicketId: env.dialTicketId ?? null,
+      dialerCallId: env.dialerCallId ?? null,
+      trigger: "scope_missing",
+      reason: products,
+      detail: `Sales discussion of ${products} with no Scope of Appointment captured on the call.`,
+    });
+  } catch (err) {
+    logger.error(
+      { err, dialTicketId: env.dialTicketId, eventId: env.eventId },
+      "Scope-of-appointment gap: failed to raise oversight task (ignored)",
     );
   }
 }

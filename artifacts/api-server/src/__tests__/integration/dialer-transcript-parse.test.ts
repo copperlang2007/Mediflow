@@ -398,3 +398,127 @@ describe("Phase 5 — auto compliance flagging from a flagged transcript (§6, �
     expect(tasks).toHaveLength(1);
   });
 });
+
+describe("Phase 5 — auto Scope-of-Appointment gap flagging (§6, §9)", () => {
+  /** Sales call that REQUIRED a scope but captured none → should flag. */
+  const SCOPE_MISSING_JSON = JSON.stringify({
+    summary: "Sales discussion of a Medicare Advantage plan.",
+    suggestedDisposition: { code: "CALLBACK", category: "FOLLOW_UP", confidence: 0.7 },
+    riskFlags: [],
+    actionItems: ["Send plan summary"],
+    scopeOfAppointment: { required: true, captured: false, products: ["MAPD"] },
+  });
+
+  /** Sales call with the scope captured → no flag. */
+  const SCOPE_CAPTURED_JSON = JSON.stringify({
+    summary: "Sales call; scope confirmed for MAPD and PDP.",
+    suggestedDisposition: { code: "ENROLLED", category: "POSITIVE", confidence: 0.9 },
+    riskFlags: [],
+    actionItems: [],
+    scopeOfAppointment: { required: true, captured: true, products: ["MAPD", "PDP"] },
+  });
+
+  /** Service/informational call — no scope required → no flag. */
+  const SERVICE_CALL_JSON = JSON.stringify({
+    summary: "Beneficiary called about an existing claim.",
+    suggestedDisposition: { code: "RESOLVED", category: "NEUTRAL", confidence: 0.8 },
+    riskFlags: [],
+    actionItems: [],
+    scopeOfAppointment: { required: false, captured: false, products: [] },
+  });
+
+  /** BOTH a COMPLIANCE-category disposition AND a missing scope on one call. */
+  const COMPLIANCE_AND_SCOPE_JSON = JSON.stringify({
+    summary: "Beneficiary asked not to be called again mid-pitch; no scope taken.",
+    suggestedDisposition: { code: "DNC_REQUEST", category: "COMPLIANCE", confidence: 0.9 },
+    riskFlags: [],
+    actionItems: [],
+    scopeOfAppointment: { required: true, captured: false, products: ["MAPD"] },
+  });
+
+  it("raises a scope_missing oversight task when a sales call captured no scope", async () => {
+    const org = await seedOrg(db, { id: `org-${randomUUID().slice(0, 8)}` });
+    await seedUser(db, { orgId: org.id, role: "compliance_manager" });
+    const ticketId = await seedTicket(org.id);
+    const { client } = mockAiClient(SCOPE_MISSING_JSON);
+
+    const env = readyEnvelope(org.id, ticketId, "Agent: let me tell you about this MA plan…");
+    const result = await dispatchEvent(env, { aiClient: client });
+    expect(result).toMatchObject({ ok: true, handled: true, note: "transcript_parsed" });
+
+    const tasks = await db
+      .select()
+      .from(taskInstancesTable)
+      .where(eq(taskInstancesTable.orgId, org.id));
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].title.toLowerCase()).toContain("scope of appointment");
+  });
+
+  it("does NOT flag when the scope was captured", async () => {
+    const org = await seedOrg(db, { id: `org-${randomUUID().slice(0, 8)}` });
+    await seedUser(db, { orgId: org.id, role: "compliance_manager" });
+    const ticketId = await seedTicket(org.id);
+    const { client } = mockAiClient(SCOPE_CAPTURED_JSON);
+    await dispatchEvent(
+      readyEnvelope(org.id, ticketId, "Agent: do you agree to discuss MAPD and PDP?"),
+      { aiClient: client },
+    );
+    const tasks = await db
+      .select()
+      .from(taskInstancesTable)
+      .where(eq(taskInstancesTable.orgId, org.id));
+    expect(tasks).toHaveLength(0);
+  });
+
+  it("does NOT flag a service call (scope not required)", async () => {
+    const org = await seedOrg(db, { id: `org-${randomUUID().slice(0, 8)}` });
+    await seedUser(db, { orgId: org.id, role: "compliance_manager" });
+    const ticketId = await seedTicket(org.id);
+    const { client } = mockAiClient(SERVICE_CALL_JSON);
+    await dispatchEvent(
+      readyEnvelope(org.id, ticketId, "Beneficiary: I have a question about a claim."),
+      { aiClient: client },
+    );
+    const tasks = await db
+      .select()
+      .from(taskInstancesTable)
+      .where(eq(taskInstancesTable.orgId, org.id));
+    expect(tasks).toHaveLength(0);
+  });
+
+  it("raises BOTH a compliance and a scope_missing task from one event (per-trigger dedup)", async () => {
+    const org = await seedOrg(db, { id: `org-${randomUUID().slice(0, 8)}` });
+    await seedUser(db, { orgId: org.id, role: "compliance_manager" });
+    const ticketId = await seedTicket(org.id);
+    const { client } = mockAiClient(COMPLIANCE_AND_SCOPE_JSON);
+
+    await dispatchEvent(
+      readyEnvelope(org.id, ticketId, "Beneficiary: stop calling — and you never set a scope."),
+      { aiClient: client },
+    );
+
+    const tasks = await db
+      .select()
+      .from(taskInstancesTable)
+      .where(eq(taskInstancesTable.orgId, org.id));
+    expect(tasks).toHaveLength(2);
+    const titles = tasks.map((t) => t.title.toLowerCase());
+    expect(titles.some((t) => t.includes("scope of appointment"))).toBe(true);
+    expect(titles.some((t) => t.includes("transcript flagged"))).toBe(true);
+  });
+
+  it("is idempotent — re-processing the same event raises no second scope task", async () => {
+    const org = await seedOrg(db, { id: `org-${randomUUID().slice(0, 8)}` });
+    await seedUser(db, { orgId: org.id, role: "compliance_manager" });
+    const ticketId = await seedTicket(org.id);
+    const { client } = mockAiClient(SCOPE_MISSING_JSON);
+    const env = readyEnvelope(org.id, ticketId, "Agent: MA plan pitch with no scope.");
+    await dispatchEvent(env, { aiClient: client });
+    await dispatchEvent(env, { aiClient: client });
+    const tasks = await db
+      .select()
+      .from(taskInstancesTable)
+      .where(eq(taskInstancesTable.orgId, org.id));
+    expect(tasks).toHaveLength(1);
+  });
+});

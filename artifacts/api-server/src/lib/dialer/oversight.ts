@@ -29,9 +29,14 @@ import { logger } from "../logger";
 
 type OversightDb = typeof defaultDb;
 
-/** Deterministic dedup key for an oversight task raised from an event. */
-export function oversightTaskKey(eventId: string): string {
-  return `dialer-compliance:${eventId}`;
+/**
+ * Deterministic dedup key for an oversight task raised from an event. Includes
+ * the trigger so distinct concern-types raised from the SAME event (e.g. a
+ * transcript-compliance flag AND a scope-of-appointment gap, both from one
+ * `call.transcript.ready`) each get their own task instead of colliding.
+ */
+export function oversightTaskKey(eventId: string, trigger: string): string {
+  return `dialer-compliance:${trigger}:${eventId}`;
 }
 
 /** Roles that should own a compliance oversight task, most-specific first. */
@@ -73,8 +78,8 @@ export interface RaiseOversightInput {
   eventId: string;
   dialTicketId?: string | null;
   dialerCallId?: string | null;
-  /** "disposition" | "flag" | "transcript" — what triggered the task. */
-  trigger: "disposition" | "flag" | "transcript";
+  /** "disposition" | "flag" | "transcript" | "scope_missing" — what triggered the task. */
+  trigger: "disposition" | "flag" | "transcript" | "scope_missing";
   /** Disposition code / compliance rule, for the task body (no PHI). */
   reason?: string | null;
   detail?: string | null;
@@ -88,7 +93,7 @@ export async function raiseComplianceOversightTask(
   input: RaiseOversightInput,
   db: OversightDb = defaultDb,
 ): Promise<TaskInstance | null> {
-  const dedupKey = oversightTaskKey(input.eventId);
+  const dedupKey = oversightTaskKey(input.eventId, input.trigger);
 
   // Resolve the contactRef for the task (so the compliance reviewer can open
   // the contact) from the dial ticket, if we have one. Never the MBI.
@@ -109,13 +114,17 @@ export async function raiseComplianceOversightTask(
       ? `Compliance review: dialer flagged ${input.reason ?? "a call"}`
       : input.trigger === "transcript"
         ? `Compliance review: transcript flagged ${input.reason ?? "a call"}`
-        : `Compliance review: ${input.reason ?? "compliance"} disposition`;
+        : input.trigger === "scope_missing"
+          ? `Compliance review: no Scope of Appointment captured (${input.reason ?? "a call"})`
+          : `Compliance review: ${input.reason ?? "compliance"} disposition`;
   const description = [
     input.trigger === "flag"
       ? "The dialer raised a hard compliance flag on an outbound call."
       : input.trigger === "transcript"
         ? "MediFlow's in-platform transcript parse surfaced a compliance concern on an outbound call."
-        : "The dialer recorded a COMPLIANCE-category disposition on a call.",
+        : input.trigger === "scope_missing"
+          ? "MediFlow's in-platform transcript parse found a sales call with NO Scope of Appointment captured on the recording."
+          : "The dialer recorded a COMPLIANCE-category disposition on a call.",
     input.detail ? `Detail: ${input.detail}` : null,
     input.dialerCallId ? `Dialer call: ${input.dialerCallId}` : null,
     input.dialTicketId ? `Dial ticket: ${input.dialTicketId}` : null,
