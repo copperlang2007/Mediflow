@@ -39,8 +39,48 @@ export interface RoutingDecision {
   presenceFiltered: boolean;
 }
 
+export interface RoutingCarrierBreakdown {
+  carrierId: string;
+  carrierName: string | null;
+  routed: number;
+  noAgent: number;
+}
+
+export interface RoutingStateBreakdown {
+  stateCode: string;
+  routed: number;
+  noAgent: number;
+}
+
+export interface RoutingStats {
+  total: number;
+  routed: number;
+  noAgent: number;
+  routedRate: number;
+  avgCandidatePool: number;
+  byCarrier: RoutingCarrierBreakdown[];
+  byState: RoutingStateBreakdown[];
+}
+
+export interface CoverageGap {
+  carrierId: string;
+  carrierName: string | null;
+  stateCode: string;
+  noAgentCount: number;
+  lastOccurrence: string;
+  availableNow: number;
+}
+
+export interface RoutingStatsResponse {
+  stats: RoutingStats;
+  coverageGaps: CoverageGap[];
+  sinceHours: number;
+  asOf: string;
+}
+
 const PRESENCE_KEY = ["/api/queue/presence"] as const;
 const RECENT_ROUTING_KEY = ["/api/queue/routing/recent"] as const;
+const ROUTING_STATS_KEY = ["/api/queue/routing/stats"] as const;
 
 export function useQueuePresence(enabled = true) {
   return useQuery({
@@ -49,6 +89,23 @@ export function useQueuePresence(enabled = true) {
     enabled,
     refetchInterval: 15_000,
     staleTime: 10_000,
+  });
+}
+
+/**
+ * Windowed routing analytics + coverage-gap list. Polls every ~30s (slower
+ * than presence — these are aggregate trends, not a live feed).
+ */
+export function useRoutingStats(sinceHours = 24, enabled = true) {
+  return useQuery({
+    queryKey: [...ROUTING_STATS_KEY, sinceHours],
+    queryFn: () =>
+      apiFetch<RoutingStatsResponse>(
+        `/api/queue/routing/stats?sinceHours=${sinceHours}`,
+      ),
+    enabled,
+    refetchInterval: 30_000,
+    staleTime: 20_000,
   });
 }
 

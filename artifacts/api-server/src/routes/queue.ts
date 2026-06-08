@@ -30,6 +30,8 @@ import { resolveCarrier } from "../lib/leadQueue/carriers";
 import {
   getPresenceOverview,
   getRecentRouting,
+  getRoutingStats,
+  getCoverageGaps,
 } from "../lib/leadQueue/overview";
 import {
   recordHeartbeat,
@@ -272,6 +274,36 @@ router.get(
     }
     const rows = await getRecentRouting(authReq.orgId, parsed.data.limit ?? 50);
     res.json({ data: rows, total: rows.length });
+  },
+);
+
+// GET /queue/routing/stats?sinceHours=24 — windowed routing analytics + the
+// carrier×state coverage-gap list, for the admin Analytics view. Admin-tier
+// (`agent:admin`), matching the other oversight endpoints. sinceHours is
+// clamped 1..720 (30 days) with a 24h default.
+const RoutingStatsQuerySchema = z.object({
+  sinceHours: z.coerce.number().int().min(1).max(720).optional(),
+});
+router.get(
+  "/queue/routing/stats",
+  requireAuth,
+  requirePermission("agent", "admin"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const parsed = RoutingStatsQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ error: "Invalid query", details: parsed.error.issues });
+      return;
+    }
+    const sinceHours = parsed.data.sinceHours ?? 24;
+    const now = new Date();
+    const [stats, coverageGaps] = await Promise.all([
+      getRoutingStats(authReq.orgId, sinceHours, now),
+      getCoverageGaps(authReq.orgId, sinceHours, now),
+    ]);
+    res.json({ stats, coverageGaps, sinceHours, asOf: now.toISOString() });
   },
 );
 

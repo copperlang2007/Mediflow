@@ -11,15 +11,18 @@
  * the API also requires lead:read. Both panels poll every 15s so the view
  * stays live.
  */
+import { useState } from "react";
 import { useIsAdmin } from "@/lib/auth/useIsAdmin";
 import {
   useQueuePresence,
   useRecentRouting,
+  useRoutingStats,
   type PresenceAgent,
 } from "@/lib/queue/api";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -29,7 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Radio } from "lucide-react";
+import { BarChart3, Radio, TriangleAlert } from "lucide-react";
 
 const STATUS_LABEL: Record<string, string> = {
   available: "Available",
@@ -69,10 +72,105 @@ function PresenceDot({ agent }: { agent: PresenceAgent }) {
   );
 }
 
+function SummaryCard({
+  label,
+  value,
+  sub,
+  alarm,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  alarm?: boolean;
+}) {
+  return (
+    <div className="rounded-md border px-3 py-2.5">
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div
+        className={cn(
+          "text-2xl font-bold tabular-nums",
+          alarm && "text-amber-600 dark:text-amber-500",
+        )}
+      >
+        {value}
+      </div>
+      {sub ? (
+        <div className="text-[11px] text-muted-foreground">{sub}</div>
+      ) : null}
+    </div>
+  );
+}
+
+interface BreakdownRow {
+  key: string;
+  label: string;
+  routed: number;
+  noAgent: number;
+}
+
+function BreakdownTable({
+  title,
+  firstHead,
+  rows,
+}: {
+  title: string;
+  firstHead: string;
+  rows: BreakdownRow[];
+}) {
+  return (
+    <div className="rounded-md border">
+      <div className="px-3 py-2 border-b text-xs font-semibold">{title}</div>
+      {rows.length > 0 ? (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{firstHead}</TableHead>
+              <TableHead className="text-right">Routed</TableHead>
+              <TableHead className="text-right">No agent</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((r) => (
+              <TableRow key={r.key}>
+                <TableCell className="truncate max-w-[12rem]">
+                  {r.label}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {r.routed}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {r.noAgent}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      ) : (
+        <p className="text-xs text-muted-foreground py-5 text-center">
+          No data.
+        </p>
+      )}
+    </div>
+  );
+}
+
+const WINDOW_OPTIONS: { label: string; hours: number }[] = [
+  { label: "24h", hours: 24 },
+  { label: "7d", hours: 168 },
+];
+
+function pct(rate: number): string {
+  return `${Math.round(rate * 100)}%`;
+}
+
 export default function AdminQueuePage() {
   const { isAdmin, isLoading: meLoading } = useIsAdmin();
+  const [sinceHours, setSinceHours] = useState(24);
   const presence = useQueuePresence(Boolean(isAdmin));
   const routing = useRecentRouting(50, Boolean(isAdmin));
+  const analytics = useRoutingStats(sinceHours, Boolean(isAdmin));
 
   if (!meLoading && !isAdmin) {
     return (
@@ -96,6 +194,154 @@ export default function AdminQueuePage() {
           Real-time agent availability and recent inbound routing decisions.
         </p>
       </div>
+
+      {/* Analytics */}
+      <Card>
+        <CardContent className="p-4 space-y-4">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-sky-500" />
+            <span className="font-semibold text-sm">Routing analytics</span>
+            <div className="ml-auto flex gap-1">
+              {WINDOW_OPTIONS.map((opt) => (
+                <Button
+                  key={opt.hours}
+                  size="sm"
+                  variant={sinceHours === opt.hours ? "secondary" : "ghost"}
+                  className="h-7 px-2.5 text-xs"
+                  onClick={() => setSinceHours(opt.hours)}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {analytics.isLoading ? (
+            <div
+              className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
+              data-testid="analytics-loading"
+            >
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-20 w-full" />
+              ))}
+            </div>
+          ) : analytics.data ? (
+            <>
+              {/* Summary cards */}
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <SummaryCard
+                  label="Decisions"
+                  value={String(analytics.data.stats.total)}
+                />
+                <SummaryCard
+                  label="Routed"
+                  value={pct(analytics.data.stats.routedRate)}
+                  sub={`${analytics.data.stats.routed} routed`}
+                />
+                <SummaryCard
+                  label="No agent"
+                  value={
+                    analytics.data.stats.total > 0
+                      ? pct(
+                          analytics.data.stats.noAgent /
+                            analytics.data.stats.total,
+                        )
+                      : "0%"
+                  }
+                  sub={`${analytics.data.stats.noAgent} missed`}
+                  alarm={analytics.data.stats.noAgent > 0}
+                />
+                <SummaryCard
+                  label="Avg pool (routed)"
+                  value={analytics.data.stats.avgCandidatePool.toFixed(1)}
+                />
+              </div>
+
+              {/* By carrier / by state mini-tables */}
+              <div className="grid gap-4 lg:grid-cols-2">
+                <BreakdownTable
+                  title="By carrier"
+                  firstHead="Carrier"
+                  rows={analytics.data.stats.byCarrier.map((c) => ({
+                    key: c.carrierId,
+                    label: c.carrierName ?? c.carrierId,
+                    routed: c.routed,
+                    noAgent: c.noAgent,
+                  }))}
+                />
+                <BreakdownTable
+                  title="By state"
+                  firstHead="State"
+                  rows={analytics.data.stats.byState.map((s) => ({
+                    key: s.stateCode,
+                    label: s.stateCode,
+                    routed: s.routed,
+                    noAgent: s.noAgent,
+                  }))}
+                />
+              </div>
+
+              {/* Coverage gaps */}
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <TriangleAlert className="h-4 w-4 text-amber-500" />
+                  <span className="font-semibold text-sm">Coverage gaps</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    carrier × state with no available agent
+                  </span>
+                </div>
+                {analytics.data.coverageGaps.length > 0 ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Carrier</TableHead>
+                        <TableHead>State</TableHead>
+                        <TableHead className="text-right">No agent</TableHead>
+                        <TableHead className="text-right">
+                          Available now
+                        </TableHead>
+                        <TableHead>Last seen</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {analytics.data.coverageGaps.map((g) => (
+                        <TableRow key={`${g.carrierId}-${g.stateCode}`}>
+                          <TableCell>{g.carrierName ?? g.carrierId}</TableCell>
+                          <TableCell>{g.stateCode}</TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {g.noAgentCount}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            <span
+                              className={cn(
+                                g.availableNow === 0 &&
+                                  "text-destructive font-medium",
+                              )}
+                            >
+                              {g.availableNow}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground whitespace-nowrap">
+                            {relativeTime(g.lastOccurrence)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <p className="text-sm text-muted-foreground py-6 text-center">
+                    No coverage gaps in this window.
+                  </p>
+                )}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground py-6 text-center">
+              No routing data yet.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Presence */}
       <Card>
