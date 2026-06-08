@@ -175,6 +175,7 @@ export const jobsMockFactory = (): Record<string, unknown> => ({
     SUBMIT_CONTRACTING_PACKET: "submit-contracting-packet",
     DIALER_RECONCILE: "dialer-reconcile",
     LEAD_CALLBACK_SWEEP: "lead-callback-sweep",
+    AEP_RENEWAL_REVIEW: "aep-renewal-review",
   },
   enqueue: async (name: string, data: unknown): Promise<string> => {
     (globalThis.__TEST_ENQUEUED__ ??= []).push({ name, data });
