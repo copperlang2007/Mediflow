@@ -56,6 +56,15 @@ export const leadRoutingTable = pgTable(
     source: text("source"),
     // Whether a live-presence filter was applied when this decision was made.
     presenceFiltered: boolean("presence_filtered").notNull().default(false),
+    // Which routing tier matched this decision (tiered overflow fallback):
+    //   'available'        — ready-to-sell ∩ currently available (preferred), OR
+    //                        a match when presence was never applied at all.
+    //   'eligible_offline' — ready-to-sell but not currently available; used as a
+    //                        fallback ONLY when tier 1 was empty AND presence
+    //                        filtering had been applied. Eligibility is NEVER
+    //                        relaxed — every routed agent is still ready-to-sell.
+    // Null for 'no_agent_available' (no tier matched).
+    fallbackTier: text("fallback_tier"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

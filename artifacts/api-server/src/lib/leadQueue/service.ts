@@ -52,6 +52,19 @@ export interface RouteInboundParams {
   now?: Date;
 }
 
+/**
+ * Which routing tier produced the decision (tiered overflow fallback):
+ *   - `available`        — a ready-to-sell agent who is currently available
+ *     (today's preferred behavior), OR any match made when no presence filter
+ *     was applied at all (org hasn't adopted presence / `availableOnly:false`).
+ *   - `eligible_offline` — a ready-to-sell agent who is NOT currently available;
+ *     a fallback used ONLY when the available tier was empty AND presence
+ *     filtering had been applied. Eligibility is never relaxed — the agent is
+ *     still active + state-licensed + AHIP-current + carrier-certified.
+ *   - `null`             — no agent matched (`no_agent_available`).
+ */
+export type FallbackTier = "available" | "eligible_offline";
+
 export interface RouteInboundBody {
   status: "routed" | "no_agent_available";
   stateCode: string;
@@ -60,6 +73,12 @@ export interface RouteInboundBody {
   agent: ReadyToSellAgent | null;
   /** Whether a live-presence filter was applied to the pool. */
   presenceFiltered: boolean;
+  /**
+   * Which tier matched this decision: `available` (preferred / no presence
+   * filter), `eligible_offline` (presence fallback), or `null` for
+   * `no_agent_available`.
+   */
+  fallbackTier: FallbackTier | null;
   /** Id of the recorded routing claim (or the replayed one). */
   routingId: string;
   /** True when this response replays a prior decision (idempotent retry). */
@@ -179,19 +198,45 @@ export async function resolveAndRouteInbound(
     INFLIGHT_SECONDS > 0
       ? new Date(now.getTime() - INFLIGHT_SECONDS * 1000)
       : null;
-  const result = await routeInboundLead({
+  const baseQuery = {
     orgId: p.orgId,
     stateCode: state,
     carrierId: carrier.carrierId,
     certificationYear: p.certificationYear,
     requireAhip: p.requireAhip,
-    availableAgentIds,
     inFlightSince,
     now,
-  });
+  };
+
+  // Tier 1: ready-to-sell ∩ currently available (today's preferred behavior).
+  let result = await routeInboundLead({ ...baseQuery, availableAgentIds });
+
+  // Tier-1 match → `available`. When no presence filter was applied at all (org
+  // hasn't adopted presence / `availableOnly:false`), a match is just
+  // `available` and there is nothing to fall back to.
+  let fallbackTier: FallbackTier | null =
+    result.status === "routed" ? "available" : null;
+
+  // Tier 2 (eligible_offline): only when tier 1 found nobody AND presence
+  // filtering was actually applied — i.e. the pool was narrowed by who's at
+  // their desk. Re-rank the FULL eligible pool (no presence filter) so a
+  // qualified-but-offline agent gets the lead rather than it being dropped.
+  // Eligibility is NOT relaxed here: routeInboundLead still requires active +
+  // state license + AHIP + carrier cert; we only drop the presence intersection.
+  if (result.status === "no_agent_available" && presenceFiltered) {
+    const fallback = await routeInboundLead({
+      ...baseQuery,
+      availableAgentIds: undefined,
+    });
+    if (fallback.status === "routed") {
+      result = fallback;
+      fallbackTier = "eligible_offline";
+    }
+  }
 
   // 5. Record the claim — the audit trail, the in-flight load signal the next
-  // route balances on, and the idempotency anchor for retries.
+  // route balances on, and the idempotency anchor for retries. `fallbackTier`
+  // captures which tier matched (null for no_agent_available).
   const routingId = randomUUID();
   await db.insert(leadRoutingTable).values({
     id: routingId,
@@ -205,6 +250,7 @@ export async function resolveAndRouteInbound(
     candidatePool: result.candidatePool,
     source: p.source ?? null,
     presenceFiltered,
+    fallbackTier,
     createdAt: now,
   });
 
@@ -217,6 +263,7 @@ export async function resolveAndRouteInbound(
       candidatePool: result.candidatePool,
       agent: result.agent,
       presenceFiltered,
+      fallbackTier,
       routingId,
       idempotent: false,
       target_phone: result.agent?.phone ?? null,
@@ -256,6 +303,7 @@ async function replayBody(
     candidatePool: prior.candidatePool,
     agent,
     presenceFiltered: prior.presenceFiltered,
+    fallbackTier: (prior.fallbackTier as FallbackTier | null) ?? null,
     routingId: prior.id,
     idempotent: true,
     target_phone: agent?.phone ?? null,

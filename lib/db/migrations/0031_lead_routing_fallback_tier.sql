@@ -1,0 +1,17 @@
+-- Inbound lead queue — tiered overflow/fallback routing.
+--
+-- Records which routing tier matched each decision so the audit trail shows
+-- WHY a lead reached a given agent — preferred (currently available) vs the
+-- fallback (a ready-to-sell agent who was momentarily offline). The fallback
+-- relaxes ONLY the live-presence constraint: eligibility (active + state
+-- license + AHIP + carrier cert) is never relaxed.
+--
+--   'available'        — ready-to-sell ∩ currently available (preferred), or a
+--                        match made when presence filtering was not applied.
+--   'eligible_offline' — ready-to-sell but not currently available; used only
+--                        when the available tier was empty AND presence had
+--                        been applied.
+--   NULL               — 'no_agent_available' (no tier matched).
+--
+-- Additive + nullable, so it backfills cleanly: existing rows keep NULL.
+ALTER TABLE "lead_routing" ADD COLUMN IF NOT EXISTS "fallback_tier" text;
