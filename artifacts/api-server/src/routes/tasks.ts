@@ -6,8 +6,10 @@ import { db, agentsTable, taskInstancesTable, taskTemplatesTable } from "@worksp
 import {
   requireAuth,
   requirePermission,
+  requireRole,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { generateAepRenewalTasks } from "../lib/aepRenewal/generate";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
@@ -482,6 +484,24 @@ router.delete(
     }
 
     res.sendStatus(204);
+  },
+);
+
+// POST /tasks/aep-renewal/run — admin-triggered AEP annual-review generation.
+//
+// Generates the CURRENT season's "set the annual review appointment" tasks for
+// this org on demand (preview / catch-up), instead of waiting for the Sept 1
+// cron. Scoped to the caller's org and idempotent — re-running returns
+// `created: 0` once this season's tasks already exist. Admin-gated because it
+// fans out tasks across the whole book of business.
+router.post(
+  "/tasks/aep-renewal/run",
+  requireAuth,
+  requireRole("super_admin", "agency_admin"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const summary = await generateAepRenewalTasks({ orgId: authReq.orgId });
+    res.json(summary);
   },
 );
 

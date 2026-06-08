@@ -99,6 +99,10 @@ export const JOB_NAMES = {
   // Callback SLA queue: re-attempt `open` lead_callbacks (dropped inbounds),
   // resolving once capacity returns and expiring past-SLA misses. Every 5 min.
   LEAD_CALLBACK_SWEEP: "lead-callback-sweep",
+  // AEP annual-review task generation: once a year (Sept 1 UTC, before the
+  // Oct 1 cutoff) create one "set the annual review appointment" to-do per
+  // current MA member, assigned to their agent, due Sept 30. Idempotent.
+  AEP_RENEWAL_REVIEW: "aep-renewal-review",
   // Import workers (ad-hoc, enqueued from import routes)
   IMPORT_MONDAY: "import-monday",
   IMPORT_GHL: "import-ghl",
@@ -393,6 +397,11 @@ export async function startWorkers(): Promise<void> {
   // with still nobody. Idempotent (each row only leaves `open` once), so a
   // frequent sweep is safe.
   await boss.schedule(JOB_NAMES.LEAD_CALLBACK_SWEEP, "*/5 * * * *", {}, { tz: "UTC" });
+  // AEP annual-review task generation — annually on Sept 1 at 06:00 UTC
+  // (`0 6 1 9 *`). Runs comfortably before the Oct 1 cutoff so every current
+  // MA member's review appointment can be set in time. Singleton; the pass is
+  // idempotent (deduped per (season-year, contact)), so a re-run is a no-op.
+  await boss.schedule(JOB_NAMES.AEP_RENEWAL_REVIEW, "0 6 1 9 *", {}, { tz: "UTC" });
 
   // ---- Workers ----
 
@@ -655,6 +664,17 @@ export async function startWorkers(): Promise<void> {
     JOB_NAMES.LEAD_CALLBACK_SWEEP,
     { batchSize: 1, localConcurrency: 1 },
     leadCallbackSweepHandler,
+  );
+
+  const aepRenewalReviewHandler: WorkHandler<Record<string, never>> = async () => {
+    const { aepRenewalReviewWorker } = await import("../workers/aepRenewalReview");
+    await aepRenewalReviewWorker();
+  };
+  // Scheduled cron — singleton; one generation pass per node, no fan-out.
+  await boss.work<Record<string, never>>(
+    JOB_NAMES.AEP_RENEWAL_REVIEW,
+    { batchSize: 1, localConcurrency: 1 },
+    aepRenewalReviewHandler,
   );
 
   logger.info("All background workers registered");
