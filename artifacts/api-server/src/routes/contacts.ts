@@ -14,10 +14,12 @@ import {
   sequencesTable,
   retentionFlagsTable,
   contactStatusEnum,
+  dialTicketsTable,
   encryptMedicareId,
   hashMedicareId,
   decryptMedicareId,
 } from "@workspace/db";
+import type { TranscriptParseResult } from "../lib/dialer/transcriptParse";
 import {
   requireAuth,
   requirePermission,
@@ -719,6 +721,90 @@ router.get(
       .where(eq(sequenceEnrollmentsTable.contactId, id))
       .orderBy(desc(sequenceEnrollmentsTable.enrolledAt));
     res.json(enrollments);
+  },
+);
+
+// GET /contacts/:id/call-summaries — post-call agent-assist surfaced on the
+// contact timeline. Reads the in-platform parsed-transcript output (dialer
+// Phase 5) for dial tickets linked to this contact via `dial_tickets.contact_ref
+// = contacts.id` (org-scoped — there is no FK). The parsed result is
+// PHI-minimized by design (no MBI), but we keep the read org-scoped and behind
+// the same `contact:read` gate as the contact-detail endpoint above.
+router.get(
+  "/contacts/:id/call-summaries",
+  requireAuth,
+  requirePermission("contact", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const [contact] = await db
+      .select({ id: contactsTable.id })
+      .from(contactsTable)
+      .where(
+        and(
+          eq(contactsTable.id, id),
+          eq(contactsTable.orgId, authReq.orgId),
+          isNull(contactsTable.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!contact) {
+      res.status(404).json({ error: "Contact not found" });
+      return;
+    }
+
+    const limitNum = safeLimit(req.query.limit, 50, 200);
+    const offsetNum = safeOffset(req.query.offset);
+
+    const whereClause = and(
+      eq(dialTicketsTable.orgId, authReq.orgId),
+      eq(dialTicketsTable.contactRef, id),
+      // Only tickets whose transcript has actually been parsed (Phase 5).
+      sql`${dialTicketsTable.transcriptParsed} IS NOT NULL`,
+    );
+
+    const [rows, totalRes] = await Promise.all([
+      db
+        .select({
+          ticketId: dialTicketsTable.id,
+          dialerCallId: dialTicketsTable.dialerCallId,
+          status: dialTicketsTable.status,
+          parsedAt: dialTicketsTable.transcriptParsedAt,
+          transcriptReadyAt: dialTicketsTable.transcriptReadyAt,
+          parsed: dialTicketsTable.transcriptParsed,
+        })
+        .from(dialTicketsTable)
+        .where(whereClause)
+        // Newest-first by when the parse landed; fall back to createdAt for any
+        // legacy row missing a parsedAt timestamp.
+        .orderBy(
+          desc(dialTicketsTable.transcriptParsedAt),
+          desc(dialTicketsTable.createdAt),
+        )
+        .limit(limitNum)
+        .offset(offsetNum),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(dialTicketsTable)
+        .where(whereClause),
+    ]);
+
+    const data = rows.map((r) => {
+      const parsed = (r.parsed ?? {}) as Partial<TranscriptParseResult>;
+      return {
+        ticketId: r.ticketId,
+        dialerCallId: r.dialerCallId,
+        status: r.status,
+        parsedAt: r.parsedAt,
+        transcriptReadyAt: r.transcriptReadyAt,
+        summary: parsed.summary ?? null,
+        suggestedDisposition: parsed.suggestedDisposition ?? null,
+        riskFlags: parsed.riskFlags ?? [],
+        actionItems: parsed.actionItems ?? [],
+      };
+    });
+
+    res.json({ data, total: Number(totalRes[0]?.count ?? 0) });
   },
 );
 
