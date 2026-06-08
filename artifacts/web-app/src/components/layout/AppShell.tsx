@@ -85,6 +85,7 @@ import {
   Lock,
   Database,
   DollarSign,
+  Wallet,
   Wrench,
   KeyRound,
   Handshake,
@@ -162,6 +163,10 @@ const navItems: NavGroup[] = [
       {
         href: "/commissions", label: "Commissions", icon: DollarSign,
         roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
+      },
+      {
+        href: "/my-commissions", label: "My Commissions", icon: Wallet,
+        roles: ["agent"],
       },
     ],
   },

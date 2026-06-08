@@ -41,6 +41,7 @@ const SignPage = lazy(() => import("@/pages/sign"));
 const DataMigrationPage = lazy(() => import("@/pages/data-migration"));
 const CommissionsPage = lazy(() => import("@/pages/commissions"));
 const CommissionStatementPage = lazy(() => import("@/pages/commission-statement"));
+const MyCommissionsPage = lazy(() => import("@/pages/my-commissions"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const ForgotPasswordPage = lazy(() => import("@/pages/forgot-password"));
 
@@ -438,6 +439,9 @@ function ClerkProviderWithRoutes() {
               </Route>
               <Route path="/compliance">
                 <ProtectedLayout><CompliancePage /></ProtectedLayout>
+              </Route>
+              <Route path="/my-commissions">
+                <ProtectedLayout><MyCommissionsPage /></ProtectedLayout>
               </Route>
               <Route path="/commissions/statements/:id">
                 <ProtectedLayout><CommissionStatementPage /></ProtectedLayout>
