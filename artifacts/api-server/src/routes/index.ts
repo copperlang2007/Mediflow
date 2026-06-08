@@ -5,6 +5,7 @@ import usersRouter from "./users";
 import organizationsRouter from "./organizations";
 import dashboardRouter from "./dashboard";
 import agentsRouter from "./agents";
+import agentReadinessRouter from "./agentReadiness";
 import notificationsRouter from "./notifications";
 import auditRouter from "./audit";
 import storageRouter from "./storage";
@@ -44,6 +45,10 @@ router.use(authRouter);
 router.use(usersRouter);
 router.use(organizationsRouter);
 router.use(dashboardRouter);
+// Mounted BEFORE agentsRouter so the static `/agents/readiness` path is matched
+// before agentsRouter's `/agents/:id` wildcard (which would treat "readiness"
+// as an agent id and 404).
+router.use(agentReadinessRouter);
 router.use(agentsRouter);
 router.use(notificationsRouter);
 router.use(auditRouter);
