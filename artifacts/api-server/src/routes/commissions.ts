@@ -686,6 +686,89 @@ router.get(
   },
 );
 
+// ─── Agent self-serve view ────────────────────────────────────────────
+//
+// GET /commissions/me — an agent's own commission statements + a
+// paid-vs-pending summary. Unlike the admin surfaces above this is NOT
+// gated on `commission:read` (agents don't hold that permission); the
+// authorization model is "your own agentId". We resolve the caller's
+// agent row the same way the queue heartbeat does (agentsTable where
+// userId + orgId match the Clerk session) so an agent can only ever see
+// their own payouts. Returns 404 when the caller has no linked agent.
+//
+// The per-agent "statement" here is a row in agent_commission_payouts
+// (period + earned + paid + status), which is the only table with a
+// clean direct agentId FK. A payout counts as paid when its status is
+// "paid"; everything else (open/approved/held) is pending.
+router.get(
+  "/commissions/me",
+  requireAuth,
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+
+    const [agent] = await db
+      .select({ id: agentsTable.id })
+      .from(agentsTable)
+      .where(
+        and(
+          eq(agentsTable.userId, authReq.userId),
+          eq(agentsTable.orgId, authReq.orgId),
+        ),
+      )
+      .limit(1);
+
+    if (!agent) {
+      res
+        .status(404)
+        .json({ error: "No agent record is linked to your account." });
+      return;
+    }
+
+    const statements = await db
+      .select()
+      .from(agentCommissionPayoutsTable)
+      .where(
+        and(
+          eq(agentCommissionPayoutsTable.orgId, authReq.orgId),
+          eq(agentCommissionPayoutsTable.agentId, agent.id),
+        ),
+      )
+      .orderBy(desc(agentCommissionPayoutsTable.periodStart))
+      .limit(safeLimit(req.query.limit, 100, 500))
+      .offset(safeOffset(req.query.offset));
+
+    // Summary math is computed from the rows we fetched so it always
+    // matches what the client renders. `paid` rows contribute their
+    // `paid` amount to totalPaid; all other statuses contribute their
+    // outstanding (earned) amount to totalPending.
+    let totalPaid = 0;
+    let totalPending = 0;
+    let paidCount = 0;
+    let pendingCount = 0;
+    for (const s of statements) {
+      if (s.status === "paid") {
+        totalPaid += Number(s.paid ?? 0);
+        paidCount += 1;
+      } else {
+        totalPending += Number(s.earned ?? 0);
+        pendingCount += 1;
+      }
+    }
+
+    res.json({
+      data: statements,
+      summary: {
+        totalPaid: Number(totalPaid.toFixed(2)),
+        totalPending: Number(totalPending.toFixed(2)),
+        paidCount,
+        pendingCount,
+        statementCount: statements.length,
+      },
+      asOf: new Date().toISOString(),
+    });
+  },
+);
+
 const UpsertPayoutSchema = z.object({
   periodStart: z.string().min(1),
   periodEnd: z.string().min(1),
