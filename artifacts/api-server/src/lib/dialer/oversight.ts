@@ -2,11 +2,12 @@
  * Compliance oversight tasks raised from inbound dialer events (Phase 4, §6).
  *
  * When the dialer reports a compliance-category disposition
- * (`call.disposition.recorded` with `category=COMPLIANCE`) or a hard
- * compliance flag (`call.compliance.flagged`), MediFlow raises an oversight
- * task in its own tasks system, assigned to a compliance manager / agency
- * admin, and audits it (§6, §9). MediFlow is the system of record; the task
- * lives here, never in the dialer.
+ * (`call.disposition.recorded` with `category=COMPLIANCE`), a hard compliance
+ * flag (`call.compliance.flagged`), or MediFlow's own in-platform transcript
+ * parse surfaces a compliance concern (`call.transcript.ready` → Phase 5
+ * agent-assist), MediFlow raises an oversight task in its own tasks system,
+ * assigned to a compliance manager / agency admin, and audits it (§6, §9).
+ * MediFlow is the system of record; the task lives here, never in the dialer.
  *
  * Idempotency: each task carries a deterministic `retentionReviewKey`
  * (reused as a generic dedup key — it is the only org-scoped partial-unique
@@ -72,8 +73,8 @@ export interface RaiseOversightInput {
   eventId: string;
   dialTicketId?: string | null;
   dialerCallId?: string | null;
-  /** "disposition" | "flag" — what triggered the task. */
-  trigger: "disposition" | "flag";
+  /** "disposition" | "flag" | "transcript" — what triggered the task. */
+  trigger: "disposition" | "flag" | "transcript";
   /** Disposition code / compliance rule, for the task body (no PHI). */
   reason?: string | null;
   detail?: string | null;
@@ -106,11 +107,15 @@ export async function raiseComplianceOversightTask(
   const title =
     input.trigger === "flag"
       ? `Compliance review: dialer flagged ${input.reason ?? "a call"}`
-      : `Compliance review: ${input.reason ?? "compliance"} disposition`;
+      : input.trigger === "transcript"
+        ? `Compliance review: transcript flagged ${input.reason ?? "a call"}`
+        : `Compliance review: ${input.reason ?? "compliance"} disposition`;
   const description = [
     input.trigger === "flag"
       ? "The dialer raised a hard compliance flag on an outbound call."
-      : "The dialer recorded a COMPLIANCE-category disposition on a call.",
+      : input.trigger === "transcript"
+        ? "MediFlow's in-platform transcript parse surfaced a compliance concern on an outbound call."
+        : "The dialer recorded a COMPLIANCE-category disposition on a call.",
     input.detail ? `Detail: ${input.detail}` : null,
     input.dialerCallId ? `Dialer call: ${input.dialerCallId}` : null,
     input.dialTicketId ? `Dial ticket: ${input.dialTicketId}` : null,
