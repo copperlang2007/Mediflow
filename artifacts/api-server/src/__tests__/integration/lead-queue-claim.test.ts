@@ -41,6 +41,7 @@ import {
   ahipRecordsTable,
   leadRoutingTable,
   agentsTable,
+  agentPresenceTable,
 } from "@workspace/db/schema";
 
 import { bootTestDb, shutdownTestDb } from "../helpers/testApp";
@@ -104,6 +105,58 @@ function claimsForOrg() {
     .select()
     .from(leadRoutingTable)
     .where(eq(leadRoutingTable.orgId, org.id));
+}
+
+/**
+ * Write an agent presence row directly (no Clerk user needed). A non-offline
+ * status with a future `expiresAt` makes the org "presence configured"; only
+ * `available` puts the agent in the available set.
+ */
+async function setPresence(
+  orgId: string,
+  agentId: string,
+  status: "available" | "away" | "on_call" | "offline",
+  now: Date,
+): Promise<void> {
+  await testDb
+    .insert(agentPresenceTable)
+    .values({
+      agentId,
+      orgId,
+      status,
+      source: "heartbeat",
+      lastSeenAt: now,
+      expiresAt:
+        status === "offline" ? null : new Date(now.getTime() + 60_000),
+    })
+    .onConflictDoUpdate({
+      target: agentPresenceTable.agentId,
+      set: {
+        status,
+        orgId,
+        lastSeenAt: now,
+        expiresAt:
+          status === "offline" ? null : new Date(now.getTime() + 60_000),
+      },
+    });
+}
+
+/** True when the agent is still ready-to-sell for (carrierId, FL) right now. */
+async function isReadyToSell(
+  agentId: string,
+  carrierId: string,
+): Promise<boolean> {
+  const { findReadyToSellAgents } = await import(
+    "../../lib/leadQueue/readyToSell"
+  );
+  const pool = await findReadyToSellAgents({
+    orgId: org.id,
+    stateCode: "FL",
+    carrierId,
+    certificationYear: YEAR,
+    now: new Date("2026-06-04T00:00:00Z"),
+  });
+  return pool.some((a) => a.agentId === agentId);
 }
 
 beforeAll(async () => {
@@ -261,5 +314,179 @@ describe("claim-on-route — in-flight load balancing", () => {
     expect(picks).toContain(a.id);
     expect(picks).toContain(b.id);
     expect(picks[0]).not.toBe(picks[1]);
+  });
+});
+
+describe("tiered overflow / fallback routing", () => {
+  it("tier 1 — routes to an available agent as fallbackTier='available'", async () => {
+    const carrier = { id: `carrier-${randomUUID()}` };
+    await testDb
+      .insert(carriersTable)
+      .values({ id: carrier.id, orgId: org.id, name: "Tier1 Co" });
+    const now = new Date("2026-06-04T09:00:00Z");
+    const agent = await seedReadyAgent("Tier1-Avail", carrier.id);
+    await setPresence(org.id, agent.id, "available", now);
+
+    const out = await resolveAndRouteInbound({
+      orgId: org.id,
+      carrierId: carrier.id,
+      contactState: "FL",
+      certificationYear: YEAR,
+      // availableOnly defaults to true → presence is applied.
+      source: "public",
+      now,
+    });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.body.status).toBe("routed");
+    expect(out.body.agent?.agentId).toBe(agent.id);
+    expect(out.body.presenceFiltered).toBe(true);
+    expect(out.body.fallbackTier).toBe("available");
+
+    const [row] = await testDb
+      .select()
+      .from(leadRoutingTable)
+      .where(eq(leadRoutingTable.id, out.body.routingId));
+    expect(row.fallbackTier).toBe("available");
+  });
+
+  it("tier 2 — falls back to an eligible-but-offline agent as 'eligible_offline'", async () => {
+    const carrier = { id: `carrier-${randomUUID()}` };
+    await testDb
+      .insert(carriersTable)
+      .values({ id: carrier.id, orgId: org.id, name: "Tier2 Co" });
+    const now = new Date("2026-06-04T10:00:00Z");
+
+    // Two ready-to-sell agents on this carrier. Presence is configured (so the
+    // filter IS applied), but the only qualified agent is merely "away", not
+    // available. A second agent is "available" but on a DIFFERENT carrier, so
+    // it's the presence rows — not who's eligible — that make the org filtered.
+    const away = await seedReadyAgent("Tier2-Away", carrier.id);
+    await setPresence(org.id, away.id, "away", now);
+
+    const out = await resolveAndRouteInbound({
+      orgId: org.id,
+      carrierId: carrier.id,
+      contactState: "FL",
+      certificationYear: YEAR,
+      source: "public",
+      now,
+    });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    // Routed to the offline-but-qualified agent rather than dropped.
+    expect(out.body.status).toBe("routed");
+    expect(out.body.agent?.agentId).toBe(away.id);
+    expect(out.body.presenceFiltered).toBe(true);
+    expect(out.body.fallbackTier).toBe("eligible_offline");
+    // Compliance guardrail: the routed agent is STILL ready-to-sell.
+    expect(await isReadyToSell(away.id, carrier.id)).toBe(true);
+
+    const [row] = await testDb
+      .select()
+      .from(leadRoutingTable)
+      .where(eq(leadRoutingTable.id, out.body.routingId));
+    expect(row.fallbackTier).toBe("eligible_offline");
+    expect(row.agentId).toBe(away.id);
+  });
+
+  it("no eligible agent at all → no_agent_available, tier null", async () => {
+    const carrier = { id: `carrier-${randomUUID()}` };
+    await testDb
+      .insert(carriersTable)
+      .values({ id: carrier.id, orgId: org.id, name: "Tier-None Co" });
+    const now = new Date("2026-06-04T11:00:00Z");
+
+    // Presence configured for the org (an unrelated agent), but nobody is
+    // ready-to-sell for this carrier → even tier 2 is empty.
+    const other = await seedReadyAgent("TierNone-Other");
+    await setPresence(org.id, other.id, "away", now);
+
+    const out = await resolveAndRouteInbound({
+      orgId: org.id,
+      carrierId: carrier.id,
+      contactState: "FL",
+      certificationYear: YEAR,
+      source: "public",
+      now,
+    });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.body.status).toBe("no_agent_available");
+    expect(out.body.agent).toBeNull();
+    expect(out.body.fallbackTier).toBeNull();
+
+    const [row] = await testDb
+      .select()
+      .from(leadRoutingTable)
+      .where(eq(leadRoutingTable.id, out.body.routingId));
+    expect(row.fallbackTier).toBeNull();
+  });
+
+  it("presence not configured → routes normally as 'available' (no spurious fallback)", async () => {
+    const carrier = { id: `carrier-${randomUUID()}` };
+    await testDb
+      .insert(carriersTable)
+      .values({ id: carrier.id, orgId: org.id, name: "NoPresence Co" });
+    const now = new Date("2026-06-04T12:00:00Z");
+
+    // A ready-to-sell agent but NO presence rows for this carrier's agent —
+    // the org's presence stays unconfigured for this isolated carrier pool, so
+    // the filter is not applied and the match is simply 'available'.
+    const agent = await seedReadyAgent("NoPresence-Agent", carrier.id);
+
+    const out = await resolveAndRouteInbound({
+      orgId: org.id,
+      carrierId: carrier.id,
+      contactState: "FL",
+      certificationYear: YEAR,
+      // Force "presence not applied" deterministically regardless of other
+      // orgs' presence rows: availableOnly:false means no presence filter.
+      availableOnly: false,
+      source: "public",
+      now,
+    });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.body.status).toBe("routed");
+    expect(out.body.agent?.agentId).toBe(agent.id);
+    expect(out.body.presenceFiltered).toBe(false);
+    expect(out.body.fallbackTier).toBe("available");
+  });
+
+  it("persists the tier; an idempotent replay returns the same tier", async () => {
+    const carrier = { id: `carrier-${randomUUID()}` };
+    await testDb
+      .insert(carriersTable)
+      .values({ id: carrier.id, orgId: org.id, name: "Replay Co" });
+    const now = new Date("2026-06-04T13:00:00Z");
+    const contactId = `ghl-${randomUUID()}`;
+
+    // Eligible-but-offline → first route lands on tier 2.
+    const away = await seedReadyAgent("Replay-Away", carrier.id);
+    await setPresence(org.id, away.id, "away", now);
+
+    const base = {
+      orgId: org.id,
+      carrierId: carrier.id,
+      contactState: "FL" as const,
+      contactId,
+      certificationYear: YEAR,
+      source: "public" as const,
+    };
+
+    const first = await resolveAndRouteInbound({ ...base, now });
+    const second = await resolveAndRouteInbound({
+      ...base,
+      now: new Date(now.getTime() + 5_000), // inside the idempotency window
+    });
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+
+    expect(first.body.fallbackTier).toBe("eligible_offline");
+    expect(second.body.idempotent).toBe(true);
+    expect(second.body.routingId).toBe(first.body.routingId);
+    // The replayed decision returns the stored tier, not a freshly-computed one.
+    expect(second.body.fallbackTier).toBe("eligible_offline");
   });
 });

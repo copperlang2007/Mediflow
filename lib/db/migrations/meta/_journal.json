@@ -239,6 +239,13 @@
       "when": 1778540000000,
       "tag": "0030_lead_routing_org_created_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1778550000000,
+      "tag": "0031_lead_routing_fallback_tier",
+      "breakpoints": true
     }
   ]
 }
