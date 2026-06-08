@@ -92,6 +92,7 @@ import {
   Activity,
   Radio,
   Target,
+  Trophy,
   MonitorPlay,
 } from "lucide-react";
 import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
@@ -180,6 +181,10 @@ const navItems: NavGroup[] = [
       {
         href: "/reports", label: "Reports", icon: BarChart2,
         roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
+      },
+      {
+        href: "/leaderboard", label: "Leaderboard", icon: Trophy,
+        roles: ["super_admin", "agency_admin", "compliance_manager"],
       },
     ],
   },
