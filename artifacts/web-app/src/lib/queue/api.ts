@@ -5,7 +5,7 @@
  * client), so these wrap `apiFetch` in react-query directly. Both poll on a
  * short interval so the view stays live without a manual refresh.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 
 export interface PresenceAgent {
@@ -119,5 +119,63 @@ export function useRecentRouting(limit = 50, enabled = true) {
     enabled,
     refetchInterval: 15_000,
     staleTime: 10_000,
+  });
+}
+
+// ---- Callback SLA queue -----------------------------------------------------
+
+export type CallbackStatus = "open" | "resolved" | "expired" | "cancelled";
+
+export interface LeadCallback {
+  id: string;
+  orgId: string;
+  contactId: string | null;
+  carrierId: string;
+  carrierName: string | null;
+  stateCode: string;
+  certificationYear: number | null;
+  status: CallbackStatus;
+  slaDueAt: string;
+  attempts: number;
+  lastAttemptAt: string | null;
+  resolvedAt: string | null;
+  resolvedAgentId: string | null;
+  createdAt: string;
+}
+
+const CALLBACKS_KEY = ["/api/queue/callbacks"] as const;
+
+/**
+ * Open (by default) callbacks for the admin Callbacks panel — dropped inbounds
+ * the sweep is tracking. SLA-soonest first. Polls every ~30s.
+ */
+export function useQueueCallbacks(
+  status: CallbackStatus = "open",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [...CALLBACKS_KEY, status],
+    queryFn: () =>
+      apiFetch<{ data: LeadCallback[]; total: number }>(
+        `/api/queue/callbacks?status=${status}`,
+      ),
+    enabled,
+    refetchInterval: 30_000,
+    staleTime: 20_000,
+  });
+}
+
+/** Cancel an open callback; invalidates the callbacks list on success. */
+export function useCancelCallback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ id: string; status: string }>(
+        `/api/queue/callbacks/${id}/cancel`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: CALLBACKS_KEY });
+    },
   });
 }

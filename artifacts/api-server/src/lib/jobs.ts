@@ -9,6 +9,7 @@
  *    automation-daily-sweep      nightly 01:00 UTC
  *    export-anomaly-check        daily 02:15 UTC
  *    dialer-reconcile            every 15 min (missed-webhook recovery, §5.4)
+ *    lead-callback-sweep         every 5 min (callback SLA queue re-attempt)
  *
  *  Ad-hoc (enqueue via `enqueue(JOB_NAMES.X, data)`):
  *    task-auto-assign            on agent creation / status change
@@ -95,6 +96,9 @@ export const JOB_NAMES = {
   // Phase 6 (§5.4): recover missed dialer terminal webhooks by reconciling
   // stuck dial tickets against the dialer's GET /calls/{id}. Runs every 15 min.
   DIALER_RECONCILE: "dialer-reconcile",
+  // Callback SLA queue: re-attempt `open` lead_callbacks (dropped inbounds),
+  // resolving once capacity returns and expiring past-SLA misses. Every 5 min.
+  LEAD_CALLBACK_SWEEP: "lead-callback-sweep",
   // Import workers (ad-hoc, enqueued from import routes)
   IMPORT_MONDAY: "import-monday",
   IMPORT_GHL: "import-ghl",
@@ -383,6 +387,12 @@ export async function startWorkers(): Promise<void> {
   // outcome unrecorded for long. Idempotent vs. a late webhook, so a frequent
   // sweep is safe.
   await boss.schedule(JOB_NAMES.DIALER_RECONCILE, "*/15 * * * *", {}, { tz: "UTC" });
+  // Callback SLA queue re-attempt — every 5 minutes. Dropped inbounds captured
+  // as `open` callbacks are re-checked against current routability: resolved
+  // once a ready-to-sell + available agent returns, expired when the SLA passes
+  // with still nobody. Idempotent (each row only leaves `open` once), so a
+  // frequent sweep is safe.
+  await boss.schedule(JOB_NAMES.LEAD_CALLBACK_SWEEP, "*/5 * * * *", {}, { tz: "UTC" });
 
   // ---- Workers ----
 
@@ -634,6 +644,17 @@ export async function startWorkers(): Promise<void> {
     JOB_NAMES.DIALER_RECONCILE,
     { batchSize: 1, localConcurrency: 1 },
     dialerReconcileHandler,
+  );
+
+  const leadCallbackSweepHandler: WorkHandler<Record<string, never>> = async () => {
+    const { leadCallbackSweepWorker } = await import("../workers/leadCallbackSweep");
+    await leadCallbackSweepWorker();
+  };
+  // Scheduled cron — singleton; one sweep pass per node, no fan-out.
+  await boss.work<Record<string, never>>(
+    JOB_NAMES.LEAD_CALLBACK_SWEEP,
+    { batchSize: 1, localConcurrency: 1 },
+    leadCallbackSweepHandler,
   );
 
   logger.info("All background workers registered");
