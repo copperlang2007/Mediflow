@@ -7,7 +7,9 @@
  * behaviour are:
  *
  *   - `call.transcript.ready`   — record the transcript hash + ready time on
- *     the dial ticket so the subsequent purge can be verified (§6.1).
+ *     the dial ticket so the subsequent purge can be verified (§6.1), parse the
+ *     transcript in-platform (Phase 5), and auto-raise a compliance oversight
+ *     task when that parse surfaces a compliance concern (best-effort).
  *   - `call.transcript.purged`  — verify the supplied `transcriptHash` matches
  *     what we recorded and stamp `transcriptPurgeConfirmedAt` (§6.1).
  *   - `call.compliance.flagged` — handled distinctly: surfaced for the
@@ -130,10 +132,103 @@ async function handleTranscriptReady(
       .set({ transcriptParsed: parsed, transcriptParsedAt: new Date() })
       .where(eq(dialTicketsTable.id, env.dialTicketId));
     await auditTranscriptParsed(env, parsed);
+    // In addition to storing the parse, auto-raise a compliance oversight task
+    // when the parse surfaces a compliance concern (below). Both happen; the
+    // raise is best-effort and never changes the result note / webhook status.
+    await raiseTranscriptComplianceSafe(env, parsed);
     return { ok: true, handled: true, note: "transcript_parsed" };
   }
 
   return { ok: true, handled: true, note: "transcript_ready_unparsed" };
+}
+
+/**
+ * Severities that, when present on ANY risk flag, are serious enough to
+ * auto-raise a compliance oversight task. The parse vocabulary is
+ * low | medium | high (`RISK_SEVERITIES` in transcriptParse.ts); we treat the
+ * TOP severity (`high`) as triggering and deliberately do NOT fire on
+ * low/medium informational flags. Defined as a Set (not a hard-coded `=== "high"`)
+ * so that if the severity vocabulary grows a "critical" tier, only this list
+ * changes.
+ */
+const TRANSCRIPT_TRIGGER_SEVERITIES = new Set<string>(["high", "critical"]);
+
+/**
+ * Decide whether a parsed transcript surfaces a compliance concern worth an
+ * oversight task. Conservative by design (see spec §6/§9 — avoid alert fatigue):
+ *
+ *   - fire when the model's suggested disposition CATEGORY is COMPLIANCE, OR
+ *   - fire when ANY risk flag carries a top-tier severity (high/critical).
+ *
+ * Low/medium/info-only flags do NOT fire. Returns the matched flag kinds +
+ * severities so the caller can build a clear, PHI-free detail string.
+ */
+function evaluateTranscriptComplianceTrigger(
+  parsed: TranscriptParseResult,
+): { fire: boolean; categoryMatch: boolean; severeFlags: { kind: string; severity: string }[] } {
+  const categoryMatch =
+    parsed.suggestedDisposition.category === "COMPLIANCE";
+  const severeFlags = parsed.riskFlags
+    .filter((f) => TRANSCRIPT_TRIGGER_SEVERITIES.has(f.severity))
+    .map((f) => ({ kind: f.kind, severity: f.severity }));
+  return {
+    fire: categoryMatch || severeFlags.length > 0,
+    categoryMatch,
+    severeFlags,
+  };
+}
+
+/**
+ * Best-effort: raise a compliance oversight task from a flagged transcript
+ * parse. Mirrors the best-effort pattern in this file (presence/audit): a
+ * failure is logged and swallowed so it can NEVER 5xx the webhook (the dialer
+ * would needlessly retry, and the parse is already stored).
+ *
+ * Idempotency: `raiseComplianceOversightTask` dedups on (orgId,
+ * retentionReviewKey) where the key is derived from `eventId`. Since the
+ * triggering `call.transcript.ready` event has a stable `eventId`, re-entry or
+ * reconciliation re-processing the same event collapses to a no-op — it cannot
+ * create a second task.
+ */
+async function raiseTranscriptComplianceSafe(
+  env: DialerEventEnvelope,
+  parsed: TranscriptParseResult,
+): Promise<void> {
+  const trigger = evaluateTranscriptComplianceTrigger(parsed);
+  if (!trigger.fire) return;
+
+  // Build a concise, PHI-free reason + detail from the matched signals. The
+  // raw transcript / summary is never put on the task.
+  const reason = trigger.categoryMatch
+    ? (parsed.suggestedDisposition.code ?? "compliance concern")
+    : (trigger.severeFlags[0]?.kind ?? "compliance concern");
+  const detailParts = [
+    trigger.categoryMatch
+      ? `In-platform parse suggested a COMPLIANCE disposition (category=COMPLIANCE${parsed.suggestedDisposition.code ? `, code=${parsed.suggestedDisposition.code}` : ""}).`
+      : null,
+    trigger.severeFlags.length > 0
+      ? `High-severity risk flags: ${trigger.severeFlags
+          .map((f) => `${f.kind} (${f.severity})`)
+          .join(", ")}.`
+      : null,
+  ].filter(Boolean);
+
+  try {
+    await raiseComplianceOversightTask({
+      orgId: env.orgId,
+      eventId: env.eventId,
+      dialTicketId: env.dialTicketId ?? null,
+      dialerCallId: env.dialerCallId ?? null,
+      trigger: "transcript",
+      reason,
+      detail: detailParts.join(" "),
+    });
+  } catch (err) {
+    logger.error(
+      { err, dialTicketId: env.dialTicketId, eventId: env.eventId },
+      "Transcript compliance: failed to raise oversight task (ignored)",
+    );
+  }
 }
 
 /**
