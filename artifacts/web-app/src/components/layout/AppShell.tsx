@@ -92,6 +92,7 @@ import {
   Activity,
   Radio,
   Target,
+  MonitorPlay,
 } from "lucide-react";
 import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
 import NotificationPanel from "@/components/notifications/NotificationPanel";
@@ -146,6 +147,10 @@ const navItems: NavGroup[] = [
       },
       {
         href: "/admin/queue", label: "Live Queue", icon: Radio,
+        roles: ["super_admin", "agency_admin"],
+      },
+      {
+        href: "/admin/queue/wall", label: "Wallboard", icon: MonitorPlay,
         roles: ["super_admin", "agency_admin"],
       },
       {
