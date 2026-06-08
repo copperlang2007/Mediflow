@@ -16,6 +16,7 @@ import {
 import { resolveCarrier } from "./carriers";
 import { getAvailableAgentIds } from "./presence";
 import { routeInboundLead, type ReadyToSellAgent } from "./readyToSell";
+import { enqueueLeadCallback } from "./callbacks";
 
 /**
  * How long a recent `routed` claim counts as in-flight load when ranking the
@@ -253,6 +254,22 @@ export async function resolveAndRouteInbound(
     fallbackTier,
     createdAt: now,
   });
+
+  // When even the eligible-offline fallback found nobody, the lead would
+  // otherwise be dropped. Capture it as an SLA-tracked callback so a scheduled
+  // sweep can auto-resolve it once capacity returns. Best-effort by
+  // construction — `enqueueLeadCallback` logs + swallows any failure, so a
+  // callback-capture problem can never break routing.
+  if (result.status === "no_agent_available") {
+    await enqueueLeadCallback({
+      orgId: p.orgId,
+      contactId: p.contactId ?? null,
+      carrierId: carrier.carrierId,
+      stateCode: state,
+      certificationYear: p.certificationYear ?? null,
+      now,
+    });
+  }
 
   return {
     ok: true,

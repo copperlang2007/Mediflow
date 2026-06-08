@@ -17,7 +17,10 @@ import {
   useQueuePresence,
   useRecentRouting,
   useRoutingStats,
+  useQueueCallbacks,
+  useCancelCallback,
   type PresenceAgent,
+  type LeadCallback,
 } from "@/lib/queue/api";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
@@ -32,7 +35,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { BarChart3, Radio, TriangleAlert } from "lucide-react";
+import { BarChart3, PhoneMissed, Radio, TriangleAlert } from "lucide-react";
 
 const STATUS_LABEL: Record<string, string> = {
   available: "Available",
@@ -55,6 +58,22 @@ function relativeTime(iso: string): string {
   const h = Math.round(m / 60);
   if (h < 24) return `${h}h ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+/**
+ * SLA countdown for a callback. Returns the label plus whether it is overdue,
+ * so the row can render red once `slaDueAt` has passed.
+ */
+function slaCountdown(slaDueAt: string): { label: string; overdue: boolean } {
+  const diffMs = new Date(slaDueAt).getTime() - Date.now();
+  const overdue = diffMs <= 0;
+  const abs = Math.abs(diffMs);
+  const m = Math.round(abs / 60000);
+  const label =
+    m < 60
+      ? `${m}m`
+      : `${Math.floor(m / 60)}h ${m % 60}m`;
+  return { label: overdue ? `${label} overdue` : `in ${label}`, overdue };
 }
 
 function PresenceDot({ agent }: { agent: PresenceAgent }) {
@@ -163,6 +182,91 @@ const WINDOW_OPTIONS: { label: string; hours: number }[] = [
 
 function pct(rate: number): string {
   return `${Math.round(rate * 100)}%`;
+}
+
+function CallbacksPanel({ enabled }: { enabled: boolean }) {
+  const callbacks = useQueueCallbacks("open", enabled);
+  const cancel = useCancelCallback();
+  const rows: LeadCallback[] = callbacks.data?.data ?? [];
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <PhoneMissed className="h-4 w-4 text-rose-500" />
+          <span className="font-semibold text-sm">Callback SLA queue</span>
+          <Badge variant="secondary" className="ml-1">
+            {rows.length} open
+          </Badge>
+          <span className="text-[11px] text-muted-foreground ml-auto">
+            dropped inbounds auto-resolved when capacity returns
+          </span>
+        </div>
+        {callbacks.isLoading ? (
+          <div className="space-y-2" data-testid="callbacks-loading">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-9 w-full" />
+            ))}
+          </div>
+        ) : rows.length > 0 ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Carrier</TableHead>
+                <TableHead>State</TableHead>
+                <TableHead>Contact</TableHead>
+                <TableHead>SLA</TableHead>
+                <TableHead className="text-right">Attempts</TableHead>
+                <TableHead className="text-right">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((c) => {
+                const sla = slaCountdown(c.slaDueAt);
+                return (
+                  <TableRow key={c.id}>
+                    <TableCell>{c.carrierName ?? c.carrierId}</TableCell>
+                    <TableCell>{c.stateCode}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {c.contactId ?? "—"}
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        "whitespace-nowrap tabular-nums",
+                        sla.overdue
+                          ? "text-destructive font-medium"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {sla.label}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {c.attempts}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2.5 text-xs"
+                        disabled={cancel.isPending}
+                        onClick={() => cancel.mutate(c.id)}
+                      >
+                        Cancel
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        ) : (
+          <p className="text-sm text-muted-foreground py-6 text-center">
+            No open callbacks.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function AdminQueuePage() {
@@ -342,6 +446,9 @@ export default function AdminQueuePage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Callback SLA queue */}
+      <CallbacksPanel enabled={Boolean(isAdmin)} />
 
       {/* Presence */}
       <Card>

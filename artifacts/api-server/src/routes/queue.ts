@@ -34,6 +34,10 @@ import {
   getCoverageGaps,
 } from "../lib/leadQueue/overview";
 import {
+  listLeadCallbacks,
+  cancelLeadCallback,
+} from "../lib/leadQueue/callbacks";
+import {
   recordHeartbeat,
   getAvailableAgentIds,
   HEARTBEAT_STATUSES,
@@ -304,6 +308,69 @@ router.get(
       getCoverageGaps(authReq.orgId, sinceHours, now),
     ]);
     res.json({ stats, coverageGaps, sinceHours, asOf: now.toISOString() });
+  },
+);
+
+// ---- Callback SLA queue (admin oversight) -----------------------------------
+//
+// Dropped inbounds (`no_agent_available`) are captured as `lead_callbacks` and
+// auto-resolved by the lead-callback-sweep worker. These endpoints back the
+// admin Callbacks panel. Admin-tier (`agent:admin`), matching the other
+// oversight endpoints above.
+
+// GET /queue/callbacks?status=open&limit=100 — worked list, SLA-soonest first.
+const CallbacksQuerySchema = z.object({
+  status: z.enum(["open", "resolved", "expired", "cancelled"]).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+router.get(
+  "/queue/callbacks",
+  requireAuth,
+  requirePermission("agent", "admin"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const parsed = CallbacksQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ error: "Invalid query", details: parsed.error.issues });
+      return;
+    }
+    const rows = await listLeadCallbacks({
+      orgId: authReq.orgId,
+      status: parsed.data.status ?? "open",
+      limit: parsed.data.limit ?? 100,
+    });
+    res.json({ data: rows, total: rows.length });
+  },
+);
+
+// POST /queue/callbacks/:id/cancel — mark an open callback cancelled.
+const CallbackIdSchema = z.object({ id: z.string().min(1) });
+router.post(
+  "/queue/callbacks/:id/cancel",
+  requireAuth,
+  requirePermission("agent", "admin"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const parsed = CallbackIdSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res
+        .status(400)
+        .json({ error: "Invalid callback id", details: parsed.error.issues });
+      return;
+    }
+    const cancelled = await cancelLeadCallback({
+      orgId: authReq.orgId,
+      id: parsed.data.id,
+    });
+    if (!cancelled) {
+      res
+        .status(404)
+        .json({ error: "No open callback with that id in this org." });
+      return;
+    }
+    res.json({ id: parsed.data.id, status: "cancelled" });
   },
 );
 
