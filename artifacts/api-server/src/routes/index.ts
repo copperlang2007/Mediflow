@@ -6,6 +6,7 @@ import organizationsRouter from "./organizations";
 import dashboardRouter from "./dashboard";
 import agentsRouter from "./agents";
 import agentReadinessRouter from "./agentReadiness";
+import agentLeaderboardRouter from "./agentLeaderboard";
 import notificationsRouter from "./notifications";
 import auditRouter from "./audit";
 import storageRouter from "./storage";
@@ -49,6 +50,10 @@ router.use(dashboardRouter);
 // before agentsRouter's `/agents/:id` wildcard (which would treat "readiness"
 // as an agent id and 404).
 router.use(agentReadinessRouter);
+// Mounted BEFORE agentsRouter for the same reason as agentReadinessRouter: the
+// static `/agents/leaderboard` path must match before agentsRouter's
+// `/agents/:id` wildcard (which would treat "leaderboard" as an agent id).
+router.use(agentLeaderboardRouter);
 router.use(agentsRouter);
 router.use(notificationsRouter);
 router.use(auditRouter);

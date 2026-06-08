@@ -35,6 +35,7 @@ const QueueWallboardPage = lazy(() => import("@/pages/queue-wallboard"));
 const AdminOnboardingPage = lazy(() => import("@/pages/admin-onboarding"));
 const AdminCarriersPage = lazy(() => import("@/pages/admin-carriers"));
 const ReadinessPage = lazy(() => import("@/pages/readiness"));
+const LeaderboardPage = lazy(() => import("@/pages/leaderboard"));
 const OnboardingPage = lazy(() => import("@/pages/onboarding"));
 const SignPage = lazy(() => import("@/pages/sign"));
 const DataMigrationPage = lazy(() => import("@/pages/data-migration"));
@@ -413,6 +414,9 @@ function ClerkProviderWithRoutes() {
               </Route>
               <Route path="/readiness">
                 <ProtectedLayout><ReadinessPage /></ProtectedLayout>
+              </Route>
+              <Route path="/leaderboard">
+                <ProtectedLayout><LeaderboardPage /></ProtectedLayout>
               </Route>
               <Route path="/admin-onboarding/:agentId">
                 <ProtectedLayout><AdminOnboardingPage /></ProtectedLayout>

@@ -70,7 +70,7 @@ import {
 } from "@workspace/db";
 
 /** Open-lead statuses that count toward an agent's current workload. */
-const OPEN_LEAD_STATUSES = ["new", "contacted", "qualified"] as const;
+export const OPEN_LEAD_STATUSES = ["new", "contacted", "qualified"] as const;
 
 /** Credential statuses that count as "satisfied" for certs/AHIP. */
 const CERT_OK_STATUSES = ["passed", "waived"] as const;
