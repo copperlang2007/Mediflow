@@ -57,6 +57,7 @@ import { seedOrg, seedAgent, seedContact, type TestDb } from "../helpers/testDb"
 
 let generateAepRenewalTasks: typeof import("../../lib/aepRenewal/generate").generateAepRenewalTasks;
 let aepRenewalTrigger: typeof import("../../lib/aepRenewal/generate").aepRenewalTrigger;
+let AEP_TASK_TITLE: typeof import("../../lib/aepRenewal/generate").AEP_TASK_TITLE;
 let db: TestDb;
 let orgId: string;
 
@@ -111,6 +112,7 @@ beforeAll(async () => {
   const mod = await import("../../lib/aepRenewal/generate");
   generateAepRenewalTasks = mod.generateAepRenewalTasks;
   aepRenewalTrigger = mod.aepRenewalTrigger;
+  AEP_TASK_TITLE = mod.AEP_TASK_TITLE;
 });
 
 afterAll(async () => {
@@ -145,7 +147,7 @@ describe("AEP annual-review task generation", () => {
       contactId: already.id,
       agentId: agentA.agentId,
       assignedToUserId: agentA.userId,
-      title: "Annual review — set AEP appointment before Oct 1 (plan renews 1/1)",
+      title: AEP_TASK_TITLE,
       status: "open",
       priority: "high",
       autoAssignTrigger: aepRenewalTrigger(YEAR, already.id),

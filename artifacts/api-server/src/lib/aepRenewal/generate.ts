@@ -117,6 +117,27 @@ export function defaultAepDueDate(year: number): Date {
   return new Date(Date.UTC(year, 8, 30, 23, 59, 59));
 }
 
+/**
+ * Task title + description for an AEP renewal review. Shared with the test so
+ * the two can't silently diverge. `year` is the season the task is generated
+ * in; the renewal it preps is Jan 1 of `year + 1`.
+ */
+export const AEP_TASK_TITLE =
+  "Annual review — set AEP appointment before Oct 1 (plan renews 1/1)";
+
+export function aepTaskDescription(
+  firstName: string,
+  lastName: string,
+  year: number,
+): string {
+  return (
+    `Set the annual review appointment for ${firstName} ${lastName} ` +
+    `before Oct 1, when ${year + 1} plan details become available. ` +
+    `Their Medicare Advantage plan renews January 1 — book the review now ` +
+    `so the renewal doesn't slip through AEP (Oct 15–Dec 7).`
+  );
+}
+
 type Tx = Parameters<Parameters<typeof defaultDb.transaction>[0]>[0];
 
 /**
@@ -224,13 +245,8 @@ async function runOrgPass(
       contactId: m.contactId,
       agentId: m.agentId,
       assignedToUserId: m.agentUserId,
-      title:
-        "Annual review — set AEP appointment before Oct 1 (plan renews 1/1)",
-      description:
-        `Set the annual review appointment for ${m.firstName} ${m.lastName} ` +
-        `before Oct 1, when ${year + 1} plan details become available. ` +
-        `Their Medicare Advantage plan renews January 1 — book the review now ` +
-        `so the renewal doesn't slip through AEP (Oct 15–Dec 7).`,
+      title: AEP_TASK_TITLE,
+      description: aepTaskDescription(m.firstName, m.lastName, year),
       dueDate: dueAt,
       status: "open",
       priority: "high",
