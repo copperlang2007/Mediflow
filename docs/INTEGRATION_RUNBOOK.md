@@ -74,7 +74,11 @@ Gate: redeploy completes and the var is present in the running environment.
 
 ## Phase 3 — Fix the misconfigured `mediflow-api-server` Vercel project
 
-It currently has `rootDirectory: null` and fails on every PR. Choose one:
+The `api-server` is a long-running process (in-process pg-boss crons + SSE) and
+should run on a process host (Railway / Render / Fly), **not** Vercel serverless
+— see `docs/DEPLOY_API_RAILWAY.md` for the turnkey Railway path (the repo ships
+`railway.json`). The `mediflow-api-server` Vercel project currently has
+`rootDirectory: null` and fails on every PR. Choose one:
 
 - **[MANUAL] If it should deploy the API:** Vercel → project `mediflow-api-server`
   → Settings → General → Root Directory = `artifacts/api-server`; add a Node
