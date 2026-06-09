@@ -71,6 +71,7 @@ import {
   FolderOpen,
   ShieldCheck,
   ShieldAlert,
+  CalendarClock,
   Settings,
   Menu,
   X,
@@ -137,6 +138,10 @@ const navItems: NavGroup[] = [
       { href: "/certifications", label: "Certifications", icon: Award, roles: ALL_ROLES },
       {
         href: "/renewals", label: "Renewals", icon: RefreshCcw,
+        roles: ["super_admin", "agency_admin", "compliance_manager"],
+      },
+      {
+        href: "/aep", label: "AEP Center", icon: CalendarClock,
         roles: ["super_admin", "agency_admin", "compliance_manager"],
       },
     ],
