@@ -74,6 +74,7 @@ import {
   CalendarClock,
   Megaphone,
   TrendingDown,
+  RotateCcw,
   Settings,
   Menu,
   X,
@@ -174,6 +175,10 @@ const navItems: NavGroup[] = [
       { href: "/tasks", label: "Tasks", icon: CheckSquare, roles: ALL_ROLES },
       {
         href: "/commissions", label: "Commissions", icon: DollarSign,
+        roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
+      },
+      {
+        href: "/clawbacks", label: "Clawbacks", icon: RotateCcw,
         roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
       },
       {
