@@ -72,6 +72,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   CalendarClock,
+  Megaphone,
   Settings,
   Menu,
   X,
@@ -186,6 +187,10 @@ const navItems: NavGroup[] = [
       },
       {
         href: "/complaints", label: "Complaints", icon: ShieldAlert,
+        roles: ["super_admin", "agency_admin", "compliance_manager"],
+      },
+      {
+        href: "/marketing", label: "Marketing Approval", icon: Megaphone,
         roles: ["super_admin", "agency_admin", "compliance_manager"],
       },
     ],
