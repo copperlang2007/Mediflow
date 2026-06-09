@@ -25,6 +25,7 @@ const TasksPage = lazy(() => import("@/pages/tasks"));
 const DocumentsPage = lazy(() => import("@/pages/documents"));
 const CompliancePage = lazy(() => import("@/pages/compliance"));
 const ComplaintsPage = lazy(() => import("@/pages/complaints"));
+const MarketingPage = lazy(() => import("@/pages/marketing"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
 const RenewalsPage = lazy(() => import("@/pages/renewals"));
 const AepCockpitPage = lazy(() => import("@/pages/aep-cockpit"));
@@ -392,6 +393,9 @@ function ClerkProviderWithRoutes() {
               </Route>
               <Route path="/complaints">
                 <ProtectedLayout><ComplaintsPage /></ProtectedLayout>
+              </Route>
+              <Route path="/marketing">
+                <ProtectedLayout><MarketingPage /></ProtectedLayout>
               </Route>
               <Route path="/aep">
                 <ProtectedLayout><AepCockpitPage /></ProtectedLayout>

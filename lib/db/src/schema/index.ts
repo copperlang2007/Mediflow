@@ -20,3 +20,4 @@ export * from "./presence";
 export * from "./leadRouting";
 export * from "./leadCallbacks";
 export * from "./complaints";
+export * from "./marketing";
