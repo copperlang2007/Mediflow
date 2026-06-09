@@ -70,6 +70,7 @@ import {
   CheckSquare,
   FolderOpen,
   ShieldCheck,
+  ShieldAlert,
   Settings,
   Menu,
   X,
@@ -176,6 +177,10 @@ const navItems: NavGroup[] = [
       { href: "/documents", label: "Documents", icon: FolderOpen, roles: ALL_ROLES },
       {
         href: "/compliance", label: "Audit & Compliance", icon: ShieldCheck,
+        roles: ["super_admin", "agency_admin", "compliance_manager"],
+      },
+      {
+        href: "/complaints", label: "Complaints", icon: ShieldAlert,
         roles: ["super_admin", "agency_admin", "compliance_manager"],
       },
     ],
