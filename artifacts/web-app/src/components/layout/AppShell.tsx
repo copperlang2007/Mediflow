@@ -73,6 +73,7 @@ import {
   ShieldAlert,
   CalendarClock,
   Megaphone,
+  TrendingDown,
   Settings,
   Menu,
   X,
@@ -143,6 +144,10 @@ const navItems: NavGroup[] = [
       },
       {
         href: "/aep", label: "AEP Center", icon: CalendarClock,
+        roles: ["super_admin", "agency_admin", "compliance_manager"],
+      },
+      {
+        href: "/churn", label: "Churn Risk", icon: TrendingDown,
         roles: ["super_admin", "agency_admin", "compliance_manager"],
       },
     ],
