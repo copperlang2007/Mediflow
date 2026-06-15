@@ -161,7 +161,12 @@ export default function SignPage() {
     // canonical gate; this just relaxes the affordance after load.
   };
 
-  const handleConfirmScroll = () => setScrolledToBottom(true);
+  // Radix Checkbox passes the new checked value (boolean | "indeterminate").
+  // The old handler hard-set `true`, so once ticked the box could never be
+  // unticked — leaving the user stuck with consent rows that stayed disabled
+  // if they wanted to revise their attestation.
+  const handleConfirmScroll = (v: boolean | "indeterminate") =>
+    setScrolledToBottom(v === true);
 
   // Submission gating
   const consentsTicked = consent1 && consent2 && consent3;

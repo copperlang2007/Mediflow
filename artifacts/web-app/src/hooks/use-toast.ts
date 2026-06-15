@@ -179,7 +179,10 @@ function useToast() {
         listeners.splice(index, 1)
       }
     }
-  }, [state])
+    // Subscribe once on mount and unsubscribe on unmount. Depending on
+    // `state` here re-ran this effect on every toast update, churning the
+    // listener list and dropping/duplicating subscriptions mid-update.
+  }, [])
 
   return {
     ...state,
