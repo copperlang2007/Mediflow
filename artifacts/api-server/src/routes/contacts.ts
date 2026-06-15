@@ -17,7 +17,6 @@ import {
   dialTicketsTable,
   encryptMedicareId,
   hashMedicareId,
-  decryptMedicareId,
 } from "@workspace/db";
 import type { TranscriptParseResult } from "../lib/dialer/transcriptParse";
 import {
@@ -32,62 +31,13 @@ import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import { logger } from "../lib/logger";
 import { captureWorkerError } from "../lib/sentry";
-import { PHI_PRIVILEGED_ROLES, type Role } from "../lib/permissions";
+import { serializeContact } from "../lib/serializeContact";
 
 const router: IRouter = Router();
 
-// PHI masking — roles that may see full DOB and Medicare ID. Canonical set
-// lives in `../lib/permissions`.
-
-const MASKED_MEDICARE_ID = "***-**-****";
-
-/**
- * Serialize a contact row for an API response (HIPAA-2).
- *
- * The plaintext `medicare_id` column was dropped in migration 0017, so the
- * MBI lives only as AES-256-GCM ciphertext in `medicareIdEncrypted`. The
- * API contract still exposes a `medicareId` string field, so we DERIVE it
- * here:
- *   - privileged roles: decrypt the ciphertext back to plaintext.
- *   - everyone else: a fixed masked sentinel when an MBI is on file.
- * The raw bytea columns (`medicareIdEncrypted` / `medicareIdHash`) are
- * never sent to clients — they are stripped from every response.
- *
- * `dob` and `healthConditions` are masked for non-privileged roles exactly
- * as before.
- */
-function serializeContact<
-  T extends {
-    dob?: Date | null;
-    medicareIdEncrypted?: Buffer | Uint8Array | null;
-    medicareIdHash?: Buffer | Uint8Array | null;
-    healthConditions?: string[] | null;
-  },
->(contact: T, userRole: string): Omit<T, "medicareIdEncrypted" | "medicareIdHash"> & {
-  medicareId: string | null;
-} {
-  const { medicareIdEncrypted, medicareIdHash: _hash, ...rest } = contact;
-  const hasMbi = medicareIdEncrypted != null;
-  const privileged = PHI_PRIVILEGED_ROLES.has(userRole as Role);
-
-  let medicareId: string | null = null;
-  if (hasMbi) {
-    medicareId = privileged
-      ? decryptMedicareId(medicareIdEncrypted as Buffer | Uint8Array)
-      : MASKED_MEDICARE_ID;
-  }
-
-  return {
-    ...rest,
-    medicareId,
-    dob: privileged ? (rest.dob ?? null) : null,
-    healthConditions: privileged
-      ? (rest.healthConditions ?? null)
-      : rest.healthConditions != null
-        ? []
-        : null,
-  };
-}
+// Contact PHI masking (serializeContact) is centralized in
+// ../lib/serializeContact so every route returning contact rows applies the
+// same HIPAA masking policy.
 
 // M1 — confirm an agent belongs to the caller's org before assigning a
 // contact to them. Prevents cross-org agent assignment via a forged

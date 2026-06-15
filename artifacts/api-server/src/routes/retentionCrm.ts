@@ -13,6 +13,7 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { serializeContact } from "../lib/serializeContact";
 
 const router: IRouter = Router();
 
@@ -55,7 +56,7 @@ router.get(
         sql`EXTRACT(MONTH FROM ${contactsTable.dob}) * 100 + EXTRACT(DAY FROM ${contactsTable.dob})`,
       )
       .limit(200);
-    res.json(contacts);
+    res.json(contacts.map((c) => serializeContact(c, authReq.userRole)));
   },
 );
 
@@ -82,7 +83,7 @@ router.get(
       )
       .orderBy(desc(contactsTable.updatedAt))
       .limit(200);
-    res.json(contacts);
+    res.json(contacts.map((c) => serializeContact(c, authReq.userRole)));
   },
 );
 
@@ -103,7 +104,7 @@ router.get(
     if (county) conditions.push(eq(contactsTable.county, county));
 
     const contacts = await db.select().from(contactsTable).where(and(...conditions)).orderBy(desc(contactsTable.updatedAt)).limit(500);
-    res.json(contacts);
+    res.json(contacts.map((c) => serializeContact(c, authReq.userRole)));
   },
 );
 
@@ -135,7 +136,7 @@ router.get(
       .orderBy(sql`${contactsTable.updatedAt} ASC`)
       .limit(500);
 
-    res.json(atRisk);
+    res.json(atRisk.map((c) => serializeContact(c, authReq.userRole)));
   },
 );
 

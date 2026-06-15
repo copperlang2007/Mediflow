@@ -18,6 +18,7 @@ import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import { logger } from "../lib/logger";
 import { captureWorkerError } from "../lib/sentry";
+import { serializeContact } from "../lib/serializeContact";
 
 const router: IRouter = Router();
 
@@ -80,7 +81,12 @@ router.get(
       db.select({ count: sql<number>`count(*)` }).from(leadsTable).where(and(...conditions)),
     ]);
 
-    res.json({ data: leads, total: Number(totalRes[0]?.count ?? 0) });
+    // Mask contact PHI (MBI/DOB/health) for non-privileged roles.
+    const data = leads.map((row) => ({
+      lead: row.lead,
+      contact: serializeContact(row.contact, authReq.userRole),
+    }));
+    res.json({ data, total: Number(totalRes[0]?.count ?? 0) });
   },
 );
 
@@ -179,7 +185,7 @@ router.get(
       .where(and(eq(leadsTable.id, id), eq(leadsTable.orgId, authReq.orgId)))
       .limit(1);
     if (!row) { res.status(404).json({ error: "Lead not found" }); return; }
-    res.json(row);
+    res.json({ lead: row.lead, contact: serializeContact(row.contact, authReq.userRole) });
   },
 );
 
