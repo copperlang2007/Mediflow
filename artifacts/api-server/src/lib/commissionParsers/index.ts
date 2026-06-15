@@ -64,11 +64,21 @@ export function parseStatement(
 
 export function toMoney(raw: unknown): string | null {
   if (raw == null) return null;
-  const s = String(raw).trim().replace(/[$,\s]/g, "").replace(/[()]/g, "");
+  // Strip currency formatting first, then detect accounting notation:
+  // parentheses around a number denote a NEGATIVE amount, e.g. "(500.00)"
+  // means -500.00. Carrier statements use this for chargebacks/recoupments,
+  // so stripping the parens without negating silently turns a clawback into
+  // a positive credit (see lib/commissionParsers/* + routes/clawbacks.ts,
+  // which assume chargeback amounts are stored negative).
+  const cleaned = String(raw).trim().replace(/[$,\s]/g, "");
+  if (!cleaned) return null;
+  const isParenNegative = /^\(.*\)$/.test(cleaned);
+  const s = cleaned.replace(/[()]/g, "");
   if (!s) return null;
   const n = Number(s);
   if (!Number.isFinite(n)) return null;
-  return n.toFixed(2);
+  const signed = isParenNegative && n > 0 ? -n : n;
+  return signed.toFixed(2);
 }
 
 export function toRequiredMoney(raw: unknown): string {
