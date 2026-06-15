@@ -27,13 +27,13 @@ export function serializeContact<
   },
 >(
   contact: T,
-  userRole: string,
+  userRole: Role,
 ): Omit<T, "medicareIdEncrypted" | "medicareIdHash"> & {
   medicareId: string | null;
 } {
   const { medicareIdEncrypted, medicareIdHash: _hash, ...rest } = contact;
   const hasMbi = medicareIdEncrypted != null;
-  const privileged = PHI_PRIVILEGED_ROLES.has(userRole as Role);
+  const privileged = PHI_PRIVILEGED_ROLES.has(userRole);
 
   let medicareId: string | null = null;
   if (hasMbi) {
