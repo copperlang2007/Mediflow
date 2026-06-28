@@ -78,7 +78,13 @@ const OPTIONAL_SECRETS = [
   "AI_INTEGRATIONS_OPENAI_BASE_URL",
 ];
 
-/** Static, non-secret production config. */
+/**
+ * Static, non-secret production config. NOTE: when the workflow runs, this
+ * script is the single source of truth for the service env — the PUT below
+ * replaces the full env set. The matching keys in render.prod.yaml apply only
+ * to the optional "connect the blueprint manually" path; keep the two in sync
+ * if you change a value here.
+ */
 const STATIC_CONFIG = {
   NODE_ENV: "production",
   AI_INTEGRATIONS_PROVIDER: "azure", // HIPAA: only BAA-covered provider
@@ -295,11 +301,10 @@ async function ensureService(ownerId) {
 }
 
 function serviceUrl(service) {
-  return (
-    service?.serviceDetails?.url ||
-    service?.dashboardUrl?.replace("dashboard.render.com", "") || // fallback, rarely used
-    ""
-  );
+  // Only serviceDetails.url is a valid public origin. (dashboardUrl points at
+  // dashboard.render.com and is NOT the app origin.) When it's absent, return
+  // "" and let main() fall back to the predictable <name>.onrender.com host.
+  return service?.serviceDetails?.url || "";
 }
 
 /**
@@ -351,7 +356,10 @@ async function triggerDeploy(serviceId) {
 }
 
 async function waitForDeploy(serviceId, deployId) {
-  const timeout = Number(process.env.DEPLOY_WAIT_TIMEOUT_MS || 1_800_000);
+  // Guard against a non-numeric override producing NaN, which would make the
+  // loop condition immediately false and skip polling entirely.
+  let timeout = Number(process.env.DEPLOY_WAIT_TIMEOUT_MS);
+  if (!Number.isFinite(timeout) || timeout <= 0) timeout = 1_800_000;
   const start = Date.now();
   const terminalOk = new Set(["live"]);
   const terminalBad = new Set([

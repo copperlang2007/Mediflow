@@ -32,7 +32,23 @@ jobs:
         with:
           node-version: 24
 
+      # Stay green until the operator has configured Render. Without this, every
+      # push before setup would paint a red ✗ — which is not "zero-touch". Once
+      # RENDER_API_KEY exists, the deploy step below runs automatically.
+      - name: Check Render is configured
+        id: gate
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "::notice::RENDER_API_KEY is not set — skipping deploy. Add the GitHub Secrets listed in docs/DEPLOY_RENDER_PRODUCTION.md to enable automatic deploys."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Deploy to Render
+        if: steps.gate.outputs.configured == 'true'
         run: node scripts/deploy/render-deploy.mjs
         env:
           # ---- Render control plane ----
