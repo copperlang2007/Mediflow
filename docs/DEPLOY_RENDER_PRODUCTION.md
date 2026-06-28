@@ -1,0 +1,93 @@
+# MediFlow — Production deploy to Render
+
+This deploys MediFlow to Render in **production** mode (real Clerk auth + PHI
+encryption, `NODE_ENV=production`). After a one-time secret setup, every push to
+`claude/product-market-launch-selection-iw23qv` deploys automatically — the
+workflow provisions the database and injects **every** environment variable for
+you, so you never open the Render dashboard to paste config.
+
+> For a throwaway, auth-bypassed demo instead, use `render.yaml` (the demo
+> blueprint) — no secrets required. This doc is the real production path.
+
+## What runs
+
+| Piece | Role |
+| --- | --- |
+| `.github/workflows/deploy-mediflow-render.yml` | Triggers on push / manual dispatch; maps your GitHub Secrets into the deploy engine. |
+| `scripts/deploy/render-deploy.mjs` | Provisions Postgres + the web service, computes and pushes the full env, triggers the deploy, waits until it's live. No npm deps. |
+| `render.prod.yaml` | Declarative reference blueprint (DB + service + static config). Optional — the engine can create everything via the API. |
+
+## One-time setup
+
+### 1. Get a Render API key
+Render dashboard → **Account Settings → API Keys → Create API Key**. Copy it.
+
+### 2. Add GitHub Secrets
+Repo → **Settings → Secrets and variables → Actions → New repository secret**.
+
+**Always required:**
+
+| Secret | Where to get it |
+| --- | --- |
+| `RENDER_API_KEY` | Step 1 above. |
+| `CLERK_SECRET_KEY` | Clerk dashboard → API Keys. Must be a **live** key (`sk_live_…`). |
+| `CLERK_PUBLISHABLE_KEY` | Clerk dashboard → API Keys. Must be **live** (`pk_live_…`). Also baked into the web bundle at build. |
+| `AI_INTEGRATIONS_OPENAI_API_KEY` | Azure OpenAI resource → Keys. (Azure is the only HIPAA/BAA-covered provider; the server refuses any other in prod.) |
+| `AI_INTEGRATIONS_AZURE_RESOURCE` | Your Azure OpenAI resource name. |
+| `AI_INTEGRATIONS_AZURE_DEPLOYMENT` | Your Azure OpenAI deployment name (e.g. `gpt-4o`). |
+| `PRIVATE_OBJECT_DIR` | GCS bucket/path for private PHI documents (e.g. `mediflow-prod/private`). Hard-required at boot. |
+
+**Optional (a feature simply no-ops until its secret is set):**
+
+| Secret | Enables |
+| --- | --- |
+| `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS`* | Transactional email |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `TWILIO_WEBHOOK_PUBLIC_HOST` | SMS + inbound SMS webhooks |
+| `SENTRY_DSN` | Error tracking (PHI-scrubbed) |
+| `ESIGN_SIGNING_CERT_PEM`, `ESIGN_SIGNING_KEY_PEM` | Org-issued PKI signing of completed e-sign PDFs |
+| `PUBLIC_OBJECT_SEARCH_PATHS` | Public document search |
+| `AI_INTEGRATIONS_OPENAI_BASE_URL` | Custom Azure/OpenAI endpoint |
+
+*`EMAIL_FROM_ADDRESS`, `CONTRACTING_EMAIL_FROM`, `AI_INTEGRATIONS_AZURE_API_VERSION`,
+and naming/region overrides are non-secret — set them as repository **Variables**
+(same screen, "Variables" tab) rather than Secrets if you want to override the
+defaults.
+
+### 3. (Optional) pin an existing service/DB
+If you'd rather create the Render service + Postgres once from `render.prod.yaml`
+(New → Blueprint), add their IDs as secrets `RENDER_SERVICE_ID` and
+`RENDER_DATABASE_ID`. Otherwise the engine finds them by name
+(`mediflow-prod` / `mediflow-prod-db`) or creates them on first run.
+
+## Deploy
+
+- **Automatic:** push to `claude/product-market-launch-selection-iw23qv`.
+- **Manual:** Actions tab → *Deploy MediFlow (Render • production)* → **Run workflow**.
+
+The run logs each step and exits non-zero (with the precise missing-secret name)
+if anything is misconfigured, so a red ✗ always tells you exactly what to fix.
+
+## What's handled for you
+
+- **Crypto keys generated once, then kept stable.** `PHI_ENCRYPTION_KEY`,
+  `PHI_HMAC_KEY`, `METRICS_TOKEN`, `DIALER_WEBHOOK_SECRET`,
+  `LEAD_QUEUE_WEBHOOK_SECRET` are generated on the first deploy and reused from
+  the service env on every later deploy — **the PHI keys must never rotate** or
+  previously-encrypted data can't be decrypted.
+- **`DATABASE_URL`** comes from the managed Postgres automatically.
+- **`ALLOWED_ORIGIN`** is set to the service's public URL (override with the
+  `APP_ORIGIN` variable to use a custom domain).
+- **`VITE_CLERK_PUBLISHABLE_KEY`** is mirrored from `CLERK_PUBLISHABLE_KEY` so the
+  build-time and runtime keys always match.
+- **Migrations** run in Render's pre-deploy step before traffic shifts.
+
+## Known caveat — object storage
+
+MediFlow's object storage targets **Google Cloud Storage**. `PRIVATE_OBJECT_DIR`
+selects the bucket/path, but GCS also needs credentials in the runtime
+environment (e.g. a `GOOGLE_APPLICATION_CREDENTIALS` JSON, or workload identity).
+On Render — which isn't GCP — wire that credential before relying on document
+upload/download. The server still boots without it; only the storage feature is
+affected. Add the GCS auth mechanism your bucket uses as an additional secret and
+extend `OPTIONAL_SECRETS` in `scripts/deploy/render-deploy.mjs` to pass it
+through.

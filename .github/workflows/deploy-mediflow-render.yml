@@ -1,0 +1,80 @@
+name: Deploy MediFlow (Render • production)
+
+# Ships MediFlow to Render in production mode. The deploy engine
+# (scripts/deploy/render-deploy.mjs) provisions the managed Postgres, injects
+# EVERY environment variable (generating the crypto keys, copying your SaaS
+# credentials from the GitHub Secrets mapped below, wiring DATABASE_URL +
+# ALLOWED_ORIGIN automatically), then triggers and waits for the deploy.
+#
+# One-time setup is in docs/DEPLOY_RENDER_PRODUCTION.md. After that, every push
+# to this branch deploys with no manual steps.
+
+on:
+  push:
+    branches: [claude/product-market-launch-selection-iw23qv]
+  workflow_dispatch: {} # lets you deploy on demand from the Actions tab
+
+# Never run two deploys against the same service at once.
+concurrency:
+  group: deploy-mediflow-render
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Provision + inject env + deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Deploy to Render
+        run: node scripts/deploy/render-deploy.mjs
+        env:
+          # ---- Render control plane ----
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          # Optional: pin a pre-created service/DB instead of lookup-by-name.
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          RENDER_DATABASE_ID: ${{ secrets.RENDER_DATABASE_ID }}
+          RENDER_OWNER_ID: ${{ secrets.RENDER_OWNER_ID }}
+          # Optional: override naming/region/plan via repository Variables.
+          RENDER_SERVICE_NAME: ${{ vars.RENDER_SERVICE_NAME }}
+          RENDER_DATABASE_NAME: ${{ vars.RENDER_DATABASE_NAME }}
+          RENDER_REGION: ${{ vars.RENDER_REGION }}
+          RENDER_PLAN: ${{ vars.RENDER_PLAN }}
+          RENDER_DB_PLAN: ${{ vars.RENDER_DB_PLAN }}
+          APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+
+          # ---- Required third-party credentials (GitHub Secrets) ----
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
+          AI_INTEGRATIONS_AZURE_RESOURCE: ${{ secrets.AI_INTEGRATIONS_AZURE_RESOURCE }}
+          AI_INTEGRATIONS_AZURE_DEPLOYMENT: ${{ secrets.AI_INTEGRATIONS_AZURE_DEPLOYMENT }}
+          PRIVATE_OBJECT_DIR: ${{ secrets.PRIVATE_OBJECT_DIR }}
+
+          # ---- Optional config / credentials (passed through only if set) ----
+          AI_INTEGRATIONS_AZURE_API_VERSION: ${{ vars.AI_INTEGRATIONS_AZURE_API_VERSION }}
+          AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
+          PUBLIC_OBJECT_SEARCH_PATHS: ${{ secrets.PUBLIC_OBJECT_SEARCH_PATHS }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER }}
+          TWILIO_WEBHOOK_PUBLIC_HOST: ${{ secrets.TWILIO_WEBHOOK_PUBLIC_HOST }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_FROM_ADDRESS: ${{ vars.EMAIL_FROM_ADDRESS }}
+          CONTRACTING_EMAIL_FROM: ${{ vars.CONTRACTING_EMAIL_FROM }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          ESIGN_SIGNING_CERT_PEM: ${{ secrets.ESIGN_SIGNING_CERT_PEM }}
+          ESIGN_SIGNING_KEY_PEM: ${{ secrets.ESIGN_SIGNING_KEY_PEM }}
+
+          # Provided automatically by GitHub Actions; used for repo derivation +
+          # build provenance (BUILD_SHA).
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
