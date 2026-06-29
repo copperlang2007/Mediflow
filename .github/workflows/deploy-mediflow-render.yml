@@ -32,16 +32,28 @@ jobs:
         with:
           node-version: 24
 
-      # Stay green until the operator has configured Render. Without this, every
-      # push before setup would paint a red ✗ — which is not "zero-touch". Once
-      # RENDER_API_KEY exists, the deploy step below runs automatically.
+      # Stay green until ALL required secrets are configured. Without this, every
+      # push during incremental secret setup would paint a red ✗ — which is not
+      # "zero-touch". The deploy step below runs automatically once the full set
+      # is present; until then this skips with a notice listing what's missing.
       - name: Check Render is configured
         id: gate
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
+          AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
+          PRIVATE_OBJECT_DIR: ${{ secrets.PRIVATE_OBJECT_DIR }}
         run: |
-          if [ -z "$RENDER_API_KEY" ]; then
-            echo "::notice::RENDER_API_KEY is not set — skipping deploy. Add the GitHub Secrets listed in docs/DEPLOY_RENDER_PRODUCTION.md to enable automatic deploys."
+          missing=()
+          for v in RENDER_API_KEY CLERK_SECRET_KEY CLERK_PUBLISHABLE_KEY \
+                   AI_INTEGRATIONS_OPENAI_API_KEY AI_INTEGRATIONS_OPENAI_BASE_URL \
+                   PRIVATE_OBJECT_DIR; do
+            if [ -z "${!v}" ]; then missing+=("$v"); fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::notice::Deploy skipped — required GitHub Secrets not yet set: ${missing[*]}. See docs/DEPLOY_RENDER_PRODUCTION.md. The deploy runs automatically once all are present."
             echo "configured=false" >> "$GITHUB_OUTPUT"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
