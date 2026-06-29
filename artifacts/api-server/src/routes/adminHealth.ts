@@ -33,7 +33,7 @@ const router: IRouter = Router();
 
 // ---- Provider-wiring env validation ----------------------------------------
 
-type ProviderKind = "azure" | "openai" | "unset";
+type ProviderKind = "azure" | "bedrock" | "openai" | "unset";
 
 interface EnvValidation {
   provider: ProviderKind;
@@ -59,6 +59,7 @@ function validateEnv(): EnvValidation {
 
   let provider: ProviderKind;
   if (rawProvider === "azure") provider = "azure";
+  else if (rawProvider === "bedrock") provider = "bedrock";
   else if (rawProvider === "openai") provider = "openai";
   else if (!rawProvider) {
     provider = "unset";
@@ -72,11 +73,17 @@ function validateEnv(): EnvValidation {
     issues.push("AI_INTEGRATIONS_OPENAI_API_KEY missing");
   }
 
-  // HIPAA guard: only `azure` is BAA-eligible. Surface a warning so the
-  // admin can see this state, but don't gate the check on it — the
-  // resolveAiProvider() in getOpenAI() will throw in production anyway.
-  if (process.env.NODE_ENV === "production" && provider !== "azure") {
-    warnings.push("Production deploys must use AI_INTEGRATIONS_PROVIDER=azure (HIPAA BAA)");
+  // HIPAA guard: only `azure` and `bedrock` are BAA-eligible. Surface a
+  // warning so the admin can see this state, but don't gate the check on it —
+  // the resolveAiProvider() in getOpenAI() will throw in production anyway.
+  if (
+    process.env.NODE_ENV === "production" &&
+    provider !== "azure" &&
+    provider !== "bedrock"
+  ) {
+    warnings.push(
+      "Production deploys must use a HIPAA-eligible AI_INTEGRATIONS_PROVIDER (azure or bedrock)",
+    );
   }
 
   let modelHint = "gpt-4o-mini";
@@ -95,6 +102,22 @@ function validateEnv(): EnvValidation {
     }
     if (!process.env.AI_INTEGRATIONS_AZURE_API_VERSION) {
       warnings.push("AI_INTEGRATIONS_AZURE_API_VERSION unset — using SDK default");
+    }
+  } else if (provider === "bedrock") {
+    // Bedrock's OpenAI-compatible endpoint is consumed via the base-URL OpenAI
+    // client, e.g. https://bedrock-runtime.<region>.amazonaws.com/openai/v1
+    if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
+      issues.push(
+        "AI_INTEGRATIONS_OPENAI_BASE_URL missing (Bedrock OpenAI-compatible endpoint)",
+      );
+    }
+    const model = process.env.AI_INTEGRATIONS_MODEL?.trim();
+    if (!model) {
+      warnings.push(
+        "AI_INTEGRATIONS_MODEL unset — using the default; set a Bedrock model id (e.g. us.anthropic.claude-sonnet-4-6)",
+      );
+    } else {
+      modelHint = model;
     }
   } else if (provider === "openai") {
     if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {

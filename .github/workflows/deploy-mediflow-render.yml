@@ -68,14 +68,16 @@ jobs:
           # ---- Required third-party credentials (GitHub Secrets) ----
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          # AI on AWS Bedrock (covered by your AWS BAA): the API key is a Bedrock
+          # Bearer token; the base URL is the OpenAI-compatible endpoint, e.g.
+          # https://bedrock-runtime.<region>.amazonaws.com/openai/v1
           AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
-          AI_INTEGRATIONS_AZURE_RESOURCE: ${{ secrets.AI_INTEGRATIONS_AZURE_RESOURCE }}
-          AI_INTEGRATIONS_AZURE_DEPLOYMENT: ${{ secrets.AI_INTEGRATIONS_AZURE_DEPLOYMENT }}
+          AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
           PRIVATE_OBJECT_DIR: ${{ secrets.PRIVATE_OBJECT_DIR }}
 
           # ---- Optional config / credentials (passed through only if set) ----
-          AI_INTEGRATIONS_AZURE_API_VERSION: ${{ vars.AI_INTEGRATIONS_AZURE_API_VERSION }}
-          AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
+          # Override the default Bedrock model id (us.anthropic.claude-sonnet-4-6).
+          AI_INTEGRATIONS_MODEL: ${{ vars.AI_INTEGRATIONS_MODEL }}
           PUBLIC_OBJECT_SEARCH_PATHS: ${{ secrets.PUBLIC_OBJECT_SEARCH_PATHS }}
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}

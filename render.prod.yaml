@@ -12,7 +12,7 @@
 #     METRICS_TOKEN, *_WEBHOOK_SECRET) once and persists them on the service so
 #     they stay STABLE across deploys (rotating PHI keys would orphan encrypted
 #     data), and
-#   - copies your third-party credentials (Clerk, Azure OpenAI, GCS, Twilio,
+#   - copies your third-party credentials (Clerk, Bedrock, GCS, Twilio,
 #     Resend, Sentry) from GitHub Secrets into the Render service env.
 #
 # Every var below marked `sync: false` is owned by that script, so a blueprint
@@ -21,8 +21,8 @@
 #
 # HARD BOOT GUARDS (the server refuses to start otherwise):
 #   - NODE_ENV must be exactly "production" once real credentials are present.
-#   - AI_INTEGRATIONS_PROVIDER must be "azure" in production (only BAA-covered
-#     provider). See artifacts/api-server/src/lib/aiProvider.ts.
+#   - AI_INTEGRATIONS_PROVIDER must be a HIPAA-eligible provider in production:
+#     "azure" or "bedrock". See artifacts/api-server/src/lib/aiProvider.ts.
 #   - PHI_ENCRYPTION_KEY / PHI_HMAC_KEY must be set (medicareId.ts).
 #   - PRIVATE_OBJECT_DIR must be set (objectStorage.ts).
 #   - DEMO_MODE must never be "true" here (prodEnvGuard.ts).
@@ -66,9 +66,9 @@ services:
       - key: WEB_STATIC_DIR
         value: /opt/render/project/src/artifacts/web-app/dist/public
       - key: AI_INTEGRATIONS_PROVIDER
-        value: azure # HIPAA: only Azure OpenAI is BAA-covered in production
-      - key: AI_INTEGRATIONS_AZURE_API_VERSION
-        value: "2024-02-15-preview"
+        value: bedrock # HIPAA: AWS Bedrock is BAA-covered (your signed AWS BAA)
+      - key: AI_INTEGRATIONS_MODEL
+        value: us.anthropic.claude-sonnet-4-6 # Bedrock model id (matches IntelBRIDGE)
       - key: MFA_REQUIRED
         value: "true"
       - key: LOG_LEVEL
@@ -102,11 +102,12 @@ services:
         sync: false
       - key: ALLOWED_ORIGIN # set to the service's public URL by the deploy script
         sync: false
+      # Bedrock API key (Bearer token) consumed by the OpenAI SDK client.
       - key: AI_INTEGRATIONS_OPENAI_API_KEY
         sync: false
-      - key: AI_INTEGRATIONS_AZURE_RESOURCE
-        sync: false
-      - key: AI_INTEGRATIONS_AZURE_DEPLOYMENT
+      # Bedrock OpenAI-compatible endpoint, e.g.
+      # https://bedrock-runtime.<region>.amazonaws.com/openai/v1
+      - key: AI_INTEGRATIONS_OPENAI_BASE_URL
         sync: false
       - key: PRIVATE_OBJECT_DIR
         sync: false

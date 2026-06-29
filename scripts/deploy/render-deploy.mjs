@@ -56,9 +56,8 @@ const KEY = required("RENDER_API_KEY");
 const REQUIRED_SECRETS = [
   "CLERK_SECRET_KEY", // sk_live_…
   "CLERK_PUBLISHABLE_KEY", // pk_live_…  (also mirrored to VITE_CLERK_PUBLISHABLE_KEY)
-  "AI_INTEGRATIONS_OPENAI_API_KEY", // Azure OpenAI key
-  "AI_INTEGRATIONS_AZURE_RESOURCE",
-  "AI_INTEGRATIONS_AZURE_DEPLOYMENT",
+  "AI_INTEGRATIONS_OPENAI_API_KEY", // Bedrock API key (Bearer token)
+  "AI_INTEGRATIONS_OPENAI_BASE_URL", // Bedrock OpenAI-compatible endpoint
   "PRIVATE_OBJECT_DIR", // GCS bucket/path (hard-required at boot)
 ];
 
@@ -75,7 +74,6 @@ const OPTIONAL_SECRETS = [
   "SENTRY_DSN",
   "ESIGN_SIGNING_CERT_PEM",
   "ESIGN_SIGNING_KEY_PEM",
-  "AI_INTEGRATIONS_OPENAI_BASE_URL",
 ];
 
 /**
@@ -87,9 +85,9 @@ const OPTIONAL_SECRETS = [
  */
 const STATIC_CONFIG = {
   NODE_ENV: "production",
-  AI_INTEGRATIONS_PROVIDER: "azure", // HIPAA: only BAA-covered provider
-  AI_INTEGRATIONS_AZURE_API_VERSION:
-    process.env.AI_INTEGRATIONS_AZURE_API_VERSION || "2024-02-15-preview",
+  AI_INTEGRATIONS_PROVIDER: "bedrock", // HIPAA: AWS Bedrock, covered by your AWS BAA
+  AI_INTEGRATIONS_MODEL:
+    process.env.AI_INTEGRATIONS_MODEL || "us.anthropic.claude-sonnet-4-6",
   MFA_REQUIRED: "true",
   LOG_LEVEL: process.env.LOG_LEVEL || "info",
   WEB_STATIC_DIR: "/opt/render/project/src/artifacts/web-app/dist/public",

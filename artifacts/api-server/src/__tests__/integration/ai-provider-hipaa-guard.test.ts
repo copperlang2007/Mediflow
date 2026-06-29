@@ -2,10 +2,11 @@
  * Unit test: HIPAA provider guard (`lib/aiProvider.ts`).
  *
  * MediFlow streams full contact Medicare profiles (PHI) to the LLM
- * provider in the system prompt. Only Azure OpenAI is BAA-covered; the
- * standard `api.openai.com` API has no HIPAA BAA and must never receive
- * PHI. In production the app must hard-fail at boot unless the provider
- * is explicitly `azure`.
+ * provider in the system prompt. Only BAA-covered providers may receive
+ * PHI: `azure` (Microsoft BAA) and `bedrock` (AWS BAA). The standard
+ * `api.openai.com` API has no HIPAA BAA and must never receive PHI. In
+ * production the app must hard-fail at boot unless the provider is a
+ * HIPAA-eligible value.
  *
  * These tests exercise `resolveAiProvider()` / `assertAiProviderHipaaCompliant()`
  * directly across `NODE_ENV` x `AI_INTEGRATIONS_PROVIDER` combinations.
@@ -15,7 +16,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import {
   resolveAiProvider,
   assertAiProviderHipaaCompliant,
-  HIPAA_ELIGIBLE_PROVIDER,
+  HIPAA_ELIGIBLE_PROVIDERS,
 } from "../../lib/aiProvider";
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
@@ -35,7 +36,7 @@ describe("HIPAA provider guard — production", () => {
     process.env.NODE_ENV = "production";
     delete process.env.AI_INTEGRATIONS_PROVIDER;
 
-    expect(() => resolveAiProvider()).toThrow(/must be 'azure' in production/);
+    expect(() => resolveAiProvider()).toThrow(/HIPAA-eligible provider/);
     expect(() => assertAiProviderHipaaCompliant()).toThrow(/HIPAA BAA/);
   });
 
@@ -43,7 +44,7 @@ describe("HIPAA provider guard — production", () => {
     process.env.NODE_ENV = "production";
     process.env.AI_INTEGRATIONS_PROVIDER = "openai";
 
-    expect(() => resolveAiProvider()).toThrow(/must be 'azure' in production/);
+    expect(() => resolveAiProvider()).toThrow(/HIPAA-eligible provider/);
     expect(() => assertAiProviderHipaaCompliant()).toThrow();
   });
 
@@ -51,7 +52,7 @@ describe("HIPAA provider guard — production", () => {
     process.env.NODE_ENV = "production";
     process.env.AI_INTEGRATIONS_PROVIDER = "anthropic";
 
-    expect(() => resolveAiProvider()).toThrow(/must be 'azure' in production/);
+    expect(() => resolveAiProvider()).toThrow(/HIPAA-eligible provider/);
   });
 
   it("does NOT throw when AI_INTEGRATIONS_PROVIDER is 'azure' in production", () => {
@@ -62,12 +63,24 @@ describe("HIPAA provider guard — production", () => {
     expect(resolveAiProvider()).toBe("azure");
   });
 
-  it("accepts 'azure' case-insensitively in production", () => {
+  it("does NOT throw when AI_INTEGRATIONS_PROVIDER is 'bedrock' in production", () => {
     process.env.NODE_ENV = "production";
-    process.env.AI_INTEGRATIONS_PROVIDER = "AZURE";
+    process.env.AI_INTEGRATIONS_PROVIDER = "bedrock";
 
     expect(() => assertAiProviderHipaaCompliant()).not.toThrow();
+    expect(resolveAiProvider()).toBe("bedrock");
+  });
+
+  it("accepts HIPAA-eligible providers case-insensitively in production", () => {
+    process.env.NODE_ENV = "production";
+
+    process.env.AI_INTEGRATIONS_PROVIDER = "AZURE";
+    expect(() => assertAiProviderHipaaCompliant()).not.toThrow();
     expect(resolveAiProvider()).toBe("azure");
+
+    process.env.AI_INTEGRATIONS_PROVIDER = "Bedrock";
+    expect(() => assertAiProviderHipaaCompliant()).not.toThrow();
+    expect(resolveAiProvider()).toBe("bedrock");
   });
 });
 
@@ -96,16 +109,21 @@ describe("HIPAA provider guard — non-production (current behavior preserved)",
     expect(resolveAiProvider()).toBe("openai");
   });
 
-  it("still allows 'azure' in non-production", () => {
+  it("still allows 'azure' and 'bedrock' in non-production", () => {
     process.env.NODE_ENV = "development";
-    process.env.AI_INTEGRATIONS_PROVIDER = "azure";
 
+    process.env.AI_INTEGRATIONS_PROVIDER = "azure";
     expect(resolveAiProvider()).toBe("azure");
+
+    process.env.AI_INTEGRATIONS_PROVIDER = "bedrock";
+    expect(resolveAiProvider()).toBe("bedrock");
   });
 });
 
-describe("HIPAA_ELIGIBLE_PROVIDER constant", () => {
-  it("is the literal 'azure' — the only BAA-covered path", () => {
-    expect(HIPAA_ELIGIBLE_PROVIDER).toBe("azure");
+describe("HIPAA_ELIGIBLE_PROVIDERS constant", () => {
+  it("covers exactly the BAA-eligible providers: azure and bedrock", () => {
+    expect(HIPAA_ELIGIBLE_PROVIDERS.has("azure")).toBe(true);
+    expect(HIPAA_ELIGIBLE_PROVIDERS.has("bedrock")).toBe(true);
+    expect(HIPAA_ELIGIBLE_PROVIDERS.size).toBe(2);
   });
 });

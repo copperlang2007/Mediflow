@@ -17,7 +17,7 @@
  */
 import OpenAI, { AzureOpenAI } from "openai";
 import { z } from "zod/v4";
-import { resolveAiProvider } from "../aiProvider";
+import { resolveAiProvider, resolveAiModel } from "../aiProvider";
 import { logger } from "../logger";
 
 /** Disposition the model suggests for the call (advisory — agent confirms). */
@@ -161,8 +161,10 @@ Return JSON shaped exactly as:
 {"summary": string, "suggestedDisposition": {"code": string|null, "category": string, "confidence": number|null}, "riskFlags": [{"kind": string, "severity": string, "detail": string}], "actionItems": [string], "scopeOfAppointment": {"required": boolean, "captured": boolean, "products": [string]}}`;
 
 // Model id is overridable via env so it can be rotated / A/B-tested without a
-// code change; the default matches the rest of the AI surface (routes/ai.ts).
-const PARSE_MODEL = process.env["AI_INTEGRATIONS_TRANSCRIPT_PARSE_MODEL"] ?? "gpt-5.4";
+// code change; the default matches the rest of the AI surface (resolveAiModel,
+// i.e. AI_INTEGRATIONS_MODEL) so a single var covers every provider.
+const PARSE_MODEL =
+  process.env["AI_INTEGRATIONS_TRANSCRIPT_PARSE_MODEL"] ?? resolveAiModel();
 const MAX_TRANSCRIPT_CHARS = 24_000;
 
 function buildUserPrompt(

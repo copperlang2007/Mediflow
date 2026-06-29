@@ -23,7 +23,7 @@ import {
   documentsTable,
 } from "@workspace/db";
 import OpenAI, { AzureOpenAI } from "openai";
-import { resolveAiProvider } from "../lib/aiProvider";
+import { resolveAiProvider, resolveAiModel } from "../lib/aiProvider";
 
 // Provider dispatch — `azure` is the HIPAA-eligible path (BAA coverage),
 // `openai` is the direct API for dev/staging only. The provider is
@@ -204,7 +204,7 @@ router.post(
 
     try {
       const stream = await aiClient.chat.completions.create({
-        model: "gpt-5.4",
+        model: resolveAiModel(),
         max_completion_tokens: 8192,
         messages: chatMessages,
         stream: true,
@@ -286,7 +286,7 @@ router.post(
 
     try {
       const response = await aiClient.chat.completions.create({
-        model: "gpt-5.4",
+        model: resolveAiModel(),
         max_completion_tokens: channel === "sms" ? 256 : 1024,
         messages: [{ role: "user", content: prompt }],
         stream: false,
@@ -392,7 +392,7 @@ router.post(
 
     try {
       const stream = await aiClient.chat.completions.create({
-        model: "gpt-5.4",
+        model: resolveAiModel(),
         max_completion_tokens: 8192,
         messages: [{ role: "user", content: reportPrompt }],
         stream: true,
