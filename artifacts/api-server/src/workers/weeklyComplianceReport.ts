@@ -25,7 +25,7 @@ import {
   usersTable,
 } from "@workspace/db";
 import OpenAI, { AzureOpenAI } from "openai";
-import { resolveAiProvider } from "../lib/aiProvider";
+import { resolveAiProvider, resolveAiModel } from "../lib/aiProvider";
 
 // Provider dispatch — `azure` is the HIPAA-eligible (BAA-covered) path.
 // This worker drafts compliance reports from agent PHI, so it MUST go
@@ -130,7 +130,7 @@ async function generateReportForOrg(orgId: string): Promise<void> {
   let fullReport = "";
   try {
     const stream = await aiClient.chat.completions.create({
-      model: "gpt-5.4",
+      model: resolveAiModel(),
       max_completion_tokens: 8192,
       messages: [{ role: "user", content: reportPrompt }],
       stream: true,

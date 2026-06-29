@@ -3,17 +3,21 @@
  * client, and the audio client. See `./client.ts` for the rationale on
  * why we dispatch by `AI_INTEGRATIONS_PROVIDER`.
  *
- * HIPAA guard: MediFlow sends PHI to the LLM provider. Only Azure OpenAI
- * is BAA-covered. In production (`NODE_ENV === "production"`) this builder
- * hard-fails unless `AI_INTEGRATIONS_PROVIDER=azure`, so a misconfigured
- * deploy cannot silently route PHI to the standard OpenAI API (no BAA).
- * In dev/test the standard API is allowed. This mirrors the guard in
- * `artifacts/api-server/src/lib/aiProvider.ts`.
+ * HIPAA guard: MediFlow sends PHI to the LLM provider. Only BAA-covered
+ * providers may receive it: `azure` (Microsoft BAA) and `bedrock` (AWS BAA,
+ * via Bedrock's OpenAI-compatible endpoint). In production
+ * (`NODE_ENV === "production"`) this builder hard-fails unless the provider
+ * is HIPAA-eligible, so a misconfigured deploy cannot silently route PHI to
+ * the standard OpenAI API (no BAA). In dev/test the standard API is allowed.
+ * This mirrors the guard in `artifacts/api-server/src/lib/aiProvider.ts`.
  */
 import OpenAI, { AzureOpenAI } from "openai";
 
-/** The HIPAA-eligible provider value. Azure OpenAI is BAA-covered. */
-export const HIPAA_ELIGIBLE_PROVIDER = "azure" as const;
+/** Providers covered by a HIPAA BAA: `azure` (Microsoft) and `bedrock` (AWS). */
+export const HIPAA_ELIGIBLE_PROVIDERS: ReadonlySet<string> = new Set([
+  "azure",
+  "bedrock",
+]);
 
 export function buildOpenAIClient(): OpenAI {
   if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
@@ -24,10 +28,11 @@ export function buildOpenAIClient(): OpenAI {
 
   const provider = (process.env.AI_INTEGRATIONS_PROVIDER ?? "openai").toLowerCase();
 
-  if (process.env.NODE_ENV === "production" && provider !== HIPAA_ELIGIBLE_PROVIDER) {
+  if (process.env.NODE_ENV === "production" && !HIPAA_ELIGIBLE_PROVIDERS.has(provider)) {
     throw new Error(
-      "FATAL: AI_INTEGRATIONS_PROVIDER must be 'azure' in production — " +
-        "the standard OpenAI API has no HIPAA BAA and must not receive PHI. " +
+      "FATAL: AI_INTEGRATIONS_PROVIDER must be a HIPAA-eligible provider " +
+        "('azure' or 'bedrock') in production — the standard OpenAI API has no " +
+        "HIPAA BAA and must not receive PHI. " +
         `Got: ${process.env.AI_INTEGRATIONS_PROVIDER ?? "<unset>"}`,
     );
   }
