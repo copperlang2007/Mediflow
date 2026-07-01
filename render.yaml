@@ -25,7 +25,9 @@ services:
   - type: web
     name: mediflow-demo
     runtime: node
-    plan: starter
+    # Free instance for the throwaway demo (sleeps when idle, $0). Bump to
+    # starter/standard if you need it always-on.
+    plan: free
     buildCommand: corepack enable && corepack prepare pnpm@10.28.1 --activate && pnpm install --frozen-lockfile && VITE_DEMO_MODE=true pnpm --filter @workspace/web-app run build && pnpm --filter @workspace/api-server run build
     # Apply migrations and (idempotently) seed the demo data before the new
     # version goes live. seed:demo is a no-op once the demo org exists.
