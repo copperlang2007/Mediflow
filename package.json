@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
+    "evidence": "playwright test --config=runner/playwright.evidence.config.ts",
     "e2e:install": "playwright install --with-deps chromium",
     "seed:demo": "pnpm --filter @workspace/scripts run seed:demo"
   },

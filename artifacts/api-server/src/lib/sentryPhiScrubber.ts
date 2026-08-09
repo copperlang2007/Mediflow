@@ -29,6 +29,10 @@
  *   - event.tags (operator-curated; PHI shouldn't be there in the first place)
  *   - UUIDs, generic timestamps, ints, durations.
  */
+import { logger } from "./logger";
+
+/** Unknown top-level event keys already warned about this process. */
+const warnedUnknownEventKeys = new Set<string>();
 
 const MBI_REGEX =
   /\b[1-9](?:[A-HJ-NP-Z][A-HJ-NP-Z])(?:\d)-?(?:[A-HJ-NP-Z])(?:\d)-?(?:[A-HJ-NP-Z])(?:[A-HJ-NP-Z])(?:\d)(?:\d)\b/gi;
@@ -332,6 +336,18 @@ export function scrubSentryEvent<T extends SentryLikeEvent>(event: T): T {
   const record = event as Record<string, unknown>;
   for (const key of Object.keys(record)) {
     if (HANDLED_OR_EXEMPT.has(key)) continue;
+    // Warn (once per key per process) before deep-redacting an UNKNOWN key:
+    // a future SDK's structural field could be hex with 9+ digits, which the
+    // SSN pattern would corrupt — the exact trap event_id is exempted for.
+    // The warning surfaces new fields at upgrade time instead of silently.
+    if (!warnedUnknownEventKeys.has(key)) {
+      warnedUnknownEventKeys.add(key);
+      logger.warn(
+        { key },
+        "sentry scrubber: unknown top-level event key — deep-redacting; " +
+          "classify it in HANDLED_OR_EXEMPT if it is structural",
+      );
+    }
     record[key] = redactPhiDeep(record[key]);
   }
 
