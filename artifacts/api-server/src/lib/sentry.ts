@@ -127,6 +127,19 @@ export function initSentry(): void {
         for (const key of ["attributes", "data"]) {
           if (key in stripped) stripped[key] = {};
         }
+        // SpanJSON.links[] each carry their own attributes bag — the same
+        // PHI surface as span attributes. Keep only the structural link
+        // fields; anything else ships unscrubbed past a failed scrub.
+        if (Array.isArray(stripped.links)) {
+          stripped.links = (stripped.links as Array<Record<string, unknown>>).map(
+            (link) => ({
+              span_id: link?.span_id,
+              trace_id: link?.trace_id,
+              sampled: link?.sampled,
+              attributes: {},
+            }),
+          );
+        }
         return span;
       }
     },

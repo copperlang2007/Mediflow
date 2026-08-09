@@ -21,7 +21,36 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 // Arbitrary app-wide constant; every migration runner must use the same key.
 const MIGRATION_LOCK_KEY = 981_234_501;
 
+// Bounded acquisition: a blocking pg_advisory_lock would wait FOREVER on a
+// peer session that never releases (crashed-but-undetected pod, network
+// partition, pooler holding the session open) — and since startCommand
+// refuses to boot until migrate exits, the container would hang instead of
+// crash-restarting. try-lock + retry keeps the normal contended path (peer
+// finishes in seconds, we acquire on a retry) while capping the pathological
+// one: on timeout we exit 1 and Render's restart loop retries with a fresh
+// session.
+const LOCK_TIMEOUT_MS = 60_000;
+const LOCK_RETRY_MS = 500;
+
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+async function acquireLock(client: pg.Client): Promise<void> {
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  for (;;) {
+    const res = await client.query(
+      "SELECT pg_try_advisory_lock($1) AS locked",
+      [MIGRATION_LOCK_KEY],
+    );
+    if (res.rows[0]?.locked) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `migration lock not acquired within ${LOCK_TIMEOUT_MS}ms — ` +
+          "a peer migration runner is stuck holding it",
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+  }
+}
 
 async function main(): Promise<void> {
   if (!process.env.DATABASE_URL) {
@@ -30,7 +59,7 @@ async function main(): Promise<void> {
   const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
   try {
-    await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_LOCK_KEY]);
+    await acquireLock(client);
     const db = drizzle(client);
     await migrate(db, {
       migrationsFolder: path.join(here, "../migrations"),

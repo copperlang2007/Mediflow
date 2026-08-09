@@ -104,15 +104,22 @@ async function bootstrap(): Promise<void> {
   } catch (err) {
     logger.error({ err }, "Failed to start job queue");
     captureWorkerError(err, { worker: "bootstrap", phase: "startup" });
-    if (process.env.NODE_ENV === "production") {
+    // Fatal in production AND on Render (RENDER is set on every Render
+    // service): the demo blueprint health-checks /api/readyz, and a process
+    // that latches workers=not_ready would sit permanently unhealthy —
+    // Render never routes to it and never restarts it. Exiting turns a
+    // transient blip into a crash-restart-retry loop that self-heals.
+    if (process.env.NODE_ENV === "production" || process.env.RENDER) {
       logger.fatal(
         { err },
-        "Exiting: worker startup failure is fatal in production",
+        "Exiting: worker startup failure is fatal when a platform health-checks readiness",
       );
       process.exit(1);
     }
+    // Local dev only: keep iterating without queue infra; readiness will
+    // simply stay 503 because `markWorkersReady()` won't be called.
     logger.warn(
-      "Continuing without background jobs (non-production); /readyz will report not_ready",
+      "Continuing without background jobs (local dev); /readyz will report not_ready",
     );
   }
 

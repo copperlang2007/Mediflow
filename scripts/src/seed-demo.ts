@@ -776,11 +776,16 @@ async function seedCommissions(
   ];
 
   for (const s of statements) {
-    const exists = await db
-      .select({ id: commissionStatementsTable.id })
-      .from(commissionStatementsTable)
-      .where(eq(commissionStatementsTable.id, s.id));
-    if (exists.length === 0) {
+    // Guard on line-item COMPLETENESS, not statement existence: a crash
+    // between the statement insert and its line items would otherwise leave
+    // a permanently empty statement — the statement-exists check skipped the
+    // whole block on resume. All inserts below are id-stable +
+    // onConflictDoNothing, so re-running the incomplete branch is safe.
+    const existingLines = await db
+      .select({ id: commissionLineItemsTable.id })
+      .from(commissionLineItemsTable)
+      .where(eq(commissionLineItemsTable.statementId, s.id));
+    if (existingLines.length < 4) {
       await db.insert(commissionStatementsTable).values({
         id: s.id,
         orgId: DEMO_ORG_ID,
@@ -864,13 +869,17 @@ async function seedAll(): Promise<void> {
 
   // Completion marker, NOT the org row: a seed that crashed mid-run leaves
   // the org behind, and skipping on org-exists would freeze that partial
-  // state forever. Commissions are the LAST seeder, so their presence means
-  // a prior run finished; anything less re-runs the (idempotent) seeders.
+  // state forever. The marker is the LAST row the LAST seeder writes — the
+  // 4th line item of the humana statement — so a crash at ANY earlier point
+  // (including between a statement and its line items) leaves it missing and
+  // the next boot resumes the idempotent seeders. Checking statement
+  // existence froze a statement-without-line-items crash forever.
   if (existing.length > 0 && !RESET) {
+    const finalLineId = stableId("line", `${stableId("stmt", "humana-2025-04")}-3`);
     const done = await db
-      .select({ id: commissionStatementsTable.id })
-      .from(commissionStatementsTable)
-      .where(eq(commissionStatementsTable.orgId, DEMO_ORG_ID))
+      .select({ id: commissionLineItemsTable.id })
+      .from(commissionLineItemsTable)
+      .where(eq(commissionLineItemsTable.id, finalLineId))
       .limit(1);
     if (done.length > 0) {
       log(
