@@ -275,6 +275,21 @@ export function scrubSentryEvent<T extends SentryLikeEvent>(event: T): T {
     if (trace.data) {
       trace.data = redactPhiDeep(trace.data);
     }
+    // Sweep the REST of the trace context — v10's TraceContext also declares
+    // `tags` (a future OTel bridge or manual span tag could carry PHI there),
+    // and later SDKs may add more string-bearing fields. Exempt only the
+    // structural hex identifiers: 32-char trace ids can contain 9+
+    // consecutive digits and would false-positive the SSN pattern. Note the
+    // event-level `tags` exemption does NOT extend here — trace.tags is
+    // instrumentation-written, not operator-curated.
+    const TRACE_HANDLED_OR_EXEMPT = new Set([
+      "description", "op", "origin", "status", "data",
+      "trace_id", "span_id", "parent_span_id", "sampled",
+    ]);
+    for (const key of Object.keys(trace)) {
+      if (TRACE_HANDLED_OR_EXEMPT.has(key)) continue;
+      trace[key] = redactPhiDeep(trace[key]);
+    }
   }
 
   // v10: walk EVERY leaf on each span, same as the contexts loop — the OTel

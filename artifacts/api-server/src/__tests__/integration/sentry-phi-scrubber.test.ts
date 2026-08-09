@@ -248,6 +248,21 @@ describe("scrubSentryEvent — Sentry v10 (OTel-first) event shape", () => {
     expect(JSON.stringify(event.contexts.trace.data)).not.toContain(SSN);
   });
 
+  it("redacts PHI in trace.tags while preserving structural trace ids", () => {
+    const event = v10Event() as any;
+    // 32-char hex trace id containing 9+ consecutive digits — must NOT be
+    // corrupted by the SSN pattern.
+    const traceId = "ab123456789012cdab123456789012cd";
+    event.contexts.trace.trace_id = traceId;
+    event.contexts.trace.span_id = "1234567890abcdef";
+    event.contexts.trace.tags = { "user.ssn": SSN, "patient.email": EMAIL };
+    const scrubbed = scrubSentryEvent(event);
+    expect(JSON.stringify(scrubbed.contexts.trace.tags)).not.toContain(SSN);
+    expect(JSON.stringify(scrubbed.contexts.trace.tags)).not.toContain(EMAIL);
+    expect(scrubbed.contexts.trace.trace_id).toBe(traceId);
+    expect(scrubbed.contexts.trace.span_id).toBe("1234567890abcdef");
+  });
+
   it("redacts PHI in child span descriptions and data", () => {
     const event = scrubSentryEvent(v10Event());
     expect(event.spans[0].description).not.toContain(SSN);

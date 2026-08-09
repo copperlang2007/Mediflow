@@ -597,53 +597,52 @@ async function seedContacts(): Promise<string[]> {
 // ---- Pipeline + deals + activities + tasks ---------------------------------
 
 async function seedPipelineAndDeals(contactIds: string[]): Promise<void> {
-  const existing = await db
-    .select({ id: pipelinesTable.id })
-    .from(pipelinesTable)
-    .where(eq(pipelinesTable.id, PIPELINE_ID));
-  if (existing.length === 0) {
-    await db.insert(pipelinesTable).values({
-      id: PIPELINE_ID,
-      orgId: DEMO_ORG_ID,
-      name: "Medicare AEP 2025",
-      description: "Annual Enrollment Period pipeline",
-      isDefault: true,
-    }).onConflictDoNothing();
-    await db.insert(pipelineStagesTable).values([
-      {
-        id: STAGES.newLead,
-        pipelineId: PIPELINE_ID,
-        name: "New Lead",
-        orderIndex: 0,
-        color: "#94a3b8",
-        probabilityPct: 10,
-      },
-      {
-        id: STAGES.contacted,
-        pipelineId: PIPELINE_ID,
-        name: "Contacted",
-        orderIndex: 1,
-        color: "#3b82f6",
-        probabilityPct: 30,
-      },
-      {
-        id: STAGES.appointment,
-        pipelineId: PIPELINE_ID,
-        name: "Appointment Set",
-        orderIndex: 2,
-        color: "#a855f7",
-        probabilityPct: 60,
-      },
-      {
-        id: STAGES.enrolled,
-        pipelineId: PIPELINE_ID,
-        name: "Enrolled",
-        orderIndex: 3,
-        color: "#22c55e",
-        probabilityPct: 100,
-      },
-    ]).onConflictDoNothing();
-  }
+  // No pipeline-exists gate here: both inserts use fixed ids +
+  // onConflictDoNothing, so re-running them is already a no-op. Gating the
+  // stages on the PIPELINE row made a crash between the two inserts
+  // unrecoverable — the resume run would skip the stages forever and every
+  // deal insert would then fail its stage_id FK.
+  await db.insert(pipelinesTable).values({
+    id: PIPELINE_ID,
+    orgId: DEMO_ORG_ID,
+    name: "Medicare AEP 2025",
+    description: "Annual Enrollment Period pipeline",
+    isDefault: true,
+  }).onConflictDoNothing();
+  await db.insert(pipelineStagesTable).values([
+    {
+      id: STAGES.newLead,
+      pipelineId: PIPELINE_ID,
+      name: "New Lead",
+      orderIndex: 0,
+      color: "#94a3b8",
+      probabilityPct: 10,
+    },
+    {
+      id: STAGES.contacted,
+      pipelineId: PIPELINE_ID,
+      name: "Contacted",
+      orderIndex: 1,
+      color: "#3b82f6",
+      probabilityPct: 30,
+    },
+    {
+      id: STAGES.appointment,
+      pipelineId: PIPELINE_ID,
+      name: "Appointment Set",
+      orderIndex: 2,
+      color: "#a855f7",
+      probabilityPct: 60,
+    },
+    {
+      id: STAGES.enrolled,
+      pipelineId: PIPELINE_ID,
+      name: "Enrolled",
+      orderIndex: 3,
+      color: "#22c55e",
+      probabilityPct: 100,
+    },
+  ]).onConflictDoNothing();
 
   const dealStageRotation = [
     STAGES.newLead,
