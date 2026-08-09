@@ -349,3 +349,22 @@ describe("scrubSentryEvent — threads, mechanism.data, debug_meta, sdk", () => 
     expect(JSON.stringify((event as any).sdk)).not.toContain(EMAIL);
   });
 });
+
+describe("scrubSentryEvent — span leaves beyond description/data", () => {
+  const SSN = "123-45-6789";
+
+  it("redacts PHI in span.name, op, status_message, origin, attributes", () => {
+    const event = scrubSentryEvent({
+      spans: [
+        {
+          name: `GET /lookup?ssn=${SSN}`,
+          op: `http ${SSN}`,
+          status_message: `failed for ${SSN}`,
+          origin: `manual.${SSN}`,
+          attributes: { "url.full": `https://x.test/?ssn=${SSN}` },
+        },
+      ],
+    } as any);
+    expect(JSON.stringify((event as any).spans[0])).not.toContain(SSN);
+  });
+});

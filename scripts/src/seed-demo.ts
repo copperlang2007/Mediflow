@@ -161,12 +161,18 @@ async function seedOrg(): Promise<void> {
     .from(organizationsTable)
     .where(eq(organizationsTable.id, DEMO_ORG_ID));
   if (existing.length === 0) {
-    await db.insert(organizationsTable).values({
-      id: DEMO_ORG_ID,
-      name: "INSUREitALL Demo",
-      slug: "insureitall-demo",
-      planTier: "growth",
-    });
+    // onConflictDoNothing: two overlapping cold-boots (free-plan deploy over
+    // a waking instance) can both pass the check-then-insert race; the loser
+    // must not crash the boot chain on organizations_pkey.
+    await db
+      .insert(organizationsTable)
+      .values({
+        id: DEMO_ORG_ID,
+        name: "INSUREitALL Demo",
+        slug: "insureitall-demo",
+        planTier: "growth",
+      })
+      .onConflictDoNothing({ target: organizationsTable.id });
     log("[org] created INSUREitALL Demo");
   } else {
     log("[org] INSUREitALL Demo already exists");

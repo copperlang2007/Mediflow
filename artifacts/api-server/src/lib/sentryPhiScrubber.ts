@@ -93,6 +93,20 @@ export function redactPhiDeep<T>(value: T, depth = DEFAULT_DEPTH): T {
   return value;
 }
 
+/** Redact every string leaf and deep-walk every object leaf of a shallow
+ *  record IN PLACE. Used for span shapes (event.spans[] and the v2 streamed
+ *  span envelope), whose key set varies by SDK version and instrumentation. */
+export function scrubShallowLeaves(record: Record<string, unknown>): void {
+  for (const key of Object.keys(record)) {
+    const value = record[key];
+    if (typeof value === "string") {
+      record[key] = redactPhiString(value);
+    } else if (value && typeof value === "object") {
+      record[key] = redactPhiDeep(value);
+    }
+  }
+}
+
 // Minimal shape of the Sentry event we mutate. We use a structural type
 // here so this module doesn't pull `@sentry/types` into the build graph
 // — that lets the regex unit tests run without the full Sentry SDK.
@@ -255,15 +269,12 @@ export function scrubSentryEvent<T extends SentryLikeEvent>(event: T): T {
     }
   }
 
-  // v10: child spans carry the same attribute shape per span.
+  // v10: walk EVERY leaf on each span, same as the contexts loop — the OTel
+  // span JSON also carries name / op / status_message / origin / attributes,
+  // any of which a future annotator can populate with PHI.
   if (event.spans) {
     for (const span of event.spans) {
-      if (typeof span.description === "string") {
-        span.description = redactPhiString(span.description);
-      }
-      if (span.data) {
-        span.data = redactPhiDeep(span.data);
-      }
+      scrubShallowLeaves(span as Record<string, unknown>);
     }
   }
 

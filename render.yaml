@@ -32,10 +32,11 @@ services:
     # Migrate + seed run at container START, not preDeployCommand (silently
     # skipped on plan:free) and not buildCommand (DATABASE_URL injection into
     # free-plan build environments is not guaranteed; runtime env always has
-    # it). Both are idempotent — migrate replays the journal, seed:demo is a
-    # no-op once the demo org exists — so re-running on every cold start is
-    # safe. If this service is ever bumped to starter+, preDeployCommand is
-    # the cleaner shape.
+    # it). Both are idempotent when serial; if a deploy overlaps a waking
+    # instance, one boot's attempt may lose a unique-key race — that failure
+    # is logged, non-fatal (see below), and the surviving instance completes
+    # the work. If this service is ever bumped to starter+, preDeployCommand
+    # runs exactly once per deploy and is the cleaner shape.
     # migrate/seed failures must not block the bind: a transient DB error on a
     # free-plan cold start would otherwise restart-loop the demo. Both are
     # idempotent, so the next wake self-heals; the server still starts and

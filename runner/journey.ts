@@ -85,6 +85,22 @@ export async function runJourney(
 ) {
   const page = await context.newPage();
   const baseUrl = process.env.EVIDENCE_BASE_URL || 'http://localhost:5000';
+
+  // The runner records raw media — it performs NO redaction. A PHI-scoped
+  // journey against real data would therefore capture PHI into screenshots
+  // and video, so refuse outright. Operators declare the target's data
+  // class via EVIDENCE_DATA_SOURCE (default: synthetic).
+  const dataSource = (process.env.EVIDENCE_DATA_SOURCE || 'synthetic') as
+    | 'synthetic'
+    | 'deidentified'
+    | 'real';
+  if (journeyDef.phiScoped && dataSource === 'real') {
+    throw new Error(
+      `Journey '${journeyDef.name}' is phiScoped but EVIDENCE_DATA_SOURCE=real: ` +
+        'the evidence runner does not redact media — refusing to record. ' +
+        'Point EVIDENCE_BASE_URL at a synthetic/deidentified dataset.',
+    );
+  }
   const startTime = Date.now();
   const stepsDir = path.join(evidenceDir, 'steps');
   const evidenceSteps: EvidenceStep[] = [];
@@ -231,8 +247,11 @@ export async function runJourney(
     business_outcome_method: hasOutcomeAssertion ? 'explicit-assertion' : 'all-steps-passed',
     phi_gate: {
       scoped: journeyDef.phiScoped,
-      redaction: journeyDef.phiScoped,
-      data_source: 'synthetic',
+      // The runner does not scrub media, so the manifest must not attest a
+      // redaction control that was never applied. This stays false until a
+      // real media-redaction pass exists.
+      redaction: false,
+      data_source: dataSource,
     },
     steps: evidenceSteps,
     media: {

@@ -10,6 +10,7 @@ import * as Sentry from "@sentry/node";
 import {
   scrubSentryEvent,
   scrubSentryBreadcrumb,
+  scrubShallowLeaves,
 } from "./sentryPhiScrubber";
 import { getBuildInfo } from "./buildInfo";
 import { logger } from "./logger";
@@ -78,6 +79,24 @@ export function initSentry(): void {
         );
         // Fail closed: drop the transaction rather than ship unscrubbed PHI.
         return null;
+      }
+    },
+    // v10 streams spans as v2 span envelopes (streamGenAiSpans defaults to
+    // true) which route through beforeSendSpan — NOT beforeSendTransaction.
+    // Narrow surface today (genAI integrations gate recordInputs/outputs on
+    // sendDefaultPii, which is unset), but the hook must exist before anyone
+    // flips those flags.
+    beforeSendSpan(span) {
+      try {
+        scrubShallowLeaves(span as unknown as Record<string, unknown>);
+        return span;
+      } catch (err) {
+        logger.error(
+          { err, scrubberError: err instanceof Error ? err.message : String(err) },
+          "PHI SCRUBBER FAILED — HALTING SENTRY SPAN TRANSMISSION"
+        );
+        // Fail closed: drop the span rather than ship unscrubbed PHI.
+        return null as never;
       }
     },
     beforeBreadcrumb(breadcrumb) {
