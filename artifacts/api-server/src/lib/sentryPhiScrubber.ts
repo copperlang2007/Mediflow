@@ -98,11 +98,19 @@ export function redactPhiDeep<T>(value: T, depth = DEFAULT_DEPTH): T {
  *  span envelope), whose key set varies by SDK version and instrumentation. */
 export function scrubShallowLeaves(record: Record<string, unknown>): void {
   for (const key of Object.keys(record)) {
-    const value = record[key];
-    if (typeof value === "string") {
-      record[key] = redactPhiString(value);
-    } else if (value && typeof value === "object") {
-      record[key] = redactPhiDeep(value);
+    try {
+      const value = record[key];
+      if (typeof value === "string") {
+        record[key] = redactPhiString(value);
+      } else if (value && typeof value === "object") {
+        record[key] = redactPhiDeep(value);
+      }
+    } catch {
+      // Per-key fail-closed: a value the scrubber chokes on (revoked Proxy,
+      // hostile getter, broken toString) is dropped rather than shipped
+      // unscrubbed — and, critically, does not abort scrubbing of the
+      // REMAINING keys, which a single function-level throw would.
+      delete record[key];
     }
   }
 }

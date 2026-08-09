@@ -827,9 +827,10 @@ async function seedCommissions(
 
 // Whole-run serialization: the org-insert defer only guards the FIRST seed;
 // the resume branch (org exists, seed incomplete) previously let two boots
-// race check-then-insert seeders — including seedDefaultCarriers, whose
-// randomUUID rows have no unique backstop and duplicated silently. One
-// try-lock covers every branch. Same key discipline as migrate-locked.ts.
+// race check-then-insert seeders. One try-lock covers every branch. Same key
+// discipline as migrate-locked.ts. (seedDefaultCarriers now ALSO self-
+// serializes with a per-org pg_advisory_xact_lock — that closes the prod
+// org-creation double-submit path this run-level lock can't see.)
 const SEED_LOCK_KEY = 981_234_502;
 
 async function main(): Promise<void> {

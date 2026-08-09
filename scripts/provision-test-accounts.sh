@@ -31,8 +31,30 @@ NC='\033[0m'
 # PROVISION_TEST_ACCOUNTS.md. Refuse to plant them in anything that doesn't
 # look like a demo/preview/test pool. Fail-closed: if the pool can't be
 # described (typo'd ID, missing perms), we refuse too.
-POOL_NAME=$(aws cognito-idp describe-user-pool --user-pool-id "$USER_POOL_ID" \
-  --region "$REGION" --query 'UserPool.Name' --output text 2>/dev/null || echo '')
+POOL_DESCRIBE=$(aws cognito-idp describe-user-pool --user-pool-id "$USER_POOL_ID" \
+  --region "$REGION" --query 'UserPool.[Name,Arn]' --output text 2>/dev/null || echo '')
+# --output text tab-separates the [Name,Arn] pair; pool names may contain
+# spaces, so split on the tab — not whitespace — to keep the name intact.
+POOL_NAME=''
+POOL_ARN=''
+IFS=$'\t' read -r POOL_NAME POOL_ARN <<< "$POOL_DESCRIBE" || true
+
+# Layer 1 — resource tags. An Environment=Production/prod tag is an explicit
+# operator declaration and outranks any name heuristic: refuse with NO
+# override. (list-tags failure degrades to the name check below rather than
+# blocking pools that were never tagged.)
+if [ -n "$POOL_ARN" ]; then
+  ENV_TAG=$(aws cognito-idp list-tags-for-resource --resource-arn "$POOL_ARN" \
+    --region "$REGION" --query 'Tags.Environment' --output text 2>/dev/null || echo '')
+  ENV_TAG_LOWER="$(printf '%s' "$ENV_TAG" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$ENV_TAG_LOWER" == "production" || "$ENV_TAG_LOWER" == "prod" ]]; then
+    echo -e "${RED}Refusing: pool '${POOL_NAME}' is tagged Environment=${ENV_TAG}.${NC}"
+    echo "This guard has no override — demo credentials must never enter a production pool."
+    exit 1
+  fi
+fi
+
+# Layer 2 — name heuristic (overridable with I_KNOW_THIS_IS_NOT_PROD=1).
 # Case-insensitive; the token must START at a word boundary (start or
 # [-_.] delimiter) but may run into trailing letters/digits. This admits
 # legitimate names like "mediflow_demopool", "DemoUsers", "sandbox2"
@@ -45,6 +67,20 @@ if [[ ! "$POOL_NAME_LOWER" =~ (^|[-_.])(demo|preview|test|sandbox|staging) ]] \
   echo "Pool name does not contain demo/preview/test/sandbox/staging."
   echo "If this really is a non-production pool, re-run with I_KNOW_THIS_IS_NOT_PROD=1."
   exit 1
+fi
+
+# Layer 3 — interactive confirmation. When a human is at the keyboard, make
+# them type it: these credentials are documented publicly, so planting them is
+# never a decision to make on autopilot. Non-TTY (CI) runs rely on layers 1–2;
+# I_KNOW_THIS_IS_NOT_PROD=1 skips the prompt for scripted-but-supervised use.
+if [ -t 0 ] && [[ "${I_KNOW_THIS_IS_NOT_PROD:-0}" != "1" ]]; then
+  echo -e "${YELLOW}About to create demo accounts with a publicly documented password in:${NC}"
+  echo "  Pool: ${POOL_NAME:-<unknown>} ($USER_POOL_ID, $REGION)"
+  read -r -p "Type 'yes' to continue: " CONFIRM
+  if [[ "$CONFIRM" != "yes" ]]; then
+    echo "Aborted — nothing was created."
+    exit 1
+  fi
 fi
 
 echo "🔐 Provisioning test accounts for demo video capture"
