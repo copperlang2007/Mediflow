@@ -99,6 +99,18 @@ export async function runJourney(
   evidenceDir: string
 ) {
   const page = await context.newPage();
+  if (!process.env.EVIDENCE_BASE_URL) {
+    // Deliberate default, loud about it: local dev capture against
+    // localhost:5000 is the intended zero-config flow, but a demo-evidence
+    // run that FORGOT the env var must not silently record the wrong
+    // target. The manifest also records base_url, so evidence is never
+    // mislabeled — this warning is about catching the mistake before a
+    // full capture run wastes itself.
+    console.warn(
+      '⚠️  EVIDENCE_BASE_URL is not set — defaulting to http://localhost:5000. ' +
+        'Set it explicitly when capturing evidence against a deployed target.',
+    );
+  }
   const baseUrl = process.env.EVIDENCE_BASE_URL || 'http://localhost:5000';
 
   // The runner records raw media — it performs NO redaction. A PHI-scoped

@@ -54,17 +54,28 @@ if [ -n "$POOL_ARN" ]; then
   fi
 fi
 
-# Layer 2 — name heuristic (overridable with I_KNOW_THIS_IS_NOT_PROD=1).
-# Case-insensitive; the token must START at a word boundary (start or
-# [-_.] delimiter) but may run into trailing letters/digits. This admits
-# legitimate names like "mediflow_demopool", "DemoUsers", "sandbox2"
-# while still rejecting mid-word matches like "protest-workers" and
-# "attestation-users".
 POOL_NAME_LOWER="$(printf '%s' "$POOL_NAME" | tr '[:upper:]' '[:lower:]')"
-if [[ ! "$POOL_NAME_LOWER" =~ (^|[-_.])(demo|preview|test|sandbox|staging) ]] \
+
+# Layer 2a — prod-token denylist, NO override. A delimited "prod"/
+# "production" in the name ("us-test-prod-users") outranks any non-prod
+# token also present; like the tag check, this refusal is deliberate even
+# under I_KNOW_THIS_IS_NOT_PROD.
+if [[ "$POOL_NAME_LOWER" =~ (^|[-_.])(prod|production)([-_.]|$) ]]; then
+  echo -e "${RED}Refusing: pool name '${POOL_NAME}' contains a prod token.${NC}"
+  echo "This guard has no override — demo credentials must never enter a production pool."
+  exit 1
+fi
+
+# Layer 2 — name heuristic (overridable with I_KNOW_THIS_IS_NOT_PROD=1).
+# Case-insensitive; the token must be delimited on BOTH sides (start/end or
+# [-_.], with trailing digits allowed). Left-only anchoring let
+# "stagingProdMigration-users" pass as "staging"; requiring the right
+# boundary rejects it. Cost: run-together names like "demopool" now need
+# the override or an Environment tag — the safe direction.
+if [[ ! "$POOL_NAME_LOWER" =~ (^|[-_.])(demo|preview|test|sandbox|staging)([-_.0-9]|$) ]] \
    && [[ "${I_KNOW_THIS_IS_NOT_PROD:-0}" != "1" ]]; then
   echo -e "${RED}Refusing to provision demo accounts in pool '${POOL_NAME:-<not found>}'${NC}"
-  echo "Pool name does not contain demo/preview/test/sandbox/staging."
+  echo "Pool name does not contain a delimited demo/preview/test/sandbox/staging token."
   echo "If this really is a non-production pool, re-run with I_KNOW_THIS_IS_NOT_PROD=1."
   exit 1
 fi
