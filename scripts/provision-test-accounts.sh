@@ -69,6 +69,22 @@ if [[ ! "$POOL_NAME_LOWER" =~ (^|[-_.])(demo|preview|test|sandbox|staging) ]] \
   exit 1
 fi
 
+# Layer 2b — non-interactive runs need an AFFIRMATIVE signal. With no TTY to
+# confirm (Layer 3 skipped) and no Environment tag to consult (Layer 1
+# degraded), a name token alone is too weak: "staging-shadow-prod" or
+# "sandbox-migration-users" would pass the name check while pointing at a
+# prod-adjacent pool. Require the tag to exist (any non-prod value) or the
+# explicit override.
+if [ ! -t 0 ] && [[ "${I_KNOW_THIS_IS_NOT_PROD:-0}" != "1" ]]; then
+  ENV_TAG_LOWER="${ENV_TAG_LOWER:-}"
+  if [[ -z "$ENV_TAG_LOWER" || "$ENV_TAG_LOWER" == "none" ]]; then
+    echo -e "${RED}Refusing (non-interactive): pool '${POOL_NAME}' has no Environment tag.${NC}"
+    echo "Unattended runs need an affirmative non-prod signal — tag the pool"
+    echo "(e.g. Environment=Demo) or set I_KNOW_THIS_IS_NOT_PROD=1."
+    exit 1
+  fi
+fi
+
 # Layer 3 — interactive confirmation. When a human is at the keyboard, make
 # them type it: these credentials are documented publicly, so planting them is
 # never a decision to make on autopilot. Non-TTY (CI) runs rely on layers 1–2;

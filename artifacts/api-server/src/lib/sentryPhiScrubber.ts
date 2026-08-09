@@ -36,9 +36,13 @@ const warnedUnknownEventKeys = new Set<string>();
 
 const MBI_REGEX =
   /\b[1-9](?:[A-HJ-NP-Z][A-HJ-NP-Z])(?:\d)-?(?:[A-HJ-NP-Z])(?:\d)-?(?:[A-HJ-NP-Z])(?:[A-HJ-NP-Z])(?:\d)(?:\d)\b/gi;
-// SSN: 3-2-4 with optional dashes. Pre-check is the trailing 4-digit
-// block so we don't grab any 9-digit blob. Lookarounds prevent eating
-// surrounding alnums.
+// SSN: 3-2-4 dashed, OR a standalone 9-digit run. Lookarounds prevent
+// eating digits embedded in longer alnum/hyphenated tokens (UUIDs, hex ids).
+// DELIBERATE over-redaction trade-off: a bare 9-digit URL path segment
+// (/api/things/123456789/) WOULD be redacted — accepted, because dropping
+// the undashed form means an SSN typed without dashes in a query string or
+// error message ships unscrubbed, and this codebase's identifiers are all
+// UUIDs, never bare 9-digit numbers. Fail closed.
 const SSN_REGEX = /(?<![\w-])(\d{3}-\d{2}-\d{4}|\d{9})(?![\w-])/g;
 const EMAIL_REGEX =
   /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
