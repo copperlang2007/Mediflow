@@ -11,6 +11,10 @@ export interface JourneyStep {
    *  demo deployments (VITE_DEMO_MODE) swap the auth provider for a shim
    *  that is always signed in and renders no login form at all. */
   authStep?: boolean;
+  /** Human-readable descriptions of what this step's expect() verifies —
+   *  recorded verbatim in the evidence manifest so an auditor can tell WHAT
+   *  a passing step proved, not merely that it didn't throw. */
+  assertionLabels?: string[];
 }
 
 export interface JourneyDefinition {
@@ -186,7 +190,12 @@ export async function runJourney(
         ms: stepMs,
         screenshot: path.relative(evidenceDir, screenshotPath),
         sha256: sha256File(screenshotPath),
-        assertions: ['step completed'],
+        // Step-specific evidence, not a boilerplate literal: authors describe
+        // what their expect() verified via assertionLabels; the fallback at
+        // least names WHICH step's expect held.
+        assertions: step.assertionLabels?.length
+          ? step.assertionLabels
+          : [`expect(${step.name}) passed`],
       });
     } catch (err) {
       const stepMs = Date.now() - stepStartTime;

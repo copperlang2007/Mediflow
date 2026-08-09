@@ -43,7 +43,7 @@ services:
     # Render). Seed failure stays fail-open: the app serves fine against an
     # already-seeded DB, and the advisory-locked seeder self-heals next wake.
     startCommand: >-
-      pnpm --filter @workspace/db run migrate || (echo 'migrate failed — refusing to start' && exit 1);
+      pnpm --filter @workspace/db run migrate || { echo 'migrate failed — refusing to start'; exit 1; };
       pnpm seed:demo || echo 'seed failed — continuing';
       pnpm --filter @workspace/api-server run start
     # Probe readiness, not the static SPA shell: / returns 200 from

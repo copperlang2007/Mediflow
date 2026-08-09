@@ -23,12 +23,27 @@ export function initSentry(): void {
   if (initialized) return;
 
   const build = getBuildInfo();
+
+  // Env-tunable: v10's OTel-first instrumentation captures a broader span
+  // surface than v8 once the --import loader flow lands, so quota burn can
+  // shift. Default unchanged; lower via env without a deploy-time code edit.
+  // Validate the parse: Number('high') is NaN, which Sentry maps to
+  // undefined and silently discards EVERY transaction — and its own invalid-
+  // rate warning is debug-build-only, so a typo'd env var would kill tracing
+  // in prod with zero signal. Fall back loudly instead.
+  const rawRate = process.env.SENTRY_TRACES_SAMPLE_RATE;
+  let tracesSampleRate = rawRate === undefined ? 0.1 : Number(rawRate);
+  if (!Number.isFinite(tracesSampleRate) || tracesSampleRate < 0 || tracesSampleRate > 1) {
+    logger.warn(
+      { rawRate },
+      "invalid SENTRY_TRACES_SAMPLE_RATE — defaulting to 0.1",
+    );
+    tracesSampleRate = 0.1;
+  }
+
   Sentry.init({
     dsn,
-    // Env-tunable: v10's OTel-first instrumentation captures a broader span
-    // surface than v8 once the --import loader flow lands, so quota burn can
-    // shift. Default unchanged; lower via env without a deploy-time code edit.
-    tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? 0.1),
+    tracesSampleRate,
     environment: process.env.NODE_ENV ?? "development",
     // Tie events to the deploy artifact. The cascade in buildInfo.ts
     // falls back to "unknown" — Sentry accepts that as a release name,
