@@ -319,3 +319,33 @@ describe("scrubSentryEvent — root trace fields and string-valued context bucke
     expect((event.contexts as any).note).not.toContain(EMAIL);
   });
 });
+
+describe("scrubSentryEvent — threads, mechanism.data, debug_meta, sdk", () => {
+  const SSN = "123-45-6789";
+  const EMAIL = "alice@example.com";
+
+  it("redacts PHI in threads[].stacktrace.frames[].vars", () => {
+    const event = scrubSentryEvent({
+      threads: { values: [{ stacktrace: { frames: [{ vars: { ssn: SSN } }] } }] },
+    } as any);
+    expect(JSON.stringify((event as any).threads)).not.toContain(SSN);
+  });
+
+  it("redacts PHI in exception.values[].mechanism.data", () => {
+    const event = scrubSentryEvent({
+      exception: {
+        values: [{ value: "boom", mechanism: { type: "http", data: { url: `https://x.test/?ssn=${SSN}` } } }],
+      },
+    } as any);
+    expect(JSON.stringify((event.exception as any).values[0].mechanism.data)).not.toContain(SSN);
+  });
+
+  it("redacts PHI in debug_meta and sdk buckets", () => {
+    const event = scrubSentryEvent({
+      debug_meta: { images: [{ code_file: `/tmp/${EMAIL}.map` }] },
+      sdk: { name: "sentry.javascript.node", note: EMAIL },
+    } as any);
+    expect(JSON.stringify((event as any).debug_meta)).not.toContain(EMAIL);
+    expect(JSON.stringify((event as any).sdk)).not.toContain(EMAIL);
+  });
+});

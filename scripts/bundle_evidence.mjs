@@ -83,11 +83,12 @@ function zipDirectory(dir, zipPath) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const bundlePath = path.join(evidenceDir, `..`, `evidence-bundle-${manifest.journey}-${timestamp}.zip`);
 
-  zipDirectory(evidenceDir, bundlePath);
+  // Write MANIFEST.sha256 into the evidence dir BEFORE zipping so the
+  // sidecar hash lands in the archive root.
+  const manifestHashPath = path.join(evidenceDir, 'MANIFEST.sha256');
+  fs.writeFileSync(manifestHashPath, `${manifest.manifest_sha256}  evidence.json\n`);
 
-  // Write MANIFEST.sha256 into the bundle root
-  const manifestHashPath = path.join(path.dirname(bundlePath), 'MANIFEST.sha256');
-  fs.writeFileSync(manifestHashPath, `${manifest.manifest_sha256}  evidence.json`);
+  zipDirectory(evidenceDir, bundlePath);
 
   console.log(`\n✅ Evidence bundle created`);
   console.log(`   Path: ${bundlePath}`);

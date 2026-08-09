@@ -16,6 +16,11 @@ export interface JourneyDefinition {
   phiScoped: boolean;
   businessOutcome: string;
   steps: JourneyStep[];
+  /** Optional terminal assertion proving the BUSINESS outcome specifically —
+   *  distinct from step expects, which only prove the steps ran. When present,
+   *  business_outcome_verified reflects THIS assertion; when absent, the
+   *  manifest records that verification was steps-only. */
+  businessOutcomeAssertion?: (page: Page, expect: any) => Promise<void>;
 }
 
 export interface EvidenceStep {
@@ -38,6 +43,10 @@ export interface EvidenceManifest {
   duration_ms: number;
   business_outcome: string;
   business_outcome_verified: boolean;
+  /** 'explicit-assertion': a dedicated businessOutcomeAssertion passed.
+   *  'all-steps-passed': no dedicated assertion exists; verified only means
+   *  every step's expect held — a weaker claim, stated as such. */
+  business_outcome_method: 'explicit-assertion' | 'all-steps-passed';
   phi_gate: {
     scoped: boolean;
     redaction: boolean;
@@ -162,6 +171,19 @@ export async function runJourney(
     }
   }
 
+  // Business-outcome gate: run the dedicated assertion (if defined) after the
+  // steps, before media finalization, so its result lands in the manifest.
+  let outcomeVerified = passed;
+  const hasOutcomeAssertion = typeof journeyDef.businessOutcomeAssertion === 'function';
+  if (passed && hasOutcomeAssertion) {
+    try {
+      await journeyDef.businessOutcomeAssertion!(page, expect);
+    } catch (err) {
+      outcomeVerified = false;
+      console.log(`   ✗ business outcome assertion failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   const totalMs = Date.now() - startTime;
 
   // Finalize media BEFORE the manifest so their hashes can be recorded in it.
@@ -205,7 +227,8 @@ export async function runJourney(
     result: passed ? 'pass' : 'fail',
     duration_ms: totalMs,
     business_outcome: journeyDef.businessOutcome,
-    business_outcome_verified: passed,
+    business_outcome_verified: outcomeVerified,
+    business_outcome_method: hasOutcomeAssertion ? 'explicit-assertion' : 'all-steps-passed',
     phi_gate: {
       scoped: journeyDef.phiScoped,
       redaction: journeyDef.phiScoped,

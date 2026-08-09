@@ -163,7 +163,38 @@ export function scrubSentryEvent<T extends SentryLikeEvent>(event: T): T {
           }
         }
       }
+      // v10 HTTP auto-instrumentation can stash request/response URLs (and
+      // bodies, when configured) on mechanism.data.
+      const mechanism = (ex as Record<string, any>).mechanism;
+      if (mechanism?.data) {
+        mechanism.data = redactPhiDeep(mechanism.data);
+      }
     }
+  }
+
+  // threads carry the same frames[].vars surface as exception stacktraces.
+  const threads = (event as Record<string, any>).threads;
+  if (threads?.values) {
+    for (const thread of threads.values) {
+      const frames = thread?.stacktrace?.frames;
+      if (frames) {
+        for (const frame of frames) {
+          if (frame.vars) {
+            frame.vars = redactPhiDeep(frame.vars);
+          }
+        }
+      }
+    }
+  }
+
+  // debug_meta / sdk are metadata buckets; scrubbing them is cheap and closes
+  // the last string-bearing top-level surfaces.
+  const anyEvent = event as Record<string, any>;
+  if (anyEvent.debug_meta) {
+    anyEvent.debug_meta = redactPhiDeep(anyEvent.debug_meta);
+  }
+  if (anyEvent.sdk) {
+    anyEvent.sdk = redactPhiDeep(anyEvent.sdk);
   }
 
   if (event.request) {
