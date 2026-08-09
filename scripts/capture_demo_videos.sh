@@ -40,8 +40,8 @@ mkdir -p "$EVIDENCE_OUTPUT"
 # Run each journey
 for journey in "${JOURNEYS[@]}"; do
   if [ ! -f "$journey" ]; then
-    echo "⚠️  Journey not found: $journey"
-    continue
+    echo "❌ Journey not found: $journey" >&2
+    exit 1
   fi
 
   echo ""

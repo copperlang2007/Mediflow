@@ -26,6 +26,21 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# ── Pool-scope guard ─────────────────────────────────────────────────────────
+# These accounts use a password that is documented publicly in
+# PROVISION_TEST_ACCOUNTS.md. Refuse to plant them in anything that doesn't
+# look like a demo/preview/test pool. Fail-closed: if the pool can't be
+# described (typo'd ID, missing perms), we refuse too.
+POOL_NAME=$(aws cognito-idp describe-user-pool --user-pool-id "$USER_POOL_ID" \
+  --region "$REGION" --query 'UserPool.Name' --output text 2>/dev/null || echo '')
+if [[ ! "$POOL_NAME" =~ (demo|preview|test|sandbox|staging) ]] \
+   && [[ "${I_KNOW_THIS_IS_NOT_PROD:-0}" != "1" ]]; then
+  echo -e "${RED}Refusing to provision demo accounts in pool '${POOL_NAME:-<not found>}'${NC}"
+  echo "Pool name does not contain demo/preview/test/sandbox/staging."
+  echo "If this really is a non-production pool, re-run with I_KNOW_THIS_IS_NOT_PROD=1."
+  exit 1
+fi
+
 echo "🔐 Provisioning test accounts for demo video capture"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "User Pool ID: $USER_POOL_ID"
