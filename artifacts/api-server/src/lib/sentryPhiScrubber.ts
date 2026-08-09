@@ -293,6 +293,25 @@ export function scrubSentryEvent<T extends SentryLikeEvent>(event: T): T {
     }
   }
 
+  // Future-proofing sweep: any top-level key a later SDK version introduces
+  // gets deep-redacted rather than passing through untouched. Exemptions are
+  // (a) keys already handled above with shape-aware logic, (b) structural
+  // identifiers where pattern redaction could corrupt the event (event_id is
+  // hex and can contain 9+ consecutive digits, tripping the SSN pattern),
+  // and (c) tags — deliberately untouched per the design note above.
+  const HANDLED_OR_EXEMPT = new Set([
+    "message", "exception", "threads", "request", "transaction", "user",
+    "contexts", "spans", "extra", "breadcrumbs", "debug_meta", "sdk",
+    "event_id", "timestamp", "start_timestamp", "type", "platform", "level",
+    "release", "dist", "environment", "server_name", "logger", "modules",
+    "fingerprint", "tags",
+  ]);
+  const record = event as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (HANDLED_OR_EXEMPT.has(key)) continue;
+    record[key] = redactPhiDeep(record[key]);
+  }
+
   return event;
 }
 

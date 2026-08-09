@@ -368,3 +368,25 @@ describe("scrubSentryEvent — span leaves beyond description/data", () => {
     expect(JSON.stringify((event as any).spans[0])).not.toContain(SSN);
   });
 });
+
+describe("scrubSentryEvent — unknown-key fallback sweep", () => {
+  const SSN = "123-45-6789";
+
+  it("deep-redacts PHI in top-level keys the scrubber does not know about", () => {
+    const event = scrubSentryEvent({
+      unknown_future_field: { details: `ssn=${SSN} phone=+15555550123` },
+    } as any);
+    const s = JSON.stringify((event as any).unknown_future_field);
+    expect(s).not.toContain(SSN);
+    expect(s).not.toContain("+15555550123");
+  });
+
+  it("leaves structural identifiers and tags untouched", () => {
+    const event = scrubSentryEvent({
+      event_id: "1234567890abcdef1234567890abcdef",
+      tags: { member_note: "operator-curated 123-45-6789" },
+    } as any);
+    expect((event as any).event_id).toBe("1234567890abcdef1234567890abcdef");
+    expect((event as any).tags.member_note).toContain("123-45-6789");
+  });
+});

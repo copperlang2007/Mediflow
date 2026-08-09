@@ -33,10 +33,13 @@ NC='\033[0m'
 # described (typo'd ID, missing perms), we refuse too.
 POOL_NAME=$(aws cognito-idp describe-user-pool --user-pool-id "$USER_POOL_ID" \
   --region "$REGION" --query 'UserPool.Name' --output text 2>/dev/null || echo '')
-# Token must be a full [-_.]-delimited segment: "mediflow-demo" and
-# "intelbridge-staging-2" pass; "protest-workers" and "attestation-users"
-# (substring inside a word) do not.
-if [[ ! "$POOL_NAME" =~ (^|[-_.])(demo|preview|test|sandbox|staging)([-_.]|$) ]] \
+# Case-insensitive; the token must START at a word boundary (start or
+# [-_.] delimiter) but may run into trailing letters/digits. This admits
+# legitimate names like "mediflow_demopool", "DemoUsers", "sandbox2"
+# while still rejecting mid-word matches like "protest-workers" and
+# "attestation-users".
+POOL_NAME_LOWER="$(printf '%s' "$POOL_NAME" | tr '[:upper:]' '[:lower:]')"
+if [[ ! "$POOL_NAME_LOWER" =~ (^|[-_.])(demo|preview|test|sandbox|staging) ]] \
    && [[ "${I_KNOW_THIS_IS_NOT_PROD:-0}" != "1" ]]; then
   echo -e "${RED}Refusing to provision demo accounts in pool '${POOL_NAME:-<not found>}'${NC}"
   echo "Pool name does not contain demo/preview/test/sandbox/staging."
@@ -81,36 +84,42 @@ create_user() {
 
   echo -n "Creating $product - $role ($email)... "
 
-  if aws cognito-idp admin-create-user \
+  local create_err="" create_rc=0
+  create_err=$(aws cognito-idp admin-create-user \
     --user-pool-id "$USER_POOL_ID" \
     --username "$email" \
     --user-attributes Name="email",Value="$email" Name="email_verified",Value="true" \
     --temporary-password "$ACCOUNT_PASSWORD" \
     --message-action SUPPRESS \
-    --region "$REGION" 2>/dev/null; then
+    --region "$REGION" 2>&1 >/dev/null) || create_rc=$?
 
-    # Set permanent password
+  if [ "$create_rc" -eq 0 ]; then
     aws cognito-idp admin-set-user-password \
       --user-pool-id "$USER_POOL_ID" \
       --username "$email" \
       --password "$ACCOUNT_PASSWORD" \
       --permanent \
-      --region "$REGION" 2>/dev/null
-
+      --region "$REGION"
     echo -e "${GREEN}✓${NC}"
     return 0
-  else
-    # User may already exist, try to set password anyway
+  fi
+
+  # Only reset the password when the user genuinely already exists — any
+  # other failure (throttle, validation, wrong region) must NOT silently
+  # rewrite an existing user's credentials.
+  if [[ "$create_err" == *UsernameExistsException* ]]; then
     aws cognito-idp admin-set-user-password \
       --user-pool-id "$USER_POOL_ID" \
       --username "$email" \
       --password "$ACCOUNT_PASSWORD" \
       --permanent \
-      --region "$REGION" 2>/dev/null || true
-
-    echo -e "${YELLOW}✓ (exists)${NC}"
+      --region "$REGION"
+    echo -e "${YELLOW}✓ (exists — password reset)${NC}"
     return 0
   fi
+
+  echo -e "${RED}✗ admin-create-user failed:${NC} $create_err" >&2
+  exit 1
 }
 
 # Mediflow authenticates via Clerk, NOT Cognito (see PROVISION_TEST_ACCOUNTS.md).
