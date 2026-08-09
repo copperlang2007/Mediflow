@@ -12,7 +12,10 @@ bash scripts/validate_evidence_setup.sh
 
 ```bash
 cp .env.evidence.example .env.evidence
-# Edit with your target URL + test Cognito accounts
+# Edit with your target URL + test accounts.
+# Targeting the auth-bypassed DEMO_MODE deploy (render.yaml)? Set
+# EVIDENCE_ASSUME_SIGNED_IN=1 — it has no login form, so login steps
+# are skipped and recorded as such.
 nano .env.evidence
 source .env.evidence
 ```
