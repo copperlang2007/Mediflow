@@ -17,7 +17,7 @@ export default defineJourney({
       },
     },
     {
-      name: 'cognito-login-compliance-admin',
+      name: 'login-compliance-admin',
       do: async (p) => {
         const email = p.locator('input[type="email"]').first();
         const password = p.locator('input[type="password"]').first();

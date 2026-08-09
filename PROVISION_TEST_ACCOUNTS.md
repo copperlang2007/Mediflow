@@ -2,6 +2,13 @@
 
 This guide walks you through creating the 16 test accounts needed to capture demo videos for IntelBRIDGE and Mediflow.
 
+> **Important — which IdP does each product use?**
+> - **IntelBRIDGE** authenticates via **AWS Cognito** — the script below applies.
+> - **Mediflow** authenticates via **Clerk**, not Cognito. Create Mediflow test
+>   accounts in the Clerk Dashboard (Users -> Create user) or via the Clerk
+>   Backend API, using the same emails listed below and the password you choose.
+>   The Cognito script sections apply to IntelBRIDGE pools only.
+
 ## Prerequisites
 
 - **AWS Account** with access to Cognito
@@ -24,15 +31,15 @@ From the repo root:
 
 ```bash
 # For Mediflow
-./scripts/provision-test-accounts.sh <MEDIFLOW_USER_POOL_ID> TempPass123!@#
+# Mediflow uses Clerk — see the note above; this script is for IntelBRIDGE
 
 # For IntelBRIDGE
-./scripts/provision-test-accounts.sh <INTELBRIDGE_USER_POOL_ID> TempPass123!@#
+./scripts/provision-test-accounts.sh <INTELBRIDGE_USER_POOL_ID> 'YourStrongPassword123!'
 ```
 
 **Example:**
 ```bash
-./scripts/provision-test-accounts.sh us-east-1_abc123def456 TempPass123!@#
+./scripts/provision-test-accounts.sh us-east-1_abc123def456 'YourStrongPassword123!'
 ```
 
 ### 3. Verify in AWS Console
@@ -100,7 +107,7 @@ Videos will be saved to `./evidence/{journey}-{timestamp}/`
 | `owner.demo@intelbridge.local` | Agency Owner | Team provisioning → roles |
 | `viewer.demo@intelbridge.local` | Viewer | Read-only dashboard |
 
-**All passwords:** `DemoPass123!SecureEnough`
+**All passwords:** the `ACCOUNT_PASSWORD` you pass to the script — update `TEST_*_PASSWORD` in `.env.evidence` to match
 
 ---
 
@@ -146,7 +153,7 @@ If you prefer to create accounts manually in AWS Console:
 2. Click **Create user**
 3. For each role, create:
    - Email: `{role}.demo@{product}.local`
-   - Password: `DemoPass123!SecureEnough` (mark as **Permanent**)
+   - Password: your chosen account password (mark as **Permanent**)
    - Email verified: ✅ (check the box)
 4. Assign to appropriate group/role
 

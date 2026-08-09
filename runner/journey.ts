@@ -233,5 +233,11 @@ export async function runJourney(
       `   Manifest: ${manifestPath}`
   );
 
+  // The manifest above is the evidence record; this throw is the CI signal.
+  // Without it Playwright reports every journey green regardless of outcome.
+  if (!passed) {
+    throw new Error(`Journey '${journeyDef.name}' failed — see ${manifestPath}`);
+  }
+
   return { manifest, passed };
 }

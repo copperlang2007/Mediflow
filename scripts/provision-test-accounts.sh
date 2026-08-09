@@ -7,17 +7,17 @@
 set -e
 
 if [ $# -lt 2 ]; then
-  echo "Usage: $0 <COGNITO_USER_POOL_ID> <TEMP_PASSWORD>"
+  echo "Usage: $0 <COGNITO_USER_POOL_ID> <ACCOUNT_PASSWORD>"
   echo ""
   echo "Example:"
-  echo "  $0 us-east-1_abcdef1234 TempPass123!@#"
+  echo "  $0 us-east-1_abcdef1234 'YourStrongPassword123!'"
   echo ""
   echo "Find your COGNITO_USER_POOL_ID in AWS Console > Cognito > User Pools"
   exit 1
 fi
 
 USER_POOL_ID="$1"
-TEMP_PASSWORD="$2"
+ACCOUNT_PASSWORD="$2"
 REGION="${AWS_REGION:-us-east-1}"
 
 # Color output
@@ -33,7 +33,10 @@ NC='\033[0m'
 # described (typo'd ID, missing perms), we refuse too.
 POOL_NAME=$(aws cognito-idp describe-user-pool --user-pool-id "$USER_POOL_ID" \
   --region "$REGION" --query 'UserPool.Name' --output text 2>/dev/null || echo '')
-if [[ ! "$POOL_NAME" =~ (demo|preview|test|sandbox|staging) ]] \
+# Token must be a full [-_.]-delimited segment: "mediflow-demo" and
+# "intelbridge-staging-2" pass; "protest-workers" and "attestation-users"
+# (substring inside a word) do not.
+if [[ ! "$POOL_NAME" =~ (^|[-_.])(demo|preview|test|sandbox|staging)([-_.]|$) ]] \
    && [[ "${I_KNOW_THIS_IS_NOT_PROD:-0}" != "1" ]]; then
   echo -e "${RED}Refusing to provision demo accounts in pool '${POOL_NAME:-<not found>}'${NC}"
   echo "Pool name does not contain demo/preview/test/sandbox/staging."
@@ -82,7 +85,7 @@ create_user() {
     --user-pool-id "$USER_POOL_ID" \
     --username "$email" \
     --user-attributes Name="email",Value="$email" Name="email_verified",Value="true" \
-    --temporary-password "$TEMP_PASSWORD" \
+    --temporary-password "$ACCOUNT_PASSWORD" \
     --message-action SUPPRESS \
     --region "$REGION" 2>/dev/null; then
 
@@ -90,7 +93,7 @@ create_user() {
     aws cognito-idp admin-set-user-password \
       --user-pool-id "$USER_POOL_ID" \
       --username "$email" \
-      --password "DemoPass123!SecureEnough" \
+      --password "$ACCOUNT_PASSWORD" \
       --permanent \
       --region "$REGION" 2>/dev/null
 
@@ -101,7 +104,7 @@ create_user() {
     aws cognito-idp admin-set-user-password \
       --user-pool-id "$USER_POOL_ID" \
       --username "$email" \
-      --password "DemoPass123!SecureEnough" \
+      --password "$ACCOUNT_PASSWORD" \
       --permanent \
       --region "$REGION" 2>/dev/null || true
 
@@ -132,7 +135,7 @@ echo ""
 echo "Test accounts are ready for demo video capture:"
 echo ""
 echo "  Email template: {role}.demo@{product}.local"
-echo "  Password: DemoPass123!SecureEnough"
+echo "  Password: the ACCOUNT_PASSWORD you supplied"
 echo ""
 echo "Next steps:"
 echo "  1. Assign roles/groups in AWS Cognito console"

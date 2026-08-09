@@ -17,7 +17,7 @@ export default defineJourney({
       },
     },
     {
-      name: 'cognito-login-supervisor',
+      name: 'login-supervisor',
       do: async (p) => {
         const email = p.locator('input[type="email"]').first();
         const password = p.locator('input[type="password"]').first();
