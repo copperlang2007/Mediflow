@@ -269,13 +269,17 @@ export async function runJourney(
     }
   }
 
+  // A journey passes only when its steps AND its business-outcome assertion
+  // (when defined) hold — a green result must never outrank the outcome gate.
+  const overall = passed && outcomeVerified;
+
   const manifest: EvidenceManifest = {
     journey: journeyDef.name,
     description: journeyDef.description,
     target: journeyDef.target,
     base_url: baseUrl,
     run_utc: new Date().toISOString(),
-    result: passed ? 'pass' : 'fail',
+    result: overall ? 'pass' : 'fail',
     duration_ms: totalMs,
     business_outcome: journeyDef.businessOutcome,
     business_outcome_verified: outcomeVerified,
@@ -305,16 +309,19 @@ export async function runJourney(
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
   console.log(
-    `\n📊 Journey ${passed ? 'PASSED' : 'FAILED'} (${totalMs}ms)\n` +
+    `\n📊 Journey ${overall ? 'PASSED' : 'FAILED'} (${totalMs}ms)\n` +
       `   Evidence: ${evidenceDir}\n` +
       `   Manifest: ${manifestPath}`
   );
 
   // The manifest above is the evidence record; this throw is the CI signal.
   // Without it Playwright reports every journey green regardless of outcome.
-  if (!passed) {
-    throw new Error(`Journey '${journeyDef.name}' failed — see ${manifestPath}`);
+  if (!overall) {
+    throw new Error(
+      `Journey '${journeyDef.name}' failed — steps=${passed ? 'pass' : 'fail'} ` +
+        `outcome=${outcomeVerified ? 'pass' : 'fail'}. See ${manifestPath}`,
+    );
   }
 
-  return { manifest, passed };
+  return { manifest, passed: overall };
 }

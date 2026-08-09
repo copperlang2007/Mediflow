@@ -51,6 +51,11 @@ for journey in "${JOURNEYS[@]}"; do
   # Set environment variables
   export EVIDENCE_BASE_URL="$BASE_URL"
   export EVIDENCE_HEADED="$HEADED"
+  # Forward the auth-skip + data-source flags (demo deploys are auth-bypassed
+  # and render no login form — without ASSUME_SIGNED_IN every journey dies at
+  # the login step there).
+  export EVIDENCE_ASSUME_SIGNED_IN="${EVIDENCE_ASSUME_SIGNED_IN:-0}"
+  export EVIDENCE_DATA_SOURCE="${EVIDENCE_DATA_SOURCE:-synthetic}"
 
   # Run the journey using Playwright with the evidence config
   npx playwright test \

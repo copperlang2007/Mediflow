@@ -830,11 +830,23 @@ async function main(): Promise<void> {
     .from(organizationsTable)
     .where(eq(organizationsTable.id, DEMO_ORG_ID));
 
+  // Completion marker, NOT the org row: a seed that crashed mid-run leaves
+  // the org behind, and skipping on org-exists would freeze that partial
+  // state forever. Commissions are the LAST seeder, so their presence means
+  // a prior run finished; anything less re-runs the (idempotent) seeders.
   if (existing.length > 0 && !RESET) {
-    log(
-      "[seed] demo org already exists — skipping. Pass --reset to wipe + reseed.",
-    );
-    return;
+    const done = await db
+      .select({ id: commissionStatementsTable.id })
+      .from(commissionStatementsTable)
+      .where(eq(commissionStatementsTable.orgId, DEMO_ORG_ID))
+      .limit(1);
+    if (done.length > 0) {
+      log(
+        "[seed] demo org fully seeded — skipping. Pass --reset to wipe + reseed.",
+      );
+      return;
+    }
+    log("[seed] demo org exists but seed looks incomplete — resuming");
   }
 
   if (RESET && existing.length > 0) {

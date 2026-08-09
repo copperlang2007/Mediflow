@@ -93,10 +93,17 @@ export function initSentry(): void {
       } catch (err) {
         logger.error(
           { err, scrubberError: err instanceof Error ? err.message : String(err) },
-          "PHI SCRUBBER FAILED — HALTING SENTRY SPAN TRANSMISSION"
+          "PHI SCRUBBER FAILED — REDACTING SPAN FIELDS"
         );
-        // Fail closed: drop the span rather than ship unscrubbed PHI.
-        return null as never;
+        // Fail closed WITHOUT null: in @sentry/core v10 a null return from
+        // beforeSendSpan keeps the ORIGINAL span (processedSpans.push(span)),
+        // so null-drop is actually fail-open here. Blank every string-bearing
+        // field instead and ship the sentinel.
+        const stripped = span as unknown as Record<string, unknown>;
+        for (const key of ["description", "name", "op", "status_message", "origin", "attributes", "data"]) {
+          if (key in stripped) stripped[key] = "[REDACTED:SCRUB_FAILED]";
+        }
+        return span;
       }
     },
     beforeBreadcrumb(breadcrumb) {
