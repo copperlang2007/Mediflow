@@ -199,17 +199,29 @@ export function scrubSentryEvent<T extends SentryLikeEvent>(event: T): T {
 
   // v10: OTel span attributes on the trace context (url.full, http.url,
   // http.target, http.query, http.request.header.*) — plus every other
-  // contexts.* bucket, which is arbitrary structured data.
+  // contexts.* bucket, which is arbitrary structured data (or a bare string).
   if (event.contexts) {
     for (const [key, value] of Object.entries(event.contexts as Record<string, unknown>)) {
       if (key === "trace") continue; // handled below with its own shape
       if (value && typeof value === "object") {
         (event.contexts as Record<string, unknown>)[key] = redactPhiDeep(value);
+      } else if (typeof value === "string") {
+        (event.contexts as Record<string, unknown>)[key] = redactPhiString(value);
       }
     }
   }
-  if (event.contexts?.trace?.data) {
-    event.contexts.trace.data = redactPhiDeep(event.contexts.trace.data);
+  if (event.contexts?.trace) {
+    // The ROOT span's description/op/origin/status live here as strings —
+    // same PHI surface as spans[].description, scrubbed symmetrically.
+    const trace = event.contexts.trace as Record<string, unknown>;
+    for (const key of ["description", "op", "origin", "status"]) {
+      if (typeof trace[key] === "string") {
+        trace[key] = redactPhiString(trace[key] as string);
+      }
+    }
+    if (trace.data) {
+      trace.data = redactPhiDeep(trace.data);
+    }
   }
 
   // v10: child spans carry the same attribute shape per span.

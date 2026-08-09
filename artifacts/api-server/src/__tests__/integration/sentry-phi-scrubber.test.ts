@@ -291,3 +291,31 @@ describe("scrubSentryEvent — latent-PHI surfaces (user, transaction, contexts.
     expect(JSON.stringify((event.contexts as any).trace.data)).not.toContain(SSN);
   });
 });
+
+describe("scrubSentryEvent — root trace fields and string-valued context buckets", () => {
+  const SSN = "123-45-6789";
+  const EMAIL = "alice@example.com";
+
+  it("redacts PHI in contexts.trace.description / op (root span strings)", () => {
+    const event = scrubSentryEvent({
+      contexts: {
+        trace: {
+          description: `GET /api/contacts/search?ssn=${SSN}`,
+          op: `lookup ${EMAIL}`,
+          status: "ok",
+        },
+      },
+    } as any);
+    const trace = (event.contexts as any).trace;
+    expect(trace.description).not.toContain(SSN);
+    expect(trace.op).not.toContain(EMAIL);
+    expect(trace.status).toBe("ok");
+  });
+
+  it("redacts PHI in string-valued sibling context buckets", () => {
+    const event = scrubSentryEvent({
+      contexts: { note: `member ${EMAIL} flagged` },
+    } as any);
+    expect((event.contexts as any).note).not.toContain(EMAIL);
+  });
+});
