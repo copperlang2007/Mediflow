@@ -37,11 +37,15 @@ services:
     # is logged, non-fatal (see below), and the surviving instance completes
     # the work. If this service is ever bumped to starter+, preDeployCommand
     # runs exactly once per deploy and is the cleaner shape.
-    # migrate/seed failures must not block the bind: a transient DB error on a
-    # free-plan cold start would otherwise restart-loop the demo. Both are
-    # idempotent, so the next wake self-heals; the server still starts and
-    # /readyz reports not_ready until the DB is usable.
-    startCommand: (pnpm --filter @workspace/db run migrate && pnpm seed:demo) || echo 'migrate/seed failed; starting anyway'; pnpm --filter @workspace/api-server run start
+    # Migrate failure REFUSES to start (drizzle wraps each migration file in
+    # its own transaction, so a retry on the next container start is clean —
+    # a restart loop until the DB is reachable is the correct signal to
+    # Render). Seed failure stays fail-open: the app serves fine against an
+    # already-seeded DB, and the advisory-locked seeder self-heals next wake.
+    startCommand: >-
+      pnpm --filter @workspace/db run migrate || (echo 'migrate failed — refusing to start' && exit 1);
+      pnpm seed:demo || echo 'seed failed — continuing';
+      pnpm --filter @workspace/api-server run start
     # Probe readiness, not the static SPA shell: / returns 200 from
     # express.static regardless of DB state, so a half-migrated wake would
     # look healthy. /api/readyz gates on DB + workers.
