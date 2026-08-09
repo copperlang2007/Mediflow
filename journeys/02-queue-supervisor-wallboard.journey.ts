@@ -9,6 +9,7 @@ export default defineJourney({
   steps: [
     {
       name: 'visit-login',
+      authStep: true,
       do: async (p) => {
         await p.goto('/');
       },
@@ -18,6 +19,7 @@ export default defineJourney({
     },
     {
       name: 'login-supervisor',
+      authStep: true,
       do: async (p) => {
         const email = p.locator('input[type="email"]').first();
         const password = p.locator('input[type="password"]').first();
@@ -37,7 +39,7 @@ export default defineJourney({
         await p.getByRole('link', { name: /queue|wallboard|monitoring/i }).first().click();
       },
       expect: async (p, x) => {
-        await x(p.getByText(/agent|queue|status|calls/i)).toBeVisible();
+        await x(p.getByText(/agent|queue|status|calls/i).first()).toBeVisible();
       },
     },
     {
@@ -46,7 +48,7 @@ export default defineJourney({
         await p.waitForTimeout(1000);
       },
       expect: async (p, x) => {
-        await x(p.getByText(/available|busy|break|ready/i)).toBeVisible();
+        await x(p.getByText(/available|busy|break|ready/i).first()).toBeVisible();
       },
     },
     {
@@ -55,7 +57,7 @@ export default defineJourney({
         await p.getByText(/waiting|queue|pending|next/i).first().click();
       },
       expect: async (p, x) => {
-        await x(p.getByText(/call|member|agent|time/i)).toBeVisible();
+        await x(p.getByText(/call|member|agent|time/i).first()).toBeVisible();
       },
     },
     {
@@ -64,7 +66,7 @@ export default defineJourney({
         await p.getByRole('button', { name: /metrics|performance|stats/i }).first().click();
       },
       expect: async (p, x) => {
-        await x(p.getByText(/calls|duration|conversion|average/i)).toBeVisible({ timeout: 10000 });
+        await x(p.getByText(/calls|duration|conversion|average/i).first()).toBeVisible({ timeout: 10000 });
       },
     },
     {
@@ -73,7 +75,7 @@ export default defineJourney({
         await p.waitForTimeout(2000);
       },
       expect: async (p, x) => {
-        await x(p.getByText(/queue|agent|status/i)).toBeVisible();
+        await x(p.getByText(/queue|agent|status/i).first()).toBeVisible();
       },
     },
   ],

@@ -9,11 +9,13 @@ export default defineJourney({
   steps: [
     {
       name: 'visit-login',
+      authStep: true,
       do: async (p) => { await p.goto('/'); },
       expect: async (p, x) => { await x(p.getByRole('heading', { name: /sign in|login/i })).toBeVisible(); },
     },
     {
       name: 'login-fmo-executive',
+      authStep: true,
       do: async (p) => {
         const email = p.locator('input[type="email"]').first();
         const password = p.locator('input[type="password"]').first();
@@ -26,27 +28,27 @@ export default defineJourney({
     {
       name: 'view-dashboard',
       do: async (p) => { await p.waitForTimeout(1500); },
-      expect: async (p, x) => { await x(p.getByText(/kpi|metrics|enrollment|revenue/i)).toBeVisible(); },
+      expect: async (p, x) => { await x(p.getByText(/kpi|metrics|enrollment|revenue/i).first()).toBeVisible(); },
     },
     {
       name: 'inspect-kpi-cards',
       do: async (p) => { await p.waitForTimeout(500); },
-      expect: async (p, x) => { await x(p.getByText(/total|average|growth|decline/i)).toBeVisible(); },
+      expect: async (p, x) => { await x(p.getByText(/total|average|growth|decline/i).first()).toBeVisible(); },
     },
     {
       name: 'view-enrollment-trends',
       do: async (p) => { await p.getByText(/enrollment|trend|chart|graph/i).first().click(); },
-      expect: async (p, x) => { await x(p.getByText(/month|quarter|period|plan/i)).toBeVisible({ timeout: 10000 }); },
+      expect: async (p, x) => { await x(p.getByText(/month|quarter|period|plan/i).first()).toBeVisible({ timeout: 10000 }); },
     },
     {
       name: 'view-agent-performance',
       do: async (p) => { await p.getByRole('link', { name: /agent|performance|leaderboard/i }).first().click(); },
-      expect: async (p, x) => { await x(p.getByText(/agent|name|enrollments|performance/i)).toBeVisible(); },
+      expect: async (p, x) => { await x(p.getByText(/agent|name|enrollments|performance/i).first()).toBeVisible(); },
     },
     {
       name: 'verify-business-metrics',
       do: async (p) => { await p.waitForTimeout(500); },
-      expect: async (p, x) => { await x(p.getByText(/commission|revenue|payout/i)).toBeVisible(); },
+      expect: async (p, x) => { await x(p.getByText(/commission|revenue|payout/i).first()).toBeVisible(); },
     },
   ],
 });

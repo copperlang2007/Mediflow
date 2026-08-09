@@ -9,11 +9,13 @@ export default defineJourney({
   steps: [
     {
       name: 'visit-login',
+      authStep: true,
       do: async (p) => { await p.goto('/'); },
       expect: async (p, x) => { await x(p.getByRole('heading', { name: /sign in|login/i })).toBeVisible(); },
     },
     {
       name: 'login-commission-specialist',
+      authStep: true,
       do: async (p) => {
         const email = p.locator('input[type="email"]').first();
         const password = p.locator('input[type="password"]').first();
@@ -26,22 +28,22 @@ export default defineJourney({
     {
       name: 'access-commission-dashboard',
       do: async (p) => { await p.getByRole('link', { name: /commission|statement|payment/i }).first().click(); },
-      expect: async (p, x) => { await x(p.getByText(/commission|amount|agent|date/i)).toBeVisible(); },
+      expect: async (p, x) => { await x(p.getByText(/commission|amount|agent|date/i).first()).toBeVisible(); },
     },
     {
       name: 'filter-by-period',
       do: async (p) => { await p.getByRole('combobox', { name: /period|month|year|date/i }).first().click(); },
-      expect: async (p, x) => { await x(p.getByRole('option')).toBeVisible(); },
+      expect: async (p, x) => { await x(p.getByRole('option').first()).toBeVisible(); },
     },
     {
       name: 'view-agent-commissions',
       do: async (p) => { await p.getByRole('row').first().click(); },
-      expect: async (p, x) => { await x(p.getByText(/commission|amount|details|breakdown/i)).toBeVisible({ timeout: 10000 }); },
+      expect: async (p, x) => { await x(p.getByText(/commission|amount|details|breakdown/i).first()).toBeVisible({ timeout: 10000 }); },
     },
     {
       name: 'review-commission-detail',
       do: async (p) => { await p.waitForTimeout(500); },
-      expect: async (p, x) => { await x(p.getByText(/enrollment|plan|amount|date/i)).toBeVisible(); },
+      expect: async (p, x) => { await x(p.getByText(/enrollment|plan|amount|date/i).first()).toBeVisible(); },
     },
     {
       name: 'export-commission-report',

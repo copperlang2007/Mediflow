@@ -9,6 +9,7 @@ export default defineJourney({
   steps: [
     {
       name: 'visit-login',
+      authStep: true,
       do: async (p) => {
         await p.goto('/');
       },
@@ -18,6 +19,7 @@ export default defineJourney({
     },
     {
       name: 'login-compliance-admin',
+      authStep: true,
       do: async (p) => {
         const email = p.locator('input[type="email"]').first();
         const password = p.locator('input[type="password"]').first();
@@ -37,7 +39,7 @@ export default defineJourney({
         await p.getByRole('link', { name: /compliance|admin/i }).first().click();
       },
       expect: async (p, x) => {
-        await x(p.getByText(/compliance|status|audit|verified/i)).toBeVisible();
+        await x(p.getByText(/compliance|status|audit|verified/i).first()).toBeVisible();
       },
     },
     {
@@ -46,7 +48,7 @@ export default defineJourney({
         await p.getByRole('link', { name: /licensing|license|certifications/i }).first().click();
       },
       expect: async (p, x) => {
-        await x(p.getByText(/license|active|expired|status/i)).toBeVisible({ timeout: 10000 });
+        await x(p.getByText(/license|active|expired|status/i).first()).toBeVisible({ timeout: 10000 });
       },
     },
     {
@@ -55,7 +57,7 @@ export default defineJourney({
         await p.getByRole('link', { name: /agents|credentials|certifications/i }).first().click();
       },
       expect: async (p, x) => {
-        await x(p.getByText(/agent|name|status|verified/i)).toBeVisible();
+        await x(p.getByText(/agent|name|status|verified/i).first()).toBeVisible();
       },
     },
     {
@@ -64,7 +66,7 @@ export default defineJourney({
         await p.getByRole('row').first().click();
       },
       expect: async (p, x) => {
-        await x(p.getByText(/license|certification|status|date/i)).toBeVisible({ timeout: 10000 });
+        await x(p.getByText(/license|certification|status|date/i).first()).toBeVisible({ timeout: 10000 });
       },
     },
     {
@@ -82,7 +84,7 @@ export default defineJourney({
         await p.getByText(/audit|history|log|changes/i).first().click();
       },
       expect: async (p, x) => {
-        await x(p.getByText(/timestamp|action|user|change/i)).toBeVisible({ timeout: 10000 });
+        await x(p.getByText(/timestamp|action|user|change/i).first()).toBeVisible({ timeout: 10000 });
       },
     },
   ],

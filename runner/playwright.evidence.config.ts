@@ -18,9 +18,12 @@ export default defineConfig({
   use: {
     baseURL: process.env.EVIDENCE_BASE_URL || 'http://localhost:5000',
     headless: process.env.EVIDENCE_HEADED === '1' ? false : true,
-    // ALWAYS capture video and trace for evidence runs
+    // Video is recorded via each wrapper's recordVideo context option.
+    // Tracing is owned by runJourney (manual start/stop into the evidence
+    // dir) — trace:'on' here would double-start tracing on the manually
+    // created contexts and silently kill every trace.zip.
     video: 'on',
-    trace: 'on',
+    trace: 'off',
     screenshot: 'on',
     actionTimeout: 15 * 1000,
     navigationTimeout: 30 * 1000,

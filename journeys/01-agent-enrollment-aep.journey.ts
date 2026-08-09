@@ -9,6 +9,7 @@ export default defineJourney({
   steps: [
     {
       name: 'visit-login',
+      authStep: true,
       do: async (p) => {
         await p.goto('/');
       },
@@ -18,6 +19,7 @@ export default defineJourney({
     },
     {
       name: 'login-agent',
+      authStep: true,
       do: async (p) => {
         const email = p.locator('input[type="email"]').first();
         const password = p.locator('input[type="password"]').first();
@@ -37,7 +39,7 @@ export default defineJourney({
         await p.getByRole('link', { name: /crm|contacts|beneficiaries/i }).first().click();
       },
       expect: async (p, x) => {
-        await x(p.getByText(/search|member|beneficiary|contact/i)).toBeVisible();
+        await x(p.getByText(/search|member|beneficiary|contact/i).first()).toBeVisible();
       },
     },
     {
@@ -48,7 +50,7 @@ export default defineJourney({
         await searchField.fill('test');
       },
       expect: async (p, x) => {
-        await x(p.getByText(/result|found|member|beneficiary/i)).toBeVisible({ timeout: 10000 });
+        await x(p.getByText(/result|found|member|beneficiary/i).first()).toBeVisible({ timeout: 10000 });
       },
     },
     {
@@ -57,7 +59,7 @@ export default defineJourney({
         await p.getByRole('row').first().click();
       },
       expect: async (p, x) => {
-        await x(p.getByText(/member detail|profile|enrollment|plan/i)).toBeVisible();
+        await x(p.getByText(/member detail|profile|enrollment|plan/i).first()).toBeVisible();
       },
     },
     {
@@ -66,7 +68,7 @@ export default defineJourney({
         await p.getByRole('button', { name: /enroll|aep|start enrollment|create enrollment/i }).first().click();
       },
       expect: async (p, x) => {
-        await x(p.getByText(/enrollment|plan selection|aep|details/i)).toBeVisible({ timeout: 10000 });
+        await x(p.getByText(/enrollment|plan selection|aep|details/i).first()).toBeVisible({ timeout: 10000 });
       },
     },
     {
@@ -97,7 +99,7 @@ export default defineJourney({
         await p.getByRole('button', { name: /submit|complete|save enrollment/i }).first().click();
       },
       expect: async (p, x) => {
-        await x(p.getByText(/confirmed|enrolled|success|completed/i)).toBeVisible({ timeout: 10000 });
+        await x(p.getByText(/confirmed|enrolled|success|completed/i).first()).toBeVisible({ timeout: 10000 });
       },
     },
     {
@@ -106,7 +108,7 @@ export default defineJourney({
         await p.waitForTimeout(1000);
       },
       expect: async (p, x) => {
-        await x(p.getByText(/enrollment|status|active|pending/i)).toBeVisible();
+        await x(p.getByText(/enrollment|status|active|pending/i).first()).toBeVisible();
       },
     },
   ],

@@ -7,6 +7,10 @@ export interface JourneyStep {
   name: string;
   do: (page: Page) => Promise<void>;
   expect: (page: Page, expect: any) => Promise<void>;
+  /** Marks login/sign-in steps. Skipped when EVIDENCE_ASSUME_SIGNED_IN=1 —
+   *  demo deployments (VITE_DEMO_MODE) swap the auth provider for a shim
+   *  that is always signed in and renders no login form at all. */
+  authStep?: boolean;
 }
 
 export interface JourneyDefinition {
@@ -26,7 +30,7 @@ export interface JourneyDefinition {
 export interface EvidenceStep {
   n: number;
   name: string;
-  status: 'pass' | 'fail';
+  status: 'pass' | 'fail' | 'skipped';
   ms: number;
   screenshot: string;
   sha256: string;
@@ -54,7 +58,14 @@ export interface EvidenceManifest {
   };
   steps: EvidenceStep[];
   media: {
-    video: { path: string; sha256: string; bytes: number } | null;
+    video: {
+      path: string;
+      sha256: string;
+      bytes: number;
+      /** Set by bundle_evidence.mjs when the bundle zip excludes the webm —
+       *  the hash then verifies the out-of-band video file. */
+      excluded_from_bundle?: boolean;
+    } | null;
     trace: { path: string; sha256: string };
   };
   manifest_sha256: string;
@@ -121,9 +132,33 @@ export async function runJourney(
   console.log(`   PHI scoped: ${journeyDef.phiScoped}`);
 
   let passed = true;
+  const assumeSignedIn = process.env.EVIDENCE_ASSUME_SIGNED_IN === '1';
+  let skippedAuth = false;
 
   for (let i = 0; i < journeyDef.steps.length; i++) {
     const step = journeyDef.steps[i];
+
+    if (assumeSignedIn && step.authStep) {
+      console.log(`   [${String(i + 1).padStart(2, '0')}/${journeyDef.steps.length}] ${step.name}... ⤳ skipped (EVIDENCE_ASSUME_SIGNED_IN)`);
+      evidenceSteps.push({
+        n: i + 1,
+        name: step.name,
+        status: 'skipped',
+        ms: 0,
+        screenshot: '',
+        sha256: '',
+        assertions: ['skipped: target is a signed-in (demo-mode) deployment'],
+      });
+      skippedAuth = true;
+      continue;
+    }
+    if (skippedAuth) {
+      // Land the signed-in session on the app root once; the SPA redirects
+      // to its authenticated landing page from here.
+      skippedAuth = false;
+      await page.goto('/');
+    }
+
     const stepStartTime = Date.now();
     const stepNum = String(i + 1).padStart(2, '0');
     const screenshotPath = path.join(stepsDir, `${stepNum}-${step.name}.png`);

@@ -155,28 +155,34 @@ async function resetDemoOrg(): Promise<void> {
 
 // ---- Core seeders ----------------------------------------------------------
 
-async function seedOrg(): Promise<void> {
+/** Seed the demo org. Returns false when ANOTHER concurrent seeder won the
+ *  org insert — the org row is the serialization point for the whole seed:
+ *  the loser defers entirely instead of racing every downstream seeder's
+ *  check-then-insert (users_pkey, agents_pkey, ...). */
+async function seedOrg(): Promise<boolean> {
   const existing = await db
     .select({ id: organizationsTable.id })
     .from(organizationsTable)
     .where(eq(organizationsTable.id, DEMO_ORG_ID));
-  if (existing.length === 0) {
-    // onConflictDoNothing: two overlapping cold-boots (free-plan deploy over
-    // a waking instance) can both pass the check-then-insert race; the loser
-    // must not crash the boot chain on organizations_pkey.
-    await db
-      .insert(organizationsTable)
-      .values({
-        id: DEMO_ORG_ID,
-        name: "INSUREitALL Demo",
-        slug: "insureitall-demo",
-        planTier: "growth",
-      })
-      .onConflictDoNothing({ target: organizationsTable.id });
-    log("[org] created INSUREitALL Demo");
-  } else {
+  if (existing.length > 0) {
     log("[org] INSUREitALL Demo already exists");
+    return true;
   }
+  const res = await db
+    .insert(organizationsTable)
+    .values({
+      id: DEMO_ORG_ID,
+      name: "INSUREitALL Demo",
+      slug: "insureitall-demo",
+      planTier: "growth",
+    })
+    .onConflictDoNothing({ target: organizationsTable.id });
+  if ((res as unknown as { rowCount?: number | null }).rowCount === 0) {
+    log("[org] another seeder is creating the demo data concurrently — deferring to it");
+    return false;
+  }
+  log("[org] created INSUREitALL Demo");
+  return true;
 }
 
 interface UserSeed {
@@ -836,7 +842,11 @@ async function main(): Promise<void> {
   }
 
   log("[seed] seeding INSUREitALL Demo…");
-  await seedOrg();
+  const wonOrCurrent = await seedOrg();
+  if (!wonOrCurrent) {
+    log("[seed] concurrent seeder active — exiting cleanly; it will finish the job");
+    return;
+  }
   await seedUsers();
   await seedAgents();
   const carriers = await seedCarriersWithDeskEmails();
