@@ -30,9 +30,12 @@ export function initSentry(): void {
   // Validate the parse: Number('high') is NaN, which Sentry maps to
   // undefined and silently discards EVERY transaction — and its own invalid-
   // rate warning is debug-build-only, so a typo'd env var would kill tracing
-  // in prod with zero signal. Fall back loudly instead.
-  const rawRate = process.env.SENTRY_TRACES_SAMPLE_RATE;
-  let tracesSampleRate = rawRate === undefined ? 0.1 : Number(rawRate);
+  // in prod with zero signal. Fall back loudly instead. Blank/whitespace
+  // counts as UNSET, not zero: Number('') is 0, a valid rate that would
+  // silently disable tracing while dodging the warn path below. An explicit
+  // '0' still means "tracing off" — that's a deliberate operator choice.
+  const rawRate = process.env.SENTRY_TRACES_SAMPLE_RATE?.trim();
+  let tracesSampleRate = rawRate === undefined || rawRate === "" ? 0.1 : Number(rawRate);
   if (!Number.isFinite(tracesSampleRate) || tracesSampleRate < 0 || tracesSampleRate > 1) {
     logger.warn(
       { rawRate },
@@ -115,30 +118,28 @@ export function initSentry(): void {
         );
         // Fail closed WITHOUT null: in @sentry/core v10 a null return from
         // beforeSendSpan keeps the ORIGINAL span (processedSpans.push(span)),
-        // so null-drop is actually fail-open here. Blank every string-bearing
-        // field instead and ship the sentinel.
+        // so null-drop is actually fail-open here. Instead, KEEP only the
+        // structural identifiers and blank everything else — an
+        // enumerate-to-scrub list would silently pass any field a future SDK
+        // adds (links[].attributes, events[].attributes, v11 surfaces…);
+        // a keep-list defaults new fields to redacted. Strings get the
+        // sentinel; objects/arrays become empty (a sentinel STRING on the
+        // Record-typed attributes/data gets char-iterated by @sentry/core's
+        // serializeAttributes into per-character entries).
+        const STRUCTURAL_KEEP = new Set([
+          "span_id", "trace_id", "parent_span_id",
+          "start_timestamp", "timestamp", "is_segment", "status",
+        ]);
         const stripped = span as unknown as Record<string, unknown>;
-        for (const key of ["description", "name", "op", "status_message", "origin"]) {
-          if (key in stripped) stripped[key] = "[REDACTED:SCRUB_FAILED]";
-        }
-        // attributes/data are Record-typed per SpanJSON — a sentinel STRING
-        // here gets char-iterated by @sentry/core's serializeAttributes into
-        // 23 per-character entries. Empty object keeps the span well-formed.
-        for (const key of ["attributes", "data"]) {
-          if (key in stripped) stripped[key] = {};
-        }
-        // SpanJSON.links[] each carry their own attributes bag — the same
-        // PHI surface as span attributes. Keep only the structural link
-        // fields; anything else ships unscrubbed past a failed scrub.
-        if (Array.isArray(stripped.links)) {
-          stripped.links = (stripped.links as Array<Record<string, unknown>>).map(
-            (link) => ({
-              span_id: link?.span_id,
-              trace_id: link?.trace_id,
-              sampled: link?.sampled,
-              attributes: {},
-            }),
-          );
+        for (const key of Object.keys(stripped)) {
+          if (STRUCTURAL_KEEP.has(key)) continue;
+          const value = stripped[key];
+          if (typeof value === "string") {
+            stripped[key] = "[REDACTED:SCRUB_FAILED]";
+          } else if (value && typeof value === "object") {
+            stripped[key] = Array.isArray(value) ? [] : {};
+          }
+          // numbers/booleans (exclusive_time, sampled…) carry no PHI — keep.
         }
         return span;
       }
