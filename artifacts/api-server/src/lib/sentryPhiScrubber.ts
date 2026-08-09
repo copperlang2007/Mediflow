@@ -110,10 +110,27 @@ export interface SentryLikeEvent {
   };
   request?: {
     data?: unknown;
+    url?: string;
+    query_string?: unknown;
+    headers?: Record<string, unknown>;
+    cookies?: unknown;
   };
   extra?: Record<string, unknown>;
   breadcrumbs?: Array<{
     message?: string;
+    data?: Record<string, unknown>;
+  }>;
+  // Sentry v10 (OTel-first) shape: HTTP details also land on the trace
+  // context and on child spans — a query string carrying an MBI/SSN shows
+  // up in request.url, request.query_string, contexts.trace.data.url.full,
+  // and spans[].data simultaneously.
+  contexts?: {
+    trace?: {
+      data?: Record<string, unknown>;
+    };
+  } & Record<string, unknown>;
+  spans?: Array<{
+    description?: string;
     data?: Record<string, unknown>;
   }>;
 }
@@ -147,8 +164,42 @@ export function scrubSentryEvent<T extends SentryLikeEvent>(event: T): T {
     }
   }
 
-  if (event.request?.data !== undefined) {
-    event.request.data = redactPhiDeep(event.request.data);
+  if (event.request) {
+    if (event.request.data !== undefined) {
+      event.request.data = redactPhiDeep(event.request.data);
+    }
+    // v10: URL, query string, headers, and cookies carry request PHI that
+    // the v8 shape kept inside request.data only.
+    if (typeof event.request.url === "string") {
+      event.request.url = redactPhiString(event.request.url);
+    }
+    if (event.request.query_string !== undefined) {
+      event.request.query_string = redactPhiDeep(event.request.query_string);
+    }
+    if (event.request.headers) {
+      event.request.headers = redactPhiDeep(event.request.headers);
+    }
+    if (event.request.cookies !== undefined) {
+      event.request.cookies = redactPhiDeep(event.request.cookies);
+    }
+  }
+
+  // v10: OTel span attributes on the trace context (url.full, http.url,
+  // http.target, http.query, http.request.header.*).
+  if (event.contexts?.trace?.data) {
+    event.contexts.trace.data = redactPhiDeep(event.contexts.trace.data);
+  }
+
+  // v10: child spans carry the same attribute shape per span.
+  if (event.spans) {
+    for (const span of event.spans) {
+      if (typeof span.description === "string") {
+        span.description = redactPhiString(span.description);
+      }
+      if (span.data) {
+        span.data = redactPhiDeep(span.data);
+      }
+    }
   }
 
   if (event.extra) {

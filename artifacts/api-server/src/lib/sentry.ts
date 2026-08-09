@@ -57,6 +57,29 @@ export function initSentry(): void {
         return null;
       }
     },
+    // beforeSend covers ERROR events only — transactions route through
+    // beforeSendTransaction. Without this hook, v10's OTel-first HTTP shape
+    // ships request.url / query_string / contexts.trace.data unscrubbed,
+    // punching PHI straight through the BAA boundary.
+    beforeSendTransaction(event) {
+      if (!initialized) return null;
+      try {
+        const eventShape = event as unknown as Record<string, any>;
+        scrubSentryEvent(eventShape);
+        return event;
+      } catch (err) {
+        logger.error(
+          {
+            err,
+            eventKeys: Object.keys(event || {}),
+            scrubberError: err instanceof Error ? err.message : String(err),
+          },
+          "PHI SCRUBBER FAILED — HALTING SENTRY TRANSACTION TRANSMISSION"
+        );
+        // Fail closed: drop the transaction rather than ship unscrubbed PHI.
+        return null;
+      }
+    },
     beforeBreadcrumb(breadcrumb) {
       if (!initialized) return breadcrumb;
       try {

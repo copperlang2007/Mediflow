@@ -191,3 +191,71 @@ describe("scrubSentryBreadcrumb", () => {
     expect(out.data).toEqual({ recipient: "[REDACTED:EMAIL]" });
   });
 });
+
+describe("scrubSentryEvent — Sentry v10 (OTel-first) event shape", () => {
+  const SSN = "123-45-6789";
+  const EMAIL = "jane.doe@example.com";
+
+  function v10Event() {
+    return {
+      request: {
+        url: `https://api.example.com/api/contacts/search?ssn=${SSN}&email=${EMAIL}`,
+        query_string: `ssn=${SSN}&email=${EMAIL}`,
+        headers: {
+          "x-member-contact": EMAIL,
+          "user-agent": "vitest",
+        },
+        cookies: { session_hint: EMAIL },
+        data: { ssn: SSN },
+      },
+      contexts: {
+        trace: {
+          data: {
+            "url.full": `https://api.example.com/lookup?ssn=${SSN}`,
+            "http.url": `https://api.example.com/lookup?ssn=${SSN}`,
+            "http.target": `/lookup?ssn=${SSN}`,
+            "http.query": `ssn=${SSN}`,
+          },
+        },
+      },
+      spans: [
+        {
+          description: `GET /lookup?ssn=${SSN}`,
+          data: { "url.full": `https://api.example.com/lookup?email=${EMAIL}` },
+        },
+      ],
+    };
+  }
+
+  it("redacts PHI in request.url and request.query_string", () => {
+    const event = scrubSentryEvent(v10Event());
+    expect(event.request.url).not.toContain(SSN);
+    expect(event.request.url).not.toContain(EMAIL);
+    expect(JSON.stringify(event.request.query_string)).not.toContain(SSN);
+    expect(JSON.stringify(event.request.query_string)).not.toContain(EMAIL);
+  });
+
+  it("redacts PHI in request headers and cookies", () => {
+    const event = scrubSentryEvent(v10Event());
+    expect(JSON.stringify(event.request.headers)).not.toContain(EMAIL);
+    expect(JSON.stringify(event.request.cookies)).not.toContain(EMAIL);
+    // Non-PHI header values pass through untouched.
+    expect(event.request.headers["user-agent"]).toBe("vitest");
+  });
+
+  it("redacts PHI in OTel trace-context data (url.full, http.*)", () => {
+    const event = scrubSentryEvent(v10Event());
+    expect(JSON.stringify(event.contexts.trace.data)).not.toContain(SSN);
+  });
+
+  it("redacts PHI in child span descriptions and data", () => {
+    const event = scrubSentryEvent(v10Event());
+    expect(event.spans[0].description).not.toContain(SSN);
+    expect(JSON.stringify(event.spans[0].data)).not.toContain(EMAIL);
+  });
+
+  it("still redacts the v8-shape request.data body", () => {
+    const event = scrubSentryEvent(v10Event());
+    expect(JSON.stringify(event.request.data)).not.toContain(SSN);
+  });
+});
