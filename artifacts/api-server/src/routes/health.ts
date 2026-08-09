@@ -88,6 +88,12 @@ router.get("/readyz", async (_req, res) => {
   // probe table without updating SCHEMA_PROBE_TABLE flips readiness to 503
   // everywhere — that rename is a migration-level event whose checklist
   // includes this constant (single place to update).
+  // KNOWN TRADE-OFF vs a bare SELECT 1: this takes AccessShareLock on the
+  // probe table, so a migration holding ACCESS EXCLUSIVE on it would 503
+  // readiness on OTHER instances during a rolling restart. Accepted — the
+  // deployment is single-instance, and a probe that can't see the schema
+  // during an exclusive-lock migration SHOULD report not-ready; reverting
+  // to SELECT 1 would resurrect the ready-while-unmigrated hole.
   const dbCheck: DbCheckResult = await pingDb(() =>
     db.execute(sql`SELECT 1 FROM ${sql.identifier(SCHEMA_PROBE_TABLE)} LIMIT 0`),
   );

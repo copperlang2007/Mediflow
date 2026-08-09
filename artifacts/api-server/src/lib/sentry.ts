@@ -135,6 +135,11 @@ export function initSentry(): void {
         // sentinel; objects/arrays become empty (a sentinel STRING on the
         // Record-typed attributes/data gets char-iterated by @sentry/core's
         // serializeAttributes into per-character entries).
+        // Caveat (unverified against live ingest): if Sentry's v2 span
+        // pipeline ever rejects envelopes whose op/origin carry this
+        // sentinel, the degraded span is dropped server-side — an
+        // acceptable outcome for a path that only fires on a structural
+        // scrub failure, and strictly better than shipping PHI.
         const STRUCTURAL_KEEP = new Set([
           "span_id", "trace_id", "parent_span_id",
           "start_timestamp", "timestamp", "is_segment", "status",

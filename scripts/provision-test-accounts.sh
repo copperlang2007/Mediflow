@@ -39,6 +39,17 @@ POOL_NAME=''
 POOL_ARN=''
 IFS=$'\t' read -r POOL_NAME POOL_ARN <<< "$POOL_DESCRIBE" || true
 
+# Fail closed on describe failure, with NO override: an undescribable pool
+# (typo'd id, missing perms) previously fell through with empty name/ARN —
+# which skipped the tag check, matched no prod token, and under
+# I_KNOW_THIS_IS_NOT_PROD=1 + non-TTY sailed past every remaining layer.
+# If we cannot SEE the pool, we do not provision into it.
+if [[ -z "$POOL_NAME" || -z "$POOL_ARN" ]]; then
+  echo -e "${RED}Refusing: could not describe user pool '${USER_POOL_ID}' (typo'd id or missing permissions).${NC}"
+  echo "This guard has no override — provisioning requires a describable pool."
+  exit 1
+fi
+
 # Layer 1 — resource tags. An Environment=Production/prod tag is an explicit
 # operator declaration and outranks any name heuristic: refuse with NO
 # override. (list-tags failure degrades to the name check below rather than

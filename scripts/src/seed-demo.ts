@@ -744,6 +744,18 @@ async function seedPipelineAndDeals(contactIds: string[]): Promise<void> {
 
 // ---- Commission statements -------------------------------------------------
 
+// Shared between seedCommissions and seedAll's completion marker so neither
+// can drift silently: the marker IS the last line item of the last statement,
+// derived from these constants rather than a duplicated literal ~700 lines
+// away. Reordering the slugs or changing the per-statement line count updates
+// both sides at once.
+const COMMISSION_STATEMENT_SLUGS = ["aetna-2025-04", "humana-2025-04"] as const;
+const COMMISSION_LINES_PER_STATEMENT = 4;
+const LAST_COMMISSION_LINE_ID = stableId(
+  "line",
+  `${stableId("stmt", COMMISSION_STATEMENT_SLUGS[COMMISSION_STATEMENT_SLUGS.length - 1]!)}-${COMMISSION_LINES_PER_STATEMENT - 1}`,
+);
+
 async function seedCommissions(
   carriers: Array<{ id: string; name: string }>,
   contactIds: string[],
@@ -758,7 +770,7 @@ async function seedCommissions(
 
   const statements = [
     {
-      id: stableId("stmt", "aetna-2025-04"),
+      id: stableId("stmt", COMMISSION_STATEMENT_SLUGS[0]),
       carrierId: aetna.id,
       statementDate: "2025-04-15",
       periodStart: "2025-04-01",
@@ -766,7 +778,7 @@ async function seedCommissions(
       totalAmount: "2450.00",
     },
     {
-      id: stableId("stmt", "humana-2025-04"),
+      id: stableId("stmt", COMMISSION_STATEMENT_SLUGS[1]),
       carrierId: humana.id,
       statementDate: "2025-04-15",
       periodStart: "2025-04-01",
@@ -785,7 +797,7 @@ async function seedCommissions(
       .select({ id: commissionLineItemsTable.id })
       .from(commissionLineItemsTable)
       .where(eq(commissionLineItemsTable.statementId, s.id));
-    if (existingLines.length < 4) {
+    if (existingLines.length < COMMISSION_LINES_PER_STATEMENT) {
       await db.insert(commissionStatementsTable).values({
         id: s.id,
         orgId: DEMO_ORG_ID,
@@ -801,7 +813,7 @@ async function seedCommissions(
       }).onConflictDoNothing();
 
       // 4 line items per statement, all crediting Carlos.
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < COMMISSION_LINES_PER_STATEMENT; i++) {
         const contactId = contactIds[i % contactIds.length] ?? null;
         const lineId = stableId("line", `${s.id}-${i}`);
         await db.insert(commissionLineItemsTable).values({
@@ -904,11 +916,10 @@ async function seedAll(): Promise<void> {
   // the next boot resumes the idempotent seeders. Checking statement
   // existence froze a statement-without-line-items crash forever.
   if (existing.length > 0 && !RESET) {
-    const finalLineId = stableId("line", `${stableId("stmt", "humana-2025-04")}-3`);
     const done = await db
       .select({ id: commissionLineItemsTable.id })
       .from(commissionLineItemsTable)
-      .where(eq(commissionLineItemsTable.id, finalLineId))
+      .where(eq(commissionLineItemsTable.id, LAST_COMMISSION_LINE_ID))
       .limit(1);
     if (done.length > 0) {
       log(
