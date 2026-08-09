@@ -3,14 +3,14 @@
 # capture_demo_videos.sh
 # Runs all journey evidence captures and bundles them into demos
 # Usage: EVIDENCE_BASE_URL=https://preview.vercel.app ./scripts/capture_demo_videos.sh
-# Or run a specific journey: ./scripts/capture_demo_videos.sh journeys/01-agent-workspace.journey.ts
+# Or run a specific journey: ./scripts/capture_demo_videos.sh journeys/01-agent-enrollment-aep.journey.ts
 
 set -e
 
 BASE_URL="${EVIDENCE_BASE_URL:-http://localhost:5000}"
 HEADED="${EVIDENCE_HEADED:-0}"
 
-echo "🎬 IntelBRIDGE Demo Video Capture Suite"
+echo "🎬 Mediflow Demo Video Capture Suite"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Base URL: $BASE_URL"
 echo "Headless: $([ "$HEADED" = "1" ] && echo "NO (headed mode)" || echo "YES")"
@@ -22,14 +22,14 @@ if [ -n "$1" ]; then
 else
   # Otherwise run all journeys in order
   JOURNEYS=(
-    "journeys/01-agent-workspace.journey.ts"
-    "journeys/02-team-lead-workspace.journey.ts"
-    "journeys/03-manager-pe-command-center.journey.ts"
-    "journeys/04-retention-workspace.journey.ts"
-    "journeys/05-compliance-audit-log.journey.ts"
-    "journeys/06-agency-owner-admin.journey.ts"
-    "journeys/07-viewer-read-only.journey.ts"
-    "journeys/08-sales-director-pe-analytics.journey.ts"
+    "journeys/01-agent-enrollment-aep.journey.ts"
+    "journeys/02-queue-supervisor-wallboard.journey.ts"
+    "journeys/03-admin-compliance.journey.ts"
+    "journeys/04-commission-specialist.journey.ts"
+    "journeys/05-licensing-manager.journey.ts"
+    "journeys/06-crm-specialist.journey.ts"
+    "journeys/07-fmo-executive-dashboard.journey.ts"
+    "journeys/08-renewals-retention-specialist.journey.ts"
   )
 fi
 

@@ -3,8 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
-import { createWriteStream } from 'fs';
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 
 const evidenceDir = process.argv[2];
 
@@ -20,14 +19,21 @@ function sha256File(filePath) {
   return createHash('sha256').update(content).digest('hex');
 }
 
-async function zipDirectory(dir, zipPath) {
-  // Use system zip if available; otherwise use Node zip lib
-  try {
-    execSync(`cd "${dir}" && zip -r "${zipPath}" . -x "*.webm"`, { stdio: 'inherit' });
-  } catch (err) {
-    console.warn('zip not available; evidence bundle will include all files (including video)');
-    // Fallback: copy the entire directory
+function zipDirectory(dir, zipPath) {
+  // spawnSync with array args — paths are never interpreted by a shell.
+  // The zip is created inside `dir` under its basename, then moved to zipPath,
+  // so `zip` never has to resolve a path outside its working directory.
+  const zipName = path.basename(zipPath);
+  const result = spawnSync('zip', ['-r', zipName, '.', '-x', '*.webm'], {
+    cwd: dir,
+    stdio: 'inherit',
+  });
+  if (result.error || result.status !== 0) {
+    console.warn('zip failed or not installed; no bundle zip was created');
+    return false;
   }
+  fs.renameSync(path.join(dir, zipName), zipPath);
+  return true;
 }
 
 (async () => {
@@ -56,9 +62,12 @@ async function zipDirectory(dir, zipPath) {
     manifest.media.trace.sha256 = sha256File(tracePath);
   }
 
-  // Recompute manifest hash
-  const manifestJson = JSON.stringify(manifest, null, 2);
-  manifest.manifest_sha256 = createHash('sha256').update(manifestJson).digest('hex');
+  // Recompute manifest hash. Convention: the hash covers the manifest
+  // serialized with manifest_sha256 blanked — verifiers blank the field,
+  // re-serialize, and compare against the recorded value.
+  manifest.manifest_sha256 = '';
+  const canonicalJson = JSON.stringify(manifest, null, 2);
+  manifest.manifest_sha256 = createHash('sha256').update(canonicalJson).digest('hex');
 
   // Write updated manifest
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
@@ -70,7 +79,7 @@ async function zipDirectory(dir, zipPath) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const bundlePath = path.join(evidenceDir, `..`, `evidence-bundle-${manifest.journey}-${timestamp}.zip`);
 
-  await zipDirectory(evidenceDir, bundlePath);
+  zipDirectory(evidenceDir, bundlePath);
 
   // Write MANIFEST.sha256 into the bundle root
   const manifestHashPath = path.join(path.dirname(bundlePath), 'MANIFEST.sha256');

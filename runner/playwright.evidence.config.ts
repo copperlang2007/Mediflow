@@ -1,7 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
-  testDir: './journeys',
+  // Paths here resolve relative to THIS config file (runner/), not the repo
+  // root — hence the ../ prefixes.
+  testDir: '../journeys',
   fullyParallel: false, // Serial execution for clean recordings
   workers: 1,
   timeout: 120 * 1000, // 2 min per test
@@ -9,8 +11,8 @@ export default defineConfig({
 
   retries: 0, // Evidence runs don't retry — capture failures as-is
   reporter: [
-    ['html', { outputFolder: 'evidence/html-report' }],
-    ['json', { outputFile: 'evidence/results.json' }],
+    ['html', { outputFolder: '../evidence/html-report' }],
+    ['json', { outputFile: '../evidence/results.json' }],
   ],
 
   use: {

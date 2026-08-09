@@ -83,6 +83,14 @@ export async function runJourney(
   // Ensure steps directory exists
   fs.mkdirSync(stepsDir, { recursive: true });
 
+  // Trace lands in the evidence dir under the name the bundler expects.
+  let tracing = true;
+  try {
+    await context.tracing.start({ screenshots: true, snapshots: true });
+  } catch {
+    tracing = false; // context may already be tracing (e.g. under the Playwright config's trace:'on')
+  }
+
   console.log(`\n📹 Starting journey: ${journeyDef.name}`);
   console.log(`   Target: ${journeyDef.target} (${baseUrl})`);
   console.log(`   PHI scoped: ${journeyDef.phiScoped}`);
@@ -156,47 +164,74 @@ export async function runJourney(
 
   const totalMs = Date.now() - startTime;
 
-  // Compute manifest hash
-  const tempManifest = {
+  // Finalize media BEFORE the manifest so their hashes can be recorded in it.
+  const tracePath = path.join(evidenceDir, 'trace.zip');
+  if (tracing) {
+    try {
+      await context.tracing.stop({ path: tracePath });
+    } catch {
+      /* trace is best-effort evidence; its absence shows as an empty hash */
+    }
+  }
+
+  const pageVideo = page.video();
+  await page.close();
+
+  // Playwright writes the recording under a random name in recordVideo.dir;
+  // give it the stable name the manifest and bundler expect. saveAs waits for
+  // the recording to be fully written.
+  const videoPath = path.join(evidenceDir, 'journey.webm');
+  let video: EvidenceManifest['media']['video'] = null;
+  if (pageVideo) {
+    try {
+      await pageVideo.saveAs(videoPath);
+      await pageVideo.delete();
+      video = {
+        path: 'journey.webm',
+        sha256: sha256File(videoPath),
+        bytes: fs.statSync(videoPath).size,
+      };
+    } catch {
+      video = null; // context was created without recordVideo
+    }
+  }
+
+  const manifest: EvidenceManifest = {
     journey: journeyDef.name,
     description: journeyDef.description,
     target: journeyDef.target,
     base_url: baseUrl,
     run_utc: new Date().toISOString(),
-    result: (passed ? 'pass' : 'fail') as 'pass' | 'fail',
+    result: passed ? 'pass' : 'fail',
     duration_ms: totalMs,
     business_outcome: journeyDef.businessOutcome,
     business_outcome_verified: passed,
     phi_gate: {
       scoped: journeyDef.phiScoped,
       redaction: journeyDef.phiScoped,
-      data_source: 'synthetic' as const,
+      data_source: 'synthetic',
     },
     steps: evidenceSteps,
     media: {
-      video: null as any,
-      trace: { path: 'trace.zip', sha256: '' },
+      video,
+      trace: { path: 'trace.zip', sha256: fs.existsSync(tracePath) ? sha256File(tracePath) : '' },
     },
     manifest_sha256: '',
   };
 
-  const manifestJson = JSON.stringify(tempManifest, null, 2);
-  const manifest: EvidenceManifest = {
-    ...tempManifest,
-    manifest_sha256: sha256Content(manifestJson),
-  };
+  // Hash convention: the hash covers the manifest serialized with
+  // manifest_sha256 blanked. Verifiers blank the field, re-serialize with
+  // JSON.stringify(manifest, null, 2), and compare.
+  manifest.manifest_sha256 = sha256Content(JSON.stringify(manifest, null, 2));
 
-  // Write manifest
   const manifestPath = path.join(evidenceDir, 'evidence.json');
-  fs.writeFileSync(manifestPath, manifestJson);
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
   console.log(
     `\n📊 Journey ${passed ? 'PASSED' : 'FAILED'} (${totalMs}ms)\n` +
       `   Evidence: ${evidenceDir}\n` +
       `   Manifest: ${manifestPath}`
   );
-
-  await page.close();
 
   return { manifest, passed };
 }

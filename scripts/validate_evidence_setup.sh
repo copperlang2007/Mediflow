@@ -85,7 +85,7 @@ fi
 
 # Check credentials
 CRED_COUNT=0
-for role in AGENT TEAM_LEAD MANAGER DIRECTOR RETENTION COMPLIANCE OWNER VIEWER; do
+for role in AGENT SUPERVISOR COMPLIANCE_ADMIN COMMISSION LICENSING CRM EXECUTIVE RENEWALS; do
   EMAIL_VAR="TEST_${role}_EMAIL"
   PASS_VAR="TEST_${role}_PASSWORD"
   if [ -n "${!EMAIL_VAR:-}" ] && [ -n "${!PASS_VAR:-}" ]; then
@@ -137,7 +137,7 @@ if [ "$FAIL" -eq 0 ]; then
   echo "     export TEST_AGENT_PASSWORD=..."
   echo ""
   echo "  2. Run a single journey:"
-  echo "     ./scripts/capture_demo_videos.sh journeys/01-agent-workspace.journey.ts"
+  echo "     ./scripts/capture_demo_videos.sh journeys/01-agent-enrollment-aep.journey.ts"
   echo ""
   echo "  3. Or run all journeys in sequence:"
   echo "     ./scripts/capture_demo_videos.sh"
