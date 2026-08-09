@@ -89,7 +89,7 @@ for role in AGENT SUPERVISOR COMPLIANCE_ADMIN COMMISSION LICENSING CRM EXECUTIVE
   EMAIL_VAR="TEST_${role}_EMAIL"
   PASS_VAR="TEST_${role}_PASSWORD"
   if [ -n "${!EMAIL_VAR:-}" ] && [ -n "${!PASS_VAR:-}" ]; then
-    ((CRED_COUNT++))
+    CRED_COUNT=$((CRED_COUNT + 1))
   fi
 done
 
