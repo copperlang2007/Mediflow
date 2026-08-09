@@ -18,10 +18,14 @@ HEADED="${EVIDENCE_HEADED:-0}"
 # mode); 401 means a real login flow exists. ${VAR+x} keeps an explicit
 # operator 0/1 authoritative — only the unset case is probed.
 if [ -z "${EVIDENCE_ASSUME_SIGNED_IN+x}" ]; then
-  # Require 200 AND a JSON body: an unauthenticated SPA fallback can serve
-  # the shell as 200 text/html, which must NOT read as "signed in".
-  PROBE=$(curl -s -o /dev/null -w '%{http_code} %{content_type}' --max-time 10 "$BASE_URL/api/users/me" || echo "000 -")
-  if [[ "$PROBE" == 200\ *json* ]]; then
+  # Require 200 AND a body that actually contains a user object ("id" key):
+  # an unauthenticated SPA fallback serves the shell as 200 text/html, and a
+  # misconfigured proxy can return 200 + a JSON ERROR body — neither may
+  # read as "signed in". (grep, not jq — no extra tool dependency.)
+  PROBE_RESP=$(curl -s --max-time 10 -w '\n%{http_code}' "$BASE_URL/api/users/me" || printf '\n000')
+  PROBE_STATUS="${PROBE_RESP##*$'\n'}"
+  PROBE_BODY="${PROBE_RESP%$'\n'*}"
+  if [ "$PROBE_STATUS" = "200" ] && printf '%s' "$PROBE_BODY" | grep -q '"id"'; then
     echo "🔓 Target answers /api/users/me unauthenticated (demo-mode deploy) — skipping login steps (EVIDENCE_ASSUME_SIGNED_IN=1)"
     EVIDENCE_ASSUME_SIGNED_IN=1
   else
