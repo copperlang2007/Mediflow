@@ -15,6 +15,10 @@ import { peekQueue } from "../lib/jobs";
 
 const router: IRouter = Router();
 
+/** Core table (migration 0000) used by /readyz to prove the app schema is
+ *  migrated, not merely that the database accepts connections. */
+const SCHEMA_PROBE_TABLE = "users";
+
 /**
  * Liveness probe — process is alive. Always returns 200 (unless the event
  * loop itself is hung, in which case nothing responds anyway).
@@ -35,7 +39,10 @@ router.get("/healthz", (_req, res) => {
  *    loop that is not stopped (see `checkWorkerLiveness()`). This catches the
  *    case where every worker dies after boot: the boot-time flag stays `true`
  *    but the node would silently run no background jobs.
- *  - the database responds to `SELECT 1` within ~500ms.
+ *  - the database responds within ~500ms to a probe that also proves the
+ *    app schema exists (`SELECT 1 FROM users LIMIT 0`) — a bare `SELECT 1`
+ *    passes against a reachable-but-unmigrated database, reporting ready
+ *    while every real endpoint 500s on missing tables.
  *
  * Successful results are cached briefly (~2s) to avoid hammering the DB from
  * per-pod probes. Failures are never cached so recovery is detected fast.
@@ -76,7 +83,20 @@ router.get("/readyz", async (_req, res) => {
     return;
   }
 
-  const dbCheck: DbCheckResult = await pingDb(() => db.execute(sql`SELECT 1`));
+  // LIMIT 0 keeps the probe free (no rows scanned) while still failing with
+  // 42P01 when the probe table is absent. DELIBERATE coupling: renaming the
+  // probe table without updating SCHEMA_PROBE_TABLE flips readiness to 503
+  // everywhere — that rename is a migration-level event whose checklist
+  // includes this constant (single place to update).
+  // KNOWN TRADE-OFF vs a bare SELECT 1: this takes AccessShareLock on the
+  // probe table, so a migration holding ACCESS EXCLUSIVE on it would 503
+  // readiness on OTHER instances during a rolling restart. Accepted — the
+  // deployment is single-instance, and a probe that can't see the schema
+  // during an exclusive-lock migration SHOULD report not-ready; reverting
+  // to SELECT 1 would resurrect the ready-while-unmigrated hole.
+  const dbCheck: DbCheckResult = await pingDb(() =>
+    db.execute(sql`SELECT 1 FROM ${sql.identifier(SCHEMA_PROBE_TABLE)} LIMIT 0`),
+  );
   if (dbCheck !== "ok") {
     res.status(503).json({
       status: "unhealthy",

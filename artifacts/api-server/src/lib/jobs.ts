@@ -349,15 +349,19 @@ export async function deadLetterHandler(
 export async function startWorkers(): Promise<void> {
   const boss = await getQueue();
 
-  // Create all job queues first (pg-boss v12 requirement). Every queue gets a
-  // retry policy and the shared dead-letter queue — see `queueOptions()`.
+  // The dead-letter queue MUST exist before any queue referencing it via the
+  // `deadLetter` option — pg-boss v12 validates the target on createQueue()
+  // and throws if it's missing, which would abort worker startup and pin
+  // /api/readyz at 503. No retries (a permanently-failed job must not loop),
+  // no further dead-letter target.
+  await boss.createQueue(DEAD_LETTER_QUEUE, { retryLimit: 0 });
+
+  // Create all job queues (pg-boss v12 requires createQueue before
+  // schedule()/work()). Every queue gets a retry policy and the shared
+  // dead-letter queue — see `queueOptions()`.
   for (const name of Object.values(JOB_NAMES)) {
     await boss.createQueue(name, queueOptions(name));
   }
-
-  // The dead-letter queue itself: no retries (a permanently-failed job must
-  // not loop), no further dead-letter target.
-  await boss.createQueue(DEAD_LETTER_QUEUE, { retryLimit: 0 });
   // One worker drains the dead-letter queue, logging + Sentry-capturing every
   // exhausted-retry failure across all job types.
   await boss.work<DeadLetterPayload>(DEAD_LETTER_QUEUE, deadLetterHandler);

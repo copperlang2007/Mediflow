@@ -29,12 +29,29 @@
  *   - event.tags (operator-curated; PHI shouldn't be there in the first place)
  *   - UUIDs, generic timestamps, ints, durations.
  */
+import { logger } from "./logger";
+
+/** Unknown top-level event keys already warned about this process. */
+const warnedUnknownEventKeys = new Set<string>();
 
 const MBI_REGEX =
   /\b[1-9](?:[A-HJ-NP-Z][A-HJ-NP-Z])(?:\d)-?(?:[A-HJ-NP-Z])(?:\d)-?(?:[A-HJ-NP-Z])(?:[A-HJ-NP-Z])(?:\d)(?:\d)\b/gi;
-// SSN: 3-2-4 with optional dashes. Pre-check is the trailing 4-digit
-// block so we don't grab any 9-digit blob. Lookarounds prevent eating
-// surrounding alnums.
+// SSN: 3-2-4 dashed, OR a standalone 9-digit run. Lookarounds prevent
+// eating digits embedded in longer alnum/hyphenated tokens (UUIDs, hex ids).
+// DELIBERATE over-redaction trade-off: a bare 9-digit URL path segment
+// (/api/things/123456789/) WOULD be redacted — accepted, because dropping
+// the undashed form means an SSN typed without dashes in a query string or
+// error message ships unscrubbed, and this codebase's identifiers are all
+// UUIDs, never bare 9-digit numbers. Fail closed.
+// ONE targeted carve-out: a number DIRECTLY labeled "NPN" (NIPR producer
+// number — public license id, 9 digits for newer licensees) is
+// definitionally not an SSN. Implemented as protect-then-restore in
+// redactPhiString, NOT as a lookbehind window: a proximity window
+// ("NPN ... 123456789" within N chars) is scope-blind and leaked real SSNs
+// in shapes like "NPN mismatch: ssn 123456789". Only `NPN[:= ]123456789`
+// is exempt; the dashed form always redacts (a mislabel must not leak a
+// real SSN), and every unlabeled 9-digit run still redacts.
+const NPN_LABELED_REGEX = /\b(NPN)([:=\s#]{1,3})(\d{9})(?![\w-])/gi;
 const SSN_REGEX = /(?<![\w-])(\d{3}-\d{2}-\d{4}|\d{9})(?![\w-])/g;
 const EMAIL_REGEX =
   /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
@@ -53,12 +70,17 @@ const BANK_REGEX = /(?<![\w-])(\d{9})[\s-]+(\d{4,17})(?![\w-])/g;
 export function redactPhiString(input: string): string {
   if (typeof input !== "string" || input.length === 0) return input;
   return input
+    // Tokenize directly-labeled NPNs (public ids, not PHI) so the SSN pass
+    // below can stay maximally aggressive; restored verbatim at the end.
+    // \x00 cannot survive any earlier redaction or appear in normal text.
+    .replace(NPN_LABELED_REGEX, (_m, label, sep, digits) => `${label}${sep}\x00NPN${digits}\x00`)
     .replace(MBI_REGEX, "[REDACTED:MBI]")
     .replace(EMAIL_REGEX, "[REDACTED:EMAIL]")
     .replace(BANK_REGEX, "[REDACTED:BANK]")
     .replace(PHONE_E164_REGEX, "[REDACTED:PHONE]")
     .replace(PHONE_US_REGEX, "[REDACTED:PHONE]")
-    .replace(SSN_REGEX, "[REDACTED:SSN]");
+    .replace(SSN_REGEX, "[REDACTED:SSN]")
+    .replace(/\x00NPN(\d{9})\x00/g, "$1");
 }
 
 /**
@@ -93,11 +115,35 @@ export function redactPhiDeep<T>(value: T, depth = DEFAULT_DEPTH): T {
   return value;
 }
 
+/** Redact every string leaf and deep-walk every object leaf of a shallow
+ *  record IN PLACE. Used for span shapes (event.spans[] and the v2 streamed
+ *  span envelope), whose key set varies by SDK version and instrumentation. */
+export function scrubShallowLeaves(record: Record<string, unknown>): void {
+  for (const key of Object.keys(record)) {
+    try {
+      const value = record[key];
+      if (typeof value === "string") {
+        record[key] = redactPhiString(value);
+      } else if (value && typeof value === "object") {
+        record[key] = redactPhiDeep(value);
+      }
+    } catch {
+      // Per-key fail-closed: a value the scrubber chokes on (revoked Proxy,
+      // hostile getter, broken toString) is dropped rather than shipped
+      // unscrubbed — and, critically, does not abort scrubbing of the
+      // REMAINING keys, which a single function-level throw would.
+      delete record[key];
+    }
+  }
+}
+
 // Minimal shape of the Sentry event we mutate. We use a structural type
 // here so this module doesn't pull `@sentry/types` into the build graph
 // — that lets the regex unit tests run without the full Sentry SDK.
 export interface SentryLikeEvent {
   message?: string;
+  transaction?: string;
+  user?: Record<string, unknown>;
   exception?: {
     values?: Array<{
       value?: string;
@@ -110,10 +156,27 @@ export interface SentryLikeEvent {
   };
   request?: {
     data?: unknown;
+    url?: string;
+    query_string?: unknown;
+    headers?: Record<string, unknown>;
+    cookies?: unknown;
   };
   extra?: Record<string, unknown>;
   breadcrumbs?: Array<{
     message?: string;
+    data?: Record<string, unknown>;
+  }>;
+  // Sentry v10 (OTel-first) shape: HTTP details also land on the trace
+  // context and on child spans — a query string carrying an MBI/SSN shows
+  // up in request.url, request.query_string, contexts.trace.data.url.full,
+  // and spans[].data simultaneously.
+  contexts?: {
+    trace?: {
+      data?: Record<string, unknown>;
+    };
+  } & Record<string, unknown>;
+  spans?: Array<{
+    description?: string;
     data?: Record<string, unknown>;
   }>;
 }
@@ -144,11 +207,120 @@ export function scrubSentryEvent<T extends SentryLikeEvent>(event: T): T {
           }
         }
       }
+      // v10 HTTP auto-instrumentation can stash request/response URLs (and
+      // bodies, when configured) on mechanism.data.
+      const mechanism = (ex as Record<string, any>).mechanism;
+      if (mechanism?.data) {
+        mechanism.data = redactPhiDeep(mechanism.data);
+      }
     }
   }
 
-  if (event.request?.data !== undefined) {
-    event.request.data = redactPhiDeep(event.request.data);
+  // threads carry the same frames[].vars surface as exception stacktraces.
+  const threads = (event as Record<string, any>).threads;
+  if (threads?.values) {
+    for (const thread of threads.values) {
+      const frames = thread?.stacktrace?.frames;
+      if (frames) {
+        for (const frame of frames) {
+          if (frame.vars) {
+            frame.vars = redactPhiDeep(frame.vars);
+          }
+        }
+      }
+    }
+  }
+
+  // debug_meta / sdk are metadata buckets; scrubbing them is cheap and closes
+  // the last string-bearing top-level surfaces.
+  const anyEvent = event as Record<string, any>;
+  if (anyEvent.debug_meta) {
+    anyEvent.debug_meta = redactPhiDeep(anyEvent.debug_meta);
+  }
+  if (anyEvent.sdk) {
+    anyEvent.sdk = redactPhiDeep(anyEvent.sdk);
+  }
+
+  if (event.request) {
+    if (event.request.data !== undefined) {
+      event.request.data = redactPhiDeep(event.request.data);
+    }
+    // v10: URL, query string, headers, and cookies carry request PHI that
+    // the v8 shape kept inside request.data only.
+    if (typeof event.request.url === "string") {
+      event.request.url = redactPhiString(event.request.url);
+    }
+    if (event.request.query_string !== undefined) {
+      event.request.query_string = redactPhiDeep(event.request.query_string);
+    }
+    if (event.request.headers) {
+      event.request.headers = redactPhiDeep(event.request.headers);
+    }
+    if (event.request.cookies !== undefined) {
+      event.request.cookies = redactPhiDeep(event.request.cookies);
+    }
+  }
+
+  // Defense in depth: these are empty today (no setUser calls,
+  // sendDefaultPii=false, OTel records transaction as a route template),
+  // but a future Sentry.setUser({ email }) or custom context bucket must
+  // not become a silent PHI leak.
+  if (typeof event.transaction === "string") {
+    event.transaction = redactPhiString(event.transaction);
+  }
+  if (event.user) {
+    event.user = redactPhiDeep(event.user);
+  }
+
+  // v10: OTel span attributes on the trace context (url.full, http.url,
+  // http.target, http.query, http.request.header.*) — plus every other
+  // contexts.* bucket, which is arbitrary structured data (or a bare string).
+  if (event.contexts) {
+    for (const [key, value] of Object.entries(event.contexts as Record<string, unknown>)) {
+      if (key === "trace") continue; // handled below with its own shape
+      if (value && typeof value === "object") {
+        (event.contexts as Record<string, unknown>)[key] = redactPhiDeep(value);
+      } else if (typeof value === "string") {
+        (event.contexts as Record<string, unknown>)[key] = redactPhiString(value);
+      }
+    }
+  }
+  if (event.contexts?.trace) {
+    // The ROOT span's description/op/origin/status live here as strings —
+    // same PHI surface as spans[].description, scrubbed symmetrically.
+    const trace = event.contexts.trace as Record<string, unknown>;
+    for (const key of ["description", "op", "origin", "status"]) {
+      if (typeof trace[key] === "string") {
+        trace[key] = redactPhiString(trace[key] as string);
+      }
+    }
+    if (trace.data) {
+      trace.data = redactPhiDeep(trace.data);
+    }
+    // Sweep the REST of the trace context — v10's TraceContext also declares
+    // `tags` (a future OTel bridge or manual span tag could carry PHI there),
+    // and later SDKs may add more string-bearing fields. Exempt only the
+    // structural hex identifiers: 32-char trace ids can contain 9+
+    // consecutive digits and would false-positive the SSN pattern. Note the
+    // event-level `tags` exemption does NOT extend here — trace.tags is
+    // instrumentation-written, not operator-curated.
+    const TRACE_HANDLED_OR_EXEMPT = new Set([
+      "description", "op", "origin", "status", "data",
+      "trace_id", "span_id", "parent_span_id", "sampled",
+    ]);
+    for (const key of Object.keys(trace)) {
+      if (TRACE_HANDLED_OR_EXEMPT.has(key)) continue;
+      trace[key] = redactPhiDeep(trace[key]);
+    }
+  }
+
+  // v10: walk EVERY leaf on each span, same as the contexts loop — the OTel
+  // span JSON also carries name / op / status_message / origin / attributes,
+  // any of which a future annotator can populate with PHI.
+  if (event.spans) {
+    for (const span of event.spans) {
+      scrubShallowLeaves(span as Record<string, unknown>);
+    }
   }
 
   if (event.extra) {
@@ -164,6 +336,46 @@ export function scrubSentryEvent<T extends SentryLikeEvent>(event: T): T {
         bc.data = redactPhiDeep(bc.data);
       }
     }
+  }
+
+  // Future-proofing sweep: any top-level key a later SDK version introduces
+  // gets deep-redacted rather than passing through untouched. Exemptions are
+  // (a) keys already handled above with shape-aware logic, (b) structural
+  // identifiers where pattern redaction could corrupt the event (event_id is
+  // hex and can contain 9+ consecutive digits, tripping the SSN pattern),
+  // and (c) tags — deliberately untouched per the design note above.
+  const HANDLED_OR_EXEMPT = new Set([
+    "message", "exception", "threads", "request", "transaction", "user",
+    "contexts", "spans", "extra", "breadcrumbs", "debug_meta", "sdk",
+    "event_id", "timestamp", "start_timestamp", "type", "platform", "level",
+    "release", "dist", "environment", "server_name", "logger", "modules",
+    "fingerprint", "tags",
+    // Standard v10 transaction keys (present on EVERY transaction event —
+    // without these the unknown-key warn fired three times per process and
+    // deep-redact walked them per event):
+    //   transaction_info — structural enum ({source: 'route'|'url'|…})
+    //   measurements     — numeric metric values, no string PHI surface
+    //   sdkProcessingMetadata — SDK-internal processing state, stripped
+    //     before serialization (never crosses the wire); mutating it risks
+    //     corrupting dynamic-sampling / request correlation instead.
+    "transaction_info", "measurements", "sdkProcessingMetadata",
+  ]);
+  const record = event as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (HANDLED_OR_EXEMPT.has(key)) continue;
+    // Warn (once per key per process) before deep-redacting an UNKNOWN key:
+    // a future SDK's structural field could be hex with 9+ digits, which the
+    // SSN pattern would corrupt — the exact trap event_id is exempted for.
+    // The warning surfaces new fields at upgrade time instead of silently.
+    if (!warnedUnknownEventKeys.has(key)) {
+      warnedUnknownEventKeys.add(key);
+      logger.warn(
+        { key },
+        "sentry scrubber: unknown top-level event key — deep-redacting; " +
+          "classify it in HANDLED_OR_EXEMPT if it is structural",
+      );
+    }
+    record[key] = redactPhiDeep(record[key]);
   }
 
   return event;

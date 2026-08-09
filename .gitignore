@@ -58,6 +58,7 @@ Thumbs.db
 
 # Playwright
 /test-results/
+/evidence/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
@@ -66,3 +67,4 @@ Thumbs.db
 
 # GitMind Agent state
 .gitmind/
+evidence/

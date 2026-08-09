@@ -46,6 +46,37 @@ describe("redactPhiString — pattern coverage", () => {
     expect(redactPhiString(input)).toBe("raw [REDACTED:SSN] in body");
   });
 
+  it("preserves DIRECTLY NPN-labeled 9-digit numbers (public license ids)", () => {
+    expect(redactPhiString("agent NPN 123456789 licensing error")).toBe(
+      "agent NPN 123456789 licensing error",
+    );
+    expect(redactPhiString("npn: 123456789 rejected")).toBe("npn: 123456789 rejected");
+    expect(redactPhiString("NPN=123456789")).toBe("NPN=123456789");
+    // Dashed SSN redacts even when NPN-labeled (dashes make it SSN-shaped,
+    // and a mislabel must not leak a real SSN).
+    expect(redactPhiString("NPN 123-45-6789")).toBe("NPN [REDACTED:SSN]");
+  });
+
+  it("still redacts SSNs that merely appear NEAR an NPN mention", () => {
+    // Regression: a proximity-window exemption leaked all of these.
+    for (const input of [
+      "user reported NPN issue. their ssn 123456789 was rejected",
+      "NPN mismatch: ssn 123456789",
+      "npn error; ssn=123456789",
+      "NPN. SSN 111223333 rejected",
+      "carrier NPN check. SSN=999887777",
+      // Indirect label with intervening words is NOT exempt either —
+      // safety outranks the diagnostic value of this import message.
+      "Duplicate NPN within file: 123456789",
+    ]) {
+      expect(redactPhiString(input), input).toContain("[REDACTED:SSN]");
+    }
+    // Direct label plus a nearby unlabeled run: only the labeled one survives.
+    expect(redactPhiString("NPN 988112233 then ssn 123456789")).toBe(
+      "NPN 988112233 then ssn [REDACTED:SSN]",
+    );
+  });
+
   it("redacts an E.164 phone number", () => {
     const input = "call +15555550123 now";
     expect(redactPhiString(input)).toBe("call [REDACTED:PHONE] now");
@@ -189,5 +220,219 @@ describe("scrubSentryBreadcrumb", () => {
     const out = scrubSentryBreadcrumb(bc);
     expect(out.message).toBe("sms to [REDACTED:PHONE] sent");
     expect(out.data).toEqual({ recipient: "[REDACTED:EMAIL]" });
+  });
+});
+
+describe("scrubSentryEvent — Sentry v10 (OTel-first) event shape", () => {
+  const SSN = "123-45-6789";
+  const EMAIL = "jane.doe@example.com";
+
+  function v10Event() {
+    return {
+      request: {
+        url: `https://api.example.com/api/contacts/search?ssn=${SSN}&email=${EMAIL}`,
+        query_string: `ssn=${SSN}&email=${EMAIL}`,
+        headers: {
+          "x-member-contact": EMAIL,
+          "user-agent": "vitest",
+        },
+        cookies: { session_hint: EMAIL },
+        data: { ssn: SSN },
+      },
+      contexts: {
+        trace: {
+          data: {
+            "url.full": `https://api.example.com/lookup?ssn=${SSN}`,
+            "http.url": `https://api.example.com/lookup?ssn=${SSN}`,
+            "http.target": `/lookup?ssn=${SSN}`,
+            "http.query": `ssn=${SSN}`,
+          },
+        },
+      },
+      spans: [
+        {
+          description: `GET /lookup?ssn=${SSN}`,
+          data: { "url.full": `https://api.example.com/lookup?email=${EMAIL}` },
+        },
+      ],
+    };
+  }
+
+  it("redacts PHI in request.url and request.query_string", () => {
+    const event = scrubSentryEvent(v10Event());
+    expect(event.request.url).not.toContain(SSN);
+    expect(event.request.url).not.toContain(EMAIL);
+    expect(JSON.stringify(event.request.query_string)).not.toContain(SSN);
+    expect(JSON.stringify(event.request.query_string)).not.toContain(EMAIL);
+  });
+
+  it("redacts PHI in request headers and cookies", () => {
+    const event = scrubSentryEvent(v10Event());
+    expect(JSON.stringify(event.request.headers)).not.toContain(EMAIL);
+    expect(JSON.stringify(event.request.cookies)).not.toContain(EMAIL);
+    // Non-PHI header values pass through untouched.
+    expect(event.request.headers["user-agent"]).toBe("vitest");
+  });
+
+  it("redacts PHI in OTel trace-context data (url.full, http.*)", () => {
+    const event = scrubSentryEvent(v10Event());
+    expect(JSON.stringify(event.contexts.trace.data)).not.toContain(SSN);
+  });
+
+  it("redacts PHI in trace.tags while preserving structural trace ids", () => {
+    const event = v10Event() as any;
+    // 32-char hex trace id containing 9+ consecutive digits — must NOT be
+    // corrupted by the SSN pattern.
+    const traceId = "ab123456789012cdab123456789012cd";
+    event.contexts.trace.trace_id = traceId;
+    event.contexts.trace.span_id = "1234567890abcdef";
+    event.contexts.trace.tags = { "user.ssn": SSN, "patient.email": EMAIL };
+    const scrubbed = scrubSentryEvent(event);
+    expect(JSON.stringify(scrubbed.contexts.trace.tags)).not.toContain(SSN);
+    expect(JSON.stringify(scrubbed.contexts.trace.tags)).not.toContain(EMAIL);
+    expect(scrubbed.contexts.trace.trace_id).toBe(traceId);
+    expect(scrubbed.contexts.trace.span_id).toBe("1234567890abcdef");
+  });
+
+  it("redacts PHI in child span descriptions and data", () => {
+    const event = scrubSentryEvent(v10Event());
+    expect(event.spans[0].description).not.toContain(SSN);
+    expect(JSON.stringify(event.spans[0].data)).not.toContain(EMAIL);
+  });
+
+  it("still redacts the v8-shape request.data body", () => {
+    const event = scrubSentryEvent(v10Event());
+    expect(JSON.stringify(event.request.data)).not.toContain(SSN);
+  });
+});
+
+describe("scrubSentryEvent — latent-PHI surfaces (user, transaction, contexts.*)", () => {
+  const SSN = "123-45-6789";
+  const EMAIL = "alice@example.com";
+
+  it("redacts PHI in event.user", () => {
+    const event = scrubSentryEvent({
+      user: { email: EMAIL, username: EMAIL, ip_address: "10.0.0.1" },
+    } as any);
+    expect(JSON.stringify(event.user)).not.toContain(EMAIL);
+    expect((event.user as any).ip_address).toBe("10.0.0.1");
+  });
+
+  it("redacts PHI in event.transaction", () => {
+    const event = scrubSentryEvent({
+      transaction: `GET /api/contacts?ssn=${SSN}`,
+    } as any);
+    expect(event.transaction).not.toContain(SSN);
+  });
+
+  it("redacts PHI in arbitrary non-trace contexts buckets", () => {
+    const event = scrubSentryEvent({
+      contexts: {
+        state: { last_email: EMAIL, step: 3 },
+        trace: { data: { "url.full": `https://x.test/?ssn=${SSN}` } },
+      },
+    } as any);
+    expect(JSON.stringify((event.contexts as any).state)).not.toContain(EMAIL);
+    expect((event.contexts as any).state.step).toBe(3);
+    expect(JSON.stringify((event.contexts as any).trace.data)).not.toContain(SSN);
+  });
+});
+
+describe("scrubSentryEvent — root trace fields and string-valued context buckets", () => {
+  const SSN = "123-45-6789";
+  const EMAIL = "alice@example.com";
+
+  it("redacts PHI in contexts.trace.description / op (root span strings)", () => {
+    const event = scrubSentryEvent({
+      contexts: {
+        trace: {
+          description: `GET /api/contacts/search?ssn=${SSN}`,
+          op: `lookup ${EMAIL}`,
+          status: "ok",
+        },
+      },
+    } as any);
+    const trace = (event.contexts as any).trace;
+    expect(trace.description).not.toContain(SSN);
+    expect(trace.op).not.toContain(EMAIL);
+    expect(trace.status).toBe("ok");
+  });
+
+  it("redacts PHI in string-valued sibling context buckets", () => {
+    const event = scrubSentryEvent({
+      contexts: { note: `member ${EMAIL} flagged` },
+    } as any);
+    expect((event.contexts as any).note).not.toContain(EMAIL);
+  });
+});
+
+describe("scrubSentryEvent — threads, mechanism.data, debug_meta, sdk", () => {
+  const SSN = "123-45-6789";
+  const EMAIL = "alice@example.com";
+
+  it("redacts PHI in threads[].stacktrace.frames[].vars", () => {
+    const event = scrubSentryEvent({
+      threads: { values: [{ stacktrace: { frames: [{ vars: { ssn: SSN } }] } }] },
+    } as any);
+    expect(JSON.stringify((event as any).threads)).not.toContain(SSN);
+  });
+
+  it("redacts PHI in exception.values[].mechanism.data", () => {
+    const event = scrubSentryEvent({
+      exception: {
+        values: [{ value: "boom", mechanism: { type: "http", data: { url: `https://x.test/?ssn=${SSN}` } } }],
+      },
+    } as any);
+    expect(JSON.stringify((event.exception as any).values[0].mechanism.data)).not.toContain(SSN);
+  });
+
+  it("redacts PHI in debug_meta and sdk buckets", () => {
+    const event = scrubSentryEvent({
+      debug_meta: { images: [{ code_file: `/tmp/${EMAIL}.map` }] },
+      sdk: { name: "sentry.javascript.node", note: EMAIL },
+    } as any);
+    expect(JSON.stringify((event as any).debug_meta)).not.toContain(EMAIL);
+    expect(JSON.stringify((event as any).sdk)).not.toContain(EMAIL);
+  });
+});
+
+describe("scrubSentryEvent — span leaves beyond description/data", () => {
+  const SSN = "123-45-6789";
+
+  it("redacts PHI in span.name, op, status_message, origin, attributes", () => {
+    const event = scrubSentryEvent({
+      spans: [
+        {
+          name: `GET /lookup?ssn=${SSN}`,
+          op: `http ${SSN}`,
+          status_message: `failed for ${SSN}`,
+          origin: `manual.${SSN}`,
+          attributes: { "url.full": `https://x.test/?ssn=${SSN}` },
+        },
+      ],
+    } as any);
+    expect(JSON.stringify((event as any).spans[0])).not.toContain(SSN);
+  });
+});
+
+describe("scrubSentryEvent — unknown-key fallback sweep", () => {
+  const SSN = "123-45-6789";
+
+  it("deep-redacts PHI in top-level keys the scrubber does not know about", () => {
+    const event = scrubSentryEvent({
+      unknown_future_field: { details: `ssn=${SSN} phone=+15555550123` },
+    } as any);
+    const s = JSON.stringify((event as any).unknown_future_field);
+    expect(s).not.toContain(SSN);
+    expect(s).not.toContain("+15555550123");
+  });
+
+  it("leaves structural identifiers and tags untouched", () => {
+    const event = scrubSentryEvent({
+      event_id: "1234567890abcdef1234567890abcdef",
+      tags: { member_note: "operator-curated 123-45-6789" },
+    } as any);
+    expect((event as any).event_id).toBe("1234567890abcdef1234567890abcdef");
+    expect((event as any).tags.member_note).toContain("123-45-6789");
   });
 });

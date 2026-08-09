@@ -30,6 +30,7 @@
  *     so we don't drift from production seed behavior.
  */
 import { and, eq } from "drizzle-orm";
+import pg from "pg";
 import { randomUUID, createHash } from "node:crypto";
 import {
   db,
@@ -155,22 +156,34 @@ async function resetDemoOrg(): Promise<void> {
 
 // ---- Core seeders ----------------------------------------------------------
 
-async function seedOrg(): Promise<void> {
+/** Seed the demo org. Returns false when ANOTHER concurrent seeder won the
+ *  org insert — the org row is the serialization point for the whole seed:
+ *  the loser defers entirely instead of racing every downstream seeder's
+ *  check-then-insert (users_pkey, agents_pkey, ...). */
+async function seedOrg(): Promise<boolean> {
   const existing = await db
     .select({ id: organizationsTable.id })
     .from(organizationsTable)
     .where(eq(organizationsTable.id, DEMO_ORG_ID));
-  if (existing.length === 0) {
-    await db.insert(organizationsTable).values({
+  if (existing.length > 0) {
+    log("[org] INSUREitALL Demo already exists");
+    return true;
+  }
+  const res = await db
+    .insert(organizationsTable)
+    .values({
       id: DEMO_ORG_ID,
       name: "INSUREitALL Demo",
       slug: "insureitall-demo",
       planTier: "growth",
-    });
-    log("[org] created INSUREitALL Demo");
-  } else {
-    log("[org] INSUREitALL Demo already exists");
+    })
+    .onConflictDoNothing({ target: organizationsTable.id });
+  if ((res as unknown as { rowCount?: number | null }).rowCount === 0) {
+    log("[org] another seeder is creating the demo data concurrently — deferring to it");
+    return false;
   }
+  log("[org] created INSUREitALL Demo");
+  return true;
 }
 
 interface UserSeed {
@@ -221,7 +234,7 @@ async function seedUsers(): Promise<void> {
         fullName: u.fullName,
         role: u.role,
         isActive: true,
-      });
+      }).onConflictDoNothing();
     }
   }
   log(`[users] ensured ${USER_ROWS.length} users`);
@@ -264,7 +277,7 @@ async function seedAgents(): Promise<{
       .from(agentsTable)
       .where(eq(agentsTable.id, a.id));
     if (existing.length === 0) {
-      await db.insert(agentsTable).values(a);
+      await db.insert(agentsTable).values(a).onConflictDoNothing();
     }
   }
 
@@ -292,7 +305,7 @@ async function seedAgents(): Promise<{
         issueDate: new Date("2023-01-15T00:00:00Z"),
         expiryDate: new Date("2026-01-15T00:00:00Z"),
         status: "active",
-      });
+      }).onConflictDoNothing();
     }
   }
   log(`[agents] ensured Carlos + Linda with ${licenses.length} licenses`);
@@ -374,7 +387,7 @@ async function seedContractingProfile(p: ProfileSeed): Promise<void> {
       entityType: "individual",
       backgroundCheckStatus: "cleared",
       backgroundCheckClearedAt: new Date("2025-04-01T00:00:00Z"),
-    });
+    }).onConflictDoNothing();
   } else {
     await db
       .update(agentContractingProfilesTable)
@@ -418,7 +431,7 @@ async function seedOnboardingForCarlos(
       startedAt: new Date("2023-02-14T00:00:00Z"),
       completedAt: new Date("2023-03-10T00:00:00Z"),
       completedSteps: { profile: true, carriers: true, signing: true },
-    });
+    }).onConflictDoNothing();
   }
 
   // Carlos is appointed at every carrier with a writing number.
@@ -447,7 +460,7 @@ async function seedOnboardingForCarlos(
         submittedAt: new Date("2023-02-25T00:00:00Z"),
         appointedAt: new Date("2023-03-08T00:00:00Z"),
         writingNumber: `WN-${wn}`,
-      });
+      }).onConflictDoNothing();
     }
   }
   log("[onboarding] Carlos: complete, all carriers appointed");
@@ -482,7 +495,7 @@ async function seedOnboardingForLinda(
       status: "signing",
       startedAt: new Date("2025-05-15T00:00:00Z"),
       completedSteps: { profile: true, carriers: true },
-    });
+    }).onConflictDoNothing();
   }
 
   // Pick 4 carriers — Aetna/CVS, Humana, UnitedHealth/AARP, Devoted —
@@ -517,7 +530,7 @@ async function seedOnboardingForLinda(
         status,
         signatureCompletedAt:
           status === "signed" ? new Date("2025-05-22T15:32:00Z") : null,
-      });
+      }).onConflictDoNothing();
     }
   }
   log(
@@ -575,7 +588,7 @@ async function seedContacts(): Promise<string[]> {
       planYear: 2025,
       status,
       leadSource: i % 2 === 0 ? "Inbound web" : "Referral",
-    });
+    }).onConflictDoNothing();
   }
   log(`[contacts] ensured ${ids.length} contacts`);
   return ids;
@@ -584,53 +597,52 @@ async function seedContacts(): Promise<string[]> {
 // ---- Pipeline + deals + activities + tasks ---------------------------------
 
 async function seedPipelineAndDeals(contactIds: string[]): Promise<void> {
-  const existing = await db
-    .select({ id: pipelinesTable.id })
-    .from(pipelinesTable)
-    .where(eq(pipelinesTable.id, PIPELINE_ID));
-  if (existing.length === 0) {
-    await db.insert(pipelinesTable).values({
-      id: PIPELINE_ID,
-      orgId: DEMO_ORG_ID,
-      name: "Medicare AEP 2025",
-      description: "Annual Enrollment Period pipeline",
-      isDefault: true,
-    });
-    await db.insert(pipelineStagesTable).values([
-      {
-        id: STAGES.newLead,
-        pipelineId: PIPELINE_ID,
-        name: "New Lead",
-        orderIndex: 0,
-        color: "#94a3b8",
-        probabilityPct: 10,
-      },
-      {
-        id: STAGES.contacted,
-        pipelineId: PIPELINE_ID,
-        name: "Contacted",
-        orderIndex: 1,
-        color: "#3b82f6",
-        probabilityPct: 30,
-      },
-      {
-        id: STAGES.appointment,
-        pipelineId: PIPELINE_ID,
-        name: "Appointment Set",
-        orderIndex: 2,
-        color: "#a855f7",
-        probabilityPct: 60,
-      },
-      {
-        id: STAGES.enrolled,
-        pipelineId: PIPELINE_ID,
-        name: "Enrolled",
-        orderIndex: 3,
-        color: "#22c55e",
-        probabilityPct: 100,
-      },
-    ]);
-  }
+  // No pipeline-exists gate here: both inserts use fixed ids +
+  // onConflictDoNothing, so re-running them is already a no-op. Gating the
+  // stages on the PIPELINE row made a crash between the two inserts
+  // unrecoverable — the resume run would skip the stages forever and every
+  // deal insert would then fail its stage_id FK.
+  await db.insert(pipelinesTable).values({
+    id: PIPELINE_ID,
+    orgId: DEMO_ORG_ID,
+    name: "Medicare AEP 2025",
+    description: "Annual Enrollment Period pipeline",
+    isDefault: true,
+  }).onConflictDoNothing();
+  await db.insert(pipelineStagesTable).values([
+    {
+      id: STAGES.newLead,
+      pipelineId: PIPELINE_ID,
+      name: "New Lead",
+      orderIndex: 0,
+      color: "#94a3b8",
+      probabilityPct: 10,
+    },
+    {
+      id: STAGES.contacted,
+      pipelineId: PIPELINE_ID,
+      name: "Contacted",
+      orderIndex: 1,
+      color: "#3b82f6",
+      probabilityPct: 30,
+    },
+    {
+      id: STAGES.appointment,
+      pipelineId: PIPELINE_ID,
+      name: "Appointment Set",
+      orderIndex: 2,
+      color: "#a855f7",
+      probabilityPct: 60,
+    },
+    {
+      id: STAGES.enrolled,
+      pipelineId: PIPELINE_ID,
+      name: "Enrolled",
+      orderIndex: 3,
+      color: "#22c55e",
+      probabilityPct: 100,
+    },
+  ]).onConflictDoNothing();
 
   const dealStageRotation = [
     STAGES.newLead,
@@ -659,7 +671,7 @@ async function seedPipelineAndDeals(contactIds: string[]): Promise<void> {
         valueEst: 1200 + i * 75,
         status: i % 4 === 3 ? "won" : "open",
         wonAt: i % 4 === 3 ? new Date("2025-05-10T00:00:00Z") : null,
-      });
+      }).onConflictDoNothing();
     }
   }
 
@@ -686,7 +698,7 @@ async function seedPipelineAndDeals(contactIds: string[]): Promise<void> {
               ? "Lead wants to compare Humana vs UHC for Q4."
               : "Sent follow-up summary email.",
         createdBy: USERS.carlosUser,
-      });
+      }).onConflictDoNothing();
     }
   }
 
@@ -724,13 +736,25 @@ async function seedPipelineAndDeals(contactIds: string[]): Promise<void> {
         status: "open",
         priority: t.priority,
         dueDate: new Date(Date.now() + (i + 1) * 86400000),
-      });
+      }).onConflictDoNothing();
     }
   }
   log("[crm] ensured pipeline + 8 deals + 6 activities + 3 tasks");
 }
 
 // ---- Commission statements -------------------------------------------------
+
+// Shared between seedCommissions and seedAll's completion marker so neither
+// can drift silently: the marker IS the last line item of the last statement,
+// derived from these constants rather than a duplicated literal ~700 lines
+// away. Reordering the slugs or changing the per-statement line count updates
+// both sides at once.
+const COMMISSION_STATEMENT_SLUGS = ["aetna-2025-04", "humana-2025-04"] as const;
+const COMMISSION_LINES_PER_STATEMENT = 4;
+const LAST_COMMISSION_LINE_ID = stableId(
+  "line",
+  `${stableId("stmt", COMMISSION_STATEMENT_SLUGS[COMMISSION_STATEMENT_SLUGS.length - 1]!)}-${COMMISSION_LINES_PER_STATEMENT - 1}`,
+);
 
 async function seedCommissions(
   carriers: Array<{ id: string; name: string }>,
@@ -746,7 +770,7 @@ async function seedCommissions(
 
   const statements = [
     {
-      id: stableId("stmt", "aetna-2025-04"),
+      id: stableId("stmt", COMMISSION_STATEMENT_SLUGS[0]),
       carrierId: aetna.id,
       statementDate: "2025-04-15",
       periodStart: "2025-04-01",
@@ -754,7 +778,7 @@ async function seedCommissions(
       totalAmount: "2450.00",
     },
     {
-      id: stableId("stmt", "humana-2025-04"),
+      id: stableId("stmt", COMMISSION_STATEMENT_SLUGS[1]),
       carrierId: humana.id,
       statementDate: "2025-04-15",
       periodStart: "2025-04-01",
@@ -764,11 +788,16 @@ async function seedCommissions(
   ];
 
   for (const s of statements) {
-    const exists = await db
-      .select({ id: commissionStatementsTable.id })
-      .from(commissionStatementsTable)
-      .where(eq(commissionStatementsTable.id, s.id));
-    if (exists.length === 0) {
+    // Guard on line-item COMPLETENESS, not statement existence: a crash
+    // between the statement insert and its line items would otherwise leave
+    // a permanently empty statement — the statement-exists check skipped the
+    // whole block on resume. All inserts below are id-stable +
+    // onConflictDoNothing, so re-running the incomplete branch is safe.
+    const existingLines = await db
+      .select({ id: commissionLineItemsTable.id })
+      .from(commissionLineItemsTable)
+      .where(eq(commissionLineItemsTable.statementId, s.id));
+    if (existingLines.length < COMMISSION_LINES_PER_STATEMENT) {
       await db.insert(commissionStatementsTable).values({
         id: s.id,
         orgId: DEMO_ORG_ID,
@@ -781,10 +810,10 @@ async function seedCommissions(
         source: "manual",
         status: "reconciled",
         uploadedByUserId: USERS.agencyAdmin,
-      });
+      }).onConflictDoNothing();
 
       // 4 line items per statement, all crediting Carlos.
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < COMMISSION_LINES_PER_STATEMENT; i++) {
         const contactId = contactIds[i % contactIds.length] ?? null;
         const lineId = stableId("line", `${s.id}-${i}`);
         await db.insert(commissionLineItemsTable).values({
@@ -803,7 +832,7 @@ async function seedCommissions(
           type: i === 0 ? "initial" : "renewal",
           writingAgentId: AGENTS.carlos,
           matchStatus: "matched",
-        });
+        }).onConflictDoNothing();
       }
     }
   }
@@ -812,17 +841,124 @@ async function seedCommissions(
 
 // ---- Main ------------------------------------------------------------------
 
+// Whole-run serialization: the org-insert defer only guards the FIRST seed;
+// the resume branch (org exists, seed incomplete) previously let two boots
+// race check-then-insert seeders. One try-lock covers every branch. Same key
+// discipline as migrate-locked.ts. (seedDefaultCarriers now ALSO self-
+// serializes with a per-org pg_advisory_xact_lock — that closes the prod
+// org-creation double-submit path this run-level lock can't see.)
+const SEED_LOCK_KEY = 981_234_502;
+
 async function main(): Promise<void> {
+  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required");
+  const lockClient = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await lockClient.connect();
+  const lockRes = await lockClient.query("SELECT pg_try_advisory_lock($1) AS locked", [
+    SEED_LOCK_KEY,
+  ]);
+  if (!lockRes.rows[0]?.locked) {
+    // WAIT for the winner instead of exiting immediately: startCommand
+    // chains `seed:demo; start`, so an early rc=0 here would boot the
+    // api-server while the peer is still writing demo rows — users would
+    // briefly see empty lists. Acquiring the lock (bounded, 120s) proves
+    // the peer finished; on timeout we boot anyway (seed is fail-open by
+    // design and the data self-heals on the next wake).
+    log("[seed] another seeder holds the lock — waiting for it to finish");
+    const deadline = Date.now() + 120_000;
+    let acquired = false;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const again = await lockClient.query(
+        "SELECT pg_try_advisory_lock($1) AS locked",
+        [SEED_LOCK_KEY],
+      );
+      if (again.rows[0]?.locked) {
+        acquired = true;
+        break;
+      }
+    }
+    if (acquired) {
+      // Acquiring the lock proves the peer's SESSION ended — not that it
+      // finished: a crashed peer releases the advisory lock too. Verify the
+      // completion marker before claiming success; if it's missing, WE now
+      // hold the lock, so resume the (idempotent) seed ourselves instead of
+      // logging a false green.
+      const done = await db
+        .select({ id: commissionLineItemsTable.id })
+        .from(commissionLineItemsTable)
+        .where(eq(commissionLineItemsTable.id, LAST_COMMISSION_LINE_ID))
+        .limit(1);
+      try {
+        if (done.length === 0) {
+          log("[seed] peer released the lock but the completion marker is missing (crashed mid-seed?) — resuming");
+          await seedAll();
+        } else {
+          log("[seed] peer seeder finished — demo data present; exiting cleanly");
+        }
+      } finally {
+        await lockClient
+          .query("SELECT pg_advisory_unlock($1)", [SEED_LOCK_KEY])
+          .catch(() => {
+            /* session teardown releases the lock anyway */
+          });
+      }
+    } else {
+      // Fail-open, but with an HONEST log: we cannot seed here (a live peer
+      // still holds the lock — racing it is what the lock prevents), but we
+      // CAN report whether the data it's writing is complete yet, so the
+      // boot log doesn't imply a ready demo that isn't.
+      const done = await db
+        .select({ id: commissionLineItemsTable.id })
+        .from(commissionLineItemsTable)
+        .where(eq(commissionLineItemsTable.id, LAST_COMMISSION_LINE_ID))
+        .limit(1);
+      log(
+        done.length > 0
+          ? "[seed] peer still holds the lock after 120s but data is complete — booting"
+          : "[seed] peer still holds the lock after 120s and seed is INCOMPLETE — booting anyway (fail-open); demo may look empty until the peer finishes or the next wake",
+      );
+    }
+    await lockClient.end();
+    return;
+  }
+  try {
+    await seedAll();
+  } finally {
+    await lockClient
+      .query("SELECT pg_advisory_unlock($1)", [SEED_LOCK_KEY])
+      .catch(() => {
+        /* session teardown releases the lock anyway */
+      });
+    await lockClient.end();
+  }
+}
+
+async function seedAll(): Promise<void> {
   const existing = await db
     .select({ id: organizationsTable.id })
     .from(organizationsTable)
     .where(eq(organizationsTable.id, DEMO_ORG_ID));
 
+  // Completion marker, NOT the org row: a seed that crashed mid-run leaves
+  // the org behind, and skipping on org-exists would freeze that partial
+  // state forever. The marker is the LAST row the LAST seeder writes — the
+  // 4th line item of the humana statement — so a crash at ANY earlier point
+  // (including between a statement and its line items) leaves it missing and
+  // the next boot resumes the idempotent seeders. Checking statement
+  // existence froze a statement-without-line-items crash forever.
   if (existing.length > 0 && !RESET) {
-    log(
-      "[seed] demo org already exists — skipping. Pass --reset to wipe + reseed.",
-    );
-    return;
+    const done = await db
+      .select({ id: commissionLineItemsTable.id })
+      .from(commissionLineItemsTable)
+      .where(eq(commissionLineItemsTable.id, LAST_COMMISSION_LINE_ID))
+      .limit(1);
+    if (done.length > 0) {
+      log(
+        "[seed] demo org fully seeded — skipping. Pass --reset to wipe + reseed.",
+      );
+      return;
+    }
+    log("[seed] demo org exists but seed looks incomplete — resuming");
   }
 
   if (RESET && existing.length > 0) {
@@ -830,7 +966,11 @@ async function main(): Promise<void> {
   }
 
   log("[seed] seeding INSUREitALL Demo…");
-  await seedOrg();
+  const wonOrCurrent = await seedOrg();
+  if (!wonOrCurrent) {
+    log("[seed] concurrent seeder active — exiting cleanly; it will finish the job");
+    return;
+  }
   await seedUsers();
   await seedAgents();
   const carriers = await seedCarriersWithDeskEmails();

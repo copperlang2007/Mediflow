@@ -67,7 +67,11 @@ describe("pkiSigner round-trip", () => {
     expect(signed.subarray(0, 4).toString()).toBe("%PDF");
 
     const verdict = verifyPdfSignature(signed);
-    expect(verdict.valid).toBe(true);
+    // This assertion has flaked rarely in CI (~1 in a few hundred full-suite
+    // runs; never reproduced in 12 isolated runs). Surface WHICH verify
+    // branch failed so the next occurrence is diagnosable instead of an
+    // opaque `expected false to be true`.
+    expect(verdict.valid, `verify failed with reason: ${verdict.reason}`).toBe(true);
     expect(verdict.signerCN).toContain("DEV ONLY");
   });
 
