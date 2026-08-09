@@ -43,18 +43,16 @@ const MBI_REGEX =
 // the undashed form means an SSN typed without dashes in a query string or
 // error message ships unscrubbed, and this codebase's identifiers are all
 // UUIDs, never bare 9-digit numbers. Fail closed.
-// ONE targeted carve-out: a number explicitly labeled "NPN" (NIPR producer
+// ONE targeted carve-out: a number DIRECTLY labeled "NPN" (NIPR producer
 // number — public license id, 9 digits for newer licensees) is
-// definitionally not an SSN, and import errors like "Duplicate NPN within
-// file: 123456789" lose their diagnostic value when the NPN is stripped.
-// Only the labeled form is exempt; an unlabeled 9-digit run still redacts.
-// (Exemption scoped to the BARE form only — a dashed number is SSN-shaped
-// regardless of label, and a mislabel must not leak a real SSN. The window
-// is ≤24 NON-DIGIT chars after "NPN", so intervening words are allowed —
-// "Duplicate NPN within file: X" — but any other number between the label
-// and the run breaks the association and the run redacts normally.)
-const SSN_REGEX =
-  /(?<![\w-])(\d{3}-\d{2}-\d{4}|(?<![Nn][Pp][Nn][^\d\n]{1,24})\d{9})(?![\w-])/g;
+// definitionally not an SSN. Implemented as protect-then-restore in
+// redactPhiString, NOT as a lookbehind window: a proximity window
+// ("NPN ... 123456789" within N chars) is scope-blind and leaked real SSNs
+// in shapes like "NPN mismatch: ssn 123456789". Only `NPN[:= ]123456789`
+// is exempt; the dashed form always redacts (a mislabel must not leak a
+// real SSN), and every unlabeled 9-digit run still redacts.
+const NPN_LABELED_REGEX = /\b(NPN)([:=\s#]{1,3})(\d{9})(?![\w-])/gi;
+const SSN_REGEX = /(?<![\w-])(\d{3}-\d{2}-\d{4}|\d{9})(?![\w-])/g;
 const EMAIL_REGEX =
   /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 // Phone: matches +1XXXXXXXXXX (E.164 US/CA) and (XXX) XXX-XXXX / XXX-XXX-XXXX.
@@ -72,12 +70,17 @@ const BANK_REGEX = /(?<![\w-])(\d{9})[\s-]+(\d{4,17})(?![\w-])/g;
 export function redactPhiString(input: string): string {
   if (typeof input !== "string" || input.length === 0) return input;
   return input
+    // Tokenize directly-labeled NPNs (public ids, not PHI) so the SSN pass
+    // below can stay maximally aggressive; restored verbatim at the end.
+    // \x00 cannot survive any earlier redaction or appear in normal text.
+    .replace(NPN_LABELED_REGEX, (_m, label, sep, digits) => `${label}${sep}\x00NPN${digits}\x00`)
     .replace(MBI_REGEX, "[REDACTED:MBI]")
     .replace(EMAIL_REGEX, "[REDACTED:EMAIL]")
     .replace(BANK_REGEX, "[REDACTED:BANK]")
     .replace(PHONE_E164_REGEX, "[REDACTED:PHONE]")
     .replace(PHONE_US_REGEX, "[REDACTED:PHONE]")
-    .replace(SSN_REGEX, "[REDACTED:SSN]");
+    .replace(SSN_REGEX, "[REDACTED:SSN]")
+    .replace(/\x00NPN(\d{9})\x00/g, "$1");
 }
 
 /**

@@ -46,16 +46,35 @@ describe("redactPhiString — pattern coverage", () => {
     expect(redactPhiString(input)).toBe("raw [REDACTED:SSN] in body");
   });
 
-  it("preserves NPN-labeled 9-digit numbers (public license ids, not SSNs)", () => {
-    expect(redactPhiString("Duplicate NPN within file: 123456789")).toBe(
-      "Duplicate NPN within file: 123456789",
+  it("preserves DIRECTLY NPN-labeled 9-digit numbers (public license ids)", () => {
+    expect(redactPhiString("agent NPN 123456789 licensing error")).toBe(
+      "agent NPN 123456789 licensing error",
     );
-    expect(redactPhiString("agent npn 123456789 licensing error")).toBe(
-      "agent npn 123456789 licensing error",
-    );
+    expect(redactPhiString("npn: 123456789 rejected")).toBe("npn: 123456789 rejected");
+    expect(redactPhiString("NPN=123456789")).toBe("NPN=123456789");
     // Dashed SSN redacts even when NPN-labeled (dashes make it SSN-shaped,
     // and a mislabel must not leak a real SSN).
     expect(redactPhiString("NPN 123-45-6789")).toBe("NPN [REDACTED:SSN]");
+  });
+
+  it("still redacts SSNs that merely appear NEAR an NPN mention", () => {
+    // Regression: a proximity-window exemption leaked all of these.
+    for (const input of [
+      "user reported NPN issue. their ssn 123456789 was rejected",
+      "NPN mismatch: ssn 123456789",
+      "npn error; ssn=123456789",
+      "NPN. SSN 111223333 rejected",
+      "carrier NPN check. SSN=999887777",
+      // Indirect label with intervening words is NOT exempt either —
+      // safety outranks the diagnostic value of this import message.
+      "Duplicate NPN within file: 123456789",
+    ]) {
+      expect(redactPhiString(input), input).toContain("[REDACTED:SSN]");
+    }
+    // Direct label plus a nearby unlabeled run: only the labeled one survives.
+    expect(redactPhiString("NPN 988112233 then ssn 123456789")).toBe(
+      "NPN 988112233 then ssn [REDACTED:SSN]",
+    );
   });
 
   it("redacts an E.164 phone number", () => {

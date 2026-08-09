@@ -903,7 +903,20 @@ async function main(): Promise<void> {
           });
       }
     } else {
-      log("[seed] peer still holds the lock after 120s — booting anyway (fail-open)");
+      // Fail-open, but with an HONEST log: we cannot seed here (a live peer
+      // still holds the lock — racing it is what the lock prevents), but we
+      // CAN report whether the data it's writing is complete yet, so the
+      // boot log doesn't imply a ready demo that isn't.
+      const done = await db
+        .select({ id: commissionLineItemsTable.id })
+        .from(commissionLineItemsTable)
+        .where(eq(commissionLineItemsTable.id, LAST_COMMISSION_LINE_ID))
+        .limit(1);
+      log(
+        done.length > 0
+          ? "[seed] peer still holds the lock after 120s but data is complete — booting"
+          : "[seed] peer still holds the lock after 120s and seed is INCOMPLETE — booting anyway (fail-open); demo may look empty until the peer finishes or the next wake",
+      );
     }
     await lockClient.end();
     return;
