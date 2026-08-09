@@ -135,6 +135,13 @@ export function initSentry(): void {
         // sentinel; objects/arrays become empty (a sentinel STRING on the
         // Record-typed attributes/data gets char-iterated by @sentry/core's
         // serializeAttributes into per-character entries).
+        // REACHABILITY: scrubShallowLeaves handles per-key failures itself
+        // (hostile getters / descriptor throws delete the key and continue),
+        // so this outer branch only fires on STRUCTURAL failures — in
+        // practice an Object.keys()/ownKeys throw (revoked or hostile
+        // Proxy). It is a narrow last-resort net, not general coverage; do
+        // not weaken the per-key try/catch on the assumption this catches
+        // what it misses.
         // Caveat (unverified against live ingest): if Sentry's v2 span
         // pipeline ever rejects envelopes whose op/origin carry this
         // sentinel, the degraded span is dropped server-side — an

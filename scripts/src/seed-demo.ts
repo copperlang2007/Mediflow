@@ -878,12 +878,30 @@ async function main(): Promise<void> {
       }
     }
     if (acquired) {
-      log("[seed] peer seeder finished — demo data present; exiting cleanly");
-      await lockClient
-        .query("SELECT pg_advisory_unlock($1)", [SEED_LOCK_KEY])
-        .catch(() => {
-          /* session teardown releases the lock anyway */
-        });
+      // Acquiring the lock proves the peer's SESSION ended — not that it
+      // finished: a crashed peer releases the advisory lock too. Verify the
+      // completion marker before claiming success; if it's missing, WE now
+      // hold the lock, so resume the (idempotent) seed ourselves instead of
+      // logging a false green.
+      const done = await db
+        .select({ id: commissionLineItemsTable.id })
+        .from(commissionLineItemsTable)
+        .where(eq(commissionLineItemsTable.id, LAST_COMMISSION_LINE_ID))
+        .limit(1);
+      try {
+        if (done.length === 0) {
+          log("[seed] peer released the lock but the completion marker is missing (crashed mid-seed?) — resuming");
+          await seedAll();
+        } else {
+          log("[seed] peer seeder finished — demo data present; exiting cleanly");
+        }
+      } finally {
+        await lockClient
+          .query("SELECT pg_advisory_unlock($1)", [SEED_LOCK_KEY])
+          .catch(() => {
+            /* session teardown releases the lock anyway */
+          });
+      }
     } else {
       log("[seed] peer still holds the lock after 120s — booting anyway (fail-open)");
     }

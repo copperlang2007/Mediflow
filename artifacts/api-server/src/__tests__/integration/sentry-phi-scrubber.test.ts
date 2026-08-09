@@ -46,6 +46,18 @@ describe("redactPhiString — pattern coverage", () => {
     expect(redactPhiString(input)).toBe("raw [REDACTED:SSN] in body");
   });
 
+  it("preserves NPN-labeled 9-digit numbers (public license ids, not SSNs)", () => {
+    expect(redactPhiString("Duplicate NPN within file: 123456789")).toBe(
+      "Duplicate NPN within file: 123456789",
+    );
+    expect(redactPhiString("agent npn 123456789 licensing error")).toBe(
+      "agent npn 123456789 licensing error",
+    );
+    // Dashed SSN redacts even when NPN-labeled (dashes make it SSN-shaped,
+    // and a mislabel must not leak a real SSN).
+    expect(redactPhiString("NPN 123-45-6789")).toBe("NPN [REDACTED:SSN]");
+  });
+
   it("redacts an E.164 phone number", () => {
     const input = "call +15555550123 now";
     expect(redactPhiString(input)).toBe("call [REDACTED:PHONE] now");

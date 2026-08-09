@@ -29,6 +29,11 @@ const MIGRATION_LOCK_KEY = 981_234_501;
 // finishes in seconds, we acquire on a retry) while capping the pathological
 // one: on timeout we exit 1 and Render's restart loop retries with a fresh
 // session.
+// The 60s ceiling is a RETRY CADENCE, not a hard limit on migration length:
+// a peer legitimately migrating for >60s makes the loser exit 1, Render
+// restarts it, and each restart re-attempts — the loop converges as soon as
+// the winner finishes. (Current journal completes in ~1.4s; revisit only if
+// a migration set approaches the ceiling AND the restart churn matters.)
 const LOCK_TIMEOUT_MS = 60_000;
 const LOCK_RETRY_MS = 500;
 
