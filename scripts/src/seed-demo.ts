@@ -30,6 +30,7 @@
  *     so we don't drift from production seed behavior.
  */
 import { and, eq } from "drizzle-orm";
+import pg from "pg";
 import { randomUUID, createHash } from "node:crypto";
 import {
   db,
@@ -824,7 +825,38 @@ async function seedCommissions(
 
 // ---- Main ------------------------------------------------------------------
 
+// Whole-run serialization: the org-insert defer only guards the FIRST seed;
+// the resume branch (org exists, seed incomplete) previously let two boots
+// race check-then-insert seeders — including seedDefaultCarriers, whose
+// randomUUID rows have no unique backstop and duplicated silently. One
+// try-lock covers every branch. Same key discipline as migrate-locked.ts.
+const SEED_LOCK_KEY = 981_234_502;
+
 async function main(): Promise<void> {
+  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required");
+  const lockClient = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await lockClient.connect();
+  const lockRes = await lockClient.query("SELECT pg_try_advisory_lock($1) AS locked", [
+    SEED_LOCK_KEY,
+  ]);
+  if (!lockRes.rows[0]?.locked) {
+    log("[seed] another seeder holds the lock — exiting cleanly; it will finish the job");
+    await lockClient.end();
+    return;
+  }
+  try {
+    await seedAll();
+  } finally {
+    await lockClient
+      .query("SELECT pg_advisory_unlock($1)", [SEED_LOCK_KEY])
+      .catch(() => {
+        /* session teardown releases the lock anyway */
+      });
+    await lockClient.end();
+  }
+}
+
+async function seedAll(): Promise<void> {
   const existing = await db
     .select({ id: organizationsTable.id })
     .from(organizationsTable)

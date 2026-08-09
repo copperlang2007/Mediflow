@@ -25,7 +25,10 @@ export function initSentry(): void {
   const build = getBuildInfo();
   Sentry.init({
     dsn,
-    tracesSampleRate: 0.1,
+    // Env-tunable: v10's OTel-first instrumentation captures a broader span
+    // surface than v8 once the --import loader flow lands, so quota burn can
+    // shift. Default unchanged; lower via env without a deploy-time code edit.
+    tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? 0.1),
     environment: process.env.NODE_ENV ?? "development",
     // Tie events to the deploy artifact. The cascade in buildInfo.ts
     // falls back to "unknown" — Sentry accepts that as a release name,
