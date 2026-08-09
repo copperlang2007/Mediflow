@@ -129,13 +129,21 @@ create_user() {
     --message-action SUPPRESS \
     --region "$REGION" 2>&1 >/dev/null) || create_rc=$?
 
+  # Every AWS call below is guarded: under `set -e` a bare failing command
+  # (one throttle blip) would abort the whole batch mid-loop, leaving the
+  # account set half-provisioned. Failures return 1 instead; the call sites
+  # collect them and the script exits nonzero with a summary AFTER attempting
+  # every account.
   if [ "$create_rc" -eq 0 ]; then
-    aws cognito-idp admin-set-user-password \
+    if ! aws cognito-idp admin-set-user-password \
       --user-pool-id "$USER_POOL_ID" \
       --username "$email" \
       --password "$ACCOUNT_PASSWORD" \
       --permanent \
-      --region "$REGION"
+      --region "$REGION"; then
+      echo -e "${RED}✗ set-password failed for $email${NC}" >&2
+      return 1
+    fi
     echo -e "${GREEN}✓${NC}"
     return 0
   fi
@@ -144,19 +152,26 @@ create_user() {
   # other failure (throttle, validation, wrong region) must NOT silently
   # rewrite an existing user's credentials.
   if [[ "$create_err" == *UsernameExistsException* ]]; then
-    aws cognito-idp admin-set-user-password \
+    if ! aws cognito-idp admin-set-user-password \
       --user-pool-id "$USER_POOL_ID" \
       --username "$email" \
       --password "$ACCOUNT_PASSWORD" \
       --permanent \
-      --region "$REGION"
+      --region "$REGION"; then
+      echo -e "${RED}✗ password reset failed for existing user $email${NC}" >&2
+      return 1
+    fi
     echo -e "${YELLOW}✓ (exists — password reset)${NC}"
     return 0
   fi
 
-  echo -e "${RED}✗ admin-create-user failed:${NC} $create_err" >&2
-  exit 1
+  echo -e "${RED}✗ admin-create-user failed for $email:${NC} $create_err" >&2
+  return 1
 }
+
+# Accumulates emails whose provisioning failed; reported (with exit 1) after
+# the whole batch has been attempted.
+FAILED_ACCOUNTS=()
 
 # Mediflow authenticates via Clerk, NOT Cognito (see PROVISION_TEST_ACCOUNTS.md).
 # Creating these users in a Cognito pool either pollutes an IntelBRIDGE pool or
@@ -166,7 +181,7 @@ if [[ "${INCLUDE_MEDIFLOW_COGNITO:-0}" == "1" ]]; then
   for account in "${MEDIFLOW_ACCOUNTS[@]}"; do
     email="${account%%:*}"
     role="${account##*:}"
-    create_user "$email" "$role" "Mediflow"
+    create_user "$email" "$role" "Mediflow" || FAILED_ACCOUNTS+=("$email")
   done
 else
   echo "📋 Mediflow accounts skipped: Mediflow uses Clerk — create them in the Clerk Dashboard."
@@ -178,11 +193,19 @@ echo "📋 IntelBRIDGE Test Accounts:"
 for account in "${INTELBRIDGE_ACCOUNTS[@]}"; do
   email="${account%%:*}"
   role="${account##*:}"
-  create_user "$email" "$role" "IntelBRIDGE"
+  create_user "$email" "$role" "IntelBRIDGE" || FAILED_ACCOUNTS+=("$email")
 done
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+if [ "${#FAILED_ACCOUNTS[@]}" -gt 0 ]; then
+  echo -e "${RED}✗ Provisioning finished with ${#FAILED_ACCOUNTS[@]} failure(s):${NC}"
+  for email in "${FAILED_ACCOUNTS[@]}"; do
+    echo "  - $email"
+  done
+  echo "Re-run the script to retry — creation is idempotent (existing users get a password reset)."
+  exit 1
+fi
 echo -e "${GREEN}✅ Account provisioning complete!${NC}"
 echo ""
 echo "Test accounts are ready for demo video capture:"
