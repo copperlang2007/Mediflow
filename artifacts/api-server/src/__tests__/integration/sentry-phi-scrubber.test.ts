@@ -259,3 +259,35 @@ describe("scrubSentryEvent — Sentry v10 (OTel-first) event shape", () => {
     expect(JSON.stringify(event.request.data)).not.toContain(SSN);
   });
 });
+
+describe("scrubSentryEvent — latent-PHI surfaces (user, transaction, contexts.*)", () => {
+  const SSN = "123-45-6789";
+  const EMAIL = "alice@example.com";
+
+  it("redacts PHI in event.user", () => {
+    const event = scrubSentryEvent({
+      user: { email: EMAIL, username: EMAIL, ip_address: "10.0.0.1" },
+    } as any);
+    expect(JSON.stringify(event.user)).not.toContain(EMAIL);
+    expect((event.user as any).ip_address).toBe("10.0.0.1");
+  });
+
+  it("redacts PHI in event.transaction", () => {
+    const event = scrubSentryEvent({
+      transaction: `GET /api/contacts?ssn=${SSN}`,
+    } as any);
+    expect(event.transaction).not.toContain(SSN);
+  });
+
+  it("redacts PHI in arbitrary non-trace contexts buckets", () => {
+    const event = scrubSentryEvent({
+      contexts: {
+        state: { last_email: EMAIL, step: 3 },
+        trace: { data: { "url.full": `https://x.test/?ssn=${SSN}` } },
+      },
+    } as any);
+    expect(JSON.stringify((event.contexts as any).state)).not.toContain(EMAIL);
+    expect((event.contexts as any).state.step).toBe(3);
+    expect(JSON.stringify((event.contexts as any).trace.data)).not.toContain(SSN);
+  });
+});

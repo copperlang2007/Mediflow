@@ -98,6 +98,8 @@ export function redactPhiDeep<T>(value: T, depth = DEFAULT_DEPTH): T {
 // — that lets the regex unit tests run without the full Sentry SDK.
 export interface SentryLikeEvent {
   message?: string;
+  transaction?: string;
+  user?: Record<string, unknown>;
   exception?: {
     values?: Array<{
       value?: string;
@@ -184,8 +186,28 @@ export function scrubSentryEvent<T extends SentryLikeEvent>(event: T): T {
     }
   }
 
+  // Defense in depth: these are empty today (no setUser calls,
+  // sendDefaultPii=false, OTel records transaction as a route template),
+  // but a future Sentry.setUser({ email }) or custom context bucket must
+  // not become a silent PHI leak.
+  if (typeof event.transaction === "string") {
+    event.transaction = redactPhiString(event.transaction);
+  }
+  if (event.user) {
+    event.user = redactPhiDeep(event.user);
+  }
+
   // v10: OTel span attributes on the trace context (url.full, http.url,
-  // http.target, http.query, http.request.header.*).
+  // http.target, http.query, http.request.header.*) — plus every other
+  // contexts.* bucket, which is arbitrary structured data.
+  if (event.contexts) {
+    for (const [key, value] of Object.entries(event.contexts as Record<string, unknown>)) {
+      if (key === "trace") continue; // handled below with its own shape
+      if (value && typeof value === "object") {
+        (event.contexts as Record<string, unknown>)[key] = redactPhiDeep(value);
+      }
+    }
+  }
   if (event.contexts?.trace?.data) {
     event.contexts.trace.data = redactPhiDeep(event.contexts.trace.data);
   }

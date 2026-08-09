@@ -113,12 +113,20 @@ create_user() {
   fi
 }
 
-echo "📋 Mediflow Test Accounts:"
-for account in "${MEDIFLOW_ACCOUNTS[@]}"; do
-  email="${account%%:*}"
-  role="${account##*:}"
-  create_user "$email" "$role" "Mediflow"
-done
+# Mediflow authenticates via Clerk, NOT Cognito (see PROVISION_TEST_ACCOUNTS.md).
+# Creating these users in a Cognito pool either pollutes an IntelBRIDGE pool or
+# creates accounts the Clerk-backed app can't log into — so the loop is opt-in.
+if [[ "${INCLUDE_MEDIFLOW_COGNITO:-0}" == "1" ]]; then
+  echo "📋 Mediflow Test Accounts (Cognito — nonstandard, INCLUDE_MEDIFLOW_COGNITO=1):"
+  for account in "${MEDIFLOW_ACCOUNTS[@]}"; do
+    email="${account%%:*}"
+    role="${account##*:}"
+    create_user "$email" "$role" "Mediflow"
+  done
+else
+  echo "📋 Mediflow accounts skipped: Mediflow uses Clerk — create them in the Clerk Dashboard."
+  echo "   (Set INCLUDE_MEDIFLOW_COGNITO=1 to force Cognito creation anyway.)"
+fi
 
 echo ""
 echo "📋 IntelBRIDGE Test Accounts:"

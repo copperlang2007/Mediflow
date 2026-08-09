@@ -53,6 +53,10 @@ function zipDirectory(dir, zipPath) {
     const stat = fs.statSync(videoPath);
     manifest.media.video = {
       path: 'journey.webm',
+      // The bundle zip deliberately excludes *.webm (size); the hash lets a
+      // verifier check the out-of-band video without the manifest signing a
+      // file the archive claims to contain.
+      excluded_from_bundle: true,
       sha256: sha256File(videoPath),
       bytes: stat.size,
     };
