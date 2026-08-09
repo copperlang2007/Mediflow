@@ -233,7 +233,7 @@ async function seedUsers(): Promise<void> {
         fullName: u.fullName,
         role: u.role,
         isActive: true,
-      });
+      }).onConflictDoNothing();
     }
   }
   log(`[users] ensured ${USER_ROWS.length} users`);
@@ -276,7 +276,7 @@ async function seedAgents(): Promise<{
       .from(agentsTable)
       .where(eq(agentsTable.id, a.id));
     if (existing.length === 0) {
-      await db.insert(agentsTable).values(a);
+      await db.insert(agentsTable).values(a).onConflictDoNothing();
     }
   }
 
@@ -304,7 +304,7 @@ async function seedAgents(): Promise<{
         issueDate: new Date("2023-01-15T00:00:00Z"),
         expiryDate: new Date("2026-01-15T00:00:00Z"),
         status: "active",
-      });
+      }).onConflictDoNothing();
     }
   }
   log(`[agents] ensured Carlos + Linda with ${licenses.length} licenses`);
@@ -386,7 +386,7 @@ async function seedContractingProfile(p: ProfileSeed): Promise<void> {
       entityType: "individual",
       backgroundCheckStatus: "cleared",
       backgroundCheckClearedAt: new Date("2025-04-01T00:00:00Z"),
-    });
+    }).onConflictDoNothing();
   } else {
     await db
       .update(agentContractingProfilesTable)
@@ -430,7 +430,7 @@ async function seedOnboardingForCarlos(
       startedAt: new Date("2023-02-14T00:00:00Z"),
       completedAt: new Date("2023-03-10T00:00:00Z"),
       completedSteps: { profile: true, carriers: true, signing: true },
-    });
+    }).onConflictDoNothing();
   }
 
   // Carlos is appointed at every carrier with a writing number.
@@ -459,7 +459,7 @@ async function seedOnboardingForCarlos(
         submittedAt: new Date("2023-02-25T00:00:00Z"),
         appointedAt: new Date("2023-03-08T00:00:00Z"),
         writingNumber: `WN-${wn}`,
-      });
+      }).onConflictDoNothing();
     }
   }
   log("[onboarding] Carlos: complete, all carriers appointed");
@@ -494,7 +494,7 @@ async function seedOnboardingForLinda(
       status: "signing",
       startedAt: new Date("2025-05-15T00:00:00Z"),
       completedSteps: { profile: true, carriers: true },
-    });
+    }).onConflictDoNothing();
   }
 
   // Pick 4 carriers — Aetna/CVS, Humana, UnitedHealth/AARP, Devoted —
@@ -529,7 +529,7 @@ async function seedOnboardingForLinda(
         status,
         signatureCompletedAt:
           status === "signed" ? new Date("2025-05-22T15:32:00Z") : null,
-      });
+      }).onConflictDoNothing();
     }
   }
   log(
@@ -587,7 +587,7 @@ async function seedContacts(): Promise<string[]> {
       planYear: 2025,
       status,
       leadSource: i % 2 === 0 ? "Inbound web" : "Referral",
-    });
+    }).onConflictDoNothing();
   }
   log(`[contacts] ensured ${ids.length} contacts`);
   return ids;
@@ -607,7 +607,7 @@ async function seedPipelineAndDeals(contactIds: string[]): Promise<void> {
       name: "Medicare AEP 2025",
       description: "Annual Enrollment Period pipeline",
       isDefault: true,
-    });
+    }).onConflictDoNothing();
     await db.insert(pipelineStagesTable).values([
       {
         id: STAGES.newLead,
@@ -641,7 +641,7 @@ async function seedPipelineAndDeals(contactIds: string[]): Promise<void> {
         color: "#22c55e",
         probabilityPct: 100,
       },
-    ]);
+    ]).onConflictDoNothing();
   }
 
   const dealStageRotation = [
@@ -671,7 +671,7 @@ async function seedPipelineAndDeals(contactIds: string[]): Promise<void> {
         valueEst: 1200 + i * 75,
         status: i % 4 === 3 ? "won" : "open",
         wonAt: i % 4 === 3 ? new Date("2025-05-10T00:00:00Z") : null,
-      });
+      }).onConflictDoNothing();
     }
   }
 
@@ -698,7 +698,7 @@ async function seedPipelineAndDeals(contactIds: string[]): Promise<void> {
               ? "Lead wants to compare Humana vs UHC for Q4."
               : "Sent follow-up summary email.",
         createdBy: USERS.carlosUser,
-      });
+      }).onConflictDoNothing();
     }
   }
 
@@ -736,7 +736,7 @@ async function seedPipelineAndDeals(contactIds: string[]): Promise<void> {
         status: "open",
         priority: t.priority,
         dueDate: new Date(Date.now() + (i + 1) * 86400000),
-      });
+      }).onConflictDoNothing();
     }
   }
   log("[crm] ensured pipeline + 8 deals + 6 activities + 3 tasks");
@@ -793,7 +793,7 @@ async function seedCommissions(
         source: "manual",
         status: "reconciled",
         uploadedByUserId: USERS.agencyAdmin,
-      });
+      }).onConflictDoNothing();
 
       // 4 line items per statement, all crediting Carlos.
       for (let i = 0; i < 4; i++) {
@@ -815,7 +815,7 @@ async function seedCommissions(
           type: i === 0 ? "initial" : "renewal",
           writingAgentId: AGENTS.carlos,
           matchStatus: "matched",
-        });
+        }).onConflictDoNothing();
       }
     }
   }
