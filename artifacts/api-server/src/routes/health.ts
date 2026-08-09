@@ -35,7 +35,10 @@ router.get("/healthz", (_req, res) => {
  *    loop that is not stopped (see `checkWorkerLiveness()`). This catches the
  *    case where every worker dies after boot: the boot-time flag stays `true`
  *    but the node would silently run no background jobs.
- *  - the database responds to `SELECT 1` within ~500ms.
+ *  - the database responds within ~500ms to a probe that also proves the
+ *    app schema exists (`SELECT 1 FROM users LIMIT 0`) — a bare `SELECT 1`
+ *    passes against a reachable-but-unmigrated database, reporting ready
+ *    while every real endpoint 500s on missing tables.
  *
  * Successful results are cached briefly (~2s) to avoid hammering the DB from
  * per-pod probes. Failures are never cached so recovery is detected fast.
@@ -76,7 +79,11 @@ router.get("/readyz", async (_req, res) => {
     return;
   }
 
-  const dbCheck: DbCheckResult = await pingDb(() => db.execute(sql`SELECT 1`));
+  // LIMIT 0 keeps the probe free (no rows scanned) while still failing with
+  // 42P01 when the `users` table — created by migration 0000 — is absent.
+  const dbCheck: DbCheckResult = await pingDb(() =>
+    db.execute(sql`SELECT 1 FROM users LIMIT 0`),
+  );
   if (dbCheck !== "ok") {
     res.status(503).json({
       status: "unhealthy",
