@@ -336,6 +336,15 @@ export function scrubSentryEvent<T extends SentryLikeEvent>(event: T): T {
     "event_id", "timestamp", "start_timestamp", "type", "platform", "level",
     "release", "dist", "environment", "server_name", "logger", "modules",
     "fingerprint", "tags",
+    // Standard v10 transaction keys (present on EVERY transaction event —
+    // without these the unknown-key warn fired three times per process and
+    // deep-redact walked them per event):
+    //   transaction_info — structural enum ({source: 'route'|'url'|…})
+    //   measurements     — numeric metric values, no string PHI surface
+    //   sdkProcessingMetadata — SDK-internal processing state, stripped
+    //     before serialization (never crosses the wire); mutating it risks
+    //     corrupting dynamic-sampling / request correlation instead.
+    "transaction_info", "measurements", "sdkProcessingMetadata",
   ]);
   const record = event as Record<string, unknown>;
   for (const key of Object.keys(record)) {

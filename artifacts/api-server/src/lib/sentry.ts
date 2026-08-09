@@ -4,6 +4,15 @@
  * Both helpers are no-ops when SENTRY_DSN is not set so local dev / CI
  * environments don't need any extra configuration. To enable error
  * reporting in production, set SENTRY_DSN in the environment.
+ *
+ * COVERAGE NOTE — auto-instrumentation is currently OUT of scope: the
+ * server ships as a single esbuild bundle, and v10's OTel instrumentation
+ * (import-in-the-middle) cannot hook modules that were inlined at build
+ * time. Error capture and MANUAL spans (Sentry.startSpan) work fully and
+ * route through the PHI-scrubbing hooks below; HTTP/pg/express auto-spans
+ * do not attach. Wiring the full surface means externalizing @sentry/node
+ * from the bundle and starting with `--import @sentry/node/preload` — a
+ * deploy-entrypoint change deliberately deferred (pending Lang's sign-off).
  */
 
 import * as Sentry from "@sentry/node";

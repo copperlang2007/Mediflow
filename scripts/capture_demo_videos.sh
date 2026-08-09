@@ -10,6 +10,25 @@ set -e
 BASE_URL="${EVIDENCE_BASE_URL:-http://localhost:5000}"
 HEADED="${EVIDENCE_HEADED:-0}"
 
+# Auto-detect demo-mode targets when the operator didn't decide explicitly.
+# Demo builds swap the auth provider for an always-signed-in shim and render
+# no login form, so every journey's authStep times out opaquely unless
+# EVIDENCE_ASSUME_SIGNED_IN=1. /api/users/me sits behind requireAuth: an
+# unauthenticated 200 means the target resolves a session by itself (demo
+# mode); 401 means a real login flow exists. ${VAR+x} keeps an explicit
+# operator 0/1 authoritative — only the unset case is probed.
+if [ -z "${EVIDENCE_ASSUME_SIGNED_IN+x}" ]; then
+  # Require 200 AND a JSON body: an unauthenticated SPA fallback can serve
+  # the shell as 200 text/html, which must NOT read as "signed in".
+  PROBE=$(curl -s -o /dev/null -w '%{http_code} %{content_type}' --max-time 10 "$BASE_URL/api/users/me" || echo "000 -")
+  if [[ "$PROBE" == 200\ *json* ]]; then
+    echo "🔓 Target answers /api/users/me unauthenticated (demo-mode deploy) — skipping login steps (EVIDENCE_ASSUME_SIGNED_IN=1)"
+    EVIDENCE_ASSUME_SIGNED_IN=1
+  else
+    EVIDENCE_ASSUME_SIGNED_IN=0
+  fi
+fi
+
 echo "🎬 Mediflow Demo Video Capture Suite"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Base URL: $BASE_URL"
@@ -51,10 +70,9 @@ for journey in "${JOURNEYS[@]}"; do
   # Set environment variables
   export EVIDENCE_BASE_URL="$BASE_URL"
   export EVIDENCE_HEADED="$HEADED"
-  # Forward the auth-skip + data-source flags (demo deploys are auth-bypassed
-  # and render no login form — without ASSUME_SIGNED_IN every journey dies at
-  # the login step there).
-  export EVIDENCE_ASSUME_SIGNED_IN="${EVIDENCE_ASSUME_SIGNED_IN:-0}"
+  # Forward the auth-skip flag (resolved above: explicit operator value, or
+  # auto-detected from the target's unauthenticated behavior).
+  export EVIDENCE_ASSUME_SIGNED_IN="$EVIDENCE_ASSUME_SIGNED_IN"
   export EVIDENCE_DATA_SOURCE="${EVIDENCE_DATA_SOURCE:-synthetic}"
 
   # Run the journey using Playwright with the evidence config
