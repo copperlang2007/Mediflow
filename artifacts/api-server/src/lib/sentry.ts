@@ -100,8 +100,14 @@ export function initSentry(): void {
         // so null-drop is actually fail-open here. Blank every string-bearing
         // field instead and ship the sentinel.
         const stripped = span as unknown as Record<string, unknown>;
-        for (const key of ["description", "name", "op", "status_message", "origin", "attributes", "data"]) {
+        for (const key of ["description", "name", "op", "status_message", "origin"]) {
           if (key in stripped) stripped[key] = "[REDACTED:SCRUB_FAILED]";
+        }
+        // attributes/data are Record-typed per SpanJSON — a sentinel STRING
+        // here gets char-iterated by @sentry/core's serializeAttributes into
+        // 23 per-character entries. Empty object keeps the span well-formed.
+        for (const key of ["attributes", "data"]) {
+          if (key in stripped) stripped[key] = {};
         }
         return span;
       }
