@@ -42,6 +42,10 @@ services:
     # a restart loop until the DB is reachable is the correct signal to
     # Render). Seed failure stays fail-open: the app serves fine against an
     # already-seeded DB, and the advisory-locked seeder self-heals next wake.
+    # ACCEPTED COST: chaining migrate + seed ahead of the server adds ~5s to
+    # the first request after a free-tier idle wake (measured: migrate ~2.3s,
+    # idempotent seed ~2.2s, bind ~0.5s) — well inside Render's health-check
+    # grace, and the price of never serving a half-migrated database.
     startCommand: >-
       pnpm --filter @workspace/db run migrate || { echo 'migrate failed — refusing to start'; exit 1; };
       pnpm seed:demo || echo 'seed failed — continuing';

@@ -845,7 +845,36 @@ async function main(): Promise<void> {
     SEED_LOCK_KEY,
   ]);
   if (!lockRes.rows[0]?.locked) {
-    log("[seed] another seeder holds the lock — exiting cleanly; it will finish the job");
+    // WAIT for the winner instead of exiting immediately: startCommand
+    // chains `seed:demo; start`, so an early rc=0 here would boot the
+    // api-server while the peer is still writing demo rows — users would
+    // briefly see empty lists. Acquiring the lock (bounded, 120s) proves
+    // the peer finished; on timeout we boot anyway (seed is fail-open by
+    // design and the data self-heals on the next wake).
+    log("[seed] another seeder holds the lock — waiting for it to finish");
+    const deadline = Date.now() + 120_000;
+    let acquired = false;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const again = await lockClient.query(
+        "SELECT pg_try_advisory_lock($1) AS locked",
+        [SEED_LOCK_KEY],
+      );
+      if (again.rows[0]?.locked) {
+        acquired = true;
+        break;
+      }
+    }
+    if (acquired) {
+      log("[seed] peer seeder finished — demo data present; exiting cleanly");
+      await lockClient
+        .query("SELECT pg_advisory_unlock($1)", [SEED_LOCK_KEY])
+        .catch(() => {
+          /* session teardown releases the lock anyway */
+        });
+    } else {
+      log("[seed] peer still holds the lock after 120s — booting anyway (fail-open)");
+    }
     await lockClient.end();
     return;
   }
