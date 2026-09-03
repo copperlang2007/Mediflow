@@ -53,6 +53,20 @@ export default defineConfig({
       prettier: true,
       override: {
         zod: {
+          // Pin the Zod output target rather than leaving it on `auto`.
+          //
+          // orval >=8.22 infers the target from the zod version it resolves,
+          // and falls back to Zod 4 output when detection is ambiguous. This
+          // workspace is on zod ^3.25.76 (see the pnpm catalog), so an
+          // inferred Zod 4 target emits `z.int()` / `z.email()` — top-level
+          // helpers that do not exist in the v3 root API — and the generated
+          // client fails to typecheck.
+          //
+          // Pinning makes codegen deterministic: the output depends on this
+          // file, not on whatever zod happens to be hoisted at generation
+          // time. Change this to 4 in the same commit that moves the catalog
+          // to zod 4.
+          version: 3,
           coerce: {
             query: ["boolean", "number", "string"],
             param: ["boolean", "number", "string"],
