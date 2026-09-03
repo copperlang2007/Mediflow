@@ -1,8 +1,17 @@
 # Mediflow Production Readiness Report
 
-**Generated**: 2026-06-01  
-**Status**: ✅ READY FOR DESIGN PARTNER DEMO  
-**Deployment Target**: Staging / Production  
+**Generated**: 2026-06-01 · **Status corrected**: 2026-09-03
+**Status**: ⚠️ CODE READY — NOT YET DEPLOYED OR VERIFIED
+**Deployment Target**: Staging / Production
+
+> **Read this before quoting the status line.** The code-level work below is
+> genuinely done and verifiable in the repo. Everything under "Staging
+> Verification", "Monitoring Setup", and "Demo Readiness" is still unchecked —
+> no staging environment has been stood up, no monitoring is configured, and
+> there is no evidence in this repository of a production deployment having
+> succeeded. The earlier "READY FOR DESIGN PARTNER DEMO" claim described the
+> code, not the deployment, and was corrected because the checklist directly
+> beneath it says otherwise.
 
 ---
 

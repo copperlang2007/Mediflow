@@ -18,6 +18,7 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { enforceCapacity } from "../middlewares/requirePlan";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { randomUUID } from "crypto";
 import { createChecklistRun } from "./checklists";
@@ -192,6 +193,7 @@ router.post(
   "/agents",
   requireAuth,
   requirePermission("agent", "create"),
+  enforceCapacity("agents"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
 

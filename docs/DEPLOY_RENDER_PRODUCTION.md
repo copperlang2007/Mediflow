@@ -47,6 +47,30 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `SENTRY_DSN` | Error tracking (PHI-scrubbed) |
 | `ESIGN_SIGNING_CERT_PEM`, `ESIGN_SIGNING_KEY_PEM` | Org-issued PKI signing of completed e-sign PDFs |
 | `PUBLIC_OBJECT_SEARCH_PATHS` | Public document search |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_GROWTH`, `STRIPE_PRICE_AGENCY` | Subscription billing, checkout, and plan limits |
+| `APP_PUBLIC_URL`* | Checkout/portal return URLs (falls back to `ALLOWED_ORIGIN`) |
+
+> **Billing is fail-open when unconfigured, fail-closed when delinquent.** With
+> no `STRIPE_SECRET_KEY`, every org resolves to the top tier and no limits are
+> enforced — a demo or design-partner install is never crippled by the absence
+> of a payment processor. Once Stripe *is* configured, an org with no active
+> subscription gets Starter limits, and a canceled one drops back to Starter.
+> Point the Stripe webhook endpoint at `POST /webhooks/stripe`; it is
+> signature-verified and rejects anything unsigned.
+
+> **E-signature provider.** `ESIGN_PROVIDER` selects between the native
+> `mediflow` provider (Beta — no KBA, no managed audit trail) and `docusign`.
+> In production the boot guard now refuses `mediflow` unless
+> `ESIGN_ALLOW_BETA_IN_PROD=true` is set to accept that risk explicitly.
+> DocuSign additionally needs its own integration key, user/account id, RSA
+> private key, and base path — `getDocuSignProvider()` names whichever is
+> missing.
+
+> **Carrier appointment email.** The email connector now genuinely transmits
+> through Resend and throws if it cannot, rather than returning a synthetic id.
+> Set `CARRIER_EMAIL_CONNECTOR_DRY_RUN=true` to rehearse the flow without
+> sending; dry-run submissions are tagged `dry-run-…` so they can never be
+> mistaken for a real carrier submission.
 
 *`EMAIL_FROM_ADDRESS`, `CONTRACTING_EMAIL_FROM`, `AI_INTEGRATIONS_MODEL`,
 and naming/region overrides are non-secret — set them as repository **Variables**

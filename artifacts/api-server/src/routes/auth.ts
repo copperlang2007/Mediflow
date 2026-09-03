@@ -16,6 +16,46 @@ const ProvisionSchema = z.object({
 
 const router: IRouter = Router();
 
+/**
+ * GET /auth/status
+ *
+ * Reports whether the signed-in Clerk user has a MediFlow account yet. The web
+ * app calls this immediately after sign-in to decide between the app shell and
+ * the create-your-agency screen. Deliberately NOT behind `requireAuth` — an
+ * unprovisioned user is precisely the case this endpoint exists to describe,
+ * and `requireAuth` rejects them.
+ */
+router.get("/auth/status", async (req: Request, res: Response): Promise<void> => {
+  const auth = getAuth(req);
+  if (!auth?.userId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const [user] = await db
+    .select({
+      id: usersTable.id,
+      orgId: usersTable.orgId,
+      role: usersTable.role,
+      isActive: usersTable.isActive,
+    })
+    .from(usersTable)
+    .where(eq(usersTable.id, auth.userId))
+    .limit(1);
+
+  if (!user) {
+    res.json({ provisioned: false, active: false });
+    return;
+  }
+
+  res.json({
+    provisioned: true,
+    active: user.isActive,
+    orgId: user.orgId,
+    role: user.role,
+  });
+});
+
 router.post("/auth/provision", async (req: Request, res: Response): Promise<void> => {
   const auth = getAuth(req);
   if (!auth?.userId) {

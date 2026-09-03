@@ -14,8 +14,7 @@
  *                            demos. Must NOT be used in production once
  *                            DocuSign is wired (Phase-3 gate).
  *   - `docusign`           — managed DocuSign envelopes via the docusign-esign
- *                            SDK. HIPAA-eligible plan + BAA required. Wired
- *                            up in a follow-up PR.
+ *                            SDK. HIPAA-eligible plan + BAA required.
  *
  * Boot-time enforcement of the prod gate lives in
  * `assertEsignProviderHipaaCompliant`, which is called from `index.ts`
@@ -25,6 +24,7 @@
  */
 import type { ESignProvider } from "./provider";
 import { getMediflowProvider } from "./mediflowProvider";
+import { getDocuSignProvider } from "./docusignProvider";
 
 export type EsignProviderName = "mediflow" | "docusign";
 
@@ -54,14 +54,12 @@ export function getEsignProvider(): ESignProvider {
     case "mediflow":
       return getMediflowProvider();
     case "docusign":
-      // The DocuSign implementation lands in a follow-up PR. Until then a
-      // misconfigured deploy that sets ESIGN_PROVIDER=docusign should fail
-      // loudly rather than silently fall back to the Beta provider.
-      throw new Error(
-        "ESIGN_PROVIDER=docusign is not yet implemented in this build. " +
-          "Either unset the env var (defaults to 'mediflow') or wait for the " +
-          "DocuSignESignProvider integration.",
-      );
+      // `DocuSignESignProvider` is fully implemented in `docusignProvider.ts`;
+      // this factory simply never reached it, so ~450 lines of working client
+      // code sat behind a hard throw. `getDocuSignProvider()` validates its own
+      // env (integration key, user/account id, RSA private key, base path) and
+      // throws with the specific missing variable if the deploy is incomplete.
+      return getDocuSignProvider();
   }
 }
 
@@ -71,12 +69,29 @@ export function getEsignProvider(): ESignProvider {
  * misconfigured production deploy fails fast before the first envelope is
  * created.
  *
- * Today this only validates that `ESIGN_PROVIDER` parses to a known value —
- * the production-must-be-docusign assertion turns on in the follow-up PR
- * that ships `DocuSignESignProvider`. Wiring the call site now means
- * `index.ts` doesn't need a second edit then.
+ * Now that `DocuSignESignProvider` is actually reachable, the gate this
+ * function was always meant to enforce is live: the native `mediflow` provider
+ * is Beta — no KBA, no managed audit trail — and must not sign real
+ * beneficiary paperwork in production.
+ *
+ * Escape hatch: `ESIGN_ALLOW_BETA_IN_PROD=true` acknowledges the risk
+ * explicitly. It exists so an operator can make a deliberate, recorded choice
+ * rather than being tempted to weaken the guard itself — and it logs nothing
+ * quietly; the caller sees the provider name at boot.
  */
 export function assertEsignProviderHipaaCompliant(): void {
   // Side-effect: throws if ESIGN_PROVIDER is set to an unsupported value.
-  readProviderEnv();
+  const provider = readProviderEnv();
+
+  if (process.env.NODE_ENV !== "production") return;
+  if (provider === "docusign") return;
+  if (process.env.ESIGN_ALLOW_BETA_IN_PROD === "true") return;
+
+  throw new Error(
+    "ESIGN_PROVIDER=mediflow is a Beta signature path (no KBA, no managed " +
+      "audit trail) and must not be used in production. Set " +
+      "ESIGN_PROVIDER=docusign with a HIPAA-eligible DocuSign plan and a " +
+      "signed BAA, or set ESIGN_ALLOW_BETA_IN_PROD=true to accept the risk " +
+      "explicitly.",
+  );
 }

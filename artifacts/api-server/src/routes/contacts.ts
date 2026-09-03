@@ -25,6 +25,7 @@ import {
   requireExportConfirm,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { enforceCapacity } from "../middlewares/requirePlan";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { logExport } from "./reports/shared";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
@@ -158,6 +159,7 @@ router.post(
   "/contacts",
   requireAuth,
   requirePermission("contact", "create"),
+  enforceCapacity("contacts"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const parsed = CreateContactSchema.safeParse(req.body);

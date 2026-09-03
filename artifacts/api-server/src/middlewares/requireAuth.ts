@@ -168,7 +168,15 @@ export const requireAuth = async (
     .limit(1);
 
   if (!user || !user.isActive) {
-    res.status(401).json({ error: "User not found or inactive" });
+    // Distinguish "signed in to Clerk but has no MediFlow account yet" from
+    // "deactivated". The first is the normal state immediately after sign-up
+    // and the web app answers it by showing the create-your-agency screen;
+    // the second must bounce to sign-in. Both stay 401 — the code is what the
+    // client branches on.
+    res.status(401).json({
+      error: user ? "User is inactive" : "User not provisioned",
+      code: user ? "USER_INACTIVE" : "NOT_PROVISIONED",
+    });
     return;
   }
 

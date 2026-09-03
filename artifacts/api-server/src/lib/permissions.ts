@@ -40,6 +40,7 @@ export type Resource =
   | "agent_onboarding"
   | "carrier_contracting"
   | "esign"
+  | "billing"
   | "dev_console";
 
 export type Action = "read" | "create" | "update" | "delete" | "admin";
@@ -206,6 +207,15 @@ const MATRIX: PermissionMatrix = {
     create: ["super_admin", "agency_admin", "compliance_manager", "agent"],
     update: ["super_admin", "agency_admin", "compliance_manager", "agent"],
     delete: ["super_admin", "agency_admin"],
+  },
+  // Subscription + payment method. Deliberately the narrowest matrix in the
+  // system: only the people who own the agency's money can see an invoice or
+  // change a plan. `compliance_manager` and `agent_support` are excluded on
+  // purpose — they administer compliance and agents, not spend.
+  billing: {
+    read: ["super_admin", "agency_admin"],
+    update: ["super_admin", "agency_admin"],
+    admin: ["super_admin"],
   },
   dev_console: {
     read: ["super_admin", "developer"],
