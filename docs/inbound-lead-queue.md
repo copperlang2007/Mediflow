@@ -198,7 +198,12 @@ just not presence-aware.
   `POST /api/queue/v1/route-inbound` for GHL/Atlas and server-side
   carrier-name resolution. ✅
 - **Phase 3:** `atlas-call-router` rewired as a thin signed proxy to the
-  public route. ✅ (Atlas repo PR.)
+  public route. ⚠️ **Code merged in the Atlas repo, NOT provisioned or verified
+  end to end.** `docs/INTEGRATION_RUNBOOK.md` is the authority on live status
+  and still treats this leg as unprovisioned: the shared
+  `LEAD_QUEUE_WEBHOOK_SECRET` has not been set on both sides and the signature
+  parity check has not been run against a deployed proxy. Treat this as "the
+  code exists" and not "the integration works" until Runbook Phase 5 passes.
 
 ### Notes for operators
 

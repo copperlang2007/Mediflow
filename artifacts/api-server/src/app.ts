@@ -14,6 +14,7 @@ import {
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import webhooksRouter from "./routes/webhooks";
+import stripeWebhookRouter from "./routes/stripeWebhook";
 import dialerEventsRouter from "./routes/dialerEvents";
 import queuePublicRouter from "./routes/queuePublic";
 import { logger } from "./lib/logger";
@@ -225,6 +226,12 @@ app.use("/api", userLimiter);
 // Twilio inbound webhooks — mounted at root so Twilio can reach them without
 // API auth middleware. Signature validation is enforced inside the handler.
 app.use(webhooksRouter);
+
+// Stripe billing webhooks — mounted at root alongside the Twilio receiver and
+// for the same reason: Stripe has no Clerk session. Trust comes from the
+// `stripe-signature` HMAC verified against STRIPE_WEBHOOK_SECRET inside the
+// handler, over the raw bytes captured by the express.json verify hook above.
+app.use(stripeWebhookRouter);
 
 // masterBRIDGE dialer event receiver (spec §6). Path lives under /api/dialer/v1
 // to match the contract's callbackUrl, but is mounted HERE — above the

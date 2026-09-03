@@ -24,7 +24,7 @@ The project is structured as a pnpm monorepo using Node.js 24 and TypeScript 5.9
 - **Authentication**: Handled by Clerk, with a proxy at `/api/__clerk`.
 - **Validation**: Zod v4 with drizzle-zod for schema validation.
 - **API Codegen**: Orval generates API client hooks (React Query v5) and Zod validation schemas from an OpenAPI specification (`lib/api-spec/openapi.yaml`).
-- **Storage**: S3-compatible object storage (AWS S3 in production, MinIO in local development) for file management. See `artifacts/api-server/src/lib/objectStorage.ts`.
+- **Storage**: Google Cloud Storage for file management, using signed URLs. GCS is the BAA-covered path for PHI, and `assertStorageBackendHipaaCompliant()` enforces it at boot. There is no S3 or MinIO code path. See `artifacts/api-server/src/lib/objectStorage.ts`.
 - **Background Jobs**: `pg-boss` (PostgreSQL-backed job queue) handles scheduled and ad-hoc tasks.
 - **Email**: Resend is integrated for transactional email services.
 - **SMS**: Twilio powers two-way SMS communication.
@@ -47,7 +47,7 @@ The project is structured as a pnpm monorepo using Node.js 24 and TypeScript 5.9
 ## External Dependencies
 - **Clerk**: User authentication and authorization service.
 - **PostgreSQL**: Primary database for all application data, including background job queue data (`pg-boss`).
-- **S3-compatible Object Storage (AWS S3 / MinIO)**: Cloud storage for application assets and documents.
+- **Google Cloud Storage**: Cloud storage for application assets and documents, accessed via signed URLs.
 - **Resend**: Email sending service.
 - **Twilio**: SMS messaging service.
 - **OpenAI**: AI model services for chat, drafting, and compliance reporting. Azure OpenAI is used in production as the HIPAA BAA-covered provider; the standard OpenAI API is used only in development. A single provider is configured via `AI_INTEGRATIONS_PROVIDER` (see `lib/integrations-openai-ai-server/src/buildClient.ts`).

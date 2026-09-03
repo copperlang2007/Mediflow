@@ -3,7 +3,7 @@ import { ClerkProvider, SignIn, SignUp, Show, useClerk, useUser, useAuth } from 
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
 import { Switch, Route, useLocation, Router as WouterRouter, Redirect } from "wouter";
-import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { QueryClientProvider, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
@@ -49,6 +49,8 @@ const MyCommissionsPage = lazy(() => import("@/pages/my-commissions"));
 const ClawbacksPage = lazy(() => import("@/pages/clawbacks"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const ForgotPasswordPage = lazy(() => import("@/pages/forgot-password"));
+const BillingPage = lazy(() => import("@/pages/billing"));
+const CreateOrganizationPage = lazy(() => import("@/pages/create-organization"));
 
 // Dev console pages are only imported when the build-time flag is set, so
 // production bundles never include this code.
@@ -245,13 +247,15 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <Show when="signed-in">
-        <AppShell>
-          <ErrorBoundary>
-            <Suspense fallback={<PageLoadingFallback />}>
-              {children}
-            </Suspense>
-          </ErrorBoundary>
-        </AppShell>
+        <ProvisioningGate>
+          <AppShell>
+            <ErrorBoundary>
+              <Suspense fallback={<PageLoadingFallback />}>
+                {children}
+              </Suspense>
+            </ErrorBoundary>
+          </AppShell>
+        </ProvisioningGate>
       </Show>
       <Show when="signed-out">
         <Redirect to="/" />
@@ -260,49 +264,58 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ProvisionUser() {
-  const { user, isSignedIn } = useUser();
+/**
+ * Provisioning gate.
+ *
+ * Sits between Clerk sign-in and the app shell. A Clerk user with no MediFlow
+ * account is sent to the create-your-agency screen instead of being silently
+ * provisioned into an auto-named org — that screen is what makes sign-up
+ * genuinely self-serve.
+ *
+ * Renders nothing but a spinner while the status call is in flight, so the
+ * shell never flashes for a user who is about to be redirected.
+ */
+function ProvisioningGate({ children }: { children: React.ReactNode }) {
+  const { isSignedIn, isLoaded } = useUser();
   const { getToken } = useAuth();
-  const qc = useQueryClient();
 
-  useEffect(() => {
-    if (!isSignedIn || !user) return;
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["auth", "status"],
+    enabled: isLoaded && Boolean(isSignedIn),
+    // The answer changes exactly once per account (at provisioning) and the
+    // create-agency screen clears the cache itself, so there is nothing to
+    // gain from refetching on every window focus.
+    staleTime: Infinity,
+    retry: 1,
+    queryFn: async () => {
+      const token = await getToken();
+      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+      const res = await fetch(`${base}/api/auth/status`, {
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Could not load account status");
+      return res.json() as Promise<{ provisioned: boolean; active: boolean }>;
+    },
+  });
 
-    let cancelled = false;
-    const run = async () => {
-      try {
-        const token = await getToken();
-        const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-        await fetch(`${base}/api/auth/provision`, {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({
-            email: user.primaryEmailAddress?.emailAddress ?? "",
-            fullName:
-              user.fullName ??
-              `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim(),
-          }),
-        });
-        if (!cancelled) {
-          void qc.invalidateQueries({ queryKey: ["users", "me"] });
-        }
-      } catch {
-        // will retry on the next sign-in
-      }
-    };
+  if (!isLoaded || isLoading) {
+    return <PageLoadingFallback />;
+  }
 
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSignedIn, user?.id]);
+  // A failed status call must not strand the user on a blank screen. Fall
+  // through to the shell: its own queries will surface the real error.
+  if (isError) return <>{children}</>;
 
-  return null;
+  if (data && !data.provisioned) {
+    return (
+      <Suspense fallback={<PageLoadingFallback />}>
+        <CreateOrganizationPage />
+      </Suspense>
+    );
+  }
+
+  return <>{children}</>;
 }
 
 function ClerkQueryClientCacheInvalidator() {
@@ -353,7 +366,6 @@ function ClerkProviderWithRoutes() {
     >
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
-          <ProvisionUser />
           <ClerkQueryClientCacheInvalidator />
           <ErrorBoundary>
             <Switch>
@@ -410,6 +422,9 @@ function ClerkProviderWithRoutes() {
               </Route>
               <Route path="/reports">
                 <ProtectedLayout><ReportsPage /></ProtectedLayout>
+              </Route>
+              <Route path="/settings/billing">
+                <ProtectedLayout><BillingPage /></ProtectedLayout>
               </Route>
               {/*
                 ADMIN ROUTES — convention going forward: `/admin/<feature>` (nested).

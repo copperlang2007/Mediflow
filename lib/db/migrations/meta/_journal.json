@@ -267,6 +267,20 @@
       "when": 1778580000000,
       "tag": "0034_marketing_materials",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1778590000000,
+      "tag": "0035_drop_orphan_ai_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1778600000000,
+      "tag": "0036_billing",
+      "breakpoints": true
     }
   ]
 }

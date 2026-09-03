@@ -76,6 +76,7 @@ import {
   TrendingDown,
   RotateCcw,
   Settings,
+  CreditCard,
   Menu,
   X,
   Bell,
@@ -227,6 +228,13 @@ const navItems: NavGroup[] = [
       },
       {
         href: "/admin-carriers", label: "Carriers", icon: Building2,
+        roles: ["super_admin", "agency_admin"],
+      },
+      {
+        // Narrower than the rest of this group on purpose: billing is the
+        // agency's money, and the RBAC matrix restricts it to the same two
+        // roles server-side (see permissions.ts `billing`).
+        href: "/settings/billing", label: "Billing", icon: CreditCard,
         roles: ["super_admin", "agency_admin"],
       },
       {
