@@ -63,6 +63,27 @@ async function member(opts: { firstName: string; planYear?: number }): Promise<s
   return c.id;
 }
 
+/**
+ * Current year / relative dates for the HTTP tests.
+ *
+ * The route scores against the real server clock (`now = new Date()` inside
+ * `GET /churn/scores`), so any hardcoded activity date or plan year in these
+ * tests silently rots as the calendar advances. That is exactly what happened:
+ * an activity pinned to 2026-05-25 was "recent" when written, then crossed the
+ * 90-day INACTIVITY_HARD_DAYS threshold and started adding +35 to every
+ * member's score, flipping "Mid" from medium to high and "Calm" from low to
+ * medium.
+ *
+ * Anchoring to the clock the route itself reads keeps these deterministic in
+ * any year. The pure `scoreMember` tests above inject their own `now` and are
+ * unaffected.
+ */
+const CURRENT_YEAR = new Date().getUTCFullYear();
+
+function daysAgo(days: number): Date {
+  return new Date(Date.now() - days * 86_400_000);
+}
+
 async function addActivity(contactId: string, createdAt: Date): Promise<void> {
   await testDb.insert(activitiesTable).values({
     id: `act-${randomUUID()}`,
@@ -131,12 +152,13 @@ describe("scoreMember (pure)", () => {
 
 describe("GET /churn/scores + /summary", () => {
   it("ranks members by risk and explains why, using the complaint signal", async () => {
-    // Low risk: recent activity, current plan year.
-    const calm = await member({ firstName: "Calm", planYear: 2026 });
-    await addActivity(calm, new Date("2026-05-25T00:00:00Z"));
+    // Low risk: recent activity, current plan year. Score 0.
+    const calm = await member({ firstName: "Calm", planYear: CURRENT_YEAR });
+    await addActivity(calm, daysAgo(7));
 
-    // High risk: no activity + an open complaint + first renewal.
-    const risky = await member({ firstName: "Risky", planYear: 2025 });
+    // High risk: no activity (+35) + an open complaint (+25) + first
+    // renewal (+15) = 75.
+    const risky = await member({ firstName: "Risky", planYear: CURRENT_YEAR - 1 });
     await testDb.insert(complaintsTable).values({
       id: `cmpl-${randomUUID()}`,
       orgId: org.id,
@@ -148,9 +170,9 @@ describe("GET /churn/scores + /summary", () => {
       source: "beneficiary_direct",
     });
 
-    // Medium risk: an unresolved at-risk flag only.
-    const mid = await member({ firstName: "Mid", planYear: 2026 });
-    await addActivity(mid, new Date("2026-05-25T00:00:00Z")); // recent, so inactivity doesn't fire
+    // Medium risk: an unresolved at-risk flag only (+25).
+    const mid = await member({ firstName: "Mid", planYear: CURRENT_YEAR });
+    await addActivity(mid, daysAgo(7)); // recent, so inactivity doesn't fire
     await testDb.insert(retentionFlagsTable).values({
       id: `rf-${randomUUID()}`,
       orgId: org.id,
