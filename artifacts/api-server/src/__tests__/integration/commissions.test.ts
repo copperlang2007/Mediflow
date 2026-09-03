@@ -42,6 +42,7 @@ import {
   commissionSchedulesTable,
   commissionStatementsTable,
   contactsTable,
+  enrollmentsTable,
   missedPaymentAlertsTable,
 } from "@workspace/db/schema";
 import {
@@ -603,6 +604,21 @@ describe("Commissions integration", () => {
         planYear: 2025,
       })
       .where(eq(contactsTable.id, contact.id));
+    // The worker reads `enrollments`, not the flattened `contacts.current_*`
+    // columns: a carrier pays on an enrollment, so that is what a missing
+    // payment is missing against. The contact columns are still set above
+    // because they are not dropped yet and other readers still use them.
+    await handle.db.insert(enrollmentsTable).values({
+      id: `enr-${randomUUID()}`,
+      orgId: isoOrg.id,
+      contactId: contact.id,
+      carrierId: isoCarrier.id,
+      planType: "MAPD",
+      planYear: 2025,
+      effectiveDate: "2025-01-01",
+      effectuated: true,
+      status: "active",
+    });
 
     await commissionMissedPaymentCheckWorker({ orgId: isoOrg.id });
 
@@ -643,6 +659,21 @@ describe("Commissions integration", () => {
         planYear: 2025,
       })
       .where(eq(contactsTable.id, contact.id));
+    // The worker reads `enrollments`, not the flattened `contacts.current_*`
+    // columns: a carrier pays on an enrollment, so that is what a missing
+    // payment is missing against. The contact columns are still set above
+    // because they are not dropped yet and other readers still use them.
+    await handle.db.insert(enrollmentsTable).values({
+      id: `enr-${randomUUID()}`,
+      orgId: isoOrg.id,
+      contactId: contact.id,
+      carrierId: isoCarrier.id,
+      planType: "MAPD",
+      planYear: 2025,
+      effectiveDate: "2025-01-01",
+      effectuated: true,
+      status: "active",
+    });
 
     await commissionMissedPaymentCheckWorker({ orgId: isoOrg.id });
     await commissionMissedPaymentCheckWorker({ orgId: isoOrg.id });

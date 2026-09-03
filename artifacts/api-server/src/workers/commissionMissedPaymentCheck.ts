@@ -15,13 +15,14 @@
  * Runs daily at 02:30 UTC.
  */
 
-import { and, eq, gte, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
   commissionLineItemsTable,
   commissionSchedulesTable,
   contactsTable,
+  enrollmentsTable,
   missedPaymentAlertsTable,
 } from "@workspace/db";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
@@ -51,21 +52,37 @@ export async function commissionMissedPaymentCheckWorker(
   const lookbackCutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
 
   const orgFilter = payload.orgId
-    ? eq(contactsTable.orgId, payload.orgId)
+    ? eq(enrollmentsTable.orgId, payload.orgId)
     : sql`true`;
 
-  const enrolledContacts = await db
+  // Iterate enrollments, not contacts.
+  //
+  // Coverage used to be read off the flattened `contacts.current_*` columns,
+  // which meant a beneficiary holding an MA plan AND a standalone PDP produced
+  // one check instead of two — one commission stream was invisible — and last
+  // year's payment was checked against whatever plan the contact happens to
+  // carry today. An enrollment is the thing a carrier actually pays on, so it
+  // is the thing to reconcile against.
+  //
+  // Only effectuated, active enrollments are in scope: a commission is not
+  // genuinely owed until the carrier confirms the member is on the plan.
+  const activeEnrollments = await db
     .select({
-      id: contactsTable.id,
-      orgId: contactsTable.orgId,
-      currentCarrierId: contactsTable.currentCarrierId,
-      currentPlanType: contactsTable.currentPlanType,
-      planYear: contactsTable.planYear,
+      enrollmentId: enrollmentsTable.id,
+      contactId: enrollmentsTable.contactId,
+      orgId: enrollmentsTable.orgId,
+      carrierId: enrollmentsTable.carrierId,
+      planType: enrollmentsTable.planType,
+      planYear: enrollmentsTable.planYear,
+      policyNumber: enrollmentsTable.policyNumber,
     })
-    .from(contactsTable)
+    .from(enrollmentsTable)
+    .innerJoin(contactsTable, eq(contactsTable.id, enrollmentsTable.contactId))
     .where(
       and(
-        eq(contactsTable.status, "enrolled"),
+        eq(enrollmentsTable.status, "active"),
+        eq(enrollmentsTable.effectuated, true),
+        isNull(enrollmentsTable.disenrolledDate),
         isNull(contactsTable.deletedAt),
         orgFilter,
       ),
@@ -73,8 +90,8 @@ export async function commissionMissedPaymentCheckWorker(
 
   let alertsInserted = 0;
 
-  for (const contact of enrolledContacts) {
-    if (!contact.currentCarrierId || !contact.currentPlanType) continue;
+  for (const enrollment of activeEnrollments) {
+    if (!enrollment.carrierId) continue;
 
     // Has a recent line item for this contact within the period covered the gap?
     const [hasLineItem] = await db
@@ -82,8 +99,8 @@ export async function commissionMissedPaymentCheckWorker(
       .from(commissionLineItemsTable)
       .where(
         and(
-          eq(commissionLineItemsTable.orgId, contact.orgId),
-          eq(commissionLineItemsTable.contactId, contact.id),
+          eq(commissionLineItemsTable.orgId, enrollment.orgId),
+          eq(commissionLineItemsTable.contactId, enrollment.contactId),
           gte(commissionLineItemsTable.createdAt, lookbackCutoff),
           or(
             and(
@@ -108,10 +125,13 @@ export async function commissionMissedPaymentCheckWorker(
       .from(commissionSchedulesTable)
       .where(
         and(
-          eq(commissionSchedulesTable.orgId, contact.orgId),
-          eq(commissionSchedulesTable.carrierId, contact.currentCarrierId),
-          eq(commissionSchedulesTable.planType, contact.currentPlanType),
+          eq(commissionSchedulesTable.orgId, enrollment.orgId),
+          eq(commissionSchedulesTable.carrierId, enrollment.carrierId),
+          eq(commissionSchedulesTable.planType, enrollment.planType),
           eq(commissionSchedulesTable.status, "active"),
+          // Prefer the schedule that governs the enrollment's own plan year
+          // rather than whatever the newest contract year happens to be.
+          lte(commissionSchedulesTable.contractYear, enrollment.planYear),
         ),
       )
       .orderBy(sql`${commissionSchedulesTable.contractYear} DESC`)
@@ -134,9 +154,17 @@ export async function commissionMissedPaymentCheckWorker(
         .insert(missedPaymentAlertsTable)
         .values({
           id: randomUUID(),
-          orgId: contact.orgId,
-          contactId: contact.id,
-          policyNumber: null,
+          orgId: enrollment.orgId,
+          contactId: enrollment.contactId,
+          // Was always null. That deduped correctly — migration 0005 made the
+          // unique constraint NULLS NOT DISTINCT precisely so it would — but
+          // it deduped per CONTACT, which is now too coarse: a beneficiary
+          // holding an MA plan and a standalone PDP has two commission
+          // streams, and collapsing them to one key would silently drop the
+          // second alert. Keying on the policy (falling back to the
+          // enrollment id, which is always present) makes it one alert per
+          // policy per period.
+          policyNumber: enrollment.policyNumber ?? enrollment.enrollmentId,
           expectedAmount,
           expectedPeriod: period.start,
         })
@@ -146,19 +174,23 @@ export async function commissionMissedPaymentCheckWorker(
       if (inserted.length > 0) {
         alertsInserted++;
         await enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
-          orgId: contact.orgId,
+          orgId: enrollment.orgId,
           trigger: "commission_missed",
           resourceType: "missed_payment_alert",
           resourceId: inserted[0].id,
           context: {
-            contactId: contact.id,
+            contactId: enrollment.contactId,
+            enrollmentId: enrollment.enrollmentId,
             expectedPeriod: period.start,
             expectedAmount,
           },
         });
       }
     } catch (err) {
-      logger.warn({ err, contactId: contact.id }, "Failed to insert missed-payment alert");
+      logger.warn(
+        { err, contactId: enrollment.contactId, enrollmentId: enrollment.enrollmentId },
+        "Failed to insert missed-payment alert",
+      );
     }
   }
 

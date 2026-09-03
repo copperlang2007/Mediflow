@@ -20,3 +20,4 @@ export * from "./leadCallbacks";
 export * from "./complaints";
 export * from "./marketing";
 export * from "./billing";
+export * from "./enrollments";
