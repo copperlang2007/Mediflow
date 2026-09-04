@@ -63,7 +63,11 @@ export const subscriptionsTable = pgTable(
     stripePriceId: text("stripe_price_id"),
     planTier: planTierEnum("plan_tier").notNull().default("starter"),
     status: subscriptionStatusEnum("status").notNull().default("none"),
-    /** Licensed agent seats purchased. Enforced on agent creation. */
+    /**
+     * Logins purchased. A seat is one active `users` row — not an `agents`
+     * row; see `api-server/src/lib/billing/seats.ts` for why those are
+     * different populations. Enforced on invitation and on reactivation.
+     */
     seats: integer("seats").notNull().default(3),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),

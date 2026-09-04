@@ -339,3 +339,20 @@ export function complianceReportEmailHtml(opts: {
   </table>
 </div>`);
 }
+
+// --- Team invitation ---
+
+export function invitationEmailHtml(opts: {
+  agencyName: string;
+  inviterName: string;
+  roleLabel: string;
+  acceptUrl: string;
+  expiresInDays: number;
+}): string {
+  return wrap(`
+<h2 style="margin:0 0 8px;font-size:20px;color:#0f172a">You've been invited to ${opts.agencyName}</h2>
+<p style="color:#475569;margin:0 0 16px">${opts.inviterName} has invited you to join <strong>${opts.agencyName}</strong> on MediFlow as a <strong>${opts.roleLabel}</strong>.</p>
+<p style="color:#475569;margin:0 0 20px">Accepting adds your account to their agency. You'll sign in with this email address.</p>
+<a href="${opts.acceptUrl}" style="display:inline-block;background:#1d4ed8;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px">Accept Invitation</a>
+<p style="color:#94a3b8;font-size:12px;margin:20px 0 0">This invitation expires in ${opts.expiresInDays} days. If you weren't expecting it, you can safely ignore this email — nothing happens until you accept.</p>`);
+}

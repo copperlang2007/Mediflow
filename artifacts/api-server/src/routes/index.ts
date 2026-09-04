@@ -44,6 +44,7 @@ import churnScoresRouter from "./churnScores";
 import clawbacksRouter from "./clawbacks";
 import enrollmentsRouter from "./enrollments";
 import billingRouter from "./billing";
+import invitationsRouter from "./invitations";
 import devRouter from "./dev";
 
 const router: IRouter = Router();
@@ -99,6 +100,7 @@ router.use(churnScoresRouter);
 router.use(clawbacksRouter);
 router.use(enrollmentsRouter);
 router.use(billingRouter);
+router.use(invitationsRouter);
 
 // Dev console is mounted only when the env var is set. The router itself
 // also applies the `devOnly` middleware, so even if this guard were
