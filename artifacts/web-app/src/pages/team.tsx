@@ -1,0 +1,647 @@
+/**
+ * Team & seats.
+ *
+ * The front end for the invitation API. Until this screen existed an agency
+ * could only ever contain the person who created it — the endpoints shipped
+ * with no way to reach them.
+ *
+ * One thing drives the layout: **a seat is a login, and a pending invitation
+ * holds one**. An admin deciding whether to invite needs the remaining count
+ * in front of them, and needs to see that a sent-but-unaccepted invitation is
+ * already costing a seat. So members and invitations share one table rather
+ * than sitting in separate tabs — they are the same ledger.
+ */
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  UserPlus,
+  Mail,
+  Copy,
+  RotateCcw,
+  Loader2,
+  AlertTriangle,
+  Users,
+  Clock,
+  Ban,
+  Check,
+} from "lucide-react";
+
+import { apiRequest } from "@/lib/api";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+/** Roles an admin may hand out. Mirrors INVITABLE_ROLES on the server. */
+const INVITABLE_ROLES = [
+  { value: "agent", label: "Agent" },
+  { value: "agent_support", label: "Agent Support" },
+  { value: "compliance_manager", label: "Compliance Manager" },
+  { value: "viewer", label: "Viewer" },
+  { value: "agency_admin", label: "Agency Admin" },
+] as const;
+
+const ROLE_LABELS: Record<string, string> = {
+  super_admin: "Super Admin",
+  agency_admin: "Agency Admin",
+  compliance_manager: "Compliance Manager",
+  agent_support: "Agent Support",
+  viewer: "Viewer",
+  agent: "Agent",
+  developer: "Developer",
+};
+
+interface SeatUsage {
+  limit: number;
+  activeUsers: number;
+  pendingInvitations: number;
+  used: number;
+  available: number;
+}
+
+interface Invitation {
+  id: string;
+  email: string;
+  role: string;
+  status: "pending" | "accepted" | "revoked" | "expired";
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+  invitedByUserId: string;
+  createdAt: string;
+}
+
+interface Member {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  isActive: boolean;
+  lastLoginAt: string | null;
+}
+
+/** A member and a pending invitation are the same thing to the invoice. */
+type Row =
+  | { kind: "member"; member: Member }
+  | { kind: "invitation"; invitation: Invitation };
+
+function errMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
+function relativeDays(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now();
+  const days = Math.round(ms / 86_400_000);
+  if (days < 0) return "expired";
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  return `in ${days} days`;
+}
+
+function SeatMeter({ seats }: { seats: SeatUsage }) {
+  const pct = Math.min(100, (seats.used / Math.max(seats.limit, 1)) * 100);
+  const full = seats.available === 0;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Users className="h-4 w-4" />
+          Seats
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-baseline justify-between">
+          <span className="text-2xl font-semibold tabular-nums">
+            {seats.used}
+            <span className="text-muted-foreground text-base font-normal">
+              {" / "}
+              {seats.limit}
+            </span>
+          </span>
+          <span
+            className={
+              full
+                ? "text-sm font-medium text-destructive"
+                : "text-sm text-muted-foreground"
+            }
+          >
+            {full
+              ? "No seats available"
+              : `${seats.available} available`}
+          </span>
+        </div>
+
+        <Progress value={pct} className="h-2" />
+
+        <p className="text-xs text-muted-foreground">
+          {seats.activeUsers} active{" "}
+          {seats.activeUsers === 1 ? "member" : "members"}
+          {seats.pendingInvitations > 0 && (
+            <>
+              {" · "}
+              <span className="text-foreground">
+                {seats.pendingInvitations} pending{" "}
+                {seats.pendingInvitations === 1 ? "invitation" : "invitations"}
+              </span>{" "}
+              holding a seat
+            </>
+          )}
+        </p>
+
+        {full && (
+          <Alert>
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription className="text-xs">
+              Revoke a pending invitation, deactivate a member, or upgrade your
+              plan to add more.
+            </AlertDescription>
+          </Alert>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function TeamPage() {
+  const qc = useQueryClient();
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<string>("agent");
+  const [lastInviteUrl, setLastInviteUrl] = useState<string | null>(null);
+  const [deactivating, setDeactivating] = useState<Member | null>(null);
+  const [revoking, setRevoking] = useState<Invitation | null>(null);
+
+  const invitations = useQuery({
+    queryKey: ["invitations"],
+    queryFn: () =>
+      apiRequest<{ data: Invitation[]; seats: SeatUsage }>("/api/invitations"),
+  });
+
+  const members = useQuery({
+    queryKey: ["users", "team"],
+    queryFn: () =>
+      apiRequest<{ data: Member[]; total: number }>("/api/users?limit=200"),
+  });
+
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["invitations"] });
+    void qc.invalidateQueries({ queryKey: ["users", "team"] });
+  };
+
+  const invite = useMutation({
+    mutationFn: () =>
+      apiRequest<{
+        invitation: Invitation;
+        acceptUrl: string;
+        emailSent: boolean;
+      }>("/api/invitations", {
+        method: "POST",
+        body: JSON.stringify({ email: email.trim(), role }),
+      }),
+    onSuccess: (res) => {
+      setInviteOpen(false);
+      setEmail("");
+      setRole("agent");
+      refresh();
+      if (res.emailSent) {
+        toast.success(`Invitation sent to ${res.invitation.email}`);
+        setLastInviteUrl(null);
+      } else {
+        // Email is not configured on this deployment. The link is the only way
+        // the invitee gets in, so surface it rather than silently succeeding.
+        setLastInviteUrl(res.acceptUrl);
+        toast.success("Invitation created — copy the link to share it");
+      }
+    },
+    onError: (err) => toast.error(errMessage(err, "Could not send invitation")),
+  });
+
+  const resend = useMutation({
+    mutationFn: (id: string) =>
+      apiRequest<{ acceptUrl: string; emailSent: boolean }>(
+        `/api/invitations/${id}/resend`,
+        { method: "POST" },
+      ),
+    onSuccess: (res) => {
+      refresh();
+      if (res.emailSent) toast.success("Invitation resent");
+      else {
+        setLastInviteUrl(res.acceptUrl);
+        toast.success("New link generated — the previous one no longer works");
+      }
+    },
+    onError: (err) => toast.error(errMessage(err, "Could not resend")),
+  });
+
+  const revoke = useMutation({
+    mutationFn: (id: string) =>
+      apiRequest(`/api/invitations/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      setRevoking(null);
+      refresh();
+      toast.success("Invitation revoked — the seat is free");
+    },
+    onError: (err) => {
+      setRevoking(null);
+      toast.error(errMessage(err, "Could not revoke"));
+    },
+  });
+
+  const setActive = useMutation({
+    mutationFn: (vars: { id: string; isActive: boolean }) =>
+      apiRequest(`/api/users/${vars.id}/active`, {
+        method: "PATCH",
+        body: JSON.stringify({ isActive: vars.isActive }),
+      }),
+    onSuccess: (_res, vars) => {
+      setDeactivating(null);
+      refresh();
+      toast.success(
+        vars.isActive
+          ? "Member reactivated"
+          : "Member deactivated — the seat is free",
+      );
+    },
+    onError: (err) => {
+      setDeactivating(null);
+      toast.error(errMessage(err, "Could not update member"));
+    },
+  });
+
+  const loading = invitations.isLoading || members.isLoading;
+
+  if (loading) {
+    return (
+      <div className="p-6 max-w-5xl mx-auto space-y-6">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-40 rounded-xl" />
+        <Skeleton className="h-72 rounded-xl" />
+      </div>
+    );
+  }
+
+  if (invitations.isError || members.isError || !invitations.data) {
+    return (
+      <div className="p-6 max-w-5xl mx-auto">
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Team unavailable</AlertTitle>
+          <AlertDescription>
+            {errMessage(
+              invitations.error ?? members.error,
+              "Could not load your team. Refresh, or contact support if this persists.",
+            )}
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  const seats = invitations.data.seats;
+  const pending = invitations.data.data.filter((i) => i.status === "pending");
+  const memberList = members.data?.data ?? [];
+
+  const rows: Row[] = [
+    ...memberList.map((member): Row => ({ kind: "member", member })),
+    ...pending.map((invitation): Row => ({ kind: "invitation", invitation })),
+  ];
+
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const noSeats = seats.available === 0;
+
+  return (
+    <div className="p-6 max-w-5xl mx-auto space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Team</h1>
+          <p className="text-sm text-muted-foreground">
+            Who can sign in to your agency, and what each seat costs you.
+          </p>
+        </div>
+        <Button onClick={() => setInviteOpen(true)} disabled={noSeats}>
+          <UserPlus className="mr-2 h-4 w-4" />
+          Invite member
+        </Button>
+      </div>
+
+      <SeatMeter seats={seats} />
+
+      {lastInviteUrl && (
+        <Alert>
+          <Mail className="h-4 w-4" />
+          <AlertTitle>Share this link</AlertTitle>
+          <AlertDescription className="space-y-2">
+            <p className="text-xs">
+              Email is not configured on this deployment, so the invitation was
+              not delivered. This link is shown once.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-xs">
+                {lastInviteUrl}
+              </code>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  void navigator.clipboard
+                    .writeText(lastInviteUrl)
+                    .then(() => toast.success("Link copied"))
+                    .catch(() => toast.error("Could not copy — select it manually"));
+                }}
+              >
+                <Copy className="mr-1.5 h-3.5 w-3.5" />
+                Copy
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">
+            Members &amp; invitations
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-0 sm:px-6">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.length === 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={4}
+                      className="py-10 text-center text-sm text-muted-foreground"
+                    >
+                      No members yet. Invite someone to get started.
+                    </TableCell>
+                  </TableRow>
+                )}
+
+                {rows.map((row) =>
+                  row.kind === "member" ? (
+                    <TableRow key={`m-${row.member.id}`}>
+                      <TableCell>
+                        <div className="font-medium">{row.member.fullName}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {row.member.email}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {ROLE_LABELS[row.member.role] ?? row.member.role}
+                      </TableCell>
+                      <TableCell>
+                        {row.member.isActive ? (
+                          <Badge variant="default">Active</Badge>
+                        ) : (
+                          <Badge variant="secondary">Deactivated</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {row.member.isActive ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setDeactivating(row.member)}
+                          >
+                            <Ban className="mr-1.5 h-3.5 w-3.5" />
+                            Deactivate
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={noSeats || setActive.isPending}
+                            title={
+                              noSeats
+                                ? "No seats available — free one first"
+                                : undefined
+                            }
+                            onClick={() =>
+                              setActive.mutate({
+                                id: row.member.id,
+                                isActive: true,
+                              })
+                            }
+                          >
+                            <Check className="mr-1.5 h-3.5 w-3.5" />
+                            Reactivate
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    <TableRow key={`i-${row.invitation.id}`}>
+                      <TableCell>
+                        <div className="font-medium text-muted-foreground">
+                          {row.invitation.email}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Invited, not yet accepted
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {ROLE_LABELS[row.invitation.role] ??
+                          row.invitation.role}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="gap-1">
+                          <Clock className="h-3 w-3" />
+                          Expires {relativeDays(row.invitation.expiresAt)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={resend.isPending}
+                          onClick={() => resend.mutate(row.invitation.id)}
+                        >
+                          <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                          Resend
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setRevoking(row.invitation)}
+                        >
+                          Revoke
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ),
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Invite dialog */}
+      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Invite a member</DialogTitle>
+            <DialogDescription>
+              They will receive a link to join this agency. The invitation holds
+              a seat until it is accepted, revoked, or expires.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (emailValid && !invite.isPending) invite.mutate();
+            }}
+          >
+            <div className="space-y-2">
+              <Label htmlFor="invite-email">Email address</Label>
+              <Input
+                id="invite-email"
+                type="email"
+                autoComplete="off"
+                placeholder="colleague@youragency.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="invite-role">Role</Label>
+              <Select value={role} onValueChange={setRole}>
+                <SelectTrigger id="invite-role">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {INVITABLE_ROLES.map((r) => (
+                    <SelectItem key={r.value} value={r.value}>
+                      {r.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setInviteOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!emailValid || invite.isPending}>
+                {invite.isPending && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Send invitation
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Deactivate confirmation */}
+      <AlertDialog
+        open={deactivating !== null}
+        onOpenChange={(open) => !open && setDeactivating(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Deactivate {deactivating?.fullName}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              They will no longer be able to sign in, and the seat returns to
+              your plan. Their record, assigned contacts, and history are kept —
+              you can reactivate them later if a seat is free.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() =>
+                deactivating &&
+                setActive.mutate({ id: deactivating.id, isActive: false })
+              }
+            >
+              Deactivate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Revoke confirmation */}
+      <AlertDialog
+        open={revoking !== null}
+        onOpenChange={(open) => !open && setRevoking(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revoke this invitation?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The link sent to {revoking?.email} will stop working immediately,
+              and the seat it holds returns to your plan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => revoking && revoke.mutate(revoking.id)}
+            >
+              Revoke
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

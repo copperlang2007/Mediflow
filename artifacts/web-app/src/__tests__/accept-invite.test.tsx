@@ -1,0 +1,197 @@
+// @vitest-environment jsdom
+/**
+ * Component tests for the public accept-invitation screen.
+ *
+ * This is the only page reachable by someone who belongs to no agency, and the
+ * first thing about the product they ever see. Two properties matter most:
+ * they learn who invited them and to what BEFORE being asked to create an
+ * account, and a link that cannot work says why in language a person can act
+ * on rather than failing generically.
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Router } from "wouter";
+import { memoryLocation } from "wouter/memory-location";
+
+const clerkState = {
+  isLoaded: true,
+  isSignedIn: false as boolean,
+  user: null as { fullName?: string; primaryEmailAddress?: { emailAddress: string } } | null,
+};
+
+vi.mock("@clerk/react", () => ({
+  useUser: () => clerkState,
+  useAuth: () => ({ getToken: async () => "clerk-token" }),
+}));
+
+import AcceptInvitePage from "@/pages/accept-invite";
+
+const PREVIEW = {
+  email: "new.hire@alpha.test",
+  role: "compliance_manager",
+  roleLabel: "Compliance Manager",
+  organizationName: "Alpha Agency",
+  expiresAt: new Date(Date.now() + 5 * 86_400_000).toISOString(),
+};
+
+function mockLookup(
+  result: { ok: true } | { ok: false; status: number; code: string },
+) {
+  return vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/api/invitations/lookup")) {
+      if (result.ok) {
+        return { ok: true, status: 200, json: async () => PREVIEW } as Response;
+      }
+      return {
+        ok: false,
+        status: result.status,
+        json: async () => ({ error: "nope", code: result.code }),
+      } as Response;
+    }
+    return { ok: true, status: 200, json: async () => ({}) } as Response;
+  });
+}
+
+function renderAt(path: string) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { hook } = memoryLocation({ path });
+  return render(
+    <QueryClientProvider client={qc}>
+      <Router hook={hook}>
+        <AcceptInvitePage />
+      </Router>
+    </QueryClientProvider>,
+  );
+}
+
+beforeEach(() => {
+  clerkState.isSignedIn = false;
+  clerkState.user = null;
+  // wouter's memoryLocation does not touch window.location, which the page
+  // reads to build its post-sign-in redirect.
+  window.history.replaceState({}, "", "/accept-invite?token=abc123");
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe("before signing in", () => {
+  it("names the agency and the role first", async () => {
+    vi.stubGlobal("fetch", mockLookup({ ok: true }));
+    renderAt("/accept-invite?token=abc123");
+
+    expect(await screen.findByText(/Join Alpha Agency/)).toBeInTheDocument();
+    expect(screen.getByText("Compliance Manager")).toBeInTheDocument();
+    // Shown twice on purpose: once as the invitation's own detail, once in the
+    // guidance to sign up with that address if they can.
+    expect(screen.getAllByText("new.hire@alpha.test").length).toBeGreaterThan(0);
+
+    // Only then is an account asked for.
+    expect(
+      screen.getByRole("link", { name: /create an account/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("carries the invitation through sign-in so the link is not lost", async () => {
+    vi.stubGlobal("fetch", mockLookup({ ok: true }));
+    renderAt("/accept-invite?token=abc123");
+
+    const link = await screen.findByRole("link", {
+      name: /i already have an account/i,
+    });
+    // Without the redirect the invitee signs in and lands nowhere near the
+    // invitation they were trying to accept.
+    expect(link.getAttribute("href")).toContain("redirect_url=");
+    expect(decodeURIComponent(link.getAttribute("href") ?? "")).toContain(
+      "token=abc123",
+    );
+  });
+
+  it("does not offer to accept before there is an identity to accept as", async () => {
+    vi.stubGlobal("fetch", mockLookup({ ok: true }));
+    renderAt("/accept-invite?token=abc123");
+
+    await screen.findByText(/Join Alpha Agency/);
+    expect(
+      screen.queryByRole("button", { name: /accept invitation/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("when signed in", () => {
+  beforeEach(() => {
+    clerkState.isSignedIn = true;
+    clerkState.user = {
+      fullName: "Nora Newhire",
+      primaryEmailAddress: { emailAddress: "nora@personal.test" },
+    };
+  });
+
+  it("offers to accept, prefilled with the signed-in name", async () => {
+    vi.stubGlobal("fetch", mockLookup({ ok: true }));
+    renderAt("/accept-invite?token=abc123");
+
+    const name = (await screen.findByLabelText(/your name/i)) as HTMLInputElement;
+    expect(name.value).toBe("Nora Newhire");
+    expect(
+      screen.getByRole("button", { name: /accept invitation/i }),
+    ).toBeEnabled();
+  });
+
+  it("shows which account is being used, since it may not be the invited one", async () => {
+    vi.stubGlobal("fetch", mockLookup({ ok: true }));
+    renderAt("/accept-invite?token=abc123");
+
+    expect(
+      await screen.findByText(/Signed in as nora@personal\.test/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /use a different account/i }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("links that cannot work", () => {
+  it("explains an expired invitation and what to do about it", async () => {
+    vi.stubGlobal("fetch", mockLookup({ ok: false, status: 410, code: "expired" }));
+    renderAt("/accept-invite?token=abc123");
+
+    expect(
+      await screen.findByText(/Ask whoever invited you to send a new one/i),
+    ).toBeInTheDocument();
+  });
+
+  it("distinguishes an already-used invitation from a broken one", async () => {
+    vi.stubGlobal("fetch", mockLookup({ ok: false, status: 410, code: "accepted" }));
+    renderAt("/accept-invite?token=abc123");
+
+    expect(
+      await screen.findByText(/already been used/i),
+    ).toBeInTheDocument();
+  });
+
+  it("suggests a truncated copy-paste when the token is not found", async () => {
+    vi.stubGlobal("fetch", mockLookup({ ok: false, status: 404, code: "invalid" }));
+    renderAt("/accept-invite?token=abc123");
+
+    expect(
+      await screen.findByText(/Check that you copied all of it/i),
+    ).toBeInTheDocument();
+  });
+
+  it("handles a link with no token at all without calling the API", async () => {
+    const fetchMock = mockLookup({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState({}, "", "/accept-invite");
+    renderAt("/accept-invite");
+
+    expect(
+      await screen.findByText(/Invitation link missing/i),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).not.toHaveBeenCalled());
+  });
+});

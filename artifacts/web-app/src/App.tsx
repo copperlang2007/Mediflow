@@ -50,6 +50,8 @@ const ClawbacksPage = lazy(() => import("@/pages/clawbacks"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const ForgotPasswordPage = lazy(() => import("@/pages/forgot-password"));
 const BillingPage = lazy(() => import("@/pages/billing"));
+const TeamPage = lazy(() => import("@/pages/team"));
+const AcceptInvitePage = lazy(() => import("@/pages/accept-invite"));
 const CreateOrganizationPage = lazy(() => import("@/pages/create-organization"));
 
 // Dev console pages are only imported when the build-time flag is set, so
@@ -372,6 +374,15 @@ function ClerkProviderWithRoutes() {
               <Route path="/" component={HomeRedirect} />
               <Route path="/sign-in/*?" component={SignInPage} />
               <Route path="/sign-up/*?" component={SignUpPage} />
+              {/*
+                Deliberately OUTSIDE ProtectedLayout. An invitee has no MediFlow
+                account yet, so the provisioning gate would send them to the
+                create-your-agency screen — and they would found a second, empty
+                org instead of joining the one that invited them.
+              */}
+              <Route path="/accept-invite">
+                <Suspense fallback={null}><AcceptInvitePage /></Suspense>
+              </Route>
               <Route path="/forgot-password">
                 <Suspense fallback={null}><ForgotPasswordPage /></Suspense>
               </Route>
@@ -425,6 +436,9 @@ function ClerkProviderWithRoutes() {
               </Route>
               <Route path="/settings/billing">
                 <ProtectedLayout><BillingPage /></ProtectedLayout>
+              </Route>
+              <Route path="/settings/team">
+                <ProtectedLayout><TeamPage /></ProtectedLayout>
               </Route>
               {/*
                 ADMIN ROUTES — convention going forward: `/admin/<feature>` (nested).

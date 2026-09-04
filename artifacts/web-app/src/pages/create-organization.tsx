@@ -10,7 +10,7 @@
 import { useState } from "react";
 import { useUser, useAuth } from "@clerk/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Building2, Loader2 } from "lucide-react";
+import { Building2, Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,6 +35,10 @@ export default function CreateOrganizationPage() {
   const defaultName = user?.fullName ? `${user.fullName}'s Agency` : "";
   const [orgName, setOrgName] = useState(defaultName);
   const [submitting, setSubmitting] = useState(false);
+  // Set when the server reports this address already has a live invitation.
+  // Creating an agency here would strand them in a second, empty org while the
+  // invitation went unused — so the screen changes rather than toasting.
+  const [pendingInvite, setPendingInvite] = useState(false);
 
   const trimmed = orgName.trim();
   const slug = slugify(trimmed);
@@ -68,7 +72,13 @@ export default function CreateOrganizationPage() {
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as {
           error?: string;
+          code?: string;
         };
+        if (res.status === 409 && body.code === "invitation_pending") {
+          setPendingInvite(true);
+          setSubmitting(false);
+          return;
+        }
         throw new Error(body.error ?? "Could not create your agency");
       }
 
@@ -83,6 +93,38 @@ export default function CreateOrganizationPage() {
       setSubmitting(false);
     }
   };
+
+  if (pendingInvite) {
+    return (
+      <div className="flex min-h-[100dvh] items-center justify-center bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 px-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="space-y-3">
+            <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-primary/10">
+              <Mail className="h-5 w-5 text-primary" />
+            </div>
+            <CardTitle className="text-center text-xl">
+              You have already been invited
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm text-muted-foreground">
+            <p>
+              An agency has invited{" "}
+              <span className="font-medium text-foreground break-all">
+                {user?.primaryEmailAddress?.emailAddress}
+              </span>{" "}
+              to join them. Open the link in that invitation email to accept it.
+            </p>
+            <p>
+              Creating a new agency here would leave you in an empty one of your
+              own, and the invitation unused — so we have stopped short of that.
+              If you meant to start your own agency instead, ask them to
+              withdraw the invitation first.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 px-4">
