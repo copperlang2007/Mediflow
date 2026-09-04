@@ -11,6 +11,15 @@ import {
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { type Role } from "../lib/permissions";
 import { safeLimit, safeOffset } from "../lib/listGuards";
+import {
+  getSeatUsage,
+  requireSeat,
+  lockOrgSeats,
+} from "../lib/billing/seats";
+import {
+  PlanLimitError,
+  planLimitResponse,
+} from "../lib/billing/entitlements";
 
 const UpdateMeSchema = z.object({
   fullName: z.string().min(1).max(100).optional(),
@@ -25,6 +34,10 @@ const UpdateUserRoleSchema = z.object({
     "agent_support",
     "viewer",
   ]),
+});
+
+const SetActiveSchema = z.object({
+  isActive: z.boolean(),
 });
 
 const VALID_ROLES: Role[] = [
@@ -185,6 +198,88 @@ router.patch(
     }
 
     res.json(user);
+  },
+);
+
+/**
+ * PATCH /users/:userId/active — deactivate or reactivate a member.
+ *
+ * This is the other half of seat management. Deactivating is how an agency
+ * frees a seat when someone leaves: the row stays (their audit trail, their
+ * assigned contacts and tasks all reference it) but the login stops working —
+ * `requireAuth` rejects an inactive user — and the seat returns to the pool.
+ *
+ * Reactivating consumes a seat and can therefore fail with 402, under the same
+ * lock as an invitation so the two paths cannot both claim the last one.
+ *
+ * An admin cannot deactivate themselves: an agency that locks its only
+ * administrator out has no way back in without support intervention.
+ */
+router.patch(
+  "/users/:userId/active",
+  requireAuth,
+  requirePermission("seat", "update"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const raw = Array.isArray(req.params.userId)
+      ? req.params.userId[0]
+      : req.params.userId;
+
+    const parsed = SetActiveSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
+      return;
+    }
+    const { isActive } = parsed.data;
+
+    if (!isActive && raw === authReq.userId) {
+      res.status(400).json({
+        error: "You cannot deactivate your own account.",
+        code: "self_deactivation",
+      });
+      return;
+    }
+
+    try {
+      const user = await db.transaction(async (tx) => {
+        await lockOrgSeats(authReq.orgId, tx);
+
+        const [current] = await tx
+          .select({ isActive: usersTable.isActive })
+          .from(usersTable)
+          .where(and(eq(usersTable.id, raw), eq(usersTable.orgId, authReq.orgId)))
+          .limit(1);
+
+        if (!current) return null;
+
+        // Only a transition into `active` consumes a seat. Re-asserting a
+        // state the user is already in must not fail on a full plan.
+        if (isActive && !current.isActive) {
+          await requireSeat(authReq.orgId, tx);
+        }
+
+        const [updated] = await tx
+          .update(usersTable)
+          .set({ isActive })
+          .where(and(eq(usersTable.id, raw), eq(usersTable.orgId, authReq.orgId)))
+          .returning();
+
+        return updated;
+      });
+
+      if (!user) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+
+      res.json({ user, seats: await getSeatUsage(authReq.orgId) });
+    } catch (err) {
+      if (err instanceof PlanLimitError) {
+        res.status(err.statusCode).json(planLimitResponse(err));
+        return;
+      }
+      throw err;
+    }
   },
 );
 

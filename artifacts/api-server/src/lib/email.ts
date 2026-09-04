@@ -154,6 +154,31 @@ const BRAND_FOOTER = `
   </p>
 </div>`.trim();
 
+/**
+ * HTML-escapes an interpolated text value.
+ *
+ * Organization names and user full names are free text the customer controls,
+ * and they land in the body of an email sent to someone who has not joined the
+ * agency yet — a recipient with no way to judge whether the message is honest.
+ * Unescaped, `name` can carry markup and rewrite what the invitation appears to
+ * say, including the link it appears to point at.
+ *
+ * Escaping `"` and `'` too, so the same helper is safe inside an attribute.
+ *
+ * NOTE: the templates above this point predate the helper and still interpolate
+ * raw. They are addressed to people already inside the agency rather than to
+ * outsiders, so the exposure differs — but it is real, and fixing it is out of
+ * this change's scope rather than out of the question.
+ */
+function esc(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function wrap(body: string): string {
   return `
 <!DOCTYPE html>
@@ -338,4 +363,27 @@ export function complianceReportEmailHtml(opts: {
     <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Overdue Tasks</td><td style="padding:6px 0;color:${opts.overdueTasks > 0 ? "#d97706" : "#16a34a"};font-size:13px;text-align:right;font-weight:600">${opts.overdueTasks}</td></tr>
   </table>
 </div>`);
+}
+
+// --- Team invitation ---
+
+export function invitationEmailHtml(opts: {
+  agencyName: string;
+  inviterName: string;
+  roleLabel: string;
+  acceptUrl: string;
+  expiresInDays: number;
+}): string {
+  const agency = esc(opts.agencyName);
+  const inviter = esc(opts.inviterName);
+  const role = esc(opts.roleLabel);
+  const href = esc(opts.acceptUrl);
+  const days = Number(opts.expiresInDays);
+
+  return wrap(`
+<h2 style="margin:0 0 8px;font-size:20px;color:#0f172a">You've been invited to ${agency}</h2>
+<p style="color:#475569;margin:0 0 16px">${inviter} has invited you to join <strong>${agency}</strong> on MediFlow as a <strong>${role}</strong>.</p>
+<p style="color:#475569;margin:0 0 20px">Accepting adds your account to their agency. You'll sign in with this email address.</p>
+<a href="${href}" style="display:inline-block;background:#1d4ed8;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px">Accept Invitation</a>
+<p style="color:#94a3b8;font-size:12px;margin:20px 0 0">This invitation expires in ${days} days. If you weren't expecting it, you can safely ignore this email — nothing happens until you accept.</p>`);
 }

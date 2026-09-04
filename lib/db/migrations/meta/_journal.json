@@ -288,6 +288,13 @@
       "when": 1788480201469,
       "tag": "0040_enrollments",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1788530912971,
+      "tag": "0041_invitations",
+      "breakpoints": true
     }
   ]
 }

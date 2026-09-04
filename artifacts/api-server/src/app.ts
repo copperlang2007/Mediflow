@@ -127,6 +127,15 @@ const authLimiter = rateLimit({
 });
 app.use("/api/auth", authLimiter);
 
+// Invitation lookup and acceptance are reachable without a MediFlow account —
+// that is the point of them — so they sit in the same brute-force bucket as
+// /api/auth rather than the general per-user one. The token itself is 256 bits
+// of randomness and is not guessable, but these two endpoints are the only
+// unauthenticated writes into the tenancy model and should be as boring to
+// probe as sign-in is.
+app.use("/api/invitations/lookup", authLimiter);
+app.use("/api/invitations/accept", authLimiter);
+
 
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 

@@ -41,6 +41,8 @@ export type Resource =
   | "carrier_contracting"
   | "esign"
   | "billing"
+  | "invitation"
+  | "seat"
   | "dev_console";
 
 export type Action = "read" | "create" | "update" | "delete" | "admin";
@@ -63,6 +65,23 @@ const MATRIX: PermissionMatrix = {
     update: ["super_admin", "agency_admin", "viewer", "agent"],
     delete: ["super_admin"],
     admin: ["super_admin"],
+  },
+  seat: {
+    // Activating or deactivating a member changes what the agency is billed
+    // for. That is an owner decision, not a compliance-manager one — but it
+    // is emphatically NOT reserved to `super_admin`, which in this product is
+    // MediFlow staff, not the customer.
+    read: ["super_admin", "agency_admin"],
+    update: ["super_admin", "agency_admin"],
+    admin: ["super_admin", "agency_admin"],
+  },
+  invitation: {
+    // Seat management is an owner concern: who joins the agency, and how many
+    // seats the invoice carries. Deliberately narrower than `user.read`.
+    read: ["super_admin", "agency_admin"],
+    create: ["super_admin", "agency_admin"],
+    delete: ["super_admin", "agency_admin"],
+    admin: ["super_admin", "agency_admin"],
   },
   agent: {
     read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],

@@ -1,8 +1,8 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getAuth } from "@clerk/express";
-import { db, usersTable, organizationsTable } from "@workspace/db";
+import { db, usersTable, organizationsTable, userInvitationsTable } from "@workspace/db";
 import { randomUUID } from "crypto";
 import { logger } from "../lib/logger";
 import { seedDefaultCarriers } from "../lib/carrierSeed";
@@ -88,6 +88,32 @@ router.post("/auth/provision", async (req: Request, res: Response): Promise<void
   }
 
   const { email, fullName, orgName, orgSlug } = bodyParsed.data;
+
+  // Someone who was invited must join the org that invited them, not create a
+  // second empty one. Without this check the invitation flow silently loses:
+  // the invitee signs up normally, lands in a fresh org of their own, and the
+  // pending invitation sits unused while the admin sees a seat consumed and no
+  // colleague. The client is expected to route to the accept screen on 409.
+  const [pendingInvite] = await db
+    .select({ id: userInvitationsTable.id })
+    .from(userInvitationsTable)
+    .where(
+      and(
+        sql`lower(${userInvitationsTable.email}) = ${email.trim().toLowerCase()}`,
+        eq(userInvitationsTable.status, "pending"),
+        gt(userInvitationsTable.expiresAt, sql`now()`),
+      ),
+    )
+    .limit(1);
+
+  if (pendingInvite) {
+    res.status(409).json({
+      error:
+        "You have a pending invitation to an existing agency. Use the link in your invitation email to join it.",
+      code: "invitation_pending",
+    });
+    return;
+  }
 
   const orgId = randomUUID();
   const slug = orgSlug ?? orgName?.toLowerCase().replace(/[^a-z0-9]/g, "-") ?? orgId;
