@@ -87,7 +87,14 @@ export default function AcceptInvitePage() {
   });
 
   const accept = useMutation({
-    mutationFn: async () => {
+    // The name travels as a mutation variable rather than being read from
+    // state inside the closure. Reading state worked, but only because React
+    // Query happens to re-read `mutationFn` after the setState flush — the
+    // submit handler sets the name and fires in the same tick. That is an
+    // ordering accident, and the failure it would eventually produce is an
+    // empty `fullName` on the most common path: an invitee who accepts without
+    // editing the prefilled name.
+    mutationFn: async (name: string) => {
       const clerkToken = await getToken();
       const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
       const res = await fetch(`${base}/api/invitations/accept`, {
@@ -97,7 +104,7 @@ export default function AcceptInvitePage() {
           "Content-Type": "application/json",
           ...(clerkToken ? { Authorization: `Bearer ${clerkToken}` } : {}),
         },
-        body: JSON.stringify({ token, fullName: fullName.trim() }),
+        body: JSON.stringify({ token, fullName: name.trim() }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as {
@@ -231,8 +238,7 @@ export default function AcceptInvitePage() {
             onSubmit={(e) => {
               e.preventDefault();
               if (nameValid && !accept.isPending) {
-                setFullName(effectiveName);
-                accept.mutate();
+                accept.mutate(effectiveName);
               }
             }}
           >
