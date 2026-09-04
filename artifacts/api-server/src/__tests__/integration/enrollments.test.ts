@@ -33,7 +33,11 @@ vi.mock("../../lib/jobs", jobsF);
 
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { enrollmentsTable, carriersTable } from "@workspace/db/schema";
+import {
+  enrollmentsTable,
+  carriersTable,
+  contactsTable,
+} from "@workspace/db/schema";
 import { bootTestDb, shutdownTestDb, withAuth } from "../helpers/testApp";
 import {
   seedOrg,
@@ -213,6 +217,116 @@ describe("PATCH /enrollments/:id", () => {
       .from(enrollmentsTable)
       .where(eq(enrollmentsTable.id, foreignId));
     expect(still.status).toBe("pending");
+  });
+});
+
+describe("review findings (Sourcery, PR #194)", () => {
+  it("refuses a carrier belonging to another organization", async () => {
+    // carriers.org_id is NOT NULL — carriers are tenant data. Attaching
+    // another agency's carrier would also leak its name back through the
+    // carrier-name join on every read.
+    const foreignCarrier = `carrier-${randomUUID()}`;
+    await testDb
+      .insert(carriersTable)
+      .values({ id: foreignCarrier, orgId: orgB.id, name: "Other Tenant Health" });
+
+    const res = await request(app)
+      .post("/api/enrollments")
+      .set(withAuth(adminA.id))
+      .send(enrollment({ carrierId: foreignCarrier, planType: "other", planYear: 2023 }));
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/carrier/i);
+  });
+
+  it("refuses a duplicate when the carrier is null (NULLS NOT DISTINCT)", async () => {
+    // A plain unique index treats every NULL as distinct, so carrier-less
+    // enrollments could pile up for one plan year and double-count.
+    const first = await request(app)
+      .post("/api/enrollments")
+      .set(withAuth(adminA.id))
+      .send(enrollment({ carrierId: null, planType: "MA", planYear: 2022 }));
+    expect(first.status).toBe(201);
+
+    const second = await request(app)
+      .post("/api/enrollments")
+      .set(withAuth(adminA.id))
+      .send(enrollment({ carrierId: null, planType: "MA", planYear: 2022 }));
+
+    expect(second.status).toBe(409);
+    expect(second.body.code).toBe("duplicate_enrollment");
+  });
+
+  it("answers 409, not 500, when a PATCH collides with an existing enrollment", async () => {
+    const a = await request(app)
+      .post("/api/enrollments")
+      .set(withAuth(adminA.id))
+      .send(enrollment({ planType: "MA", planYear: 2021 }));
+    const b = await request(app)
+      .post("/api/enrollments")
+      .set(withAuth(adminA.id))
+      .send(enrollment({ planType: "PDP", planYear: 2021 }));
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+
+    // Move B onto A's exact key.
+    const res = await request(app)
+      .patch(`/api/enrollments/${b.body.id}`)
+      .set(withAuth(adminA.id))
+      .send({ planType: "MA" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("duplicate_enrollment");
+  });
+
+  it("keeps the legacy contacts.current_* projection in step", async () => {
+    // Those columns are not dropped yet and the AEP cockpit, churn scoring,
+    // retention CRM and automation context still read them. Recording
+    // coverage here has to remain visible there.
+    const contact = await seedContact(testDb, {
+      orgId: orgA.id,
+      firstName: "Projection",
+      lastName: "Check",
+    });
+
+    const created = await request(app)
+      .post("/api/enrollments")
+      .set(withAuth(adminA.id))
+      .send({
+        contactId: contact.id,
+        carrierId,
+        planType: "MAPD",
+        planYear: 2027,
+        effectiveDate: "2027-01-01",
+        status: "active",
+      });
+    expect(created.status).toBe(201);
+
+    const [row] = await testDb
+      .select({
+        planType: contactsTable.currentPlanType,
+        carrier: contactsTable.currentCarrierId,
+        year: contactsTable.planYear,
+      })
+      .from(contactsTable)
+      .where(eq(contactsTable.id, contact.id));
+
+    expect(row.planType).toBe("MAPD");
+    expect(row.carrier).toBe(carrierId);
+    expect(row.year).toBe(2027);
+
+    // Deleting the only active enrollment clears the projection rather than
+    // leaving stale coverage behind.
+    const del = await request(app)
+      .delete(`/api/enrollments/${created.body.id}`)
+      .set(withAuth(adminA.id));
+    expect(del.status).toBe(204);
+
+    const [after] = await testDb
+      .select({ planType: contactsTable.currentPlanType })
+      .from(contactsTable)
+      .where(eq(contactsTable.id, contact.id));
+    expect(after.planType).toBeNull();
   });
 });
 

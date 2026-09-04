@@ -684,6 +684,79 @@ describe("Commissions integration", () => {
     expect(rows.length).toBe(1);
   });
 
+  it("missed-payment cron: a paid MA line item does not mask a missing PDP payment", async () => {
+    // The failure this worker was repointed at enrollments to fix. Matching
+    // line items on contactId alone means one paid stream silences the alert
+    // for the other, and the beneficiary's second commission stays invisible.
+    const handle = await bootTestDb();
+    const isoOrg = await seedOrg(handle.db, { id: `cron-org-${randomUUID()}` });
+    const isoCarrier = await seedCarrier(handle.db, { orgId: isoOrg.id });
+    const contact = await seedContact(handle.db, {
+      orgId: isoOrg.id,
+      status: "enrolled",
+    });
+
+    for (const planType of ["MAPD", "PDP"] as const) {
+      await handle.db.insert(commissionSchedulesTable).values({
+        id: `sched-${randomUUID()}`,
+        orgId: isoOrg.id,
+        carrierId: isoCarrier.id,
+        planType,
+        contractYear: 2025,
+        flatAmount: "25.00",
+        effectiveFrom: "2025-01-01",
+        status: "active",
+      });
+      await handle.db.insert(enrollmentsTable).values({
+        id: `enr-${randomUUID()}`,
+        orgId: isoOrg.id,
+        contactId: contact.id,
+        carrierId: isoCarrier.id,
+        planType,
+        planYear: 2025,
+        effectiveDate: "2025-01-01",
+        effectuated: true,
+        status: "active",
+        policyNumber: `POL-${planType}`,
+      });
+    }
+
+    // The MA stream is paid; the PDP stream is not.
+    const stmt = `stmt-${randomUUID()}`;
+    await handle.db.insert(commissionStatementsTable).values({
+      id: stmt,
+      orgId: isoOrg.id,
+      carrierId: isoCarrier.id,
+      statementDate: "2025-06-30",
+      periodStart: "2025-06-01",
+      periodEnd: "2025-06-30",
+      source: "csv_upload",
+      status: "reconciled",
+    });
+    await handle.db.insert(commissionLineItemsTable).values({
+      id: `li-${randomUUID()}`,
+      statementId: stmt,
+      orgId: isoOrg.id,
+      contactId: contact.id,
+      policyNumber: "POL-MAPD",
+      planType: "MAPD",
+      planYear: 2025,
+      commissionAmount: "25.00",
+      type: "renewal",
+    });
+
+    await commissionMissedPaymentCheckWorker({ orgId: isoOrg.id });
+
+    const alerts = await handle.db
+      .select()
+      .from(missedPaymentAlertsTable)
+      .where(eq(missedPaymentAlertsTable.orgId, isoOrg.id));
+
+    // Exactly one alert, and it is the PDP policy — not zero, and not both.
+    expect(alerts.length).toBe(1);
+    expect(alerts[0].policyNumber).toBe("POL-PDP");
+  });
+
   it("CSV parser registry: parseStatement('Humana', buf) emits normalized rows", async () => {
     const rows = parseStatement("Humana", HUMANA_CSV_BUFFER);
     expect(rows.length).toBe(3);

@@ -1,16 +1,26 @@
 /**
  * Commission Missed-Payment Check (nightly cron).
  *
- * For every active enrolled contact:
- *   1. Find the applicable commission_schedule for the contact's
- *      carrier + plan_type at the contact's plan year.
- *   2. Estimate expected commission for the previous calendar month
- *      using premium × renewal_pct × hierarchy split.
- *   3. If no commission_line_item exists for that contact + period
- *      within the last 60 days, insert a missed_payment_alerts row
- *      (idempotent via UNIQUE constraint).
- *   4. Fire the `commission_missed` automation trigger when a new alert
- *      is inserted.
+ * For every ACTIVE, EFFECTUATED enrollment — not every enrolled contact. A
+ * carrier pays on an enrollment, so that is the unit a missing payment is
+ * missing against, and a beneficiary holding an MA plan plus a standalone PDP
+ * has two commission streams that must be checked independently.
+ *
+ *   1. Find the commission_schedule governing that enrollment's carrier +
+ *      plan_type, at or before the enrollment's own plan year (not merely the
+ *      newest contract year on file).
+ *   2. Estimate expected commission for the previous calendar month using
+ *      premium × renewal_pct × hierarchy split.
+ *   3. If no commission_line_item matches THAT POLICY for the period within
+ *      the last 60 days, insert a missed_payment_alerts row. Matching narrows
+ *      by policy number when the enrollment has one, and otherwise by plan
+ *      type: matching on contact alone would let a paid MA line item mask a
+ *      missing PDP payment for the same beneficiary.
+ *   4. Fire the `commission_missed` automation trigger when a new alert is
+ *      inserted.
+ *
+ * Alerts are keyed per policy per period, so the two streams above produce two
+ * independent alerts rather than colliding on one row.
  *
  * Runs daily at 02:30 UTC.
  */
@@ -93,7 +103,29 @@ export async function commissionMissedPaymentCheckWorker(
   for (const enrollment of activeEnrollments) {
     if (!enrollment.carrierId) continue;
 
-    // Has a recent line item for this contact within the period covered the gap?
+    // Does a recent line item cover THIS POLICY for the period?
+    //
+    // Narrowing past `contactId` matters: a beneficiary with an MA plan and a
+    // standalone PDP has two commission streams, and matching on contact alone
+    // means one paid line item silences the alert for both — the exact failure
+    // this worker was repointed at enrollments to fix.
+    //
+    // Prefer the policy number when the enrollment carries one (carriers key
+    // their statements by it). Otherwise fall back to plan type, which still
+    // separates the MA stream from the PDP stream. Line items with neither
+    // recorded stay unnarrowed rather than being treated as a non-match, so a
+    // sparsely-populated statement cannot manufacture false alerts.
+    const policyMatch = enrollment.policyNumber
+      ? or(
+          eq(commissionLineItemsTable.policyNumber, enrollment.policyNumber),
+          eq(commissionLineItemsTable.memberId, enrollment.policyNumber),
+          isNull(commissionLineItemsTable.policyNumber),
+        )
+      : or(
+          eq(commissionLineItemsTable.planType, enrollment.planType),
+          isNull(commissionLineItemsTable.planType),
+        );
+
     const [hasLineItem] = await db
       .select({ id: commissionLineItemsTable.id })
       .from(commissionLineItemsTable)
@@ -101,6 +133,7 @@ export async function commissionMissedPaymentCheckWorker(
         and(
           eq(commissionLineItemsTable.orgId, enrollment.orgId),
           eq(commissionLineItemsTable.contactId, enrollment.contactId),
+          policyMatch,
           gte(commissionLineItemsTable.createdAt, lookbackCutoff),
           or(
             and(

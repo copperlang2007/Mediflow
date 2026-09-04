@@ -1,5 +1,5 @@
 {
-  "id": "fe152945-a4e6-44d5-9b6e-845ff2d29d39",
+  "id": "7ee9ad22-6c0d-434d-8ceb-bbd9c08f5e89",
   "prevId": "31a4ee1c-6928-4cc5-aa62-bcc259e07dbf",
   "version": "7",
   "dialect": "postgresql",
@@ -9147,39 +9147,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "enrollments_contact_year_type_carrier_key": {
-          "name": "enrollments_contact_year_type_carrier_key",
-          "columns": [
-            {
-              "expression": "contact_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "plan_year",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "plan_type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "carrier_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -9237,7 +9204,18 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "enrollments_contact_year_type_carrier_key": {
+          "name": "enrollments_contact_year_type_carrier_key",
+          "nullsNotDistinct": true,
+          "columns": [
+            "contact_id",
+            "plan_year",
+            "plan_type",
+            "carrier_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

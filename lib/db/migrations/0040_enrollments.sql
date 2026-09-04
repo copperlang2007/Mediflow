@@ -17,7 +17,8 @@ CREATE TABLE "enrollments" (
 	"status" "enrollment_status" DEFAULT 'pending' NOT NULL,
 	"notes" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "enrollments_contact_year_type_carrier_key" UNIQUE NULLS NOT DISTINCT("contact_id","plan_year","plan_type","carrier_id")
 );
 --> statement-breakpoint
 ALTER TABLE "enrollments" ADD CONSTRAINT "enrollments_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -28,7 +29,6 @@ CREATE INDEX "enrollments_org_contact_idx" ON "enrollments" USING btree ("org_id
 CREATE INDEX "enrollments_org_plan_year_idx" ON "enrollments" USING btree ("org_id","plan_year");--> statement-breakpoint
 CREATE INDEX "enrollments_org_effective_idx" ON "enrollments" USING btree ("org_id","effective_date");--> statement-breakpoint
 CREATE INDEX "enrollments_org_carrier_plan_idx" ON "enrollments" USING btree ("org_id","carrier_id","plan_type","plan_year");--> statement-breakpoint
-CREATE UNIQUE INDEX "enrollments_contact_year_type_carrier_key" ON "enrollments" USING btree ("contact_id","plan_year","plan_type","carrier_id");--> statement-breakpoint
 
 -- Backfill: one enrollment per contact that already carries coverage.
 --

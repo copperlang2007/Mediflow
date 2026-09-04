@@ -72,6 +72,26 @@ const CreateSchema = z.object({
 const UpdateSchema = CreateSchema.partial().omit({ contactId: true });
 
 /**
+ * Resolves a carrier inside the caller's org.
+ *
+ * `carriers.org_id` is NOT NULL — carriers are tenant data, not global
+ * reference data. Without this check a caller could attach another agency's
+ * carrier to their own enrollment, and the carrier-name join would then read
+ * that foreign row straight back out in the response.
+ */
+async function carrierInOrg(
+  carrierId: string,
+  orgId: string,
+): Promise<{ id: string } | null> {
+  const [row] = await db
+    .select({ id: carriersTable.id })
+    .from(carriersTable)
+    .where(and(eq(carriersTable.id, carrierId), eq(carriersTable.orgId, orgId)))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
  * Resolves a contact inside the caller's org.
  * Returns null (and the caller 404s) for a contact in another tenant.
  */
@@ -109,6 +129,52 @@ function isUniqueViolation(err: unknown): boolean {
   }
   // Last resort for drivers that only surface text (pglite in tests).
   return /duplicate key value violates unique constraint/i.test(String(err));
+}
+
+/**
+ * Mirrors an enrollment back onto the legacy `contacts.current_*` columns.
+ *
+ * Those columns are not dropped yet, and several consumers still read them —
+ * the AEP cockpit, churn scoring, retention CRM filters, automation-rule
+ * context, and the AI context builder. If enrollments were written without
+ * updating them, coverage recorded through this API would be invisible to all
+ * of those, which is worse than the flattening it replaces.
+ *
+ * Only the beneficiary's CURRENT coverage belongs in a single-value column, so
+ * this writes the latest active enrollment by plan year and effective date —
+ * and clears the columns when no active coverage remains. It is a projection,
+ * not a second source of truth: `enrollments` is authoritative, and this
+ * function is deleted in the release that drops the columns.
+ */
+async function syncContactCoverageProjection(
+  contactId: string,
+  orgId: string,
+): Promise<void> {
+  const [current] = await db
+    .select({
+      planType: enrollmentsTable.planType,
+      carrierId: enrollmentsTable.carrierId,
+      planYear: enrollmentsTable.planYear,
+    })
+    .from(enrollmentsTable)
+    .where(
+      and(
+        eq(enrollmentsTable.orgId, orgId),
+        eq(enrollmentsTable.contactId, contactId),
+        eq(enrollmentsTable.status, "active"),
+      ),
+    )
+    .orderBy(desc(enrollmentsTable.planYear), desc(enrollmentsTable.effectiveDate))
+    .limit(1);
+
+  await db
+    .update(contactsTable)
+    .set({
+      currentPlanType: current?.planType ?? null,
+      currentCarrierId: current?.carrierId ?? null,
+      planYear: current?.planYear ?? null,
+    })
+    .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId)));
 }
 
 /** Shared select shape — joins the carrier so the UI need not fetch names. */
@@ -161,7 +227,13 @@ router.get(
     const rows = await db
       .select(enrollmentColumns)
       .from(enrollmentsTable)
-      .leftJoin(carriersTable, eq(carriersTable.id, enrollmentsTable.carrierId))
+      .leftJoin(
+        carriersTable,
+        and(
+          eq(carriersTable.id, enrollmentsTable.carrierId),
+          eq(carriersTable.orgId, authReq.orgId),
+        ),
+      )
       .where(and(...conditions))
       .orderBy(desc(enrollmentsTable.planYear), desc(enrollmentsTable.effectiveDate))
       .limit(safeLimit(q.limit, 100))
@@ -199,7 +271,13 @@ router.get(
     const rows = await db
       .select(enrollmentColumns)
       .from(enrollmentsTable)
-      .leftJoin(carriersTable, eq(carriersTable.id, enrollmentsTable.carrierId))
+      .leftJoin(
+        carriersTable,
+        and(
+          eq(carriersTable.id, enrollmentsTable.carrierId),
+          eq(carriersTable.orgId, authReq.orgId),
+        ),
+      )
       .where(
         and(
           eq(enrollmentsTable.orgId, authReq.orgId),
@@ -233,6 +311,11 @@ router.post(
       return;
     }
 
+    if (data.carrierId && !(await carrierInOrg(data.carrierId, authReq.orgId))) {
+      res.status(404).json({ error: "Carrier not found" });
+      return;
+    }
+
     try {
       const [created] = await db
         .insert(enrollmentsTable)
@@ -255,6 +338,8 @@ router.post(
           notes: data.notes ?? null,
         })
         .returning();
+
+      await syncContactCoverageProjection(data.contactId, authReq.orgId);
 
       logger.info(
         { orgId: authReq.orgId, enrollmentId: created.id, contactId: data.contactId },
@@ -317,21 +402,47 @@ router.patch(
       return;
     }
 
-    const [updated] = await db
-      .update(enrollmentsTable)
-      .set(updates)
-      .where(
-        and(
-          eq(enrollmentsTable.id, id),
-          eq(enrollmentsTable.orgId, authReq.orgId),
-        ),
-      )
-      .returning();
+    if (d.carrierId && !(await carrierInOrg(d.carrierId, authReq.orgId))) {
+      res.status(404).json({ error: "Carrier not found" });
+      return;
+    }
+
+    let updated;
+    try {
+      [updated] = await db
+        .update(enrollmentsTable)
+        .set(updates)
+        .where(
+          and(
+            eq(enrollmentsTable.id, id),
+            eq(enrollmentsTable.orgId, authReq.orgId),
+          ),
+        )
+        .returning();
+    } catch (err) {
+      // Moving an enrollment onto an existing carrier + plan type + year
+      // collides with the same unique index POST guards against, and must
+      // answer the same way rather than surfacing a 500.
+      if (isUniqueViolation(err)) {
+        res.status(409).json({
+          error:
+            "This beneficiary already has an enrollment with that carrier, plan type, and plan year.",
+          code: "duplicate_enrollment",
+        });
+        return;
+      }
+      throw err;
+    }
 
     if (!updated) {
       res.status(404).json({ error: "Enrollment not found" });
       return;
     }
+
+    // Status, plan year, carrier or plan type may have changed which
+    // enrollment counts as current.
+    await syncContactCoverageProjection(updated.contactId, authReq.orgId);
+
     res.json(updated);
   },
 );
@@ -352,12 +463,18 @@ router.delete(
           eq(enrollmentsTable.orgId, authReq.orgId),
         ),
       )
-      .returning({ id: enrollmentsTable.id });
+      .returning({
+        id: enrollmentsTable.id,
+        contactId: enrollmentsTable.contactId,
+      });
 
     if (!deleted) {
       res.status(404).json({ error: "Enrollment not found" });
       return;
     }
+
+    await syncContactCoverageProjection(deleted.contactId, authReq.orgId);
+
     res.status(204).send();
   },
 );

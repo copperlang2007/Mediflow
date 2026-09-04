@@ -30,7 +30,7 @@ import {
   timestamp,
   pgEnum,
   index,
-  uniqueIndex,
+  unique,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -126,13 +126,19 @@ export const enrollmentsTable = pgTable(
      * A beneficiary can hold an MA plan and a standalone PDP in the same year,
      * but not two enrollments in the same plan type, same year, with the same
      * carrier. This is the constraint that stops double-counting a commission.
+     *
+     * `nullsNotDistinct` because `carrierId` is nullable — an enrollment can be
+     * recorded before the carrier is known. Postgres treats each NULL as
+     * distinct by default, which would let identical carrier-less enrollments
+     * pile up for one plan year and defeat the whole point of the constraint.
+     *
+     * A UNIQUE constraint rather than a unique index, because that is the form
+     * that carries NULLS NOT DISTINCT — the same shape migration 0005 used on
+     * missed_payment_alerts for the same reason.
      */
-    uniqueIndex("enrollments_contact_year_type_carrier_key").on(
-      t.contactId,
-      t.planYear,
-      t.planType,
-      t.carrierId,
-    ),
+    unique("enrollments_contact_year_type_carrier_key")
+      .on(t.contactId, t.planYear, t.planType, t.carrierId)
+      .nullsNotDistinct(),
   ],
 );
 
