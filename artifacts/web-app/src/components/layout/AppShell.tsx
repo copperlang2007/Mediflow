@@ -101,6 +101,7 @@ import {
   Target,
   Trophy,
   MonitorPlay,
+  UserPlus,
 } from "lucide-react";
 import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
 import NotificationPanel from "@/components/notifications/NotificationPanel";
@@ -504,6 +505,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           collapsed ? "px-2" : "px-3"
         )}
       >
+        {/* Seat management is an owner concern — same audience as billing. */}
+        {(userRole === "super_admin" || userRole === "agency_admin") && (
+          <NavItem
+            href="/settings/team"
+            label="Team"
+            icon={UserPlus}
+            collapsed={collapsed}
+          />
+        )}
+
         <NavItem
           href="/settings"
           label="Settings"
