@@ -86,15 +86,45 @@ function newToken(): { raw: string; hash: string } {
   return { raw, hash: hashToken(raw) };
 }
 
+/**
+ * Thrown when the deployment cannot build a usable invitation link.
+ *
+ * `APP_BASE_URL` falls back to the Vite dev server for local work. In
+ * production that fallback is worse than an error: the invitation would be
+ * created, the email sent, and the link would point at the recipient's own
+ * machine. The feature would look like it worked and silently fail for every
+ * invitee. Refusing to create the invitation at all is the honest failure.
+ */
+class AppBaseUrlUnconfiguredError extends Error {
+  readonly statusCode = 503;
+  constructor() {
+    super("APP_BASE_URL is not set");
+  }
+}
+
 function appBaseUrl(): string {
-  return (process.env.APP_BASE_URL ?? "http://localhost:5173").replace(
-    /\/+$/,
-    "",
-  );
+  const configured = process.env.APP_BASE_URL?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  if (process.env.NODE_ENV === "production") {
+    throw new AppBaseUrlUnconfiguredError();
+  }
+  return "http://localhost:5173";
 }
 
 function acceptUrlFor(token: string): string {
   return `${appBaseUrl()}/accept-invite?token=${encodeURIComponent(token)}`;
+}
+
+/** Shared 503 for a deployment that cannot produce a working invite link. */
+function baseUrlUnconfigured(res: Response): void {
+  logger.error(
+    "APP_BASE_URL is not set — refusing to issue an invitation whose link would be unusable",
+  );
+  res.status(503).json({
+    error:
+      "This deployment is not configured to send invitations. Set APP_BASE_URL and try again.",
+    code: "app_base_url_unconfigured",
+  });
 }
 
 /** Public shape — never leaks `tokenHash`. */
@@ -189,6 +219,15 @@ router.post(
       return;
     }
 
+    // Checked before any write: an invitation that cannot produce a working
+    // link should not exist, and should not consume a seat.
+    try {
+      appBaseUrl();
+    } catch (err) {
+      if (err instanceof AppBaseUrlUnconfiguredError) return baseUrlUnconfigured(res);
+      throw err;
+    }
+
     const email = parsed.data.email.trim().toLowerCase();
     const { role } = parsed.data;
     const { raw, hash } = newToken();
@@ -281,6 +320,14 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = paramId(req);
+
+    try {
+      appBaseUrl();
+    } catch (err) {
+      if (err instanceof AppBaseUrlUnconfiguredError) return baseUrlUnconfigured(res);
+      throw err;
+    }
+
     const { raw, hash } = newToken();
 
     let row: typeof userInvitationsTable.$inferSelect | undefined;

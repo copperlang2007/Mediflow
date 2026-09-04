@@ -424,6 +424,49 @@ describe("deactivation frees a seat", () => {
   });
 });
 
+describe("deployment configuration", () => {
+  it("refuses to issue an invitation it cannot build a working link for", async () => {
+    const prevNodeEnv = process.env.NODE_ENV;
+    const prevBase = process.env.APP_BASE_URL;
+    process.env.NODE_ENV = "production";
+    delete process.env.APP_BASE_URL;
+
+    try {
+      const res = await invite(adminA, { email: "deadlink@alpha.test" });
+
+      expect(res.status).toBe(503);
+      expect(res.body.code).toBe("app_base_url_unconfigured");
+
+      // And crucially: no invitation row, so no seat was consumed by an
+      // invitation whose link would have pointed at the recipient's own
+      // machine.
+      const rows = await testDb.select().from(userInvitationsTable);
+      expect(rows).toHaveLength(0);
+    } finally {
+      process.env.NODE_ENV = prevNodeEnv;
+      if (prevBase === undefined) delete process.env.APP_BASE_URL;
+      else process.env.APP_BASE_URL = prevBase;
+    }
+  });
+
+  it("uses the configured base url for the accept link", async () => {
+    const prevBase = process.env.APP_BASE_URL;
+    process.env.APP_BASE_URL = "https://app.mediflow.test/";
+
+    try {
+      const res = await invite(adminA, { email: "linked@alpha.test" });
+      expect(res.status).toBe(201);
+      // Trailing slash normalized, not doubled.
+      expect(res.body.acceptUrl).toMatch(
+        /^https:\/\/app\.mediflow\.test\/accept-invite\?token=/,
+      );
+    } finally {
+      if (prevBase === undefined) delete process.env.APP_BASE_URL;
+      else process.env.APP_BASE_URL = prevBase;
+    }
+  });
+});
+
 describe("tenancy", () => {
   it("does not expose another org's invitations", async () => {
     await invite(adminA, { email: "alpha-only@alpha.test" });
