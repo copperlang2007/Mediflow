@@ -36,7 +36,6 @@ const REPO_ROOT = join(__dirname, "..", "..", "..", "..", "..");
  * Fail-closed is the whole design.
  */
 const GLOBAL_TABLES = new Set([
-  "carriersTable", // global carrier reference data, identical per tenant
   "organizationsTable", // the tenant root itself, scoped by its own PK
   "sessionActivityTable", // keyed by Clerk session id
   "billingEventsTable", // webhook ledger, keyed by the provider's event id

@@ -281,6 +281,13 @@
       "when": 1778600000000,
       "tag": "0036_billing",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1788480201469,
+      "tag": "0040_enrollments",
+      "breakpoints": true
     }
   ]
 }
