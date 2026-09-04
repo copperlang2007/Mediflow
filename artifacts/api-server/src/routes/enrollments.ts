@@ -26,7 +26,11 @@ import {
   enrollmentsTable,
   contactsTable,
   carriersTable,
+  agentsTable,
 } from "@workspace/db";
+
+/** The transaction handle Drizzle hands to `db.transaction(...)`. */
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 import {
   requireAuth,
@@ -92,6 +96,27 @@ async function carrierInOrg(
 }
 
 /**
+ * Resolves an agent inside the caller's org.
+ *
+ * Same invariant as `carrierInOrg`, and it was missed on the same table:
+ * `agents.org_id` is NOT NULL, so accepting an unchecked `agentId` would let
+ * one agency attach another agency's agent to its enrollment — on the very
+ * table intended to spine commission payouts, where a foreign writing agent
+ * is a money problem, not just a data one.
+ */
+async function agentInOrg(
+  agentId: string,
+  orgId: string,
+): Promise<{ id: string } | null> {
+  const [row] = await db
+    .select({ id: agentsTable.id })
+    .from(agentsTable)
+    .where(and(eq(agentsTable.id, agentId), eq(agentsTable.orgId, orgId)))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
  * Resolves a contact inside the caller's org.
  * Returns null (and the caller 404s) for a contact in another tenant.
  */
@@ -149,8 +174,9 @@ function isUniqueViolation(err: unknown): boolean {
 async function syncContactCoverageProjection(
   contactId: string,
   orgId: string,
+  tx?: DbTransaction,
 ): Promise<void> {
-  const [current] = await db
+  const [current] = await (tx ?? db)
     .select({
       planType: enrollmentsTable.planType,
       carrierId: enrollmentsTable.carrierId,
@@ -164,10 +190,33 @@ async function syncContactCoverageProjection(
         eq(enrollmentsTable.status, "active"),
       ),
     )
-    .orderBy(desc(enrollmentsTable.planYear), desc(enrollmentsTable.effectiveDate))
+    .orderBy(
+      desc(enrollmentsTable.planYear),
+      desc(enrollmentsTable.effectiveDate),
+      // Deterministic tiebreaker, and not an arbitrary one.
+      //
+      // A dual-enrolled beneficiary (MA/MAPD plus a standalone PDP) commonly
+      // has both enrollments in the same plan year with the same effective
+      // date — the 0040 backfill guarantees it, since it sets every backfilled
+      // effective date to 1 January. Ordering on (plan year, effective date)
+      // alone leaves the winner to row order, so the projection could land on
+      // either plan.
+      //
+      // That is not a cosmetic coin flip. `aepCockpit.ts` and
+      // `lib/aepRenewal/generate.ts` both filter `contacts.current_plan_type`
+      // through MA_PLAN_TYPES = ('MA','MAPD'). If PDP won the tie, the
+      // beneficiary silently vanished from AEP renewal task generation and the
+      // cockpit counts — a regression against the feature this table exists to
+      // enable.
+      //
+      // MA/MAPD therefore outranks everything else, and `id` breaks any
+      // remaining tie so the result is stable across runs.
+      sql`CASE WHEN ${enrollmentsTable.planType} IN ('MA','MAPD') THEN 0 ELSE 1 END`,
+      desc(enrollmentsTable.id),
+    )
     .limit(1);
 
-  await db
+  await (tx ?? db)
     .update(contactsTable)
     .set({
       currentPlanType: current?.planType ?? null,
@@ -316,8 +365,17 @@ router.post(
       return;
     }
 
+    if (data.agentId && !(await agentInOrg(data.agentId, authReq.orgId))) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
     try {
-      const [created] = await db
+      // Insert and projection in one transaction: a crash between them would
+      // otherwise leave `contacts.current_*` describing coverage that differs
+      // from the enrollments table, and the AEP filters read the projection.
+      const created = await db.transaction(async (tx) => {
+      const [row] = await tx
         .insert(enrollmentsTable)
         .values({
           id: randomUUID(),
@@ -339,7 +397,9 @@ router.post(
         })
         .returning();
 
-      await syncContactCoverageProjection(data.contactId, authReq.orgId);
+        await syncContactCoverageProjection(data.contactId, authReq.orgId, tx);
+        return row;
+      });
 
       logger.info(
         { orgId: authReq.orgId, enrollmentId: created.id, contactId: data.contactId },
@@ -407,18 +467,32 @@ router.patch(
       return;
     }
 
+    if (d.agentId && !(await agentInOrg(d.agentId, authReq.orgId))) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
     let updated;
     try {
-      [updated] = await db
-        .update(enrollmentsTable)
-        .set(updates)
-        .where(
-          and(
-            eq(enrollmentsTable.id, id),
-            eq(enrollmentsTable.orgId, authReq.orgId),
-          ),
-        )
-        .returning();
+      updated = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(enrollmentsTable)
+          .set(updates)
+          .where(
+            and(
+              eq(enrollmentsTable.id, id),
+              eq(enrollmentsTable.orgId, authReq.orgId),
+            ),
+          )
+          .returning();
+
+        // Status, plan year, carrier or plan type may have changed which
+        // enrollment counts as current.
+        if (row) {
+          await syncContactCoverageProjection(row.contactId, authReq.orgId, tx);
+        }
+        return row;
+      });
     } catch (err) {
       // Moving an enrollment onto an existing carrier + plan type + year
       // collides with the same unique index POST guards against, and must
@@ -439,10 +513,6 @@ router.patch(
       return;
     }
 
-    // Status, plan year, carrier or plan type may have changed which
-    // enrollment counts as current.
-    await syncContactCoverageProjection(updated.contactId, authReq.orgId);
-
     res.json(updated);
   },
 );
@@ -455,25 +525,31 @@ router.delete(
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
-    const [deleted] = await db
-      .delete(enrollmentsTable)
-      .where(
-        and(
-          eq(enrollmentsTable.id, id),
-          eq(enrollmentsTable.orgId, authReq.orgId),
-        ),
-      )
-      .returning({
-        id: enrollmentsTable.id,
-        contactId: enrollmentsTable.contactId,
-      });
+    const deleted = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .delete(enrollmentsTable)
+        .where(
+          and(
+            eq(enrollmentsTable.id, id),
+            eq(enrollmentsTable.orgId, authReq.orgId),
+          ),
+        )
+        .returning({
+          id: enrollmentsTable.id,
+          contactId: enrollmentsTable.contactId,
+        });
+
+      // Removing the current enrollment must not leave stale coverage behind.
+      if (row) {
+        await syncContactCoverageProjection(row.contactId, authReq.orgId, tx);
+      }
+      return row;
+    });
 
     if (!deleted) {
       res.status(404).json({ error: "Enrollment not found" });
       return;
     }
-
-    await syncContactCoverageProjection(deleted.contactId, authReq.orgId);
 
     res.status(204).send();
   },

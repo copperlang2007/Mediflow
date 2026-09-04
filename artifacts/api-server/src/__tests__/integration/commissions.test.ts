@@ -757,6 +757,121 @@ describe("Commissions integration", () => {
     expect(alerts[0].policyNumber).toBe("POL-PDP");
   });
 
+  it("missed-payment cron: an unattributable line item cannot silence both streams", async () => {
+    // A line item recording neither policy number nor plan type used to match
+    // EVERY enrollment on the contact, so one such row produced zero alerts on
+    // a dual-enrolled beneficiary where two were owed — reopening the exact
+    // "one paid stream silences the other" failure by way of the safeguard
+    // against false alerts.
+    const handle = await bootTestDb();
+    const isoOrg = await seedOrg(handle.db, { id: `cron-org-${randomUUID()}` });
+    const isoCarrier = await seedCarrier(handle.db, { orgId: isoOrg.id });
+    const contact = await seedContact(handle.db, {
+      orgId: isoOrg.id,
+      status: "enrolled",
+    });
+
+    for (const planType of ["MAPD", "PDP"] as const) {
+      await handle.db.insert(commissionSchedulesTable).values({
+        id: `sched-${randomUUID()}`,
+        orgId: isoOrg.id,
+        carrierId: isoCarrier.id,
+        planType,
+        contractYear: 2025,
+        flatAmount: "25.00",
+        effectiveFrom: "2025-01-01",
+        status: "active",
+      });
+      await handle.db.insert(enrollmentsTable).values({
+        id: `enr-${randomUUID()}`,
+        orgId: isoOrg.id,
+        contactId: contact.id,
+        carrierId: isoCarrier.id,
+        planType,
+        planYear: 2025,
+        effectiveDate: "2025-01-01",
+        effectuated: true,
+        status: "active",
+        policyNumber: `POL-${planType}`,
+      });
+    }
+
+    // One line item that names neither the policy nor the plan type.
+    const stmt = `stmt-${randomUUID()}`;
+    await handle.db.insert(commissionStatementsTable).values({
+      id: stmt,
+      orgId: isoOrg.id,
+      carrierId: isoCarrier.id,
+      statementDate: "2025-06-30",
+      periodStart: "2025-06-01",
+      periodEnd: "2025-06-30",
+      source: "csv_upload",
+      status: "reconciled",
+    });
+    await handle.db.insert(commissionLineItemsTable).values({
+      id: `li-${randomUUID()}`,
+      statementId: stmt,
+      orgId: isoOrg.id,
+      contactId: contact.id,
+      policyNumber: null,
+      planType: null,
+      commissionAmount: "25.00",
+      type: "renewal",
+    });
+
+    await commissionMissedPaymentCheckWorker({ orgId: isoOrg.id });
+
+    const alerts = await handle.db
+      .select()
+      .from(missedPaymentAlertsTable)
+      .where(eq(missedPaymentAlertsTable.orgId, isoOrg.id));
+
+    // Both streams remain unattributed, so both are still owed an alert.
+    expect(alerts.length).toBe(2);
+  });
+
+  it("missed-payment cron: skips contacts the agency has written off", async () => {
+    // The 0040 backfill derives enrollment status from the contact's status,
+    // and the worker filters these out as well — a `do_not_contact`
+    // beneficiary must not generate commission alerts on the first cron run.
+    const handle = await bootTestDb();
+    const isoOrg = await seedOrg(handle.db, { id: `cron-org-${randomUUID()}` });
+    const isoCarrier = await seedCarrier(handle.db, { orgId: isoOrg.id });
+    const contact = await seedContact(handle.db, {
+      orgId: isoOrg.id,
+      status: "do_not_contact",
+    });
+    await handle.db.insert(commissionSchedulesTable).values({
+      id: `sched-${randomUUID()}`,
+      orgId: isoOrg.id,
+      carrierId: isoCarrier.id,
+      planType: "MAPD",
+      contractYear: 2025,
+      flatAmount: "25.00",
+      effectiveFrom: "2025-01-01",
+      status: "active",
+    });
+    await handle.db.insert(enrollmentsTable).values({
+      id: `enr-${randomUUID()}`,
+      orgId: isoOrg.id,
+      contactId: contact.id,
+      carrierId: isoCarrier.id,
+      planType: "MAPD",
+      planYear: 2025,
+      effectiveDate: "2025-01-01",
+      effectuated: true,
+      status: "active",
+    });
+
+    await commissionMissedPaymentCheckWorker({ orgId: isoOrg.id });
+
+    const alerts = await handle.db
+      .select()
+      .from(missedPaymentAlertsTable)
+      .where(eq(missedPaymentAlertsTable.orgId, isoOrg.id));
+    expect(alerts.length).toBe(0);
+  });
+
   it("CSV parser registry: parseStatement('Humana', buf) emits normalized rows", async () => {
     const rows = parseStatement("Humana", HUMANA_CSV_BUFFER);
     expect(rows.length).toBe(3);

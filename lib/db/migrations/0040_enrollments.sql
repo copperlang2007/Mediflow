@@ -44,8 +44,13 @@ CREATE INDEX "enrollments_org_carrier_plan_idx" ON "enrollments" USING btree ("o
 --   * `effective_date` is set to 1 January of the plan year. The true date was
 --     never stored, so this is a stated approximation, not a discovered fact —
 --     it is the only date consistent with the plan year we do have.
---   * `effectuated` = true and `status` = 'active': these contacts are recorded
---     as currently covered, which is what the flattened fields meant.
+--   * Status is derived from the CONTACT's own status, not assumed. Only
+--     `enrolled` / `retained` contacts get `active` coverage; a contact the
+--     agency has marked `lost` or `do_not_contact`, or one still a `lead` /
+--     `prospect`, gets `terminated` instead. Writing `active` for all of them
+--     would put written-off beneficiaries into the missed-payment cron's scope
+--     on its first run after deploy and generate alerts for commission nobody
+--     is owed. `effectuated` follows the same rule.
 --   * `application_date` stays NULL rather than guessing.
 --
 -- The source columns are NOT dropped here. Readers move to this table now; the
@@ -63,9 +68,9 @@ SELECT
   c."current_plan_type",
   c."plan_year",
   make_date(c."plan_year", 1, 1),
-  true,
-  'active',
-  'Backfilled from contacts.current_plan_type / current_carrier_id / plan_year. Effective date approximated as 1 Jan of the plan year; the true date was never recorded.'
+  (c."status" IN ('enrolled', 'retained')),
+  (CASE WHEN c."status" IN ('enrolled', 'retained') THEN 'active' ELSE 'terminated' END)::enrollment_status,
+  'Backfilled from contacts.current_plan_type / current_carrier_id / plan_year. Effective date approximated as 1 Jan of the plan year; the true date was never recorded. Status derived from the contact status at backfill time.'
 FROM "contacts" c
 WHERE c."current_plan_type" IS NOT NULL
   AND c."plan_year" IS NOT NULL

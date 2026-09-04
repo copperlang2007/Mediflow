@@ -25,7 +25,7 @@
  * Runs daily at 02:30 UTC.
  */
 
-import { and, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, lte, notInArray, or, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -94,9 +94,28 @@ export async function commissionMissedPaymentCheckWorker(
         eq(enrollmentsTable.effectuated, true),
         isNull(enrollmentsTable.disenrolledDate),
         isNull(contactsTable.deletedAt),
+        // Restores a filter the contact-based query had and the enrollment
+        // rewrite dropped. The 0040 backfill marks coverage active from the
+        // flattened columns regardless of the contact's own status, so without
+        // this a `lost` or `do_not_contact` beneficiary starts generating
+        // missed-payment alerts on the first cron run after deploy.
+        notInArray(contactsTable.status, ["lost", "do_not_contact"]),
         orgFilter,
       ),
     );
+
+  // How many active enrollments each contact holds. This decides whether the
+  // "line item records neither policy number nor plan type" tolerance below is
+  // safe: with one enrollment an unattributable line item can only belong to
+  // that enrollment, but with two it would satisfy BOTH and silence the alert
+  // for whichever stream is genuinely unpaid.
+  const enrollmentsPerContact = new Map<string, number>();
+  for (const e of activeEnrollments) {
+    enrollmentsPerContact.set(
+      e.contactId,
+      (enrollmentsPerContact.get(e.contactId) ?? 0) + 1,
+    );
+  }
 
   let alertsInserted = 0;
 
@@ -111,19 +130,33 @@ export async function commissionMissedPaymentCheckWorker(
     // this worker was repointed at enrollments to fix.
     //
     // Prefer the policy number when the enrollment carries one (carriers key
-    // their statements by it). Otherwise fall back to plan type, which still
-    // separates the MA stream from the PDP stream. Line items with neither
-    // recorded stay unnarrowed rather than being treated as a non-match, so a
-    // sparsely-populated statement cannot manufacture false alerts.
+    // their statements by it), otherwise fall back to plan type, which still
+    // separates the MA stream from the PDP stream.
+    //
+    // The tolerance for line items that record NEITHER is scoped to
+    // single-enrollment contacts, and that scoping is the whole point. An
+    // earlier version allowed `IS NULL` unconditionally so a sparse statement
+    // could not manufacture false alerts — but on a dual-enrolled beneficiary
+    // one unattributable line item then satisfied every enrollment, producing
+    // zero alerts where two were owed. That is the precise "one paid stream
+    // silences the other" failure this worker was rewritten to fix, reopened
+    // by the safeguard against the opposite error.
+    //
+    // Where the two risks collide, the missed alert is the worse one: an extra
+    // alert is a minute of an agent's attention, a missed one is unpaid
+    // commission nobody goes looking for. So with more than one active
+    // enrollment we demand positive attribution.
+    const ambiguous = (enrollmentsPerContact.get(enrollment.contactId) ?? 1) > 1;
+
     const policyMatch = enrollment.policyNumber
       ? or(
           eq(commissionLineItemsTable.policyNumber, enrollment.policyNumber),
           eq(commissionLineItemsTable.memberId, enrollment.policyNumber),
-          isNull(commissionLineItemsTable.policyNumber),
+          ...(ambiguous ? [] : [isNull(commissionLineItemsTable.policyNumber)]),
         )
       : or(
           eq(commissionLineItemsTable.planType, enrollment.planType),
-          isNull(commissionLineItemsTable.planType),
+          ...(ambiguous ? [] : [isNull(commissionLineItemsTable.planType)]),
         );
 
     const [hasLineItem] = await db

@@ -37,6 +37,7 @@ import {
   enrollmentsTable,
   carriersTable,
   contactsTable,
+  agentsTable,
 } from "@workspace/db/schema";
 import { bootTestDb, shutdownTestDb, withAuth } from "../helpers/testApp";
 import {
@@ -327,6 +328,73 @@ describe("review findings (Sourcery, PR #194)", () => {
       .from(contactsTable)
       .where(eq(contactsTable.id, contact.id));
     expect(after.planType).toBeNull();
+  });
+});
+
+describe("release-readiness findings (AWS review, PR #194)", () => {
+  it("projects MA over PDP for a dual-enrolled contact regardless of write order", async () => {
+    // THE blocking finding. `aepCockpit.ts` and `lib/aepRenewal/generate.ts`
+    // both filter contacts.current_plan_type through MA_PLAN_TYPES
+    // ('MA','MAPD'). A beneficiary holding MA + PDP in the same year with the
+    // same effective date — which the 0040 backfill guarantees, since it sets
+    // every effective date to 1 Jan — could land either way without a
+    // tiebreaker, silently dropping them from AEP renewal generation.
+    //
+    // Written PDP-first on purpose: that is the order in which the old
+    // ordering picked the wrong plan.
+    for (const [firstType, secondType] of [
+      ["PDP", "MAPD"],
+      ["MAPD", "PDP"],
+    ] as const) {
+      const contact = await seedContact(testDb, {
+        orgId: orgA.id,
+        firstName: `Dual-${firstType}`,
+        lastName: "Enrolled",
+      });
+
+      for (const planType of [firstType, secondType]) {
+        const res = await request(app)
+          .post("/api/enrollments")
+          .set(withAuth(adminA.id))
+          .send({
+            contactId: contact.id,
+            carrierId,
+            planType,
+            planYear: 2026,
+            effectiveDate: "2026-01-01", // identical — the ambiguous case
+            status: "active",
+            effectuated: true,
+          });
+        expect(res.status).toBe(201);
+      }
+
+      const [row] = await testDb
+        .select({ planType: contactsTable.currentPlanType })
+        .from(contactsTable)
+        .where(eq(contactsTable.id, contact.id));
+
+      // MA/MAPD must win either way, or the beneficiary disappears from AEP.
+      expect(row.planType).toBe("MAPD");
+    }
+  });
+
+  it("refuses an agent belonging to another organization", async () => {
+    const foreignAgent = `agent-${randomUUID()}`;
+    await testDb.insert(agentsTable).values({
+      id: foreignAgent,
+      orgId: orgB.id,
+      firstName: "Other",
+      lastName: "Agency",
+      email: `${foreignAgent}@example.test`,
+    });
+
+    const res = await request(app)
+      .post("/api/enrollments")
+      .set(withAuth(adminA.id))
+      .send(enrollment({ agentId: foreignAgent, planType: "other", planYear: 2019 }));
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/agent/i);
   });
 });
 
