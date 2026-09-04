@@ -154,6 +154,31 @@ const BRAND_FOOTER = `
   </p>
 </div>`.trim();
 
+/**
+ * HTML-escapes an interpolated text value.
+ *
+ * Organization names and user full names are free text the customer controls,
+ * and they land in the body of an email sent to someone who has not joined the
+ * agency yet — a recipient with no way to judge whether the message is honest.
+ * Unescaped, `name` can carry markup and rewrite what the invitation appears to
+ * say, including the link it appears to point at.
+ *
+ * Escaping `"` and `'` too, so the same helper is safe inside an attribute.
+ *
+ * NOTE: the templates above this point predate the helper and still interpolate
+ * raw. They are addressed to people already inside the agency rather than to
+ * outsiders, so the exposure differs — but it is real, and fixing it is out of
+ * this change's scope rather than out of the question.
+ */
+function esc(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function wrap(body: string): string {
   return `
 <!DOCTYPE html>
@@ -349,10 +374,16 @@ export function invitationEmailHtml(opts: {
   acceptUrl: string;
   expiresInDays: number;
 }): string {
+  const agency = esc(opts.agencyName);
+  const inviter = esc(opts.inviterName);
+  const role = esc(opts.roleLabel);
+  const href = esc(opts.acceptUrl);
+  const days = Number(opts.expiresInDays);
+
   return wrap(`
-<h2 style="margin:0 0 8px;font-size:20px;color:#0f172a">You've been invited to ${opts.agencyName}</h2>
-<p style="color:#475569;margin:0 0 16px">${opts.inviterName} has invited you to join <strong>${opts.agencyName}</strong> on MediFlow as a <strong>${opts.roleLabel}</strong>.</p>
+<h2 style="margin:0 0 8px;font-size:20px;color:#0f172a">You've been invited to ${agency}</h2>
+<p style="color:#475569;margin:0 0 16px">${inviter} has invited you to join <strong>${agency}</strong> on MediFlow as a <strong>${role}</strong>.</p>
 <p style="color:#475569;margin:0 0 20px">Accepting adds your account to their agency. You'll sign in with this email address.</p>
-<a href="${opts.acceptUrl}" style="display:inline-block;background:#1d4ed8;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px">Accept Invitation</a>
-<p style="color:#94a3b8;font-size:12px;margin:20px 0 0">This invitation expires in ${opts.expiresInDays} days. If you weren't expecting it, you can safely ignore this email — nothing happens until you accept.</p>`);
+<a href="${href}" style="display:inline-block;background:#1d4ed8;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px">Accept Invitation</a>
+<p style="color:#94a3b8;font-size:12px;margin:20px 0 0">This invitation expires in ${days} days. If you weren't expecting it, you can safely ignore this email — nothing happens until you accept.</p>`);
 }

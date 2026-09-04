@@ -36,7 +36,6 @@ import {
   PlanLimitError,
   planLimitResponse,
   invalidateEntitlements,
-  getEntitlements,
 } from "../lib/billing/entitlements";
 import { sendEmail, invitationEmailHtml, isEmailConfigured } from "../lib/email";
 import { logger } from "../lib/logger";
@@ -194,9 +193,6 @@ router.post(
     const { role } = parsed.data;
     const { raw, hash } = newToken();
 
-    // Resolved before the transaction opens — see the note in lib/billing/seats.
-    const ent = await getEntitlements(authReq.orgId);
-
     let created: typeof userInvitationsTable.$inferSelect;
     try {
       created = await db.transaction(async (tx) => {
@@ -220,7 +216,7 @@ router.post(
           throw new AlreadyMemberError(existingUser.isActive);
         }
 
-        await requireSeat(authReq.orgId, ent.seats, ent.tier, tx);
+        await requireSeat(authReq.orgId, tx);
 
         const [row] = await tx
           .insert(userInvitationsTable)
@@ -287,24 +283,57 @@ router.post(
     const id = paramId(req);
     const { raw, hash } = newToken();
 
-    const [row] = await db
-      .update(userInvitationsTable)
-      .set({
-        tokenHash: hash,
-        expiresAt: new Date(
-          Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000,
-        ),
-        // A resend revives an invitation that lapsed while nobody was looking.
-        status: "pending",
-      })
-      .where(
-        and(
-          eq(userInvitationsTable.id, id),
-          eq(userInvitationsTable.orgId, authReq.orgId),
-          sql`${userInvitationsTable.status} in ('pending', 'expired')`,
-        ),
-      )
-      .returning();
+    let row: typeof userInvitationsTable.$inferSelect | undefined;
+    try {
+      row = await db.transaction(async (tx) => {
+        await lockOrgSeats(authReq.orgId, tx);
+
+        const [current] = await tx
+          .select()
+          .from(userInvitationsTable)
+          .where(
+            and(
+              eq(userInvitationsTable.id, id),
+              eq(userInvitationsTable.orgId, authReq.orgId),
+              sql`${userInvitationsTable.status} in ('pending', 'expired')`,
+            ),
+          )
+          .limit(1);
+
+        if (!current) return undefined;
+
+        // A lapsed invitation has already given its seat back, and the agency
+        // may have spent it in the meantime. Reviving one is therefore a seat
+        // purchase like any other; resending a still-live invitation is not,
+        // because it never stopped holding its seat.
+        const stillHoldsSeat =
+          current.status === "pending" &&
+          current.expiresAt.getTime() > Date.now();
+        if (!stillHoldsSeat) {
+          await requireSeat(authReq.orgId, tx);
+        }
+
+        const [updated] = await tx
+          .update(userInvitationsTable)
+          .set({
+            tokenHash: hash,
+            expiresAt: new Date(
+              Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000,
+            ),
+            status: "pending",
+          })
+          .where(eq(userInvitationsTable.id, current.id))
+          .returning();
+
+        return updated;
+      });
+    } catch (err) {
+      if (err instanceof PlanLimitError) {
+        res.status(err.statusCode).json(planLimitResponse(err));
+        return;
+      }
+      throw err;
+    }
 
     if (!row) {
       res.status(404).json({ error: "Invitation not found" });
@@ -317,6 +346,7 @@ router.post(
       invitation: serialize(row),
       acceptUrl: acceptUrlFor(raw),
       emailSent: isEmailConfigured(),
+      seats: await getSeatUsage(authReq.orgId),
     });
   },
 );
@@ -471,28 +501,6 @@ router.post(
     }
 
     try {
-      // The token names the org, so the invitation has to be read before the
-      // entitlement can be resolved — and the entitlement has to be resolved
-      // before the transaction opens. Both reads are re-done under the lock
-      // below; this pass exists only to learn which org to price.
-      const [preview] = await db
-        .select({
-          orgId: userInvitationsTable.orgId,
-          status: userInvitationsTable.status,
-          expiresAt: userInvitationsTable.expiresAt,
-        })
-        .from(userInvitationsTable)
-        .where(eq(userInvitationsTable.tokenHash, hashToken(token)))
-        .limit(1);
-
-      if (!preview) throw new InviteUnusableError("invalid", 404);
-      const previewState = effectiveState(preview.status, preview.expiresAt);
-      if (previewState !== "pending") {
-        throw new InviteUnusableError(previewState, 410);
-      }
-
-      const ent = await getEntitlements(preview.orgId);
-
       const result = await db.transaction(async (tx) => {
         const [invite] = await tx
           .select()
@@ -506,7 +514,18 @@ router.post(
         if (state !== "pending") throw new InviteUnusableError(state, 410);
 
         await lockOrgSeats(invite.orgId, tx);
-        await requireSeat(invite.orgId, ent.seats, ent.tier, tx);
+        await requireSeat(invite.orgId, tx);
+
+        // Re-checked inside the transaction, not only before it: two concurrent
+        // accepts by the same Clerk identity would both pass an outside check
+        // and the loser would hit the users primary key, surfacing as a 500
+        // rather than the documented conflict.
+        const [raced] = await tx
+          .select({ id: usersTable.id })
+          .from(usersTable)
+          .where(eq(usersTable.id, clerkUserId))
+          .limit(1);
+        if (raced) throw new AlreadyProvisionedError();
 
         const [user] = await tx
           .insert(usersTable)
@@ -553,6 +572,17 @@ router.post(
 
       res.status(201).json({ user: result.user });
     } catch (err) {
+      // Belt and braces for the same race: even the in-transaction check above
+      // can be beaten under a weaker isolation level, and the primary key is
+      // the only thing that cannot be.
+      if (err instanceof AlreadyProvisionedError || isUsersPkViolation(err)) {
+        res.status(409).json({
+          error:
+            "This account already belongs to an agency. Sign out and use a different account to accept.",
+          code: "already_provisioned",
+        });
+        return;
+      }
       if (err instanceof InviteUnusableError) {
         res
           .status(err.statusCode)
@@ -580,6 +610,12 @@ class AlreadyMemberError extends Error {
   }
 }
 
+class AlreadyProvisionedError extends Error {
+  constructor() {
+    super("already provisioned");
+  }
+}
+
 class InviteUnusableError extends Error {
   constructor(
     readonly code: string,
@@ -600,6 +636,19 @@ function isUniqueViolation(err: unknown): boolean {
     ) {
       return true;
     }
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/** Specifically the `users` primary-key collision, not any unique violation. */
+function isUsersPkViolation(err: unknown): boolean {
+  if (!isUniqueViolation(err)) return false;
+  let cur: unknown = err;
+  for (let i = 0; i < 5 && cur != null; i++) {
+    const c = cur as { constraint?: unknown; message?: unknown };
+    const marker = `${String(c.constraint ?? "")} ${String(c.message ?? "")}`;
+    if (/users_pkey|"users"/.test(marker)) return true;
     cur = (cur as { cause?: unknown }).cause;
   }
   return false;

@@ -94,12 +94,33 @@ export async function getEntitlements(orgId: string): Promise<Entitlements> {
     .where(eq(subscriptionsTable.orgId, orgId))
     .limit(1);
 
+  const value = deriveEntitlements(orgId, row ?? null);
+  cache.set(orgId, { value, fetchedAt: Date.now() });
+  return value;
+}
+
+/**
+ * The pure mapping from a subscription row to what it entitles.
+ *
+ * Split out from `getEntitlements` so a caller holding a transaction can read
+ * the subscription on *its own* connection and derive the same answer, without
+ * going through the module-level `db` handle or the cache. Seat enforcement
+ * needs exactly that: an entitlement read outside the seat lock can be stale by
+ * the time the lock is held, and a cached one can be staler still.
+ *
+ * Both paths share this function so the two can never disagree about what a
+ * row means.
+ */
+export function deriveEntitlements(
+  orgId: string,
+  row: typeof subscriptionsTable.$inferSelect | null,
+): Entitlements {
   const billingConfigured = isBillingConfigured();
 
   // No payment processor wired up: this is a demo or design-partner install.
   // Grant the top tier rather than crippling a product someone was handed.
   if (!billingConfigured) {
-    const value: Entitlements = {
+    return {
       orgId,
       tier: "agency",
       plan: PLANS.agency,
@@ -110,8 +131,6 @@ export async function getEntitlements(orgId: string): Promise<Entitlements> {
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
     };
-    cache.set(orgId, { value, fetchedAt: Date.now() });
-    return value;
   }
 
   const status = row?.status ?? "none";
@@ -122,7 +141,7 @@ export async function getEntitlements(orgId: string): Promise<Entitlements> {
   const tier: PlanTier =
     entitled && isPlanTier(row.planTier) ? row.planTier : "starter";
 
-  const value: Entitlements = {
+  return {
     orgId,
     tier,
     plan: PLANS[tier],
@@ -133,9 +152,6 @@ export async function getEntitlements(orgId: string): Promise<Entitlements> {
     currentPeriodEnd: row?.currentPeriodEnd ?? null,
     cancelAtPeriodEnd: row?.cancelAtPeriodEnd ?? false,
   };
-
-  cache.set(orgId, { value, fetchedAt: Date.now() });
-  return value;
 }
 
 /** Error thrown when an action exceeds the org's plan. */

@@ -19,7 +19,6 @@ import {
 import {
   PlanLimitError,
   planLimitResponse,
-  getEntitlements,
 } from "../lib/billing/entitlements";
 
 const UpdateMeSchema = z.object({
@@ -241,9 +240,6 @@ router.patch(
       return;
     }
 
-    // Resolved before the transaction opens — see the note in lib/billing/seats.
-    const ent = await getEntitlements(authReq.orgId);
-
     try {
       const user = await db.transaction(async (tx) => {
         await lockOrgSeats(authReq.orgId, tx);
@@ -259,7 +255,7 @@ router.patch(
         // Only a transition into `active` consumes a seat. Re-asserting a
         // state the user is already in must not fail on a full plan.
         if (isActive && !current.isActive) {
-          await requireSeat(authReq.orgId, ent.seats, ent.tier, tx);
+          await requireSeat(authReq.orgId, tx);
         }
 
         const [updated] = await tx

@@ -316,6 +316,57 @@ describe("seat accounting", () => {
   });
 });
 
+describe("resend", () => {
+  it("does not let a lapsed invitation be revived past the seat limit", async () => {
+    await setSeats(orgA.id, 2); // adminA + one
+
+    const created = await invite(adminA, { email: "lapsed@alpha.test" });
+    expect(created.status).toBe(201);
+
+    // It expires, giving the seat back...
+    await testDb
+      .update(userInvitationsTable)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(userInvitationsTable.id, created.body.invitation.id));
+
+    // ...and the agency spends it on someone else.
+    expect((await invite(adminA, { email: "took-it@alpha.test" })).status).toBe(201);
+
+    // Reviving the lapsed one would now put the org over its plan.
+    const resent = await request(app)
+      .post(`/api/invitations/${created.body.invitation.id}/resend`)
+      .set(withAuth(adminA.id))
+      .send({});
+
+    expect(resent.status).toBe(402);
+  });
+
+  it("resends a still-live invitation without double-counting its seat", async () => {
+    await setSeats(orgA.id, 2); // adminA + exactly one
+
+    const created = await invite(adminA, { email: "nudge@alpha.test" });
+    expect(created.body.seats.available).toBe(0);
+
+    // The invitation already holds the last seat; resending must not be read
+    // as a request for a second one.
+    const resent = await request(app)
+      .post(`/api/invitations/${created.body.invitation.id}/resend`)
+      .set(withAuth(adminA.id))
+      .send({});
+
+    expect(resent.status).toBe(200);
+    // A fresh token, and the old one is dead.
+    const oldToken = new URL(created.body.acceptUrl).searchParams.get("token")!;
+    const newToken = new URL(resent.body.acceptUrl).searchParams.get("token")!;
+    expect(newToken).not.toBe(oldToken);
+
+    const stale = await request(app).get(
+      `/api/invitations/lookup?token=${encodeURIComponent(oldToken)}`,
+    );
+    expect(stale.status).toBe(404);
+  });
+});
+
 describe("deactivation frees a seat", () => {
   it("deactivates, frees the seat, and refuses to reactivate past the limit", async () => {
     const member = await seedUser(testDb, {

@@ -22,21 +22,35 @@
  * cannot issue ten invitations against three seats and discover the problem
  * only as people trickle in.
  *
- * ## Why the limit is passed in rather than looked up
+ * ## Why the entitlement is re-read under the lock
  *
- * `getEntitlements` reads through the module-level `db` handle. Calling it from
- * inside a transaction would issue that read on a *different* connection than
- * the one holding the seat lock — which under pglite (a single connection)
- * deadlocks outright, and under a real pool silently reads outside the
- * transaction's snapshot. So the entitlement is resolved once, before the
- * transaction opens, and the limit travels in as a number. Everything in here
- * that runs under a lock touches only the connection it was handed.
+ * `getEntitlements` reads through the module-level `db` handle and caches for
+ * 30s. Calling it from inside a transaction issues that read on a *different*
+ * connection than the one holding the seat lock — which under pglite (a single
+ * connection) deadlocks outright, and under a real pool reads outside the
+ * transaction's snapshot. But resolving it *before* the lock is not safe
+ * either: a downgrade committing in between leaves the check enforcing a stale,
+ * larger limit, and the cache can make that window 30s wide.
+ *
+ * So `requireSeat` reads the `subscriptions` row on the connection it was
+ * handed — inside the lock, in the transaction's own snapshot — and maps it
+ * through the same `deriveEntitlements` that `getEntitlements` uses, so the two
+ * can never disagree. Everything under a lock touches only that connection.
  */
 import { and, count, eq, gt, sql } from "drizzle-orm";
-import { db, usersTable, userInvitationsTable } from "@workspace/db";
-
-import { getEntitlements, PlanLimitError } from "./entitlements";
 import { type PlanTier } from "./plans";
+import {
+  db,
+  usersTable,
+  userInvitationsTable,
+  subscriptionsTable,
+} from "@workspace/db";
+
+import {
+  getEntitlements,
+  deriveEntitlements,
+  PlanLimitError,
+} from "./entitlements";
 
 /** A Drizzle transaction handle, structurally identical to `db` for queries. */
 type DbLike =
@@ -110,19 +124,35 @@ export async function getSeatUsage(orgId: string): Promise<SeatUsage> {
 }
 
 /**
+ * Reads the org's seat entitlement on the given connection, bypassing the
+ * cache. Call only while holding the seat lock — see the module note.
+ */
+export async function seatEntitlementOn(
+  orgId: string,
+  conn: DbLike,
+): Promise<{ seats: number; tier: PlanTier }> {
+  const [row] = await conn
+    .select()
+    .from(subscriptionsTable)
+    .where(eq(subscriptionsTable.orgId, orgId))
+    .limit(1);
+
+  const ent = deriveEntitlements(orgId, row ?? null);
+  return { seats: ent.seats, tier: ent.tier };
+}
+
+/**
  * Asserts the org has room for one more seat, throwing `PlanLimitError` (402)
  * when it does not.
  *
- * `limit` and `tier` come from an entitlement resolved before the transaction
- * opened; `conn` is the transaction actually doing the write, so the count and
- * the insert see one snapshot.
+ * Both the limit and the count are read on `conn`, so a downgrade that commits
+ * while this transaction waits on the lock is seen, not missed.
  */
 export async function requireSeat(
   orgId: string,
-  limit: number,
-  tier: PlanTier,
   conn: DbLike,
 ): Promise<SeatCounts> {
+  const { seats: limit, tier } = await seatEntitlementOn(orgId, conn);
   const counts = await countSeatsUsed(orgId, conn);
   if (counts.used < limit) return counts;
 
