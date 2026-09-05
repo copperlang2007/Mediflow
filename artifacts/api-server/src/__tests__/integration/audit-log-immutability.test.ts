@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { auditLogTable, organizationsTable } from "@workspace/db/schema";
 import {
   setupTestDb,
@@ -91,6 +91,23 @@ describe("audit_log immutability triggers", () => {
       await handle.db
         .delete(auditLogTable)
         .where(eq(auditLogTable.id, entryId));
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught).toBeDefined();
+    const cause = (caught as Error & { cause?: { message?: string } }).cause;
+    const msg = cause?.message ?? caught?.message ?? "";
+    expect(msg).toMatch(/immutable|not permitted/i);
+  });
+
+  it("rejects TRUNCATE on audit_log with the immutability message", async () => {
+    // The UPDATE/DELETE triggers from migration 0002 are row-level, and
+    // row-level triggers never fire on TRUNCATE — Postgres drops the rows
+    // without visiting them. Before migration 0042 this statement silently
+    // erased the whole audit trail while the two tests above still passed.
+    let caught: Error | undefined;
+    try {
+      await handle.db.execute(sql`truncate table audit_log`);
     } catch (err) {
       caught = err as Error;
     }
