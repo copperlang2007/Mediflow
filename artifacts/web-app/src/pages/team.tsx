@@ -206,7 +206,14 @@ export default function TeamPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<string>("agent");
-  const [lastInviteUrl, setLastInviteUrl] = useState<string | null>(null);
+  // The surfaced accept link is tied to the invitation that owns it. A single
+  // URL slot was not enough: clearing it on any emailed resend took away a
+  // *different* invitation's still-valid link, since the server rotates only
+  // the token of the row it resent.
+  const [lastInvite, setLastInvite] = useState<{
+    id: string;
+    url: string;
+  } | null>(null);
   const [deactivating, setDeactivating] = useState<Member | null>(null);
   const [revoking, setRevoking] = useState<Invitation | null>(null);
 
@@ -244,11 +251,10 @@ export default function TeamPage() {
       refresh();
       if (res.emailSent) {
         toast.success(`Invitation sent to ${res.invitation.email}`);
-        setLastInviteUrl(null);
       } else {
         // Email is not configured on this deployment. The link is the only way
         // the invitee gets in, so surface it rather than silently succeeding.
-        setLastInviteUrl(res.acceptUrl);
+        setLastInvite({ id: res.invitation.id, url: res.acceptUrl });
         toast.success("Invitation created — copy the link to share it");
       }
     },
@@ -261,15 +267,16 @@ export default function TeamPage() {
         `/api/invitations/${id}/resend`,
         { method: "POST" },
       ),
-    onSuccess: (res) => {
+    onSuccess: (res, id) => {
       refresh();
       if (res.emailSent) {
-        // Clear any link left over from an earlier unsent invitation: it now
-        // points at a token this resend has already invalidated.
-        setLastInviteUrl(null);
+        // A resend rotates this invitation's token, so a link on screen FOR
+        // THIS invitation is now dead and must go. Another invitation's link
+        // is untouched by it and must stay.
+        setLastInvite((cur) => (cur?.id === id ? null : cur));
         toast.success("Invitation resent");
       } else {
-        setLastInviteUrl(res.acceptUrl);
+        setLastInvite({ id, url: res.acceptUrl });
         toast.success("New link generated — the previous one no longer works");
       }
     },
@@ -369,7 +376,7 @@ export default function TeamPage() {
 
       <SeatMeter seats={seats} />
 
-      {lastInviteUrl && (
+      {lastInvite && (
         <Alert>
           <Mail className="h-4 w-4" />
           <AlertTitle>Share this link</AlertTitle>
@@ -380,14 +387,14 @@ export default function TeamPage() {
             </p>
             <div className="flex items-center gap-2">
               <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-xs">
-                {lastInviteUrl}
+                {lastInvite.url}
               </code>
               <Button
                 size="sm"
                 variant="secondary"
                 onClick={() => {
                   void navigator.clipboard
-                    .writeText(lastInviteUrl)
+                    .writeText(lastInvite.url)
                     .then(() => toast.success("Link copied"))
                     .catch(() => toast.error("Could not copy — select it manually"));
                 }}

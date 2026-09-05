@@ -57,6 +57,17 @@ const MEMBERS = [
 
 const PENDING = [
   {
+    id: "inv-2",
+    email: "second.hire@alpha.test",
+    role: "agent",
+    status: "pending" as const,
+    expiresAt: new Date(Date.now() + 5 * 86_400_000).toISOString(),
+    acceptedAt: null,
+    revokedAt: null,
+    invitedByUserId: "u-admin",
+    createdAt: new Date().toISOString(),
+  },
+  {
     id: "inv-1",
     email: "new.hire@alpha.test",
     role: "compliance_manager",
@@ -146,7 +157,9 @@ describe("seat visibility", () => {
 
     expect(await screen.findByText("Ada Admin")).toBeInTheDocument();
     expect(screen.getByText("new.hire@alpha.test")).toBeInTheDocument();
-    expect(screen.getByText("Invited, not yet accepted")).toBeInTheDocument();
+    expect(screen.getAllByText("Invited, not yet accepted")).toHaveLength(
+      PENDING.length,
+    );
   });
 });
 
@@ -186,7 +199,11 @@ describe("revoking", () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: /^revoke$/i }));
+    // Two pending invitations are seeded; revoke the one for new.hire.
+    const revokeButtons = await screen.findAllByRole("button", {
+      name: /^revoke$/i,
+    });
+    fireEvent.click(revokeButtons[1]!);
 
     const dialog = await screen.findByRole("alertdialog");
     expect(
@@ -205,6 +222,100 @@ describe("revoking", () => {
         expect.stringContaining("/api/invitations/inv-1"),
       );
     });
+  });
+});
+
+describe("the displayed link belongs to one invitation", () => {
+  it("does not drop invitation A's live link when invitation B is resent", async () => {
+    // Reachable when RESEND_API_KEY is set (and the API restarted) while an
+    // admin's tab stays open: earlier invitations were created without email,
+    // later ones send. A's token is untouched by B's resend — the server
+    // rotates only `WHERE id = :id` — so dropping A's link takes away a
+    // working link with no indication it still works.
+    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      const ok = (body: unknown) =>
+        ({ ok: true, status: 200, json: async () => body }) as Response;
+
+      if (method === "GET" && url.includes("/api/invitations")) {
+        return ok({ data: PENDING, seats: seats() });
+      }
+      if (method === "GET" && url.includes("/api/users")) {
+        return ok({ data: MEMBERS, total: MEMBERS.length });
+      }
+      if (method === "POST" && url.includes("/inv-1/resend")) {
+        return ok({ acceptUrl: "https://app.test/accept-invite?token=AAA", emailSent: false });
+      }
+      if (method === "POST" && url.includes("/inv-2/resend")) {
+        return ok({ acceptUrl: "https://app.test/accept-invite?token=BBB", emailSent: true });
+      }
+      return ok({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const resendButtons = await screen.findAllByRole("button", { name: /resend/i });
+    // inv-1 first (no email) — its link is surfaced for copying.
+    fireEvent.click(resendButtons[1]!);
+    expect(
+      await screen.findByText("https://app.test/accept-invite?token=AAA"),
+    ).toBeInTheDocument();
+
+    // inv-2 next, which does send by email. A's link must survive.
+    fireEvent.click(resendButtons[0]!);
+    await waitFor(() =>
+      expect(
+        screen.queryByText("https://app.test/accept-invite?token=BBB"),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText("https://app.test/accept-invite?token=AAA"),
+    ).toBeInTheDocument();
+  });
+
+  it("does clear the link when the invitation that owns it is resent by email", async () => {
+    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      const ok = (body: unknown) =>
+        ({ ok: true, status: 200, json: async () => body }) as Response;
+
+      if (method === "GET" && url.includes("/api/invitations")) {
+        return ok({ data: PENDING, seats: seats() });
+      }
+      if (method === "GET" && url.includes("/api/users")) {
+        return ok({ data: MEMBERS, total: MEMBERS.length });
+      }
+      if (method === "POST" && url.includes("/inv-1/resend")) {
+        // Same invitation twice: first without email, then with. The first
+        // link is dead the moment the second resend rotates the token.
+        const nth = fetchMock.mock.calls.filter(([u, i]) =>
+          String(u).includes("/inv-1/resend") &&
+          (i as RequestInit | undefined)?.method === "POST").length;
+        return nth <= 1
+          ? ok({ acceptUrl: "https://app.test/accept-invite?token=AAA", emailSent: false })
+          : ok({ acceptUrl: "https://app.test/accept-invite?token=CCC", emailSent: true });
+      }
+      return ok({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const resendButtons = await screen.findAllByRole("button", { name: /resend/i });
+    fireEvent.click(resendButtons[1]!);
+    expect(
+      await screen.findByText("https://app.test/accept-invite?token=AAA"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(resendButtons[1]!);
+    await waitFor(() =>
+      expect(
+        screen.queryByText("https://app.test/accept-invite?token=AAA"),
+      ).not.toBeInTheDocument(),
+    );
   });
 });
 
