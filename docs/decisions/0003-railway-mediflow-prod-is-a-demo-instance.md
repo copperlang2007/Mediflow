@@ -147,3 +147,104 @@ restores the previous (broken) state.
    Clerk (Phase 2), `PRIVATE_OBJECT_DIR` on a BAA-covered GCS bucket.
 3. Consider renaming the Railway project so `prod` does not name a demo.
 4. Verify the seeded data in this instance is entirely synthetic.
+
+---
+
+## Addendum — operator decision and audit-trail verification (2026-09-05)
+
+Recorded on PR #199 by the operator, and treated as the authoritative intent
+for this deployment:
+
+> I need to operate on the live environment with seed data to do real world
+> human testing without incurring any fees along the way. The true production
+> app will not live on Railway. I want to exercise real human workflow with
+> every process myself. [...] Stripe is not activated nor is any other payment
+> method so putting real PHI in the application now defeats the purpose by
+> which it has been built. This is a decision to be documented and it is
+> auditable.
+
+This confirms and tightens the decision above:
+
+1. **Railway is the human-testing environment, permanently.** It is not a
+   staging rung on the way to production on Railway; production lands
+   elsewhere. Nothing in this service should be built or configured on the
+   assumption that it will one day be promoted.
+2. **Seed data only, and no real PHI — by intent, not by omission.** The demo
+   guards are not a temporary state to be "completed later." They are the
+   contract.
+3. **No live payment path.** Stripe is not activated. `STRIPE_SECRET_KEY` and
+   `STRIPE_WEBHOOK_SECRET` are present on the service but the account is not
+   live, so billing exercises the flow without moving money. Do not activate
+   Stripe on this service.
+4. **The purpose is full-workflow human exercise.** The operator walks every
+   process personally. That is precisely what the auth bypass exists to make
+   possible, and precisely why real beneficiary data must never enter it.
+
+### Audit-trail immutability — verified, and one hole found
+
+The operator's condition was that these actions land in an immutable audit
+log, and that if the log is not actually immutable, a contract and a named
+steward are required instead. That claim was checked against the schema rather
+than assumed.
+
+**What held.** Migration `0002_audit_log_immutability.sql` installs
+`BEFORE UPDATE` and `BEFORE DELETE` row-level triggers on `audit_log`, both
+calling `audit_log_immutable()`, which unconditionally raises. Tampering with
+a row, or removing one, fails at the database level — application code cannot
+route around it. Migration 0002 is registered in `meta/_journal.json`
+(Drizzle's migrator reads only the journal), so it does apply.
+
+**What did not hold.** Row-level triggers never fire on `TRUNCATE` — Postgres
+removes the rows through a table-level operation that does not visit them
+individually. `TRUNCATE audit_log`, or a `TRUNCATE ... CASCADE` reaching it
+through a foreign key, silently erased the entire audit trail while every
+existing immutability test still passed. The trail was append-only against
+row-by-row tampering and wide open to a single statement.
+
+**Fix.** Migration `0042_audit_log_truncate_guard.sql` adds a
+`BEFORE TRUNCATE ... FOR EACH STATEMENT` trigger reusing the same
+`audit_log_immutable()` function, so all three tamper paths reject with an
+identical message. (A TRUNCATE trigger must be statement-level; declaring it
+`FOR EACH ROW` is a syntax error, which is why this could not be an extra
+event on the 0002 pair.)
+
+**Evidence.** A new case in `audit-log-immutability.test.ts` asserts the
+rejection. It was mutation-tested: with migration 0042 neutered to `SELECT 1`,
+the suite fails twice — the TRUNCATE is accepted, and the pre-existing
+"original row still exists" assertion then reports zero rows, demonstrating
+the wipe. With 0042 restored, all five cases pass.
+
+So the answer to the operator's question is: **the audit log is immutable
+against UPDATE and DELETE, was not immutable against TRUNCATE, and now is.**
+No steward contract is required on that basis.
+
+### Residual audit-integrity gaps (not closed here)
+
+Stated plainly so they are not mistaken for solved:
+
+- **Trigger removal.** A role that owns `audit_log` can `DROP TRIGGER` and
+  then tamper freely. Database-level immutability binds the application, not a
+  superuser or the table owner. Real production should run the app under a
+  role that is not the table owner.
+- **Whole-table destruction.** `DROP TABLE audit_log` is not covered by any
+  trigger. An `EVENT TRIGGER` on `ddl_command_start` would cover both this and
+  the point above.
+- **No cryptographic chaining.** Rows are not hash-chained or externally
+  anchored, so a party with sufficient database privilege could rebuild the
+  table and forge history without detection. Chaining each row to its
+  predecessor's hash is the standard countermeasure and is the right next step
+  before this is offered as a compliance artifact to a third party.
+
+These are acceptable for a seeded demo with no real PHI. They are not
+acceptable for the eventual production environment, and are recorded in the
+follow-ups below.
+
+### Follow-Up Actions (addendum)
+
+5. Run the production app under a database role that does not own `audit_log`,
+   so the immutability triggers cannot be dropped by the application.
+6. Add an `EVENT TRIGGER` guarding against `DROP TABLE` / `DROP TRIGGER` on
+   `audit_log`.
+7. Hash-chain `audit_log` rows before presenting the audit trail as evidence
+   to any external party.
+8. Do not activate Stripe on the Railway service.
