@@ -263,8 +263,12 @@ export default function TeamPage() {
       ),
     onSuccess: (res) => {
       refresh();
-      if (res.emailSent) toast.success("Invitation resent");
-      else {
+      if (res.emailSent) {
+        // Clear any link left over from an earlier unsent invitation: it now
+        // points at a token this resend has already invalidated.
+        setLastInviteUrl(null);
+        toast.success("Invitation resent");
+      } else {
         setLastInviteUrl(res.acceptUrl);
         toast.success("New link generated — the previous one no longer works");
       }

@@ -9,7 +9,7 @@
  * on rather than failing generically.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
@@ -140,6 +140,28 @@ describe("when signed in", () => {
     expect(
       screen.getByRole("button", { name: /accept invitation/i }),
     ).toBeEnabled();
+  });
+
+  it("posts the name that is actually on screen", async () => {
+    const fetchMock = mockLookup({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    renderAt("/accept-invite?token=abc123");
+
+    // The invitee accepts without touching the prefilled name — the common
+    // path, and the one where a stale closure would send an empty string.
+    fireEvent.click(
+      await screen.findByRole("button", { name: /accept invitation/i }),
+    );
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(
+        ([, init]) => (init as RequestInit | undefined)?.method === "POST",
+      );
+      expect(post).toBeDefined();
+      const body = JSON.parse(String((post![1] as RequestInit).body));
+      expect(body.fullName).toBe("Nora Newhire");
+      expect(body.token).toBe("abc123");
+    });
   });
 
   it("shows which account is being used, since it may not be the invited one", async () => {
