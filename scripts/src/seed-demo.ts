@@ -51,6 +51,7 @@ import {
   carrierContractingRequestsTable,
   commissionStatementsTable,
   commissionLineItemsTable,
+  subscriptionsTable,
   encryptSsn,
 } from "@workspace/db";
 import { seedDefaultCarriers } from "@workspace/api-server/lib/carrierSeed";
@@ -145,6 +146,9 @@ async function resetDemoOrg(): Promise<void> {
   await db.delete(carriersTable).where(eq(carriersTable.orgId, DEMO_ORG_ID));
   await db.delete(usersTable).where(eq(usersTable.orgId, DEMO_ORG_ID));
   await db
+    .delete(subscriptionsTable)
+    .where(eq(subscriptionsTable.orgId, DEMO_ORG_ID));
+  await db
     .delete(organizationsTable)
     .where(eq(organizationsTable.id, DEMO_ORG_ID));
   log("[reset] done");
@@ -215,6 +219,48 @@ const USER_ROWS: UserSeed[] = [
     role: "agent",
   },
 ];
+
+/**
+ * Seed the demo org's subscription.
+ *
+ * Without this the demo starts OVER its seat limit. `deriveEntitlements()`
+ * grants the top tier only when billing is unconfigured; the Railway demo has
+ * STRIPE_SECRET_KEY set (the account is not live, but the variable is
+ * present), so `isBillingConfigured()` is true and the code falls through to
+ * the subscription row. With no row, `entitled` is false and the tier is
+ * "starter" -- 3 included seats against the 4 active users this script
+ * creates. Invitations and reactivations then fail with 402, which breaks
+ * exactly the seat-management workflows the demo exists to exercise.
+ *
+ * `organizations.planTier` does NOT help: deriveEntitlements reads the
+ * subscription's planTier, not the org's, so the "growth" recorded on the org
+ * row in seedOrg() is silently ignored. This row makes the org's stated tier
+ * the one the code actually resolves.
+ *
+ * Deliberately no Stripe ids: nothing here should look like a real customer.
+ * `trialing` entitles without implying a payment ever happened.
+ */
+async function seedSubscription(): Promise<void> {
+  const existing = await db
+    .select({ id: subscriptionsTable.id })
+    .from(subscriptionsTable)
+    .where(eq(subscriptionsTable.orgId, DEMO_ORG_ID));
+  if (existing.length > 0) {
+    log("[subscription] demo subscription already exists");
+    return;
+  }
+  await db
+    .insert(subscriptionsTable)
+    .values({
+      id: stableId("subscription", DEMO_ORG_ID),
+      orgId: DEMO_ORG_ID,
+      planTier: "growth",
+      status: "trialing",
+      seats: 15,
+    })
+    .onConflictDoNothing();
+  log("[subscription] created growth/trialing, 15 seats");
+}
 
 async function seedUsers(): Promise<void> {
   for (const u of USER_ROWS) {
@@ -897,42 +943,72 @@ function remoteDatabaseHost(): string | null {
   return `DATABASE_URL host "${host}" is not localhost/127.0.0.1`;
 }
 
+/**
+ * The production-looking signals, mirroring `detectProdLikeCredentials()` in
+ * `artifacts/api-server/src/lib/prodEnvGuard.ts`. Kept in the same shape so
+ * the two cannot drift into disagreeing about what "looks like production".
+ */
+function detectProdLikeCredentials(): string[] {
+  const clerkSecret = process.env["CLERK_SECRET_KEY"];
+  const clerkPublishable = process.env["CLERK_PUBLISHABLE_KEY"];
+  return [
+    process.env["PHI_ENCRYPTION_KEY"] ? "PHI_ENCRYPTION_KEY is set" : null,
+    clerkSecret?.startsWith("sk_live")
+      ? "CLERK_SECRET_KEY starts with sk_live"
+      : null,
+    clerkPublishable?.startsWith("pk_live")
+      ? "CLERK_PUBLISHABLE_KEY starts with pk_live"
+      : null,
+    remoteDatabaseHost(),
+  ].filter((reason): reason is string => reason !== null);
+}
+
 function assertSafeToSeed(): void {
-  // DEMO_MODE is the escape hatch, but it does NOT excuse NODE_ENV=production.
-  // `isDemoMode()` requires both, `assertProdEnvIntegrity` refuses to boot on
-  // that pair at all, and the seed would write partial rows (org, users,
-  // carriers) before encryptSsn throws on the missing PHI keys — orphan demo
-  // data in a database that, by its own NODE_ENV, claims to be production. So
-  // the combination falls through to the checks below and is refused there.
-  if (
-    process.env["DEMO_MODE"] === "true" &&
-    process.env["NODE_ENV"] !== "production"
-  ) {
+  // Mirrors assertProdEnvIntegrity's DEMO_MODE branch exactly. DEMO_MODE is an
+  // opt-in for a demo DATABASE_URL -- which is expected to be remote -- and
+  // for NOTHING else. It does not excuse NODE_ENV=production, a real PHI key,
+  // or a live Clerk key.
+  //
+  // The earlier version returned immediately on DEMO_MODE=true and so exempted
+  // all three. That mattered because railway.json runs this in preDeploy,
+  // BEFORE the app boots: assertProdEnvIntegrity would refuse to start on the
+  // same credentials, but only after these rows were already committed.
+  if (process.env["DEMO_MODE"] === "true") {
+    if (process.env["NODE_ENV"] === "production") {
+      throw new Error(
+        "[seed] refusing to seed demo data: DEMO_MODE=true does not override " +
+          "NODE_ENV=production. isDemoMode() requires both, and " +
+          "assertProdEnvIntegrity refuses to boot the app on that pair. " +
+          "Unset NODE_ENV=production on this service.",
+      );
+    }
+    const dangerous = detectProdLikeCredentials().filter(
+      (reason) => !reason.startsWith("DATABASE_URL host"),
+    );
+    if (dangerous.length > 0) {
+      throw new Error(
+        "[seed] refusing to seed demo data: DEMO_MODE=true is paired with " +
+          `production-looking credentials (${dangerous.join("; ")}). ` +
+          "The demo seed plants a hardcoded super_admin and fake-SSN contacts " +
+          "and must never see real Clerk/PHI secrets. A remote DATABASE_URL is " +
+          "the one thing DEMO_MODE does excuse.",
+      );
+    }
     return;
   }
 
   const reasons = [
     process.env["NODE_ENV"] === "production" ? "NODE_ENV=production" : null,
-    process.env["PHI_ENCRYPTION_KEY"] ? "PHI_ENCRYPTION_KEY is set" : null,
-    remoteDatabaseHost(),
-  ].filter(Boolean);
+    ...detectProdLikeCredentials(),
+  ].filter((reason): reason is string => reason !== null);
 
   if (reasons.length === 0) return;
-
-  // The remedy differs depending on whether DEMO_MODE is already set. Telling
-  // someone to "set DEMO_MODE=true" when they already have would send them
-  // round a loop that cannot terminate.
-  const remedy =
-    process.env["DEMO_MODE"] === "true"
-      ? "DEMO_MODE=true does not override NODE_ENV=production: isDemoMode() " +
-        "requires both, and assertProdEnvIntegrity refuses to boot the app on " +
-        "that pair. Unset NODE_ENV=production on this service."
-      : "If this really is a demo deployment, set DEMO_MODE=true.";
 
   throw new Error(
     `[seed] refusing to seed demo data (${reasons.join("; ")}). ` +
       "This script plants a hardcoded super_admin identity and fake-SSN contacts " +
-      `and must never run against a real PHI database. ${remedy}`,
+      "and must never run against a real PHI database. If this really is a demo " +
+      "deployment, set DEMO_MODE=true.",
   );
 }
 
@@ -1059,6 +1135,7 @@ async function seedAll(): Promise<void> {
     log("[seed] concurrent seeder active — exiting cleanly; it will finish the job");
     return;
   }
+  await seedSubscription();
   await seedUsers();
   await seedAgents();
   const carriers = await seedCarriersWithDeskEmails();
