@@ -24,13 +24,17 @@
  * the middle one is repaired in place, for the reason given below:
  *
  *   1. the demo user exists;
- *   2. it is ACTIVE — requireAuth rejects an inactive demo user with the same
- *      401 as a missing one. A deactivated demo principal is REPAIRED here
- *      rather than refused: the seed cannot fix it, so refusing would wedge
- *      every future deploy on one operator action;
- *   3. the seed's completion MARKER is present — `seedUsers()` runs long
+ *   2. the seed's completion MARKER is present — `seedUsers()` runs long
  *      before agents, contacts, deals and commissions, so the user being there
- *      does not mean the seed finished.
+ *      does not mean the seed finished;
+ *   3. it is ACTIVE — requireAuth rejects an inactive demo user with the same
+ *      401 as a missing one. A deactivated demo principal is REPAIRED rather
+ *      than refused: the seed cannot fix it, so refusing would wedge every
+ *      future deploy on one operator action.
+ *
+ * The two read-only checks come first so a gate that is going to fail never
+ * mutates anything — the repair writes an immutable audit row, and one
+ * attached to a rejected deploy cannot be removed afterwards.
  */
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -43,14 +47,39 @@ import path from "node:path";
 // services this gate exists to leave alone.
 
 import { USERS, LAST_COMMISSION_LINE_ID } from "./demo-constants";
+import { DEFAULT_DEMO_USER_ID as API_DEFAULT_DEMO_USER_ID } from "@workspace/api-server/lib/demoMode";
 
 /**
  * The seeded default demo principal, taken from the seed's own constants
  * rather than re-typed here. `artifacts/api-server/src/lib/demoMode.ts` holds
- * a third copy as `DEFAULT_DEMO_USER_ID`; the two packages cannot share a
- * module today without api-server depending on @workspace/scripts.
+ * a second definition as `DEFAULT_DEMO_USER_ID`; the two packages cannot share
+ * a module today without api-server depending on @workspace/scripts.
  */
 const DEFAULT_DEMO_USER_ID = USERS.superAdmin;
+
+/**
+ * Assert the two definitions still agree, in BOTH directions.
+ *
+ * An earlier comment here claimed drift "fails the deploy loudly". That was
+ * only half true: this file reads the seed's constant, so editing
+ * demo-constants.ts is caught, but editing demoMode.ts alone is not — the gate
+ * would verify the id the seed wrote, pass, and the rebuilt api-server would
+ * then resolve a different id in requireAuth's demo branch and 401 every
+ * request. /api/readyz would not catch it either: it probes the database and
+ * the worker pool, not auth resolution.
+ *
+ * Comparing them here makes the claim true rather than rewording it down.
+ */
+function assertDemoUserIdConstantsAgree(): void {
+  if (API_DEFAULT_DEMO_USER_ID === USERS.superAdmin) return;
+  throw new Error(
+    "[predeploy-seed] the two demo-principal constants have drifted: " +
+      `demoMode.ts DEFAULT_DEMO_USER_ID is ${API_DEFAULT_DEMO_USER_ID} but the ` +
+      `seed's USERS.superAdmin is ${USERS.superAdmin}. requireAuth resolves the ` +
+      "former and the seed writes the latter, so the api-server would 401 every " +
+      "request. Make them match before deploying.",
+  );
+}
 
 function demoUserId(): string {
   const fromEnv = process.env["DEMO_USER_ID"]?.trim();
@@ -100,8 +129,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Before the seed, not after: an unseedable DEMO_USER_ID is unrecoverable,
-  // so there is no point spending two minutes discovering it downstream.
+  // Before the seed, not after: neither of these is recoverable by seeding,
+  // so there is no point spending two minutes discovering them downstream.
+  assertDemoUserIdConstantsAgree();
   assertDemoUserIdIsSeedable();
 
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -155,7 +185,40 @@ async function main(): Promise<void> {
     );
   }
 
+  // The demo user alone is not proof the seed finished. `seedUsers()` runs
+  // long before agents, contacts, deals and commissions, so on the fail-open
+  // lock-timeout path a peer can have written the org and user and still be
+  // going — the user is present, the demo is empty, and checking only the user
+  // would green-light exactly the state this gate exists to prevent.
+  //
+  // LAST_COMMISSION_LINE_ID is the seed's own completion marker: deliberately
+  // the last row the last seeder writes. seedAll() uses it for the same
+  // question, so the gate and the seed agree on what "complete" means.
+  const marker = await db
+    .select({ id: commissionLineItemsTable.id })
+    .from(commissionLineItemsTable)
+    .where(eq(commissionLineItemsTable.id, LAST_COMMISSION_LINE_ID))
+    .limit(1);
+
+  if (marker.length === 0) {
+    throw new Error(
+      "[predeploy-seed] the demo user exists but the seed completion marker " +
+        `(${LAST_COMMISSION_LINE_ID}) is missing, so the seed did not finish — ` +
+        "the demo would come up with empty deals, contacts and commissions. " +
+        "This is the fail-open path taken when a concurrent deploy held the " +
+        "seed lock for over 120s. Retry this deploy once the peer finishes.",
+    );
+  }
+
   if (!demoUser.isActive) {
+    // Runs AFTER the marker check on purpose: every read-only verification
+    // happens first, so a gate that is going to fail does so without having
+    // mutated anything. Repairing before the marker check committed a
+    // user.reactivate row into an append-only log for a deploy that was then
+    // rejected — truthful about the row it changed, but a permanent entry
+    // attached to a deployment that never shipped, and audit_log forbids
+    // deleting it.
+    //
     // Repair rather than refuse. Throwing here turns ONE operator action --
     // deactivating the demo principal through PATCH /users/:userId/active --
     // into a permanently wedged deploy pipeline: the seed cannot fix it
@@ -219,31 +282,6 @@ async function main(): Promise<void> {
         },
       });
     });
-  }
-
-  // The demo user alone is not proof the seed finished. `seedUsers()` runs
-  // long before agents, contacts, deals and commissions, so on the fail-open
-  // lock-timeout path a peer can have written the org and user and still be
-  // going — the user is present, the demo is empty, and checking only the user
-  // would green-light exactly the state this gate exists to prevent.
-  //
-  // LAST_COMMISSION_LINE_ID is the seed's own completion marker: deliberately
-  // the last row the last seeder writes. seedAll() uses it for the same
-  // question, so the gate and the seed agree on what "complete" means.
-  const marker = await db
-    .select({ id: commissionLineItemsTable.id })
-    .from(commissionLineItemsTable)
-    .where(eq(commissionLineItemsTable.id, LAST_COMMISSION_LINE_ID))
-    .limit(1);
-
-  if (marker.length === 0) {
-    throw new Error(
-      "[predeploy-seed] the demo user exists but the seed completion marker " +
-        `(${LAST_COMMISSION_LINE_ID}) is missing, so the seed did not finish — ` +
-        "the demo would come up with empty deals, contacts and commissions. " +
-        "This is the fail-open path taken when a concurrent deploy held the " +
-        "seed lock for over 120s. Retry this deploy once the peer finishes.",
-    );
   }
 
   console.log(

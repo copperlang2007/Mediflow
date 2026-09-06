@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     "./workers/commissionSplits": "./src/workers/commissionSplits.ts",
-    "./lib/carrierSeed": "./src/lib/carrierSeed.ts"
+    "./lib/carrierSeed": "./src/lib/carrierSeed.ts",
+    "./lib/demoMode": "./src/lib/demoMode.ts"
   },
   "scripts": {
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
