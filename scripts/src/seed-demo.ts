@@ -1134,6 +1134,14 @@ async function seedAll(): Promise<void> {
   // the next boot resumes the idempotent seeders. Checking statement
   // existence froze a statement-without-line-items crash forever.
   if (existing.length > 0 && !RESET) {
+    // Backfill BEFORE the completion check. Demos seeded before
+    // seedSubscription() existed have the marker already, so they would take
+    // the early return below and never get a subscription row -- leaving them
+    // permanently on starter/3 seats with 4 active users, which is the exact
+    // bug seedSubscription was added to fix. It is idempotent and cheap, so
+    // running it on every pass costs one indexed lookup.
+    await seedSubscription();
+
     const done = await db
       .select({ id: commissionLineItemsTable.id })
       .from(commissionLineItemsTable)
