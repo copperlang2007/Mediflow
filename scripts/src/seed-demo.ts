@@ -241,12 +241,46 @@ const USER_ROWS: UserSeed[] = [
  * `trialing` entitles without implying a payment ever happened.
  */
 async function seedSubscription(): Promise<void> {
-  const existing = await db
-    .select({ id: subscriptionsTable.id })
+  const [existing] = await db
+    .select({
+      id: subscriptionsTable.id,
+      planTier: subscriptionsTable.planTier,
+      status: subscriptionsTable.status,
+      stripeCustomerId: subscriptionsTable.stripeCustomerId,
+      stripeSubscriptionId: subscriptionsTable.stripeSubscriptionId,
+    })
     .from(subscriptionsTable)
     .where(eq(subscriptionsTable.orgId, DEMO_ORG_ID));
-  if (existing.length > 0) {
-    log("[subscription] demo subscription already exists");
+
+  if (existing) {
+    // A row existing is NOT the same as the demo being entitled.
+    // `ensureSubscriptionRow()` in api-server's routes/billing.ts materializes
+    // a starter/none row with 3 seats the first time anyone opens
+    // /api/billing/subscription -- so an existence-only check here would find
+    // that placeholder, do nothing, and leave the demo at 3 seats with 4
+    // active users: exactly the 402 this function exists to prevent.
+    //
+    // Anything carrying Stripe ids is real billing and is left alone; a
+    // placeholder has neither.
+    const stripeBacked =
+      Boolean(existing.stripeCustomerId) ||
+      Boolean(existing.stripeSubscriptionId);
+    if (stripeBacked) {
+      log("[subscription] Stripe-backed subscription present — leaving it alone");
+      return;
+    }
+    if (existing.planTier === "growth" && existing.status === "trialing") {
+      log("[subscription] demo subscription already correct");
+      return;
+    }
+    await db
+      .update(subscriptionsTable)
+      .set({ planTier: "growth", status: "trialing", seats: 15 })
+      .where(eq(subscriptionsTable.id, existing.id));
+    log(
+      `[subscription] upgraded placeholder (${existing.planTier}/${existing.status}) ` +
+        "to growth/trialing, 15 seats",
+    );
     return;
   }
   await db

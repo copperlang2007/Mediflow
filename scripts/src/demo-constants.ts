@@ -29,6 +29,21 @@ export const USERS = {
 } as const;
 
 /**
+ * The role each seeded user is created with.
+ *
+ * `predeploy-seed.ts` verifies the demo principal still holds its seeded role:
+ * `requireAuth`'s demo branch reads `demoUser.role` straight from the database,
+ * and `PATCH /users/:userId/role` is gated on super_admin — so the default demo
+ * principal can demote ITSELF and then lack the permission to undo it.
+ */
+export const USER_ROLES = {
+  [USERS.superAdmin]: "super_admin",
+  [USERS.agencyAdmin]: "agency_admin",
+  [USERS.carlosUser]: "agent",
+  [USERS.lindaUser]: "agent",
+} as const satisfies Record<string, "super_admin" | "agency_admin" | "agent">;
+
+/**
  * Build child IDs from a stable prefix so reseeds with the same input land on
  * the same UUID-shaped strings (idempotency without table-by-table "upsert"
  * plumbing). We're not picky about UUID validity here — the columns are plain
