@@ -908,7 +908,18 @@ function remoteDatabaseHost(): string | null {
 }
 
 function assertSafeToSeed(): void {
-  if (process.env["DEMO_MODE"] === "true") return;
+  // DEMO_MODE is the escape hatch, but it does NOT excuse NODE_ENV=production.
+  // `isDemoMode()` requires both, `assertProdEnvIntegrity` refuses to boot on
+  // that pair at all, and the seed would write partial rows (org, users,
+  // carriers) before encryptSsn throws on the missing PHI keys — orphan demo
+  // data in a database that, by its own NODE_ENV, claims to be production. So
+  // the combination falls through to the checks below and is refused there.
+  if (
+    process.env["DEMO_MODE"] === "true" &&
+    process.env["NODE_ENV"] !== "production"
+  ) {
+    return;
+  }
 
   const reasons = [
     process.env["NODE_ENV"] === "production" ? "NODE_ENV=production" : null,
@@ -918,11 +929,20 @@ function assertSafeToSeed(): void {
 
   if (reasons.length === 0) return;
 
+  // The remedy differs depending on whether DEMO_MODE is already set. Telling
+  // someone to "set DEMO_MODE=true" when they already have would send them
+  // round a loop that cannot terminate.
+  const remedy =
+    process.env["DEMO_MODE"] === "true"
+      ? "DEMO_MODE=true does not override NODE_ENV=production: isDemoMode() " +
+        "requires both, and assertProdEnvIntegrity refuses to boot the app on " +
+        "that pair. Unset NODE_ENV=production on this service."
+      : "If this really is a demo deployment, set DEMO_MODE=true.";
+
   throw new Error(
-    `[seed] refusing to seed demo data (${reasons.join("; ")}) without DEMO_MODE=true. ` +
+    `[seed] refusing to seed demo data (${reasons.join("; ")}). ` +
       "This script plants a hardcoded super_admin identity and fake-SSN contacts " +
-      "and must never run against a real PHI database. If this really is a demo " +
-      "deployment, set DEMO_MODE=true.",
+      `and must never run against a real PHI database. ${remedy}`,
   );
 }
 

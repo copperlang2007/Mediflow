@@ -40,10 +40,19 @@ function demoUserId(): string {
 }
 
 async function main(): Promise<void> {
-  if (process.env["DEMO_MODE"] !== "true") {
+  // Mirrors `isDemoMode()` in api-server's `lib/demoMode.ts`: DEMO_MODE=true
+  // AND NODE_ENV !== "production". Checking DEMO_MODE alone let the pair
+  // through, and the seed then wrote partial rows (org, users, carriers)
+  // before encryptSsn threw on the missing PHI keys. `assertProdEnvIntegrity`
+  // refuses to boot the app on that pair anyway, so a service in that state is
+  // misconfigured — seeding it can only leave orphan demo data behind.
+  if (
+    process.env["DEMO_MODE"] !== "true" ||
+    process.env["NODE_ENV"] === "production"
+  ) {
     console.log(
-      "[predeploy-seed] DEMO_MODE is not 'true' — skipping the demo seed. " +
-        "This service is not a demo deployment.",
+      "[predeploy-seed] not a demo deployment (needs DEMO_MODE=true and " +
+        "NODE_ENV != production) — skipping the demo seed.",
     );
     return;
   }
