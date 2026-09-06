@@ -849,7 +849,50 @@ async function seedCommissions(
 // org-creation double-submit path this run-level lock can't see.)
 const SEED_LOCK_KEY = 981_234_502;
 
+/**
+ * Refuse to plant demo data into anything that looks like a real database.
+ *
+ * This script writes a hardcoded `super_admin` identity
+ * (sarah@insureitall.example), a fixed org, users, agents, carriers, and
+ * contacts carrying fake `999-XX-XXXX` SSNs. None of that belongs in a
+ * database holding real PHI, and `seedAll()` is NOT transactional — a run
+ * that dies partway (e.g. at `encryptSsn`) leaves the org, users, agents and
+ * carriers committed, and the resume branch then completes the plant on the
+ * next attempt rather than raising a fresh alarm.
+ *
+ * `predeploy-seed.ts` gates the Railway deploy path on DEMO_MODE, but this
+ * guard is the one that protects a human running `pnpm seed:demo` by hand
+ * against whatever DATABASE_URL happens to be exported. It lives here so the
+ * protection travels with the dangerous code rather than with one caller.
+ *
+ * Two shapes are refused, both overridable only by an explicit DEMO_MODE=true:
+ *   - NODE_ENV=production.
+ *   - An explicitly-set PHI_ENCRYPTION_KEY. `lib/prodEnvGuard.ts` already
+ *     treats an explicit PHI key as production-looking (test/dev fall back to
+ *     a dev sentinel), and reusing that heuristic covers the case where
+ *     NODE_ENV is simply unset — where the seed would otherwise complete
+ *     silently under the dev-sentinel keys.
+ */
+function assertSafeToSeed(): void {
+  if (process.env["DEMO_MODE"] === "true") return;
+
+  const reasons = [
+    process.env["NODE_ENV"] === "production" ? "NODE_ENV=production" : null,
+    process.env["PHI_ENCRYPTION_KEY"] ? "PHI_ENCRYPTION_KEY is set" : null,
+  ].filter(Boolean);
+
+  if (reasons.length === 0) return;
+
+  throw new Error(
+    `[seed] refusing to seed demo data (${reasons.join("; ")}) without DEMO_MODE=true. ` +
+      "This script plants a hardcoded super_admin identity and fake-SSN contacts " +
+      "and must never run against a real PHI database. If this really is a demo " +
+      "deployment, set DEMO_MODE=true.",
+  );
+}
+
 async function main(): Promise<void> {
+  assertSafeToSeed();
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required");
   const lockClient = new pg.Client({ connectionString: process.env.DATABASE_URL });
   await lockClient.connect();
