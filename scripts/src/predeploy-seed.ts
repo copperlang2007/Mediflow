@@ -57,6 +57,31 @@ function demoUserId(): string {
   return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_DEMO_USER_ID;
 }
 
+/**
+ * Reject a DEMO_USER_ID the seed can never create, BEFORE running the seed.
+ *
+ * `demoMode.ts` advertises DEMO_USER_ID as a supported persona override, so
+ * operators are expected to set it — and `seedUsers()` only ever inserts the
+ * four fixed ids in USERS. Any other value is unreachable: the seed will not
+ * create it, and on an already-seeded database seedAll() skips seeding
+ * entirely, so retrying cannot help.
+ *
+ * Checked up front so a typo costs one clear message instead of a full seed
+ * run followed by "demo user … is still missing after seeding", which names
+ * the symptom rather than the cause.
+ */
+function assertDemoUserIdIsSeedable(): void {
+  const id = demoUserId();
+  const seeded = Object.values(USERS) as string[];
+  if (seeded.includes(id)) return;
+  throw new Error(
+    `[predeploy-seed] DEMO_USER_ID is set to ${id}, which the demo seed never ` +
+      "creates. seedUsers() inserts only the fixed personas: " +
+      `${seeded.join(", ")}. Pick one of those or unset DEMO_USER_ID to use ` +
+      "the default super_admin. Re-running the deploy will not fix this.",
+  );
+}
+
 async function main(): Promise<void> {
   // Mirrors `isDemoMode()` in api-server's `lib/demoMode.ts`: DEMO_MODE=true
   // AND NODE_ENV !== "production". Checking DEMO_MODE alone let the pair
@@ -74,6 +99,10 @@ async function main(): Promise<void> {
     );
     return;
   }
+
+  // Before the seed, not after: an unseedable DEMO_USER_ID is unrecoverable,
+  // so there is no point spending two minutes discovering it downstream.
+  assertDemoUserIdIsSeedable();
 
   const here = path.dirname(fileURLToPath(import.meta.url));
   const seed = spawnSync(

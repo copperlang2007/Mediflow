@@ -796,12 +796,35 @@ async function seedCommissions(
   carriers: Array<{ id: string; name: string }>,
   contactIds: string[],
 ): Promise<void> {
-  // Pick Aetna + Humana for the two sample statements.
+  // Pick Aetna + Humana for the two sample statements. These names are matched
+  // against DEFAULT_CARRIERS in api-server's lib/carrierSeed.ts, and the
+  // coupling is by string literal across two files with no shared constant.
+  //
+  // This THROWS rather than skipping. It used to skip, which was defensible
+  // when an incomplete seed merely meant "resume on the next boot". It is not
+  // defensible now: LAST_COMMISSION_LINE_ID is the last row this function
+  // writes, predeploy-seed.ts gates the deploy on that marker, and the resume
+  // path re-runs this same function -- so a rename in carrierSeed.ts would
+  // skip here forever, never write the marker, and permanently fail every
+  // deploy with a message pointing at the marker rather than at the rename.
+  // Failing here names the actual cause the first time.
   const aetna = carriers.find((c) => c.name === "Aetna/CVS");
   const humana = carriers.find((c) => c.name === "Humana");
   if (!aetna || !humana) {
-    log("[commissions] skipping — Aetna/Humana not found");
-    return;
+    const missing = [
+      !aetna ? '"Aetna/CVS"' : null,
+      !humana ? '"Humana"' : null,
+    ]
+      .filter(Boolean)
+      .join(" and ");
+    throw new Error(
+      `[commissions] required demo carrier(s) ${missing} not found among the ` +
+        `${carriers.length} seeded carriers. seedCommissions matches ` +
+        "DEFAULT_CARRIERS in artifacts/api-server/src/lib/carrierSeed.ts by " +
+        "exact name; if a carrier was renamed or removed there, update the " +
+        "names here to match. Without these the seed never writes its " +
+        "completion marker and every deploy fails the pre-deploy gate.",
+    );
   }
 
   const statements = [
