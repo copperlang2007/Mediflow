@@ -195,6 +195,34 @@ export async function teardownTestDb(handle: TestDbHandle): Promise<void> {
   await handle.pg.close();
 }
 
+/**
+ * Empty `audit_log` in a test, working around its immutability triggers.
+ *
+ * `audit_log` is append-only by design: migration 0002 blocks UPDATE and
+ * DELETE, and migration 0042 blocks TRUNCATE. That is the point — there is
+ * deliberately no supported way for application code to erase the audit
+ * trail, so a test that wants a clean slate has to say so explicitly.
+ *
+ * Two tests previously used a bare `TRUNCATE TABLE "audit_log"` and their
+ * comments described it as bypassing the 0002 triggers. It did, and that
+ * bypass was the hole 0042 closed.
+ *
+ * The disable/enable pair is scoped to this pglite instance, which is
+ * in-process and thrown away at teardown, and it names the escape hatch
+ * instead of hiding it behind a statement that happens to slip past a
+ * trigger. Production is untouched: nothing outside `__tests__` calls this.
+ */
+export async function truncateAuditLogForTests(
+  handle: TestDbHandle,
+): Promise<void> {
+  await handle.pg.exec(`ALTER TABLE "audit_log" DISABLE TRIGGER USER;`);
+  try {
+    await handle.pg.exec(`TRUNCATE TABLE "audit_log";`);
+  } finally {
+    await handle.pg.exec(`ALTER TABLE "audit_log" ENABLE TRIGGER USER;`);
+  }
+}
+
 // ---- Seed helpers -----------------------------------------------------------
 
 export interface SeedOrgOptions {
