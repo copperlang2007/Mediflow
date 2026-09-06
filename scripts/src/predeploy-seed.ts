@@ -33,6 +33,7 @@
  *      does not mean the seed finished.
  */
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -88,12 +89,15 @@ async function main(): Promise<void> {
 
   // The seed can return 0 without having produced a usable demo (the
   // fail-open lock-timeout path). Verify the thing the app actually needs.
-  const [{ db }, { usersTable, commissionLineItemsTable }, { eq }] =
-    await Promise.all([
-      import("@workspace/db"),
-      import("@workspace/db/schema"),
-      import("drizzle-orm"),
-    ]);
+  const [
+    { db },
+    { usersTable, commissionLineItemsTable, auditLogTable },
+    { eq },
+  ] = await Promise.all([
+    import("@workspace/db"),
+    import("@workspace/db/schema"),
+    import("drizzle-orm"),
+  ]);
   const id = demoUserId();
   // `isActive` is part of the check, not decoration: requireAuth's demo branch
   // rejects on `!demoUser || !demoUser.isActive` and returns the SAME "Demo
@@ -103,7 +107,11 @@ async function main(): Promise<void> {
   // Verifying existence alone would pass and promote a deployment that 401s on
   // every request, which is the state this gate exists to prevent.
   const rows = await db
-    .select({ id: usersTable.id, isActive: usersTable.isActive })
+    .select({
+      id: usersTable.id,
+      isActive: usersTable.isActive,
+      orgId: usersTable.orgId,
+    })
     .from(usersTable)
     .where(eq(usersTable.id, id))
     .limit(1);
@@ -138,10 +146,35 @@ async function main(): Promise<void> {
         "every request. Deactivate a different seeded user if you are testing " +
         "seat management.",
     );
-    await db
-      .update(usersTable)
-      .set({ isActive: true })
-      .where(eq(usersTable.id, id));
+    // Write the audit entry in the SAME transaction as the change. The
+    // deactivation that got us here was recorded in audit_log, so an
+    // unrecorded reactivation would leave access-review consumers reading a
+    // final state of "deactivated" while requireAuth accepts the account --
+    // a silent divergence in exactly the trail ADR-0003 commits to keeping
+    // auditable. audit_log is append-only (migrations 0002 and 0042), so this
+    // row can never be edited or removed afterwards.
+    await db.transaction(async (tx) => {
+      await tx
+        .update(usersTable)
+        .set({ isActive: true })
+        .where(eq(usersTable.id, id));
+      await tx.insert(auditLogTable).values({
+        id: randomUUID(),
+        orgId: demoUser.orgId,
+        userId: null,
+        userRole: "system",
+        action: "user.reactivate",
+        resourceType: "user",
+        resourceId: id,
+        changes: {
+          isActive: { from: false, to: true },
+          reason:
+            "predeploy-seed reactivated the DEMO_MODE principal: an inactive " +
+            "demo user 401s every request and the seed cannot repair it, so " +
+            "refusing would block all future deploys.",
+        },
+      });
+    });
   }
 
   // The demo user alone is not proof the seed finished. `seedUsers()` runs

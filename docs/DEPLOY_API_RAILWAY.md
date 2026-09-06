@@ -24,6 +24,28 @@ is why the `mediflow-api-server` Vercel project errors on every PR; see step 5.)
 > Do **not** set `DEMO_MODE=true` on a service holding real data. `seedAll()`
 > is not transactional, so a partially-completed seed leaves rows behind that
 > the resume branch will finish on the next deploy rather than flag.
+> `DEMO_MODE=true` does not override anything else either: the seed still
+> refuses to run under `NODE_ENV=production`, with an explicit
+> `PHI_ENCRYPTION_KEY`, or with a live Clerk key. A remote `DATABASE_URL` is
+> the one thing it does excuse, matching `assertProdEnvIntegrity`.
+
+### Demo-service operations
+
+Two behaviours on a `DEMO_MODE=true` service will surprise an operator:
+
+- **The demo principal is reactivated on every deploy.** Deactivating it
+  through `PATCH /users/:userId/active` is self-lockout — it is the only login
+  on a demo service, and `requireAuth` 401s every request while it is
+  inactive. The seed cannot repair it (`seedUsers` only inserts when the row
+  is absent, and a fully-seeded database skips that step entirely), so
+  refusing to deploy would block every future release, including hotfixes.
+  `predeploy-seed` therefore sets it back to active, logs a warning, and
+  writes a `user.reactivate` entry to `audit_log` in the same transaction.
+  To exercise seat management, deactivate one of the *other* seeded users —
+  those changes are left alone and survive deploys.
+- **A missing demo user fails the deploy.** Pointing `DEMO_USER_ID` at a UUID
+  the seed does not create is a misconfiguration; the fix is the env var, not
+  a database edit.
 
 
 | Field | Value | Why |
