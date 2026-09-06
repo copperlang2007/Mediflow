@@ -12,7 +12,8 @@
     "seed:demo": "tsx ./src/seed-demo.ts",
     "check:migration-journal": "tsx ./src/check-migration-journal.ts",
     "lq:sign": "tsx ./src/sign-lead-queue-request.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "predeploy:seed": "tsx ./src/predeploy-seed.ts"
   },
   "dependencies": {
     "@workspace/api-server": "workspace:*",

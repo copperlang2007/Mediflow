@@ -40,7 +40,7 @@ vi.mock("@clerk/express", clerkF);
 vi.mock("../../lib/jobs", jobsF);
 
 import { bootTestDb, shutdownTestDb, withAuth } from "../helpers/testApp";
-import { seedOrg, seedUser } from "../helpers/testDb";
+import { seedOrg, seedUser, truncateAuditLogForTests } from "../helpers/testDb";
 import {
   contactsTable,
   agentsTable,
@@ -292,10 +292,12 @@ describe("Pagination guards on list endpoints", () => {
     // enrichment query (`SELECT ... WHERE id = ANY($1)`) is short-circuited.
     // pglite's bound-array handling for that exact form differs from
     // node-postgres in a way that's tangential to the cap-clamping under
-    // test. TRUNCATE bypasses the immutability triggers (DELETE-only).
+    // test. audit_log is append-only (0002 blocks UPDATE/DELETE, 0042
+    // blocks TRUNCATE), so this goes through the explicit test-only helper
+    // rather than a bare TRUNCATE.
     // The audit middleware writes its own log entry on `res.on("finish")`,
     // i.e. AFTER the response is sent, so it can't pollute this GET.
-    await handle.pg.exec(`TRUNCATE TABLE "audit_log";`);
+    await truncateAuditLogForTests(handle);
     const auditValues: string[] = [];
     for (let i = 0; i < SEED_AUDIT_COUNT; i++) {
       const id = randomUUID();

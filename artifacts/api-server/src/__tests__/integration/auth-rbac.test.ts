@@ -29,6 +29,7 @@ import {
   seedUser,
   seedAgent,
   seedContact,
+  truncateAuditLogForTests,
 } from "../helpers/testDb";
 
 import type { Express } from "express";
@@ -138,11 +139,12 @@ describe("Auth & RBAC integration", () => {
     // The admin route enriches entries with user fullnames via a `userId =
     // ANY($1)` query. Pglite's bound-parameter handling for JS arrays in
     // that exact SQL form differs from node-postgres in a way that is
-    // tangential to RBAC. We TRUNCATE audit_log first so the enrichment
+    // tangential to RBAC. We empty audit_log first so the enrichment
     // path is short-circuited (length-zero guard) and this test only
-    // exercises the role gate. TRUNCATE bypasses the immutability triggers
-    // installed by migration 0002 (which only block DELETE/UPDATE).
-    await handle.pg.exec(`TRUNCATE TABLE "audit_log";`);
+    // exercises the role gate. audit_log is append-only (0002 blocks
+    // UPDATE/DELETE, 0042 blocks TRUNCATE), so this goes through the
+    // explicit test-only helper rather than a bare TRUNCATE.
+    await truncateAuditLogForTests(handle);
     const res = await request(app)
       .get("/api/admin/audit-log")
       .set(withAuth(cm.id));
