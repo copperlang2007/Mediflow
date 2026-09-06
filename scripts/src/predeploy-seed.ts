@@ -18,13 +18,16 @@
  * deployment whose demo user does not exist, which is the exact
  * green-but-unusable state the seeding change exists to prevent.
  *
- * So after the seed returns, this verifies three things and exits non-zero on
- * any of them, so Railway fails the pre-deploy and keeps serving the previous
- * version instead of promoting a broken one:
+ * So after the seed returns, this checks three things before letting the
+ * deploy proceed. Two of them exit non-zero, so Railway fails the pre-deploy
+ * and keeps serving the previous version instead of promoting a broken one;
+ * the middle one is repaired in place, for the reason given below:
  *
  *   1. the demo user exists;
  *   2. it is ACTIVE — requireAuth rejects an inactive demo user with the same
- *      401 as a missing one, and the seed never reactivates an existing row;
+ *      401 as a missing one. A deactivated demo principal is REPAIRED here
+ *      rather than refused: the seed cannot fix it, so refusing would wedge
+ *      every future deploy on one operator action;
  *   3. the seed's completion MARKER is present — `seedUsers()` runs long
  *      before agents, contacts, deals and commissions, so the user being there
  *      does not mean the seed finished.
@@ -116,13 +119,29 @@ async function main(): Promise<void> {
   }
 
   if (!demoUser.isActive) {
-    throw new Error(
-      `[predeploy-seed] demo user ${id} exists but is deactivated. ` +
-        "requireAuth rejects an inactive demo user, so every request would 401. " +
-        "Re-running the seed will NOT fix this — it only inserts a missing row. " +
-        "Reactivate the user (PATCH /users/:userId/active) or point DEMO_USER_ID " +
-        "at an active seeded user, then redeploy.",
+    // Repair rather than refuse. Throwing here turns ONE operator action --
+    // deactivating the demo principal through PATCH /users/:userId/active --
+    // into a permanently wedged deploy pipeline: the seed cannot fix it
+    // (seedUsers only inserts when the row is ABSENT, and on a fully-seeded
+    // database seedAll() skips before seedUsers even runs), so every later
+    // deploy fails, including hotfixes with nothing to do with the demo.
+    //
+    // Blocking the world to protect a demo login is the wrong trade. This is
+    // a DEMO_MODE service holding seed data, the demo principal is the only
+    // way to log into it, and deactivating it is self-lockout rather than a
+    // meaningful seat-management state worth preserving. Only THIS user is
+    // touched — deactivating the other seeded users to exercise seat
+    // management still works and survives deploys.
+    console.warn(
+      `[predeploy-seed] demo user ${id} was deactivated — reactivating it. ` +
+        "requireAuth rejects an inactive demo user, so leaving it would 401 " +
+        "every request. Deactivate a different seeded user if you are testing " +
+        "seat management.",
     );
+    await db
+      .update(usersTable)
+      .set({ isActive: true })
+      .where(eq(usersTable.id, id));
   }
 
   // The demo user alone is not proof the seed finished. `seedUsers()` runs
