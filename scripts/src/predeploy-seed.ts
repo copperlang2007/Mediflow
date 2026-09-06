@@ -68,13 +68,22 @@ async function main(): Promise<void> {
     import("drizzle-orm"),
   ]);
   const id = demoUserId();
+  // `isActive` is part of the check, not decoration: requireAuth's demo branch
+  // rejects on `!demoUser || !demoUser.isActive` and returns the SAME "Demo
+  // user not found" 401 either way. And the seed will not repair it — seedUsers
+  // inserts only when the row is absent, so a demo user deactivated through
+  // PATCH /users/:userId/active stays deactivated across every future deploy.
+  // Verifying existence alone would pass and promote a deployment that 401s on
+  // every request, which is the state this gate exists to prevent.
   const rows = await db
-    .select({ id: usersTable.id })
+    .select({ id: usersTable.id, isActive: usersTable.isActive })
     .from(usersTable)
     .where(eq(usersTable.id, id))
     .limit(1);
 
-  if (rows.length === 0) {
+  const demoUser = rows[0];
+
+  if (!demoUser) {
     throw new Error(
       `[predeploy-seed] demo user ${id} is still missing after seeding. ` +
         "Refusing to promote a deployment that cannot serve an authenticated " +
@@ -82,7 +91,19 @@ async function main(): Promise<void> {
     );
   }
 
-  console.log(`[predeploy-seed] demo user ${id} present — deploy may proceed.`);
+  if (!demoUser.isActive) {
+    throw new Error(
+      `[predeploy-seed] demo user ${id} exists but is deactivated. ` +
+        "requireAuth rejects an inactive demo user, so every request would 401. " +
+        "Re-running the seed will NOT fix this — it only inserts a missing row. " +
+        "Reactivate the user (PATCH /users/:userId/active) or point DEMO_USER_ID " +
+        "at an active seeded user, then redeploy.",
+    );
+  }
+
+  console.log(
+    `[predeploy-seed] demo user ${id} present and active — deploy may proceed.`,
+  );
 }
 
 main()
