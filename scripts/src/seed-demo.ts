@@ -873,12 +873,47 @@ const SEED_LOCK_KEY = 981_234_502;
  *     NODE_ENV is simply unset — where the seed would otherwise complete
  *     silently under the dev-sentinel keys.
  */
+/**
+ * Report DATABASE_URL as production-looking when it points anywhere but
+ * loopback, mirroring `detectProdLikeCredentials()` in
+ * `artifacts/api-server/src/lib/prodEnvGuard.ts`.
+ *
+ * This is the shape that slips past the other two checks: exporting only a
+ * production DATABASE_URL to run a one-off script, with NODE_ENV and
+ * PHI_ENCRYPTION_KEY both unset. `isNonProdEnv()` treats an undefined
+ * NODE_ENV as non-production, so `encryptSsn` quietly falls back to the dev
+ * sentinel keys and the whole seed completes against the remote database.
+ *
+ * Requiring DEMO_MODE=true for a remote host matches prodEnvGuard, which
+ * tolerates a remote DATABASE_URL specifically and only under demo mode
+ * ("a remote demo DATABASE_URL is expected and allowed").
+ *
+ * An unparseable URL yields null rather than throwing: `main()` reports a
+ * bad DATABASE_URL better than this guard can, and a parse failure is not
+ * evidence of production.
+ */
+function remoteDatabaseHost(): string | null {
+  const raw = process.env["DATABASE_URL"];
+  if (!raw) return null;
+  let host: string;
+  try {
+    host = new URL(raw).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (!host || host === "localhost" || host === "127.0.0.1" || host === "::1") {
+    return null;
+  }
+  return `DATABASE_URL host "${host}" is not localhost/127.0.0.1`;
+}
+
 function assertSafeToSeed(): void {
   if (process.env["DEMO_MODE"] === "true") return;
 
   const reasons = [
     process.env["NODE_ENV"] === "production" ? "NODE_ENV=production" : null,
     process.env["PHI_ENCRYPTION_KEY"] ? "PHI_ENCRYPTION_KEY is set" : null,
+    remoteDatabaseHost(),
   ].filter(Boolean);
 
   if (reasons.length === 0) return;
