@@ -18,9 +18,16 @@
  * deployment whose demo user does not exist, which is the exact
  * green-but-unusable state the seeding change exists to prevent.
  *
- * So after the seed returns, this verifies the demo user is actually present
- * and exits non-zero if it is not. Railway then fails the pre-deploy and keeps
- * serving the previous version instead of promoting a broken one.
+ * So after the seed returns, this verifies three things and exits non-zero on
+ * any of them, so Railway fails the pre-deploy and keeps serving the previous
+ * version instead of promoting a broken one:
+ *
+ *   1. the demo user exists;
+ *   2. it is ACTIVE — requireAuth rejects an inactive demo user with the same
+ *      401 as a missing one, and the seed never reactivates an existing row;
+ *   3. the seed's completion MARKER is present — `seedUsers()` runs long
+ *      before agents, contacts, deals and commissions, so the user being there
+ *      does not mean the seed finished.
  */
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -31,8 +38,15 @@ import path from "node:path";
 // would make the "not a demo service, skip" path crash on exactly the
 // services this gate exists to leave alone.
 
-/** Mirrors `DEFAULT_DEMO_USER_ID` in api-server's `lib/demoMode.ts`. */
-const DEFAULT_DEMO_USER_ID = "00000000-0000-4000-8000-000000000010";
+import { USERS, LAST_COMMISSION_LINE_ID } from "./demo-constants";
+
+/**
+ * The seeded default demo principal, taken from the seed's own constants
+ * rather than re-typed here. `artifacts/api-server/src/lib/demoMode.ts` holds
+ * a third copy as `DEFAULT_DEMO_USER_ID`; the two packages cannot share a
+ * module today without api-server depending on @workspace/scripts.
+ */
+const DEFAULT_DEMO_USER_ID = USERS.superAdmin;
 
 function demoUserId(): string {
   const fromEnv = process.env["DEMO_USER_ID"]?.trim();
@@ -71,11 +85,12 @@ async function main(): Promise<void> {
 
   // The seed can return 0 without having produced a usable demo (the
   // fail-open lock-timeout path). Verify the thing the app actually needs.
-  const [{ db }, { usersTable }, { eq }] = await Promise.all([
-    import("@workspace/db"),
-    import("@workspace/db/schema"),
-    import("drizzle-orm"),
-  ]);
+  const [{ db }, { usersTable, commissionLineItemsTable }, { eq }] =
+    await Promise.all([
+      import("@workspace/db"),
+      import("@workspace/db/schema"),
+      import("drizzle-orm"),
+    ]);
   const id = demoUserId();
   // `isActive` is part of the check, not decoration: requireAuth's demo branch
   // rejects on `!demoUser || !demoUser.isActive` and returns the SAME "Demo
@@ -110,8 +125,33 @@ async function main(): Promise<void> {
     );
   }
 
+  // The demo user alone is not proof the seed finished. `seedUsers()` runs
+  // long before agents, contacts, deals and commissions, so on the fail-open
+  // lock-timeout path a peer can have written the org and user and still be
+  // going — the user is present, the demo is empty, and checking only the user
+  // would green-light exactly the state this gate exists to prevent.
+  //
+  // LAST_COMMISSION_LINE_ID is the seed's own completion marker: deliberately
+  // the last row the last seeder writes. seedAll() uses it for the same
+  // question, so the gate and the seed agree on what "complete" means.
+  const marker = await db
+    .select({ id: commissionLineItemsTable.id })
+    .from(commissionLineItemsTable)
+    .where(eq(commissionLineItemsTable.id, LAST_COMMISSION_LINE_ID))
+    .limit(1);
+
+  if (marker.length === 0) {
+    throw new Error(
+      "[predeploy-seed] the demo user exists but the seed completion marker " +
+        `(${LAST_COMMISSION_LINE_ID}) is missing, so the seed did not finish — ` +
+        "the demo would come up with empty deals, contacts and commissions. " +
+        "This is the fail-open path taken when a concurrent deploy held the " +
+        "seed lock for over 120s. Retry this deploy once the peer finishes.",
+    );
+  }
+
   console.log(
-    `[predeploy-seed] demo user ${id} present and active — deploy may proceed.`,
+    `[predeploy-seed] demo user ${id} active and seed complete — deploy may proceed.`,
   );
 }
 

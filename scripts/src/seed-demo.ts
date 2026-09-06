@@ -54,17 +54,18 @@ import {
   encryptSsn,
 } from "@workspace/db";
 import { seedDefaultCarriers } from "@workspace/api-server/lib/carrierSeed";
+import {
+  DEMO_ORG_ID,
+  USERS,
+  stableId,
+  COMMISSION_STATEMENT_SLUGS,
+  COMMISSION_LINES_PER_STATEMENT,
+  LAST_COMMISSION_LINE_ID,
+} from "./demo-constants";
 
 // ---- Stable fixed IDs ------------------------------------------------------
 // Fixed UUIDs so re-runs land on the same rows and the demo URL stays stable.
 
-const DEMO_ORG_ID = "00000000-0000-4000-8000-000000000001";
-const USERS = {
-  superAdmin: "00000000-0000-4000-8000-000000000010",
-  agencyAdmin: "00000000-0000-4000-8000-000000000011",
-  carlosUser: "00000000-0000-4000-8000-000000000012",
-  lindaUser: "00000000-0000-4000-8000-000000000013",
-};
 const AGENTS = {
   carlos: "00000000-0000-4000-8000-000000000020",
   linda: "00000000-0000-4000-8000-000000000021",
@@ -92,11 +93,6 @@ function log(...parts: unknown[]): void {
 // on the same UUID-shaped strings (idempotency without table-by-table
 // "upsert" plumbing). We're not picky about UUID validity here — the columns
 // are plain `text`, and the prefix makes ownership obvious in a DB browser.
-
-function stableId(scope: string, key: string): string {
-  const h = createHash("sha1").update(`${DEMO_ORG_ID}:${scope}:${key}`).digest("hex");
-  return `demo-${scope}-${h.slice(0, 16)}`;
-}
 
 // ---- Reset -----------------------------------------------------------------
 
@@ -749,12 +745,6 @@ async function seedPipelineAndDeals(contactIds: string[]): Promise<void> {
 // derived from these constants rather than a duplicated literal ~700 lines
 // away. Reordering the slugs or changing the per-statement line count updates
 // both sides at once.
-const COMMISSION_STATEMENT_SLUGS = ["aetna-2025-04", "humana-2025-04"] as const;
-const COMMISSION_LINES_PER_STATEMENT = 4;
-const LAST_COMMISSION_LINE_ID = stableId(
-  "line",
-  `${stableId("stmt", COMMISSION_STATEMENT_SLUGS[COMMISSION_STATEMENT_SLUGS.length - 1]!)}-${COMMISSION_LINES_PER_STATEMENT - 1}`,
-);
 
 async function seedCommissions(
   carriers: Array<{ id: string; name: string }>,
