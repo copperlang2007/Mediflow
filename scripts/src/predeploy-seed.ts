@@ -121,7 +121,7 @@ async function main(): Promise<void> {
   const [
     { db },
     { usersTable, commissionLineItemsTable, auditLogTable },
-    { eq },
+    { eq, and },
   ] = await Promise.all([
     import("@workspace/db"),
     import("@workspace/db/schema"),
@@ -183,10 +183,25 @@ async function main(): Promise<void> {
     // auditable. audit_log is append-only (migrations 0002 and 0042), so this
     // row can never be edited or removed afterwards.
     await db.transaction(async (tx) => {
-      await tx
+      // Conditional on isActive=false, and the audit row is written only when
+      // this statement actually changed something. Two overlapping pre-deploys
+      // can both read isActive=false before either transaction starts; an
+      // unconditional update would then have both insert a false->true entry,
+      // recording two transitions in an append-only log where only one
+      // happened. RETURNING makes the winner observable instead of inferred
+      // from the stale pre-transaction read.
+      const changed = await tx
         .update(usersTable)
         .set({ isActive: true })
-        .where(eq(usersTable.id, id));
+        .where(and(eq(usersTable.id, id), eq(usersTable.isActive, false)))
+        .returning({ id: usersTable.id });
+      if (changed.length === 0) {
+        console.warn(
+          `[predeploy-seed] demo user ${id} was already reactivated by a ` +
+            "concurrent deploy — skipping the duplicate audit entry.",
+        );
+        return;
+      }
       await tx.insert(auditLogTable).values({
         id: randomUUID(),
         orgId: demoUser.orgId,
