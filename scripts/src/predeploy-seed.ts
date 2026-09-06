@@ -27,10 +27,11 @@
  *   2. the seed's completion MARKER is present — `seedUsers()` runs long
  *      before agents, contacts, deals and commissions, so the user being there
  *      does not mean the seed finished;
- *   3. it is ACTIVE — requireAuth rejects an inactive demo user with the same
- *      401 as a missing one. A deactivated demo principal is REPAIRED rather
- *      than refused: the seed cannot fix it, so refusing would wedge every
- *      future deploy on one operator action.
+ *   3. it is ACTIVE, and still holds its SEEDED ROLE — requireAuth rejects an
+ *      inactive demo user with the same 401 as a missing one, and resolves
+ *      whatever role the row carries for every demo request. Both are REPAIRED
+ *      rather than refused: the seed cannot fix either, so refusing would wedge
+ *      every future deploy on one operator action.
  *
  * The two read-only checks come first so a gate that is going to fail never
  * mutates anything — the repair writes an immutable audit row, and one
@@ -46,7 +47,7 @@ import path from "node:path";
 // would make the "not a demo service, skip" path crash on exactly the
 // services this gate exists to leave alone.
 
-import { USERS, LAST_COMMISSION_LINE_ID } from "./demo-constants";
+import { USERS, USER_ROLES, LAST_COMMISSION_LINE_ID } from "./demo-constants";
 import { DEFAULT_DEMO_USER_ID as API_DEFAULT_DEMO_USER_ID } from "@workspace/api-server/lib/demoMode";
 
 /**
@@ -169,6 +170,7 @@ async function main(): Promise<void> {
     .select({
       id: usersTable.id,
       isActive: usersTable.isActive,
+      role: usersTable.role,
       orgId: usersTable.orgId,
     })
     .from(usersTable)
@@ -279,6 +281,54 @@ async function main(): Promise<void> {
             "predeploy-seed reactivated the DEMO_MODE principal: an inactive " +
             "demo user 401s every request and the seed cannot repair it, so " +
             "refusing would block all future deploys.",
+        },
+      });
+    });
+  }
+
+  // Same failure shape as isActive, same reasoning. requireAuth's demo branch
+  // reads demoUser.role straight from the database, and PATCH
+  // /users/:userId/role is gated on super_admin -- so the default demo
+  // principal can demote ITSELF to viewer while exercising user management and
+  // then lack the permission to undo it. The seed will not repair it either
+  // (seedUsers inserts only when the row is absent). Leaving it would hand
+  // back a demo that logs in but cannot reach most of the product, with no
+  // route to recovery short of editing the database.
+  const expectedRole = USER_ROLES[id as keyof typeof USER_ROLES];
+  if (expectedRole && demoUser.role !== expectedRole) {
+    const previousRole = demoUser.role;
+    console.warn(
+      `[predeploy-seed] demo user ${id} has role "${previousRole}" but is ` +
+        `seeded as "${expectedRole}" — restoring it. Change a different seeded ` +
+        "user's role if you are exercising role management.",
+    );
+    await db.transaction(async (tx) => {
+      const changed = await tx
+        .update(usersTable)
+        .set({ role: expectedRole })
+        .where(and(eq(usersTable.id, id), eq(usersTable.role, previousRole)))
+        .returning({ id: usersTable.id });
+      if (changed.length === 0) {
+        console.warn(
+          `[predeploy-seed] demo user ${id} role was already restored by a ` +
+            "concurrent deploy — skipping the duplicate audit entry.",
+        );
+        return;
+      }
+      await tx.insert(auditLogTable).values({
+        id: randomUUID(),
+        orgId: demoUser.orgId,
+        userId: null,
+        userRole: "system",
+        action: "user.role_restore",
+        resourceType: "user",
+        resourceId: id,
+        changes: {
+          role: { from: previousRole, to: expectedRole },
+          reason:
+            "predeploy-seed restored the DEMO_MODE principal's seeded role: " +
+            "requireAuth resolves this role for every demo request, and the " +
+            "principal can demote itself past the permission needed to undo it.",
         },
       });
     });
