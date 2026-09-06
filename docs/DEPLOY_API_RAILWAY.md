@@ -9,10 +9,27 @@ is why the `mediflow-api-server` Vercel project errors on every PR; see step 5.)
 
 `railway.json` at the repo root encodes the build/migrate/start contract:
 
+> **This manifest is shared by every Railway service built from this repo,
+> including this production one.** Its `preDeployCommand` ends in
+> `predeploy:seed`, which runs the demo seeder — a script that plants a
+> hardcoded `super_admin` (`sarah@insureitall.example`), a fixed demo org,
+> users, agents, carriers, and contacts carrying fake `999-XX-XXXX` SSNs.
+>
+> That step is gated: `scripts/src/predeploy-seed.ts` runs the seed only when
+> `DEMO_MODE=true`, and `seed-demo.ts` itself refuses to run under
+> `NODE_ENV=production` or with an explicit `PHI_ENCRYPTION_KEY` unless
+> `DEMO_MODE=true`. Following this doc (`NODE_ENV=production`, no `DEMO_MODE`)
+> therefore skips the seed entirely.
+>
+> Do **not** set `DEMO_MODE=true` on a service holding real data. `seedAll()`
+> is not transactional, so a partially-completed seed leaves rows behind that
+> the resume branch will finish on the next deploy rather than flag.
+
+
 | Field | Value | Why |
 | --- | --- | --- |
 | build | `pnpm install --frozen-lockfile && pnpm --filter @workspace/api-server build` | esbuild bundle → `artifacts/api-server/dist/index.mjs` |
-| preDeployCommand | `pnpm --filter @workspace/db run migrate` | apply drizzle migrations before the new version goes live |
+| preDeployCommand | `pnpm --filter @workspace/db run migrate && pnpm --filter @workspace/scripts run predeploy:seed` | apply drizzle migrations before the new version goes live, then seed demo data **only on a demo service** (see the warning below) |
 | startCommand | `pnpm --filter @workspace/api-server run start` | `node --enable-source-maps dist/index.mjs` |
 | healthcheckPath | `/api/healthz` | liveness probe (200 `{status:"ok"}`, no DB dependency) |
 | numReplicas | `1` | **important** — see the singleton caveat below |
@@ -46,7 +63,7 @@ is why the `mediflow-api-server` Vercel project errors on every PR; see step 5.)
    Do **not** set `WEB_STATIC_DIR`: keep the web-app on Vercel (static SPA) and
    run this service API-only. (Set it only if you intend one service to serve
    both the API and the built SPA.)
-4. **Deploy.** Railway runs build → `preDeployCommand` (migrate) → start, then
+4. **Deploy.** Railway runs build → `preDeployCommand` (migrate, then the demo-seed gate) → start, then
    probes `/api/healthz`. A green healthcheck means the process booted; readiness
    (`/api/readyz`, which also verifies pg-boss workers are live + a DB `SELECT 1`)
    is available if you wire a load-balancer readiness gate.
