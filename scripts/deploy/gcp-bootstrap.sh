@@ -248,7 +248,7 @@ fi
 
 log "Granting runtime SA least-privilege roles…"
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-  --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/cloudsql.client" --condition=None >/dev/null
+  --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/cloudsql.client" >/dev/null
 gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
   --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/storage.objectAdmin" >/dev/null
 for name in mediflow-database-url mediflow-phi-encryption-key mediflow-phi-hmac-key \
@@ -260,9 +260,9 @@ done
 
 log "Granting deploy SA CI roles…"
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-  --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/run.developer" --condition=None >/dev/null
+  --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/run.developer" >/dev/null
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-  --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/artifactregistry.writer" --condition=None >/dev/null
+  --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/artifactregistry.writer" >/dev/null
 gcloud iam service-accounts add-iam-policy-binding "${RUN_SA_EMAIL}" \
   --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/iam.serviceAccountUser" >/dev/null
 for name in ${REQUIRED_CREDENTIAL_SECRETS} ${OPTIONAL_CREDENTIAL_SECRETS}; do
