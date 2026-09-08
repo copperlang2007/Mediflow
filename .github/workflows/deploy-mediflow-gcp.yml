@@ -1,0 +1,110 @@
+name: Deploy MediFlow (Google Cloud • production)
+
+# Ships MediFlow to Cloud Run in production mode. One-time setup
+# (scripts/deploy/gcp-bootstrap.sh + docs/DEPLOY_GCP_PRODUCTION.md) provisions
+# the project, Cloud SQL, the PHI bucket, service accounts, and Workload
+# Identity Federation. After that, every push to this branch builds the
+# production image and deploys it with no manual steps and no GCP JSON key
+# stored in GitHub.
+
+on:
+  push:
+    branches: [claude/google-cloud-deployment-ml41c2]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-mediflow-gcp
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # required for Workload Identity Federation
+
+jobs:
+  deploy:
+    name: Build + deploy to Cloud Run
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      # Stay green until ALL required secrets are configured, matching the
+      # Render deploy workflow's behavior — a red ✗ on every push during
+      # incremental secret setup is not "zero-touch". Runs automatically once
+      # the full set is present.
+      - name: Check GCP deploy is configured
+        id: gate
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_WIF_PROVIDER: ${{ secrets.GCP_WIF_PROVIDER }}
+          GCP_DEPLOY_SA_EMAIL: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+          GCP_RUN_SA_EMAIL: ${{ secrets.GCP_RUN_SA_EMAIL }}
+          GCP_CLOUDSQL_CONNECTION: ${{ secrets.GCP_CLOUDSQL_CONNECTION }}
+          GCP_PHI_BUCKET: ${{ secrets.GCP_PHI_BUCKET }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
+          AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
+        run: |
+          missing=()
+          for v in GCP_PROJECT_ID GCP_WIF_PROVIDER GCP_DEPLOY_SA_EMAIL GCP_RUN_SA_EMAIL \
+                   GCP_CLOUDSQL_CONNECTION GCP_PHI_BUCKET CLERK_SECRET_KEY CLERK_PUBLISHABLE_KEY \
+                   AI_INTEGRATIONS_OPENAI_API_KEY AI_INTEGRATIONS_OPENAI_BASE_URL; do
+            if [ -z "${!v}" ]; then missing+=("$v"); fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::notice::Deploy skipped — required GitHub Secrets not yet set: ${missing[*]}. Run scripts/deploy/gcp-bootstrap.sh, then see docs/DEPLOY_GCP_PRODUCTION.md. The deploy runs automatically once all are present."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Authenticate to Google Cloud
+        if: steps.gate.outputs.configured == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA_EMAIL }}
+
+      - name: Set up gcloud
+        if: steps.gate.outputs.configured == 'true'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Cloud Run
+        if: steps.gate.outputs.configured == 'true'
+        run: bash scripts/deploy/gcp-deploy.sh
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
+          GCP_RUN_SA_EMAIL: ${{ secrets.GCP_RUN_SA_EMAIL }}
+          GCP_CLOUDSQL_CONNECTION: ${{ secrets.GCP_CLOUDSQL_CONNECTION }}
+          GCP_PHI_BUCKET: ${{ secrets.GCP_PHI_BUCKET }}
+
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          # AI on AWS Bedrock (unchanged — covered by your AWS BAA). The API
+          # key is a Bedrock Bearer token; the base URL is Bedrock's
+          # OpenAI-compatible endpoint, e.g.
+          # https://bedrock-runtime.<region>.amazonaws.com/openai/v1
+          AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
+          AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
+          AI_INTEGRATIONS_MODEL: ${{ vars.AI_INTEGRATIONS_MODEL }}
+
+          APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+          MIN_INSTANCES: ${{ vars.MIN_INSTANCES }}
+          MAX_INSTANCES: ${{ vars.MAX_INSTANCES }}
+
+          # Optional — passed through only if set (feature no-ops otherwise).
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER }}
+          TWILIO_WEBHOOK_PUBLIC_HOST: ${{ secrets.TWILIO_WEBHOOK_PUBLIC_HOST }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_FROM_ADDRESS: ${{ vars.EMAIL_FROM_ADDRESS }}
+          CONTRACTING_EMAIL_FROM: ${{ vars.CONTRACTING_EMAIL_FROM }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          ESIGN_SIGNING_CERT_PEM: ${{ secrets.ESIGN_SIGNING_CERT_PEM }}
+          ESIGN_SIGNING_KEY_PEM: ${{ secrets.ESIGN_SIGNING_KEY_PEM }}
+          PUBLIC_OBJECT_SEARCH_PATHS: ${{ secrets.PUBLIC_OBJECT_SEARCH_PATHS }}
+
+          GITHUB_SHA: ${{ github.sha }}

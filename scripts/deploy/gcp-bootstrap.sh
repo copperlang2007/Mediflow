@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+# MediFlow → Google Cloud PRODUCTION bootstrap.
+#
+# One-time, idempotent setup. Run this yourself from a machine (or Cloud
+# Shell) authenticated with `gcloud auth login` against an account that can
+# create/administer the target project — this repo's Claude session has no
+# GCP credentials and cannot run this for you.
+#
+# What it does:
+#   1. Enables the required APIs.
+#   2. Creates an Artifact Registry Docker repo.
+#   3. Creates a Cloud SQL for PostgreSQL instance + database + user
+#      (skipped if it already exists).
+#   4. Creates the GCS bucket for PHI documents (PRIVATE_OBJECT_DIR target).
+#   5. Creates two service accounts:
+#        - mediflow-run-sa    (Cloud Run RUNTIME identity — least privilege:
+#          Cloud SQL client, Secret Manager accessor, object admin scoped to
+#          the PHI bucket only)
+#        - mediflow-deploy-sa (GitHub Actions DEPLOY identity — Cloud Run
+#          deployer, Artifact Registry writer, can actAs the runtime SA)
+#   6. Sets up Workload Identity Federation so GitHub Actions authenticates
+#      as mediflow-deploy-sa with NO long-lived JSON key.
+#   7. Generates the PHI/crypto secrets ONCE in Secret Manager and never
+#      touches them again if they already exist (rotating PHI_ENCRYPTION_KEY
+#      orphans previously-encrypted data — see docs/DEPLOY_GCP_PRODUCTION.md).
+#
+# Re-running is safe: every step checks for the resource first.
+#
+# Required env (export before running, or edit the defaults below):
+#   PROJECT_ID           GCP project to deploy into (created if it doesn't
+#                         exist AND BILLING_ACCOUNT_ID is set).
+#   GITHUB_REPO           "owner/repo", e.g. copperlang2007/mediflow
+# Optional env:
+#   REGION                Default: us-central1
+#   BILLING_ACCOUNT_ID    Only needed if PROJECT_ID doesn't exist yet.
+#   DB_TIER               Cloud SQL machine tier. Default: db-custom-2-8192
+#   GITHUB_BRANCH         Default: claude/google-cloud-deployment-ml41c2
+set -euo pipefail
+
+: "${PROJECT_ID:?Set PROJECT_ID to the target GCP project id}"
+: "${GITHUB_REPO:?Set GITHUB_REPO to owner/repo, e.g. copperlang2007/mediflow}"
+REGION="${REGION:-us-central1}"
+DB_TIER="${DB_TIER:-db-custom-2-8192}"
+GITHUB_BRANCH="${GITHUB_BRANCH:-claude/google-cloud-deployment-ml41c2}"
+
+SQL_INSTANCE="mediflow-prod-db"
+SQL_DB="mediflow_prod"
+SQL_USER="mediflow"
+BUCKET="${PROJECT_ID}-mediflow-phi"
+AR_REPO="mediflow"
+RUN_SA="mediflow-run-sa"
+DEPLOY_SA="mediflow-deploy-sa"
+WIF_POOL="github-pool"
+WIF_PROVIDER="github-provider"
+
+log() { echo "▶ $*"; }
+
+log "Project: ${PROJECT_ID}  Region: ${REGION}"
+
+if ! gcloud projects describe "${PROJECT_ID}" >/dev/null 2>&1; then
+  : "${BILLING_ACCOUNT_ID:?Project ${PROJECT_ID} does not exist — set BILLING_ACCOUNT_ID to create it}"
+  log "Creating project ${PROJECT_ID}…"
+  gcloud projects create "${PROJECT_ID}"
+  gcloud billing projects link "${PROJECT_ID}" --billing-account "${BILLING_ACCOUNT_ID}"
+fi
+gcloud config set project "${PROJECT_ID}" >/dev/null
+
+log "Enabling APIs…"
+gcloud services enable \
+  run.googleapis.com \
+  sqladmin.googleapis.com \
+  secretmanager.googleapis.com \
+  artifactregistry.googleapis.com \
+  iam.googleapis.com \
+  iamcredentials.googleapis.com \
+  cloudresourcemanager.googleapis.com \
+  sts.googleapis.com \
+  storage.googleapis.com
+
+PROJECT_NUMBER="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
+
+# ---------------------------------------------------------------------------
+# Artifact Registry
+# ---------------------------------------------------------------------------
+if ! gcloud artifacts repositories describe "${AR_REPO}" --location="${REGION}" >/dev/null 2>&1; then
+  log "Creating Artifact Registry repo ${AR_REPO}…"
+  gcloud artifacts repositories create "${AR_REPO}" \
+    --repository-format=docker --location="${REGION}" \
+    --description="MediFlow production images"
+else
+  log "Artifact Registry repo ${AR_REPO} already exists."
+fi
+
+# ---------------------------------------------------------------------------
+# Cloud SQL for PostgreSQL
+# ---------------------------------------------------------------------------
+if ! gcloud sql instances describe "${SQL_INSTANCE}" >/dev/null 2>&1; then
+  log "Creating Cloud SQL instance ${SQL_INSTANCE} (this takes several minutes)…"
+  gcloud sql instances create "${SQL_INSTANCE}" \
+    --database-version=POSTGRES_16 \
+    --tier="${DB_TIER}" \
+    --region="${REGION}" \
+    --storage-auto-increase \
+    --backup \
+    --no-assign-ip
+  # HIPAA baseline: no public IP. Cloud Run reaches it over the private
+  # Cloud SQL connector (--add-cloudsql-instances), not a routable address.
+else
+  log "Cloud SQL instance ${SQL_INSTANCE} already exists."
+fi
+SQL_CONNECTION_NAME="$(gcloud sql instances describe "${SQL_INSTANCE}" --format='value(connectionName)')"
+
+if ! gcloud sql databases describe "${SQL_DB}" --instance="${SQL_INSTANCE}" >/dev/null 2>&1; then
+  log "Creating database ${SQL_DB}…"
+  gcloud sql databases create "${SQL_DB}" --instance="${SQL_INSTANCE}"
+fi
+
+if ! gcloud secrets describe mediflow-db-password >/dev/null 2>&1; then
+  log "Generating DB password and creating user ${SQL_USER}…"
+  DB_PASSWORD="$(openssl rand -base64 32)"
+  printf '%s' "${DB_PASSWORD}" | gcloud secrets create mediflow-db-password --data-file=-
+  if gcloud sql users describe "${SQL_USER}" --instance="${SQL_INSTANCE}" >/dev/null 2>&1; then
+    gcloud sql users set-password "${SQL_USER}" --instance="${SQL_INSTANCE}" --password="${DB_PASSWORD}"
+  else
+    gcloud sql users create "${SQL_USER}" --instance="${SQL_INSTANCE}" --password="${DB_PASSWORD}"
+  fi
+else
+  log "mediflow-db-password secret already exists — reusing existing DB credential."
+  DB_PASSWORD="$(gcloud secrets versions access latest --secret=mediflow-db-password)"
+fi
+
+# DATABASE_URL over the Cloud Run Cloud SQL Unix socket (no public IP, no
+# separate proxy sidecar — Cloud Run mounts the socket when
+# --add-cloudsql-instances is set on the service).
+DATABASE_URL="postgresql://${SQL_USER}:${DB_PASSWORD}@/${SQL_DB}?host=/cloudsql/${SQL_CONNECTION_NAME}"
+if ! gcloud secrets describe mediflow-database-url >/dev/null 2>&1; then
+  printf '%s' "${DATABASE_URL}" | gcloud secrets create mediflow-database-url --data-file=-
+else
+  printf '%s' "${DATABASE_URL}" | gcloud secrets versions add mediflow-database-url --data-file=-
+fi
+
+# ---------------------------------------------------------------------------
+# GCS bucket for PHI documents (PRIVATE_OBJECT_DIR)
+# ---------------------------------------------------------------------------
+if ! gcloud storage buckets describe "gs://${BUCKET}" >/dev/null 2>&1; then
+  log "Creating PHI documents bucket gs://${BUCKET}…"
+  gcloud storage buckets create "gs://${BUCKET}" \
+    --location="${REGION}" \
+    --uniform-bucket-level-access \
+    --public-access-prevention
+else
+  log "Bucket gs://${BUCKET} already exists."
+fi
+
+# ---------------------------------------------------------------------------
+# Generated crypto secrets — created ONCE, never rotated by this script.
+# ---------------------------------------------------------------------------
+for name in mediflow-phi-encryption-key mediflow-phi-hmac-key; do
+  if ! gcloud secrets describe "${name}" >/dev/null 2>&1; then
+    log "Generating ${name} (32 random bytes, base64)…"
+    openssl rand -base64 32 | tr -d '\n' | gcloud secrets create "${name}" --data-file=-
+  else
+    log "${name} already exists — leaving it untouched (PHI keys must never rotate)."
+  fi
+done
+for name in mediflow-metrics-token mediflow-dialer-webhook-secret mediflow-lead-queue-webhook-secret; do
+  if ! gcloud secrets describe "${name}" >/dev/null 2>&1; then
+    log "Generating ${name} (32 random bytes, hex)…"
+    openssl rand -hex 32 | tr -d '\n' | gcloud secrets create "${name}" --data-file=-
+  fi
+done
+
+# Placeholder secrets for third-party credentials — created empty if absent
+# so `gcloud secrets versions add` in CI has something to version. The deploy
+# workflow overwrites these from GitHub Secrets on every run.
+for name in mediflow-clerk-secret-key mediflow-clerk-publishable-key \
+            mediflow-ai-openai-api-key mediflow-ai-openai-base-url; do
+  if ! gcloud secrets describe "${name}" >/dev/null 2>&1; then
+    log "Creating placeholder secret ${name} (CI fills the real value in)…"
+    printf 'unset' | gcloud secrets create "${name}" --data-file=-
+  fi
+done
+
+# ---------------------------------------------------------------------------
+# Service accounts
+# ---------------------------------------------------------------------------
+RUN_SA_EMAIL="${RUN_SA}@${PROJECT_ID}.iam.gserviceaccount.com"
+DEPLOY_SA_EMAIL="${DEPLOY_SA}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+if ! gcloud iam service-accounts describe "${RUN_SA_EMAIL}" >/dev/null 2>&1; then
+  log "Creating runtime service account ${RUN_SA_EMAIL}…"
+  gcloud iam service-accounts create "${RUN_SA}" --display-name="MediFlow Cloud Run runtime"
+fi
+if ! gcloud iam service-accounts describe "${DEPLOY_SA_EMAIL}" >/dev/null 2>&1; then
+  log "Creating deploy service account ${DEPLOY_SA_EMAIL}…"
+  gcloud iam service-accounts create "${DEPLOY_SA}" --display-name="MediFlow GitHub Actions deployer"
+fi
+
+log "Granting runtime SA least-privilege roles…"
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/cloudsql.client" --condition=None >/dev/null
+gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
+  --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/storage.objectAdmin" >/dev/null
+for name in mediflow-database-url mediflow-phi-encryption-key mediflow-phi-hmac-key \
+            mediflow-metrics-token mediflow-dialer-webhook-secret mediflow-lead-queue-webhook-secret \
+            mediflow-clerk-secret-key mediflow-clerk-publishable-key \
+            mediflow-ai-openai-api-key mediflow-ai-openai-base-url; do
+  gcloud secrets add-iam-policy-binding "${name}" \
+    --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/secretmanager.secretAccessor" >/dev/null
+done
+
+log "Granting deploy SA CI roles…"
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/run.developer" --condition=None >/dev/null
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/artifactregistry.writer" --condition=None >/dev/null
+gcloud iam service-accounts add-iam-policy-binding "${RUN_SA_EMAIL}" \
+  --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/iam.serviceAccountUser" >/dev/null
+for name in mediflow-clerk-secret-key mediflow-clerk-publishable-key \
+            mediflow-ai-openai-api-key mediflow-ai-openai-base-url; do
+  gcloud secrets add-iam-policy-binding "${name}" \
+    --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/secretmanager.secretVersionAdder" >/dev/null
+done
+
+# ---------------------------------------------------------------------------
+# Workload Identity Federation — GitHub Actions auths as DEPLOY_SA with no
+# long-lived JSON key.
+# ---------------------------------------------------------------------------
+if ! gcloud iam workload-identity-pools describe "${WIF_POOL}" --location=global >/dev/null 2>&1; then
+  log "Creating Workload Identity Pool ${WIF_POOL}…"
+  gcloud iam workload-identity-pools create "${WIF_POOL}" --location=global \
+    --display-name="GitHub Actions"
+fi
+if ! gcloud iam workload-identity-pools providers describe "${WIF_PROVIDER}" \
+    --location=global --workload-identity-pool="${WIF_POOL}" >/dev/null 2>&1; then
+  log "Creating Workload Identity Provider ${WIF_PROVIDER} scoped to ${GITHUB_REPO}…"
+  gcloud iam workload-identity-pools providers create-oidc "${WIF_PROVIDER}" \
+    --location=global --workload-identity-pool="${WIF_POOL}" \
+    --issuer-uri="https://token.actions.githubusercontent.com" \
+    --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
+    --attribute-condition="assertion.repository == '${GITHUB_REPO}'"
+fi
+WIF_PROVIDER_RESOURCE="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WIF_POOL}/providers/${WIF_PROVIDER}"
+
+gcloud iam service-accounts add-iam-policy-binding "${DEPLOY_SA_EMAIL}" \
+  --role="roles/iam.workloadIdentityUser" \
+  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WIF_POOL}/attribute.repository/${GITHUB_REPO}" >/dev/null
+
+cat <<EOF
+
+✅ Bootstrap complete.
+
+Add these as GitHub Actions SECRETS on ${GITHUB_REPO}
+(Settings → Secrets and variables → Actions):
+
+  GCP_PROJECT_ID              ${PROJECT_ID}
+  GCP_REGION                  ${REGION}
+  GCP_WIF_PROVIDER             ${WIF_PROVIDER_RESOURCE}
+  GCP_DEPLOY_SA_EMAIL         ${DEPLOY_SA_EMAIL}
+  GCP_RUN_SA_EMAIL            ${RUN_SA_EMAIL}
+  GCP_CLOUDSQL_CONNECTION     ${SQL_CONNECTION_NAME}
+  GCP_PHI_BUCKET              ${BUCKET}
+
+Plus the third-party credentials listed in docs/DEPLOY_GCP_PRODUCTION.md
+(CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY, AI_INTEGRATIONS_OPENAI_API_KEY,
+AI_INTEGRATIONS_OPENAI_BASE_URL, and any optional ones you use).
+
+Then push to ${GITHUB_BRANCH} or run the
+"Deploy MediFlow (Google Cloud • production)" workflow manually.
+EOF
