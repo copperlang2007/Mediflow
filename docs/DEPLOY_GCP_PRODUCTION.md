@@ -47,7 +47,8 @@ From a machine with the `gcloud` CLI installed and authenticated
 
 ```bash
 export PROJECT_ID=mediflow-prod        # pick a globally-unique project id
-export GITHUB_REPO=copperlang2007/mediflow
+# Match the GitHub repository's owner/name casing exactly: WIF checks this claim.
+export GITHUB_REPO=copperlang2007/Mediflow
 export BILLING_ACCOUNT_ID=XXXXXX-XXXXXX-XXXXXX   # only if PROJECT_ID doesn't exist yet
 bash scripts/deploy/gcp-bootstrap.sh
 ```
@@ -70,7 +71,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `GCP_RUN_SA_EMAIL` | printed by the script |
 | `GCP_CLOUDSQL_CONNECTION` | printed by the script |
 | `GCP_PHI_BUCKET` | printed by the script |
-| `GCP_NETWORK` | printed by the script (default `default`) — must match between bootstrap and deploy: Cloud Run egresses onto this VPC (Direct VPC egress) to reach the private-IP Cloud SQL instance peered to it |
+| `GCP_NETWORK` | printed by the script (default `default`) — must match between bootstrap and deploy: Cloud Run egresses onto this VPC (Direct VPC egress) to reach the private-IP Cloud SQL instance. |
 
 **Third-party credentials (same as the Render path):**
 
