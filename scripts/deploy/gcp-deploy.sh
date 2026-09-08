@@ -16,11 +16,20 @@
 #   GCP_PHI_BUCKET, CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY,
 #   AI_INTEGRATIONS_OPENAI_API_KEY, AI_INTEGRATIONS_OPENAI_BASE_URL
 # Optional:
-#   AI_INTEGRATIONS_MODEL, APP_ORIGIN, PUBLIC_OBJECT_SEARCH_PATHS,
-#   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER,
-#   TWILIO_WEBHOOK_PUBLIC_HOST, RESEND_API_KEY, EMAIL_FROM_ADDRESS,
-#   CONTRACTING_EMAIL_FROM, SENTRY_DSN, ESIGN_SIGNING_CERT_PEM,
-#   ESIGN_SIGNING_KEY_PEM, GITHUB_SHA
+#   GCP_NETWORK (default: default — must match gcp-bootstrap.sh's NETWORK,
+#   since Cloud Run needs Direct VPC egress onto the same network the
+#   private-IP Cloud SQL instance peers with), AI_INTEGRATIONS_MODEL,
+#   APP_ORIGIN, EMAIL_FROM_ADDRESS, CONTRACTING_EMAIL_FROM,
+#   PUBLIC_OBJECT_SEARCH_PATHS, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN,
+#   TWILIO_FROM_NUMBER, TWILIO_WEBHOOK_PUBLIC_HOST, RESEND_API_KEY,
+#   SENTRY_DSN, ESIGN_SIGNING_CERT_PEM, ESIGN_SIGNING_KEY_PEM, GITHUB_SHA
+#
+# Every optional SECRET-backed var below (Twilio/Resend/Sentry/e-sign/public
+# object paths) must already exist in Secret Manager with this script's
+# service account granted secretVersionAdder — gcp-bootstrap.sh pre-creates
+# all of them as placeholders precisely so this script only ever needs to
+# call `gcloud secrets versions add`, never `secrets create` /
+# `add-iam-policy-binding` (the deploy SA is not granted those).
 set -euo pipefail
 
 : "${GCP_PROJECT_ID:?}"
@@ -32,6 +41,7 @@ set -euo pipefail
 : "${CLERK_PUBLISHABLE_KEY:?}"
 : "${AI_INTEGRATIONS_OPENAI_API_KEY:?}"
 : "${AI_INTEGRATIONS_OPENAI_BASE_URL:?}"
+GCP_NETWORK="${GCP_NETWORK:-default}"
 
 SERVICE="mediflow-prod"
 AR_REPO="mediflow"
@@ -63,9 +73,13 @@ sync_secret mediflow-clerk-publishable-key "${CLERK_PUBLISHABLE_KEY}"
 sync_secret mediflow-ai-openai-api-key "${AI_INTEGRATIONS_OPENAI_API_KEY}"
 sync_secret mediflow-ai-openai-base-url "${AI_INTEGRATIONS_OPENAI_BASE_URL}"
 
-# Optional secrets: only create/update if the caller actually set them, and
-# only reference them in --set-secrets (below) when present, so an unset
-# optional credential doesn't fail the deploy on a missing secret.
+# Optional secrets: every one of these already exists in Secret Manager
+# (created as an "unset" placeholder by gcp-bootstrap.sh, with this script's
+# service account already granted secretVersionAdder on it) — so only
+# `versions add` is ever needed here, and only reference a var in
+# --set-secrets (below) when the caller actually set it, so an unset
+# optional credential is left off the Cloud Run revision entirely rather
+# than resolving to the literal string "unset".
 declare -A OPTIONAL_SECRET_MAP=(
   [TWILIO_ACCOUNT_SID]=mediflow-twilio-account-sid
   [TWILIO_AUTH_TOKEN]=mediflow-twilio-auth-token
@@ -82,15 +96,15 @@ for var in "${!OPTIONAL_SECRET_MAP[@]}"; do
   val="${!var:-}"
   [ -n "$val" ] || continue
   secret="${OPTIONAL_SECRET_MAP[$var]}"
-  if ! gcloud secrets describe "$secret" --project="${GCP_PROJECT_ID}" >/dev/null 2>&1; then
-    gcloud secrets create "$secret" --project="${GCP_PROJECT_ID}" --data-file=- <<<"$val" >/dev/null
-    gcloud secrets add-iam-policy-binding "$secret" --project="${GCP_PROJECT_ID}" \
-      --member="serviceAccount:${GCP_RUN_SA_EMAIL}" --role="roles/secretmanager.secretAccessor" >/dev/null
-  else
-    sync_secret "$secret" "$val"
-  fi
+  sync_secret "$secret" "$val"
   OPTIONAL_SECRETS_FLAG="${OPTIONAL_SECRETS_FLAG}${var}=${secret}:latest,"
 done
+
+# Optional PLAIN (non-secret) env vars — same "only if set" rule, appended
+# directly to Cloud Run's env rather than Secret Manager.
+OPTIONAL_ENV_FLAG=""
+[ -n "${EMAIL_FROM_ADDRESS:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS},"
+[ -n "${CONTRACTING_EMAIL_FROM:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}CONTRACTING_EMAIL_FROM=${CONTRACTING_EMAIL_FROM},"
 
 REQUIRED_SECRETS_FLAG="DATABASE_URL=mediflow-database-url:latest,\
 PHI_ENCRYPTION_KEY=mediflow-phi-encryption-key:latest,\
@@ -110,7 +124,7 @@ MFA_REQUIRED=true,\
 LOG_LEVEL=${LOG_LEVEL:-info},\
 WEB_STATIC_DIR=/app/artifacts/web-app/dist/public,\
 PRIVATE_OBJECT_DIR=${GCP_PHI_BUCKET}/private,\
-BUILD_SHA=${SHA}"
+BUILD_SHA=${SHA}${OPTIONAL_ENV_FLAG:+,${OPTIONAL_ENV_FLAG%,}}"
 
 log "Deploying ${SERVICE} to Cloud Run (${GCP_REGION})…"
 gcloud run deploy "${SERVICE}" \
@@ -119,6 +133,9 @@ gcloud run deploy "${SERVICE}" \
   --image="${IMAGE}" \
   --service-account="${GCP_RUN_SA_EMAIL}" \
   --add-cloudsql-instances="${GCP_CLOUDSQL_CONNECTION}" \
+  --network="${GCP_NETWORK}" \
+  --subnet="${GCP_NETWORK}" \
+  --vpc-egress=private-ranges-only \
   --allow-unauthenticated \
   --min-instances="${MIN_INSTANCES:-1}" \
   --max-instances="${MAX_INSTANCES:-10}" \

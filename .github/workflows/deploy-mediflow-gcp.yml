@@ -76,6 +76,7 @@ jobs:
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
+          GCP_NETWORK: ${{ secrets.GCP_NETWORK || 'default' }}
           GCP_RUN_SA_EMAIL: ${{ secrets.GCP_RUN_SA_EMAIL }}
           GCP_CLOUDSQL_CONNECTION: ${{ secrets.GCP_CLOUDSQL_CONNECTION }}
           GCP_PHI_BUCKET: ${{ secrets.GCP_PHI_BUCKET }}

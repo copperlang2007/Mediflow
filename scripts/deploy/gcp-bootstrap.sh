@@ -43,6 +43,7 @@ REGION="${REGION:-us-central1}"
 DB_TIER="${DB_TIER:-db-custom-2-8192}"
 GITHUB_BRANCH="${GITHUB_BRANCH:-claude/google-cloud-deployment-ml41c2}"
 
+NETWORK="${NETWORK:-default}"
 SQL_INSTANCE="mediflow-prod-db"
 SQL_DB="mediflow_prod"
 SQL_USER="mediflow"
@@ -75,9 +76,46 @@ gcloud services enable \
   iamcredentials.googleapis.com \
   cloudresourcemanager.googleapis.com \
   sts.googleapis.com \
-  storage.googleapis.com
+  storage.googleapis.com \
+  compute.googleapis.com \
+  servicenetworking.googleapis.com \
+  vpcaccess.googleapis.com
 
 PROJECT_NUMBER="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
+
+# ---------------------------------------------------------------------------
+# VPC network + Private Service Access.
+#
+# A private-IP-only Cloud SQL instance lives on a Google-managed VPC peered
+# to this one. Cloud Run's --add-cloudsql-instances flag mounts the Cloud
+# SQL Auth Proxy's Unix socket, but the proxy's actual data path to a
+# private-IP instance still needs a network route — that requires Cloud Run
+# to egress onto this VPC (Direct VPC egress, set on the Cloud Run service
+# in gcp-deploy.sh), which in turn requires the private-service-access
+# peering below to exist before the Cloud SQL instance is created.
+# ---------------------------------------------------------------------------
+if ! gcloud compute networks describe "${NETWORK}" >/dev/null 2>&1; then
+  log "Creating VPC network ${NETWORK}…"
+  gcloud compute networks create "${NETWORK}" --subnet-mode=auto
+fi
+if ! gcloud compute networks subnets describe "${NETWORK}" --region="${REGION}" >/dev/null 2>&1; then
+  log "Creating subnet ${NETWORK} in ${REGION} for Direct VPC egress…"
+  gcloud compute networks subnets create "${NETWORK}" \
+    --network="${NETWORK}" --region="${REGION}" --range=10.8.0.0/28
+fi
+if ! gcloud compute addresses describe "google-managed-services-${NETWORK}" --global >/dev/null 2>&1; then
+  log "Reserving IP range for Private Service Access…"
+  gcloud compute addresses create "google-managed-services-${NETWORK}" \
+    --global --purpose=VPC_PEERING --prefix-length=16 --network="${NETWORK}"
+fi
+if ! gcloud services vpc-peerings list --network="${NETWORK}" --format='value(reservedPeeringRanges)' 2>/dev/null \
+    | grep -q "google-managed-services-${NETWORK}"; then
+  log "Creating Private Service Access peering (required before a private-IP Cloud SQL instance can be created)…"
+  gcloud services vpc-peerings connect \
+    --service=servicenetworking.googleapis.com \
+    --ranges="google-managed-services-${NETWORK}" \
+    --network="${NETWORK}"
+fi
 
 # ---------------------------------------------------------------------------
 # Artifact Registry
@@ -102,9 +140,12 @@ if ! gcloud sql instances describe "${SQL_INSTANCE}" >/dev/null 2>&1; then
     --region="${REGION}" \
     --storage-auto-increase \
     --backup \
+    --network="projects/${PROJECT_ID}/global/networks/${NETWORK}" \
     --no-assign-ip
-  # HIPAA baseline: no public IP. Cloud Run reaches it over the private
-  # Cloud SQL connector (--add-cloudsql-instances), not a routable address.
+  # HIPAA baseline: no public IP. Cloud Run reaches it over Direct VPC
+  # egress + the Cloud SQL Auth Proxy socket (--add-cloudsql-instances),
+  # not a routable address — see gcp-deploy.sh's --network/--subnet/
+  # --vpc-egress flags, which must target this same network.
 else
   log "Cloud SQL instance ${SQL_INSTANCE} already exists."
 fi
@@ -172,11 +213,20 @@ done
 
 # Placeholder secrets for third-party credentials — created empty if absent
 # so `gcloud secrets versions add` in CI has something to version. The deploy
-# workflow overwrites these from GitHub Secrets on every run.
-for name in mediflow-clerk-secret-key mediflow-clerk-publishable-key \
-            mediflow-ai-openai-api-key mediflow-ai-openai-base-url; do
+# workflow overwrites these from GitHub Secrets on every run. Includes every
+# OPTIONAL secret gcp-deploy.sh may reference too: that script only ever
+# calls `versions add` (never `secrets create` / `add-iam-policy-binding`),
+# so every secret it can touch — required or optional — must already exist
+# with the deploy SA's version-add grant in place before CI runs.
+REQUIRED_CREDENTIAL_SECRETS="mediflow-clerk-secret-key mediflow-clerk-publishable-key \
+mediflow-ai-openai-api-key mediflow-ai-openai-base-url"
+OPTIONAL_CREDENTIAL_SECRETS="mediflow-twilio-account-sid mediflow-twilio-auth-token \
+mediflow-twilio-from-number mediflow-twilio-webhook-host mediflow-resend-api-key \
+mediflow-sentry-dsn mediflow-esign-cert-pem mediflow-esign-key-pem \
+mediflow-public-object-search-paths"
+for name in ${REQUIRED_CREDENTIAL_SECRETS} ${OPTIONAL_CREDENTIAL_SECRETS}; do
   if ! gcloud secrets describe "${name}" >/dev/null 2>&1; then
-    log "Creating placeholder secret ${name} (CI fills the real value in)…"
+    log "Creating placeholder secret ${name} (CI fills the real value in if you use it)…"
     printf 'unset' | gcloud secrets create "${name}" --data-file=-
   fi
 done
@@ -203,8 +253,7 @@ gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
   --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/storage.objectAdmin" >/dev/null
 for name in mediflow-database-url mediflow-phi-encryption-key mediflow-phi-hmac-key \
             mediflow-metrics-token mediflow-dialer-webhook-secret mediflow-lead-queue-webhook-secret \
-            mediflow-clerk-secret-key mediflow-clerk-publishable-key \
-            mediflow-ai-openai-api-key mediflow-ai-openai-base-url; do
+            ${REQUIRED_CREDENTIAL_SECRETS} ${OPTIONAL_CREDENTIAL_SECRETS}; do
   gcloud secrets add-iam-policy-binding "${name}" \
     --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/secretmanager.secretAccessor" >/dev/null
 done
@@ -216,8 +265,7 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/artifactregistry.writer" --condition=None >/dev/null
 gcloud iam service-accounts add-iam-policy-binding "${RUN_SA_EMAIL}" \
   --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/iam.serviceAccountUser" >/dev/null
-for name in mediflow-clerk-secret-key mediflow-clerk-publishable-key \
-            mediflow-ai-openai-api-key mediflow-ai-openai-base-url; do
+for name in ${REQUIRED_CREDENTIAL_SECRETS} ${OPTIONAL_CREDENTIAL_SECRETS}; do
   gcloud secrets add-iam-policy-binding "${name}" \
     --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/secretmanager.secretVersionAdder" >/dev/null
 done
@@ -260,6 +308,7 @@ Add these as GitHub Actions SECRETS on ${GITHUB_REPO}
   GCP_RUN_SA_EMAIL            ${RUN_SA_EMAIL}
   GCP_CLOUDSQL_CONNECTION     ${SQL_CONNECTION_NAME}
   GCP_PHI_BUCKET              ${BUCKET}
+  GCP_NETWORK                 ${NETWORK}
 
 Plus the third-party credentials listed in docs/DEPLOY_GCP_PRODUCTION.md
 (CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY, AI_INTEGRATIONS_OPENAI_API_KEY,

@@ -70,6 +70,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `GCP_RUN_SA_EMAIL` | printed by the script |
 | `GCP_CLOUDSQL_CONNECTION` | printed by the script |
 | `GCP_PHI_BUCKET` | printed by the script |
+| `GCP_NETWORK` | printed by the script (default `default`) — must match between bootstrap and deploy: Cloud Run egresses onto this VPC (Direct VPC egress) to reach the private-IP Cloud SQL instance peered to it |
 
 **Third-party credentials (same as the Render path):**
 
