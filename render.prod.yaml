@@ -45,8 +45,7 @@ services:
     # CLERK_PUBLISHABLE_KEY) before the build runs. NOTE: no VITE_DEMO_MODE here
     # — that is what keeps this a real authenticated build.
     buildCommand: >-
-      corepack enable &&
-      corepack prepare pnpm@10.28.1 --activate &&
+      npm install -g pnpm@10.28.1 &&
       pnpm install --frozen-lockfile &&
       pnpm --filter @workspace/web-app run build &&
       pnpm --filter @workspace/api-server run build

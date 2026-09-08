@@ -7,7 +7,7 @@
 # (both devDependencies) can run at container start.
 FROM node:24-slim AS app
 
-RUN corepack enable && corepack prepare pnpm@10.28.1 --activate
+RUN npm install -g pnpm@10.28.1
 
 WORKDIR /app
 

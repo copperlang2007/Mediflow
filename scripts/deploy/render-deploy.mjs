@@ -287,7 +287,7 @@ async function ensureService(ownerId) {
       preDeployCommand: "pnpm --filter @workspace/db run migrate",
       envSpecificDetails: {
         buildCommand:
-          "corepack enable && corepack prepare pnpm@10.28.1 --activate && " +
+          "npm install -g pnpm@10.28.1 && " +
           "pnpm install --frozen-lockfile && " +
           "pnpm --filter @workspace/web-app run build && " +
           "pnpm --filter @workspace/api-server run build",

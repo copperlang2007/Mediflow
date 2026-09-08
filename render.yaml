@@ -28,7 +28,7 @@ services:
     # Free instance for the throwaway demo (sleeps when idle, $0). Bump to
     # starter/standard if you need it always-on.
     plan: free
-    buildCommand: corepack enable && corepack prepare pnpm@10.28.1 --activate && pnpm install --frozen-lockfile && VITE_DEMO_MODE=true pnpm --filter @workspace/web-app run build && pnpm --filter @workspace/api-server run build
+    buildCommand: npm install -g pnpm@10.28.1 && pnpm install --frozen-lockfile && VITE_DEMO_MODE=true pnpm --filter @workspace/web-app run build && pnpm --filter @workspace/api-server run build
     # Migrate + seed run at container START, not preDeployCommand (silently
     # skipped on plan:free) and not buildCommand (DATABASE_URL injection into
     # free-plan build environments is not guaranteed; runtime env always has
