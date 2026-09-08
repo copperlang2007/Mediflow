@@ -1,0 +1,44 @@
+# MediFlow — GCP Cloud Run PRODUCTION image.
+#
+# Unlike the repo-root Dockerfile (an auth-bypassed demo build), this image
+# builds the web-app with real Clerk auth baked in and never seeds demo data.
+# It is the container Cloud Run runs in production — see
+# scripts/deploy/gcp-deploy.sh and docs/DEPLOY_GCP_PRODUCTION.md.
+FROM node:24-slim AS app
+
+RUN corepack enable && corepack prepare pnpm@10.28.1 --activate
+
+WORKDIR /app
+
+# Copy workspace manifests first so `pnpm install` only re-runs when a
+# package.json/lockfile actually changes, not on every source edit.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY artifacts/api-server/package.json artifacts/api-server/package.json
+COPY artifacts/mockup-sandbox/package.json artifacts/mockup-sandbox/package.json
+COPY artifacts/web-app/package.json artifacts/web-app/package.json
+COPY lib/api-client-react/package.json lib/api-client-react/package.json
+COPY lib/api-spec/package.json lib/api-spec/package.json
+COPY lib/api-zod/package.json lib/api-zod/package.json
+COPY lib/db/package.json lib/db/package.json
+COPY lib/devtools/package.json lib/devtools/package.json
+COPY lib/integrations-openai-ai-react/package.json lib/integrations-openai-ai-react/package.json
+COPY lib/integrations-openai-ai-server/package.json lib/integrations-openai-ai-server/package.json
+COPY lib/object-storage-web/package.json lib/object-storage-web/package.json
+COPY scripts/package.json scripts/package.json
+
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+
+# VITE_CLERK_PUBLISHABLE_KEY is a publishable (public-by-design) key that Vite
+# inlines into the static web bundle at build time — safe as a build arg, not
+# a secret. No VITE_DEMO_MODE: this is the real authenticated build.
+ARG VITE_CLERK_PUBLISHABLE_KEY
+ENV VITE_CLERK_PUBLISHABLE_KEY=${VITE_CLERK_PUBLISHABLE_KEY}
+
+RUN pnpm --filter @workspace/web-app run build \
+  && pnpm --filter @workspace/api-server run build
+
+EXPOSE 8080
+
+CMD ["sh", "./docker/start.prod.sh"]
