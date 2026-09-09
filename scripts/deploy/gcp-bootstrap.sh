@@ -34,6 +34,9 @@
 #   REGION                Default: us-central1
 #   BILLING_ACCOUNT_ID    Only needed if PROJECT_ID doesn't exist yet.
 #   DB_TIER               Cloud SQL machine tier. Default: db-custom-2-8192
+#   DB_EDITION            Cloud SQL edition. Default: ENTERPRISE. Must be
+#                         ENTERPRISE for any db-custom-* tier; ENTERPRISE_PLUS
+#                         only accepts db-perf-optimized-N-* tiers.
 #   GITHUB_BRANCH         Default: claude/google-cloud-deployment-ml41c2
 set -euo pipefail
 
@@ -41,6 +44,7 @@ set -euo pipefail
 : "${GITHUB_REPO:?Set GITHUB_REPO to owner/repo, e.g. copperlang2007/mediflow}"
 REGION="${REGION:-us-central1}"
 DB_TIER="${DB_TIER:-db-custom-2-8192}"
+DB_EDITION="${DB_EDITION:-ENTERPRISE}"
 GITHUB_BRANCH="${GITHUB_BRANCH:-claude/google-cloud-deployment-ml41c2}"
 
 NETWORK="${NETWORK:-default}"
@@ -134,8 +138,17 @@ fi
 # ---------------------------------------------------------------------------
 if ! gcloud sql instances describe "${SQL_INSTANCE}" >/dev/null 2>&1; then
   log "Creating Cloud SQL instance ${SQL_INSTANCE} (this takes several minutes)…"
+  # --edition is REQUIRED, not cosmetic. Without it the API picks
+  # ENTERPRISE_PLUS, which rejects every `db-custom-*` tier:
+  #   ERROR: Invalid Tier (db-custom-2-8192) for (ENTERPRISE_PLUS) Edition.
+  # ENTERPRISE is the right tier family for this workload — Enterprise Plus
+  # buys a data cache and near-zero-downtime maintenance at roughly double
+  # the price, neither of which a pre-revenue single-tenant API needs.
+  # Override with DB_EDITION=ENTERPRISE_PLUS *and* a db-perf-optimized-N-*
+  # DB_TIER if that changes.
   gcloud sql instances create "${SQL_INSTANCE}" \
     --database-version=POSTGRES_16 \
+    --edition="${DB_EDITION}" \
     --tier="${DB_TIER}" \
     --region="${REGION}" \
     --storage-auto-increase \
