@@ -43,12 +43,18 @@ jobs:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
           AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
+          AI_INTEGRATIONS_BEDROCK_BASE_URL: ${{ secrets.AI_INTEGRATIONS_BEDROCK_BASE_URL }}
           AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
           PRIVATE_OBJECT_DIR: ${{ secrets.PRIVATE_OBJECT_DIR }}
         run: |
+          # Same either-name contract as the GCP gate; whitespace counts as
+          # unset, matching resolveAiBaseUrl()'s .trim().
+          if [ -z "$(printf '%s' "${AI_INTEGRATIONS_BEDROCK_BASE_URL:-}" | tr -d '[:space:]')" ]; then
+            AI_INTEGRATIONS_BEDROCK_BASE_URL="${AI_INTEGRATIONS_OPENAI_BASE_URL:-}"
+          fi
           missing=()
           for v in RENDER_API_KEY CLERK_SECRET_KEY CLERK_PUBLISHABLE_KEY \
-                   AI_INTEGRATIONS_OPENAI_API_KEY AI_INTEGRATIONS_OPENAI_BASE_URL \
+                   AI_INTEGRATIONS_OPENAI_API_KEY AI_INTEGRATIONS_BEDROCK_BASE_URL \
                    PRIVATE_OBJECT_DIR; do
             if [ -z "${!v}" ]; then missing+=("$v"); fi
           done
@@ -81,9 +87,12 @@ jobs:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
           # AI on AWS Bedrock (covered by your AWS BAA): the API key is a Bedrock
-          # Bearer token; the base URL is the OpenAI-compatible endpoint, e.g.
-          # https://bedrock-runtime.<region>.amazonaws.com/openai/v1
+          # Bearer token; the base URL is the ANTHROPIC MESSAGES endpoint, e.g.
+          # https://bedrock-runtime.<region>.amazonaws.com/anthropic
+          # NOT /openai/v1 — AWS lists Chat Completions as unsupported for
+          # every Anthropic model, so Claude is unreachable over that path.
           AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
+          AI_INTEGRATIONS_BEDROCK_BASE_URL: ${{ secrets.AI_INTEGRATIONS_BEDROCK_BASE_URL }}
           AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
           PRIVATE_OBJECT_DIR: ${{ secrets.PRIVATE_OBJECT_DIR }}
 

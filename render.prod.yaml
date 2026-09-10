@@ -105,8 +105,14 @@ services:
       # Bedrock API key (Bearer token) consumed by the OpenAI SDK client.
       - key: AI_INTEGRATIONS_OPENAI_API_KEY
         sync: false
-      # Bedrock OpenAI-compatible endpoint, e.g.
-      # https://bedrock-runtime.<region>.amazonaws.com/openai/v1
+      # Bedrock's ANTHROPIC MESSAGES endpoint, e.g.
+      # https://bedrock-runtime.<region>.amazonaws.com/anthropic
+      # NOT /openai/v1 — AWS lists Chat Completions as unsupported for every
+      # Anthropic model, so Claude is unreachable over that path.
+      - key: AI_INTEGRATIONS_BEDROCK_BASE_URL
+        sync: false
+      # Legacy name, still read as a fallback by resolveAiBaseUrl() so a
+      # pre-rename Render service keeps booting. Set the BEDROCK one above.
       - key: AI_INTEGRATIONS_OPENAI_BASE_URL
         sync: false
       - key: PRIVATE_OBJECT_DIR

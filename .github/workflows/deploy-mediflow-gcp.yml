@@ -96,8 +96,10 @@ jobs:
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
           # AI on AWS Bedrock (unchanged — covered by your AWS BAA). The API
           # key is a Bedrock Bearer token; the base URL is Bedrock's
-          # OpenAI-compatible endpoint, e.g.
-          # https://bedrock-runtime.<region>.amazonaws.com/openai/v1
+          # ANTHROPIC MESSAGES endpoint, e.g.
+          # https://bedrock-runtime.<region>.amazonaws.com/anthropic
+          # NOT /openai/v1 — AWS lists Chat Completions as unsupported for
+          # every Anthropic model, so Claude is unreachable over that path.
           AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
           # BOTH names must reach the deploy step. The gate's shell default is
           # step-scoped and does not persist here, so passing only the legacy
