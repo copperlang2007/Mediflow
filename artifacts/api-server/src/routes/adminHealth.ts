@@ -104,17 +104,28 @@ function validateEnv(): EnvValidation {
       warnings.push("AI_INTEGRATIONS_AZURE_API_VERSION unset — using SDK default");
     }
   } else if (provider === "bedrock") {
-    // Bedrock's OpenAI-compatible endpoint is consumed via the base-URL OpenAI
-    // client, e.g. https://bedrock-runtime.<region>.amazonaws.com/openai/v1
-    if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
+    // NOT an OpenAI endpoint. AWS's API-compatibility matrix lists Chat
+    // Completions as unsupported for every Anthropic model, so a Bedrock
+    // base URL for Claude points at the Anthropic Messages interface —
+    // https://bedrock-runtime.<region>.amazonaws.com/anthropic — not at
+    // /openai/v1. The legacy variable is accepted as a fallback so a
+    // pre-rename environment still reports healthy, but it is flagged so the
+    // drift is visible rather than silent.
+    const bedrockBaseUrl = process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL?.trim();
+    const legacyBaseUrl = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL?.trim();
+    if (!bedrockBaseUrl && !legacyBaseUrl) {
       issues.push(
-        "AI_INTEGRATIONS_OPENAI_BASE_URL missing (Bedrock OpenAI-compatible endpoint)",
+        "AI_INTEGRATIONS_BEDROCK_BASE_URL missing (Bedrock Anthropic Messages endpoint)",
+      );
+    } else if (!bedrockBaseUrl) {
+      warnings.push(
+        "AI_INTEGRATIONS_BEDROCK_BASE_URL unset — falling back to the legacy AI_INTEGRATIONS_OPENAI_BASE_URL; rename it",
       );
     }
     const model = process.env.AI_INTEGRATIONS_MODEL?.trim();
     if (!model) {
       warnings.push(
-        "AI_INTEGRATIONS_MODEL unset — using the default; set a Bedrock model id (e.g. us.anthropic.claude-sonnet-4-6)",
+        "AI_INTEGRATIONS_MODEL unset — using the default; set a Bedrock model id (e.g. us.anthropic.claude-sonnet-5)",
       );
     } else {
       modelHint = model;

@@ -35,7 +35,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import OpenAI, { AzureOpenAI } from "openai";
-import { resolveAiProvider } from "../../lib/aiProvider";
+import { resolveAiProvider, resolveAiBaseUrl } from "../../lib/aiProvider";
 import {
   requireAuth,
   requirePermission,
@@ -177,7 +177,7 @@ function getOpenAI(): AiClient | null {
         deployment,
       }) as unknown as AiClient;
     }
-    const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+    const baseURL = resolveAiBaseUrl(provider);
     if (!baseURL) return null;
     return new OpenAI({ apiKey, baseURL }) as unknown as AiClient;
   } catch {

@@ -25,7 +25,11 @@ import {
   usersTable,
 } from "@workspace/db";
 import OpenAI, { AzureOpenAI } from "openai";
-import { resolveAiProvider, resolveAiModel } from "../lib/aiProvider";
+import {
+  resolveAiProvider,
+  resolveAiModel,
+  resolveAiBaseUrl,
+} from "../lib/aiProvider";
 
 // Provider dispatch — `azure` is the HIPAA-eligible (BAA-covered) path.
 // This worker drafts compliance reports from agent PHI, so it MUST go
@@ -52,7 +56,7 @@ function getOpenAI(): OpenAI | null {
       _openai = new AzureOpenAI({ apiKey, endpoint, apiVersion, deployment });
       return _openai;
     }
-    const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+    const baseURL = resolveAiBaseUrl(provider);
     if (!baseURL) return null;
     _openai = new OpenAI({ apiKey, baseURL });
     return _openai;

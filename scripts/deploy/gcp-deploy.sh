@@ -14,7 +14,8 @@
 # Required env (set by the workflow from GitHub Secrets/Variables):
 #   GCP_PROJECT_ID, GCP_REGION, GCP_RUN_SA_EMAIL, GCP_CLOUDSQL_CONNECTION,
 #   GCP_PHI_BUCKET, CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY,
-#   AI_INTEGRATIONS_OPENAI_API_KEY, AI_INTEGRATIONS_OPENAI_BASE_URL
+#   AI_INTEGRATIONS_OPENAI_API_KEY, AI_INTEGRATIONS_BEDROCK_BASE_URL
+#   (AI_INTEGRATIONS_OPENAI_BASE_URL is still accepted as a legacy fallback)
 # Optional:
 #   GCP_NETWORK (default: default — must match gcp-bootstrap.sh's NETWORK,
 #   since Cloud Run needs Direct VPC egress onto the same network the
@@ -40,7 +41,12 @@ set -euo pipefail
 : "${CLERK_SECRET_KEY:?}"
 : "${CLERK_PUBLISHABLE_KEY:?}"
 : "${AI_INTEGRATIONS_OPENAI_API_KEY:?}"
-: "${AI_INTEGRATIONS_OPENAI_BASE_URL:?}"
+# Canonical name is AI_INTEGRATIONS_BEDROCK_BASE_URL; the OPENAI-named
+# variable is a legacy fallback. Bedrock is not an OpenAI endpoint: AWS lists
+# Chat Completions as unsupported for every Anthropic model, so this holds an
+# Anthropic Messages URL (.../anthropic), not .../openai/v1.
+: "${AI_INTEGRATIONS_BEDROCK_BASE_URL:=${AI_INTEGRATIONS_OPENAI_BASE_URL:-}}"
+: "${AI_INTEGRATIONS_BEDROCK_BASE_URL:?set AI_INTEGRATIONS_BEDROCK_BASE_URL}"
 GCP_NETWORK="${GCP_NETWORK:-default}"
 
 SERVICE="mediflow-prod"
@@ -71,7 +77,7 @@ log "Syncing credentials to Secret Manager…"
 sync_secret mediflow-clerk-secret-key "${CLERK_SECRET_KEY}"
 sync_secret mediflow-clerk-publishable-key "${CLERK_PUBLISHABLE_KEY}"
 sync_secret mediflow-ai-openai-api-key "${AI_INTEGRATIONS_OPENAI_API_KEY}"
-sync_secret mediflow-ai-openai-base-url "${AI_INTEGRATIONS_OPENAI_BASE_URL}"
+sync_secret mediflow-ai-bedrock-base-url "${AI_INTEGRATIONS_BEDROCK_BASE_URL}"
 
 # Optional secrets: every one of these already exists in Secret Manager
 # (created as an "unset" placeholder by gcp-bootstrap.sh, with this script's
@@ -115,7 +121,7 @@ LEAD_QUEUE_WEBHOOK_SECRET=mediflow-lead-queue-webhook-secret:latest,\
 CLERK_SECRET_KEY=mediflow-clerk-secret-key:latest,\
 CLERK_PUBLISHABLE_KEY=mediflow-clerk-publishable-key:latest,\
 AI_INTEGRATIONS_OPENAI_API_KEY=mediflow-ai-openai-api-key:latest,\
-AI_INTEGRATIONS_OPENAI_BASE_URL=mediflow-ai-openai-base-url:latest"
+AI_INTEGRATIONS_BEDROCK_BASE_URL=mediflow-ai-bedrock-base-url:latest"
 
 STATIC_ENV="NODE_ENV=production,\
 AI_INTEGRATIONS_PROVIDER=bedrock,\

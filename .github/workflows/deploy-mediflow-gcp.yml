@@ -44,12 +44,18 @@ jobs:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
           AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
+          AI_INTEGRATIONS_BEDROCK_BASE_URL: ${{ secrets.AI_INTEGRATIONS_BEDROCK_BASE_URL }}
           AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
         run: |
+          # The base URL may be set under either name: BEDROCK is canonical,
+          # OPENAI is the legacy fallback. Requiring the new name outright
+          # would skip the deploy for an environment that is correctly
+          # configured under the old one.
+          : "${AI_INTEGRATIONS_BEDROCK_BASE_URL:=${AI_INTEGRATIONS_OPENAI_BASE_URL}}"
           missing=()
           for v in GCP_PROJECT_ID GCP_WIF_PROVIDER GCP_DEPLOY_SA_EMAIL GCP_RUN_SA_EMAIL \
                    GCP_CLOUDSQL_CONNECTION GCP_PHI_BUCKET CLERK_SECRET_KEY CLERK_PUBLISHABLE_KEY \
-                   AI_INTEGRATIONS_OPENAI_API_KEY AI_INTEGRATIONS_OPENAI_BASE_URL; do
+                   AI_INTEGRATIONS_OPENAI_API_KEY AI_INTEGRATIONS_BEDROCK_BASE_URL; do
             if [ -z "${!v}" ]; then missing+=("$v"); fi
           done
           if [ ${#missing[@]} -gt 0 ]; then
