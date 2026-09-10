@@ -56,7 +56,12 @@ jobs:
           for v in RENDER_API_KEY CLERK_SECRET_KEY CLERK_PUBLISHABLE_KEY \
                    AI_INTEGRATIONS_OPENAI_API_KEY AI_INTEGRATIONS_BEDROCK_BASE_URL \
                    PRIVATE_OBJECT_DIR; do
-            if [ -z "${!v}" ]; then missing+=("$v"); fi
+            # Trim before testing, exactly as the GCP gate does: the app
+            # trims these values and treats whitespace as unset, so a bare -z
+            # here would pass a config the runtime then rejects -- and would
+            # let a whitespace-only legacy value be copied into BEDROCK above
+            # and counted as set.
+            if [ -z "$(printf '%s' "${!v}" | tr -d '[:space:]')" ]; then missing+=("$v"); fi
           done
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::notice::Deploy skipped — required GitHub Secrets not yet set: ${missing[*]}. See docs/DEPLOY_RENDER_PRODUCTION.md. The deploy runs automatically once all are present."
