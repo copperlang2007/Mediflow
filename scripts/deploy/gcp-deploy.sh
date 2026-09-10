@@ -85,13 +85,26 @@ sync_secret() {
   # never created therefore fails here under `set -e`, mid-deploy, with a bare
   # NOT_FOUND. That is exactly what happens to a project bootstrapped before
   # mediflow-ai-bedrock-base-url existed, so say so instead of dying opaquely.
-  if ! gcloud secrets describe "$secret_name" --project="${GCP_PROJECT_ID}" >/dev/null 2>&1; then
-    echo "FATAL: Secret Manager secret '${secret_name}' does not exist in ${GCP_PROJECT_ID}." >&2
-    echo "       Re-run scripts/deploy/gcp-bootstrap.sh — it is idempotent and will" >&2
-    echo "       create the secret and grant this deploy service account access." >&2
+  #
+  # Diagnose from the WRITE's own failure rather than a prior `secrets describe`:
+  # describe needs secretmanager.secrets.get, which this role is not guaranteed
+  # to carry. A probe that returns PERMISSION_DENIED for a secret that exists is
+  # indistinguishable here from one that is genuinely absent, so gating on it
+  # risks aborting every deploy on a correctly provisioned project. Attempting
+  # the write costs nothing extra and cannot produce a false negative.
+  local add_err
+  if ! add_err="$(printf '%s' "$value" | gcloud secrets versions add "$secret_name" --data-file=- --project="${GCP_PROJECT_ID}" 2>&1 >/dev/null)"; then
+    echo "FATAL: could not add a version to Secret Manager secret '${secret_name}' in ${GCP_PROJECT_ID}." >&2
+    echo "${add_err}" >&2
+    if printf '%s' "$add_err" | grep -qi "NOT_FOUND\|was not found"; then
+      echo "       The secret does not exist. Re-run scripts/deploy/gcp-bootstrap.sh — it is" >&2
+      echo "       idempotent and will create it and grant this deploy service account access." >&2
+    elif printf '%s' "$add_err" | grep -qi "PERMISSION_DENIED\|does not have"; then
+      echo "       The deploy service account lacks secretVersionAdder on this secret." >&2
+      echo "       Re-run scripts/deploy/gcp-bootstrap.sh to (re)apply the IAM binding." >&2
+    fi
     exit 1
   fi
-  printf '%s' "$value" | gcloud secrets versions add "$secret_name" --data-file=- --project="${GCP_PROJECT_ID}" >/dev/null
 }
 log "Syncing credentials to Secret Manager…"
 sync_secret mediflow-clerk-secret-key "${CLERK_SECRET_KEY}"

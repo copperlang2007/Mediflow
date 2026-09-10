@@ -57,11 +57,28 @@ const REQUIRED_SECRETS = [
   "CLERK_SECRET_KEY", // sk_live_…
   "CLERK_PUBLISHABLE_KEY", // pk_live_…  (also mirrored to VITE_CLERK_PUBLISHABLE_KEY)
   "AI_INTEGRATIONS_OPENAI_API_KEY", // Bedrock API key (Bearer token)
-  // Bedrock's Anthropic Messages endpoint (.../anthropic). NOT /openai/v1:
-  // AWS lists Chat Completions as unsupported for every Anthropic model.
-  "AI_INTEGRATIONS_BEDROCK_BASE_URL",
-  "AI_INTEGRATIONS_OPENAI_BASE_URL", // legacy fallback, still read at runtime
   "PRIVATE_OBJECT_DIR", // GCS bucket/path (hard-required at boot)
+];
+
+/**
+ * The AI base URL, which may be supplied under EITHER name — exactly the
+ * contract resolveAiBaseUrl() implements and the deploy workflow gates on:
+ *
+ *   AI_INTEGRATIONS_BEDROCK_BASE_URL  canonical
+ *   AI_INTEGRATIONS_OPENAI_BASE_URL   legacy fallback, still read at runtime
+ *
+ * These must NOT live in REQUIRED_SECRETS: that list demands every entry, so
+ * listing both there would make the deploy succeed only when BOTH are set —
+ * failing the documented canonical-only setup and every existing legacy-only
+ * one. preflight() instead requires that at least one is present.
+ *
+ * Bedrock's endpoint is the Anthropic Messages path (.../anthropic), NOT
+ * /openai/v1: AWS lists Chat Completions as unsupported for every Anthropic
+ * model.
+ */
+const AI_BASE_URL_SECRETS = [
+  "AI_INTEGRATIONS_BEDROCK_BASE_URL",
+  "AI_INTEGRATIONS_OPENAI_BASE_URL",
 ];
 
 /** Optional credentials — passed through only when set (feature no-ops if absent). */
@@ -174,6 +191,19 @@ function preflight() {
       "FATAL: the following required GitHub Secrets are missing. Add them in\n" +
         "  Settings → Secrets and variables → Actions, then re-run:\n" +
         missing.map((n) => `   - ${n}`).join("\n"),
+    );
+    process.exit(1);
+  }
+  // The AI base URL may arrive under either name; require at least one,
+  // matching resolveAiBaseUrl() and the workflow gate. Whitespace is unset.
+  if (!AI_BASE_URL_SECRETS.some((n) => (process.env[n] || "").trim())) {
+    console.error(
+      "FATAL: the AI base URL is not set. Add ONE of these GitHub Secrets in\n" +
+        "  Settings \u2192 Secrets and variables \u2192 Actions, then re-run:\n" +
+        "   - AI_INTEGRATIONS_BEDROCK_BASE_URL  (canonical; preferred)\n" +
+        "   - AI_INTEGRATIONS_OPENAI_BASE_URL   (legacy name, still honored)\n" +
+        "  For Bedrock this is the Anthropic Messages endpoint, e.g.\n" +
+        "  https://bedrock-runtime.<region>.amazonaws.com/anthropic",
     );
     process.exit(1);
   }
@@ -335,7 +365,11 @@ function buildEnv(existing, databaseUrl, origin) {
   }
 
   // 4) Required + optional SaaS secrets
-  for (const name of [...REQUIRED_SECRETS, ...OPTIONAL_SECRETS]) {
+  for (const name of [
+    ...REQUIRED_SECRETS,
+    ...AI_BASE_URL_SECRETS,
+    ...OPTIONAL_SECRETS,
+  ]) {
     const v = process.env[name];
     if (v && v.trim()) out[name] = v.trim();
   }
