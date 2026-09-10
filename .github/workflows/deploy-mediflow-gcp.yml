@@ -51,12 +51,17 @@ jobs:
           # OPENAI is the legacy fallback. Requiring the new name outright
           # would skip the deploy for an environment that is correctly
           # configured under the old one.
-          : "${AI_INTEGRATIONS_BEDROCK_BASE_URL:=${AI_INTEGRATIONS_OPENAI_BASE_URL}}"
+          if [ -z "$(printf '%s' "${AI_INTEGRATIONS_BEDROCK_BASE_URL:-}" | tr -d '[:space:]')" ]; then
+            AI_INTEGRATIONS_BEDROCK_BASE_URL="${AI_INTEGRATIONS_OPENAI_BASE_URL:-}"
+          fi
           missing=()
           for v in GCP_PROJECT_ID GCP_WIF_PROVIDER GCP_DEPLOY_SA_EMAIL GCP_RUN_SA_EMAIL \
                    GCP_CLOUDSQL_CONNECTION GCP_PHI_BUCKET CLERK_SECRET_KEY CLERK_PUBLISHABLE_KEY \
                    AI_INTEGRATIONS_OPENAI_API_KEY AI_INTEGRATIONS_BEDROCK_BASE_URL; do
-            if [ -z "${!v}" ]; then missing+=("$v"); fi
+            # Trim before testing: the app trims these values and treats
+            # whitespace as unset, so a gate using bare -z would pass a
+            # config the runtime then rejects.
+            if [ -z "$(printf '%s' "${!v}" | tr -d '[:space:]')" ]; then missing+=("$v"); fi
           done
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::notice::Deploy skipped — required GitHub Secrets not yet set: ${missing[*]}. Run scripts/deploy/gcp-bootstrap.sh, then see docs/DEPLOY_GCP_PRODUCTION.md. The deploy runs automatically once all are present."
@@ -94,6 +99,12 @@ jobs:
           # OpenAI-compatible endpoint, e.g.
           # https://bedrock-runtime.<region>.amazonaws.com/openai/v1
           AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
+          # BOTH names must reach the deploy step. The gate's shell default is
+          # step-scoped and does not persist here, so passing only the legacy
+          # name would let an operator who followed the docs (canonical name
+          # only) pass the gate and then hit an immediate exit in
+          # gcp-deploy.sh -- green pipeline, no deploy.
+          AI_INTEGRATIONS_BEDROCK_BASE_URL: ${{ secrets.AI_INTEGRATIONS_BEDROCK_BASE_URL }}
           AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
           AI_INTEGRATIONS_MODEL: ${{ vars.AI_INTEGRATIONS_MODEL }}
 

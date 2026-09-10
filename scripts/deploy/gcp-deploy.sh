@@ -45,8 +45,17 @@ set -euo pipefail
 # variable is a legacy fallback. Bedrock is not an OpenAI endpoint: AWS lists
 # Chat Completions as unsupported for every Anthropic model, so this holds an
 # Anthropic Messages URL (.../anthropic), not .../openai/v1.
-: "${AI_INTEGRATIONS_BEDROCK_BASE_URL:=${AI_INTEGRATIONS_OPENAI_BASE_URL:-}}"
-: "${AI_INTEGRATIONS_BEDROCK_BASE_URL:?set AI_INTEGRATIONS_BEDROCK_BASE_URL}"
+#
+# Whitespace counts as unset, matching resolveAiBaseUrl()'s .trim(). A bare
+# :- test would accept "   ", sync it to Secret Manager, and deploy a service
+# whose runtime then treats the value as missing.
+if [ -z "$(printf '%s' "${AI_INTEGRATIONS_BEDROCK_BASE_URL:-}" | tr -d '[:space:]')" ]; then
+  AI_INTEGRATIONS_BEDROCK_BASE_URL="${AI_INTEGRATIONS_OPENAI_BASE_URL:-}"
+fi
+if [ -z "$(printf '%s' "${AI_INTEGRATIONS_BEDROCK_BASE_URL}" | tr -d '[:space:]')" ]; then
+  echo "FATAL: set AI_INTEGRATIONS_BEDROCK_BASE_URL (or the legacy AI_INTEGRATIONS_OPENAI_BASE_URL)" >&2
+  exit 1
+fi
 GCP_NETWORK="${GCP_NETWORK:-default}"
 
 SERVICE="mediflow-prod"
@@ -71,6 +80,17 @@ docker push "${IMAGE}"
 sync_secret() {
   local secret_name="$1" value="$2"
   [ -n "$value" ] || return 0
+  # The deploy SA holds secretVersionAdder, NOT admin — it can add versions but
+  # cannot create a secret. A secret this script writes that gcp-bootstrap.sh
+  # never created therefore fails here under `set -e`, mid-deploy, with a bare
+  # NOT_FOUND. That is exactly what happens to a project bootstrapped before
+  # mediflow-ai-bedrock-base-url existed, so say so instead of dying opaquely.
+  if ! gcloud secrets describe "$secret_name" --project="${GCP_PROJECT_ID}" >/dev/null 2>&1; then
+    echo "FATAL: Secret Manager secret '${secret_name}' does not exist in ${GCP_PROJECT_ID}." >&2
+    echo "       Re-run scripts/deploy/gcp-bootstrap.sh — it is idempotent and will" >&2
+    echo "       create the secret and grant this deploy service account access." >&2
+    exit 1
+  fi
   printf '%s' "$value" | gcloud secrets versions add "$secret_name" --data-file=- --project="${GCP_PROJECT_ID}" >/dev/null
 }
 log "Syncing credentials to Secret Manager…"
