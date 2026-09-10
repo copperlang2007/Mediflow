@@ -57,7 +57,10 @@ const REQUIRED_SECRETS = [
   "CLERK_SECRET_KEY", // sk_live_…
   "CLERK_PUBLISHABLE_KEY", // pk_live_…  (also mirrored to VITE_CLERK_PUBLISHABLE_KEY)
   "AI_INTEGRATIONS_OPENAI_API_KEY", // Bedrock API key (Bearer token)
-  "AI_INTEGRATIONS_OPENAI_BASE_URL", // Bedrock OpenAI-compatible endpoint
+  // Bedrock's Anthropic Messages endpoint (.../anthropic). NOT /openai/v1:
+  // AWS lists Chat Completions as unsupported for every Anthropic model.
+  "AI_INTEGRATIONS_BEDROCK_BASE_URL",
+  "AI_INTEGRATIONS_OPENAI_BASE_URL", // legacy fallback, still read at runtime
   "PRIVATE_OBJECT_DIR", // GCS bucket/path (hard-required at boot)
 ];
 

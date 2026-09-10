@@ -33,7 +33,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `CLERK_SECRET_KEY` | Clerk dashboard → API Keys. Must be a **live** key (`sk_live_…`). |
 | `CLERK_PUBLISHABLE_KEY` | Clerk dashboard → API Keys. Must be **live** (`pk_live_…`). Also baked into the web bundle at build. |
 | `AI_INTEGRATIONS_OPENAI_API_KEY` | Your **Amazon Bedrock API key** (used as a Bearer token by the OpenAI SDK). Bedrock is HIPAA/BAA-covered under your AWS BAA; the server refuses non-BAA providers in prod. |
-| `AI_INTEGRATIONS_OPENAI_BASE_URL` | Bedrock's OpenAI-compatible endpoint for your region, e.g. `https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1`. |
+| `AI_INTEGRATIONS_BEDROCK_BASE_URL` | Bedrock's **Anthropic Messages** endpoint for your region, e.g. `https://bedrock-runtime.us-east-1.amazonaws.com/anthropic`. **Not** `/openai/v1`: AWS lists Chat Completions as unsupported for every Anthropic model, so Claude is unreachable over that path. The legacy `AI_INTEGRATIONS_OPENAI_BASE_URL` name is still read as a fallback so a pre-rename service keeps booting. |
 | `PRIVATE_OBJECT_DIR` | GCS bucket/path for private PHI documents (e.g. `mediflow-prod/private`). Hard-required at boot. |
 
 > **AI provider.** The blueprint sets `AI_INTEGRATIONS_PROVIDER=bedrock` and `AI_INTEGRATIONS_MODEL=us.anthropic.claude-sonnet-4-6` (the same Claude Sonnet model IntelBRIDGE uses). To use a different Bedrock model, set the `AI_INTEGRATIONS_MODEL` repository **Variable**. Make sure the model is enabled in your Bedrock account for that region. Azure OpenAI also remains supported — set `AI_INTEGRATIONS_PROVIDER=azure` plus the `AI_INTEGRATIONS_AZURE_RESOURCE`/`_DEPLOYMENT` vars instead.
