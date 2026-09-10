@@ -231,8 +231,13 @@ done
 # calls `versions add` (never `secrets create` / `add-iam-policy-binding`),
 # so every secret it can touch — required or optional — must already exist
 # with the deploy SA's version-add grant in place before CI runs.
+# mediflow-ai-bedrock-base-url is the canonical AI base-URL secret;
+# mediflow-ai-openai-base-url stays in the list because an already-bootstrapped
+# project has it and Cloud Run may still reference it during the rename window.
+# Both must exist WITH the deploy SA's version-add grant before CI runs, or
+# `gcloud secrets versions add` aborts the deploy under `set -e`.
 REQUIRED_CREDENTIAL_SECRETS="mediflow-clerk-secret-key mediflow-clerk-publishable-key \
-mediflow-ai-openai-api-key mediflow-ai-openai-base-url"
+mediflow-ai-openai-api-key mediflow-ai-bedrock-base-url mediflow-ai-openai-base-url"
 OPTIONAL_CREDENTIAL_SECRETS="mediflow-twilio-account-sid mediflow-twilio-auth-token \
 mediflow-twilio-from-number mediflow-twilio-webhook-host mediflow-resend-api-key \
 mediflow-sentry-dsn mediflow-esign-cert-pem mediflow-esign-key-pem \
