@@ -79,7 +79,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `CLERK_SECRET_KEY` | Clerk dashboard → API Keys. Must be **live** (`sk_live_…`). |
 | `CLERK_PUBLISHABLE_KEY` | Clerk dashboard → API Keys. Must be **live** (`pk_live_…`). Baked into the web bundle at image build time. |
 | `AI_INTEGRATIONS_OPENAI_API_KEY` | Your Amazon Bedrock API key (Bearer token). |
-| `AI_INTEGRATIONS_OPENAI_BASE_URL` | Bedrock's OpenAI-compatible endpoint, e.g. `https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1`. |
+| `AI_INTEGRATIONS_BEDROCK_BASE_URL` | Bedrock's **Anthropic Messages** endpoint for your region, e.g. `https://bedrock-runtime.us-east-1.amazonaws.com/anthropic`. **Not** `/openai/v1`: AWS's API-compatibility matrix lists Chat Completions as unsupported for every Anthropic model, so Claude is unreachable over the OpenAI path. The legacy `AI_INTEGRATIONS_OPENAI_BASE_URL` name is still read as a fallback so a pre-rename environment keeps booting. |
 
 **Optional (a feature simply no-ops until its secret is set):** `RESEND_API_KEY`,
 `EMAIL_FROM_ADDRESS`* , `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,

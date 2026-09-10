@@ -17,7 +17,11 @@
  */
 import OpenAI, { AzureOpenAI } from "openai";
 import { z } from "zod/v4";
-import { resolveAiProvider, resolveAiModel } from "../aiProvider";
+import {
+  resolveAiProvider,
+  resolveAiModel,
+  resolveAiBaseUrl,
+} from "../aiProvider";
 import { logger } from "../logger";
 
 /** Disposition the model suggests for the call (advisory — agent confirms). */
@@ -140,7 +144,7 @@ function buildDefaultAiClient(): TranscriptAiClient | null {
         deployment,
       }) as unknown as TranscriptAiClient;
     }
-    const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+    const baseURL = resolveAiBaseUrl(provider);
     if (!baseURL) return null;
     return new OpenAI({ apiKey, baseURL }) as unknown as TranscriptAiClient;
   } catch {

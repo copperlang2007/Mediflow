@@ -58,13 +58,27 @@ export function buildOpenAIClient(): OpenAI {
     });
   }
 
-  if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
+  // Named per PROVIDER, not per SDK. Bedrock's endpoint is not an OpenAI
+  // endpoint — AWS lists Chat Completions as NOT supported for every
+  // Anthropic model, so a Bedrock base URL points at /anthropic, never at
+  // /openai/v1. The legacy name stays readable as a fallback so environments
+  // configured before the rename keep booting.
+  const baseURL =
+    provider === "bedrock"
+      ? (process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL?.trim() ||
+         process.env.AI_INTEGRATIONS_OPENAI_BASE_URL?.trim())
+      : process.env.AI_INTEGRATIONS_OPENAI_BASE_URL?.trim();
+  if (!baseURL) {
+    const expected =
+      provider === "bedrock"
+        ? "AI_INTEGRATIONS_BEDROCK_BASE_URL"
+        : "AI_INTEGRATIONS_OPENAI_BASE_URL";
     throw new Error(
-      "AI_INTEGRATIONS_OPENAI_BASE_URL must be set. Did you forget to provision the OpenAI AI integration?",
+      `${expected} must be set for provider "${provider}". Did you forget to provision the AI integration?`,
     );
   }
   return new OpenAI({
     apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    baseURL,
   });
 }

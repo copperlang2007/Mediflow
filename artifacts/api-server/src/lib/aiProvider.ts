@@ -82,6 +82,39 @@ export function resolveAiModel(): string {
 }
 
 /**
+ * The base URL for the configured provider's API.
+ *
+ * The variable is named per PROVIDER, not per SDK, because the two stopped
+ * agreeing once Bedrock entered the picture:
+ *
+ *   - bedrock       → AI_INTEGRATIONS_BEDROCK_BASE_URL
+ *   - azure/openai  → AI_INTEGRATIONS_OPENAI_BASE_URL
+ *
+ * Bedrock's endpoint is not an OpenAI endpoint. AWS's compatibility matrix
+ * lists Chat Completions as NOT supported for every Anthropic model — Claude
+ * is reachable over Converse, Invoke, or the Anthropic Messages interface at
+ * `https://bedrock-runtime.<region>.amazonaws.com/anthropic`, never over
+ * `/openai/v1`. Calling that variable AI_INTEGRATIONS_OPENAI_BASE_URL while it
+ * holds an Anthropic endpoint is how a deploy ends up green and broken.
+ *
+ * The legacy name is still read as a fallback for bedrock so an environment
+ * configured before this rename keeps booting; it is deliberately a fallback
+ * and not an alias, so `env | grep BEDROCK` tells the truth on new deploys.
+ */
+export function resolveAiBaseUrl(
+  provider: AiProvider = resolveAiProvider(),
+): string | undefined {
+  if (provider === "bedrock") {
+    return (
+      process.env["AI_INTEGRATIONS_BEDROCK_BASE_URL"]?.trim() ||
+      process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"]?.trim() ||
+      undefined
+    );
+  }
+  return process.env["AI_INTEGRATIONS_OPENAI_BASE_URL"]?.trim() || undefined;
+}
+
+/**
  * Boot-time assertion. Call once at app/worker bootstrap so a
  * misconfigured production deploy fails fast — before the first AI call.
  * Throws the same error as `resolveAiProvider()`.

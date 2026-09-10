@@ -12,11 +12,12 @@
  * directly across `NODE_ENV` x `AI_INTEGRATIONS_PROVIDER` combinations.
  * They make no network calls and need no DB.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   resolveAiProvider,
   assertAiProviderHipaaCompliant,
   HIPAA_ELIGIBLE_PROVIDERS,
+  resolveAiBaseUrl,
 } from "../../lib/aiProvider";
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
@@ -125,5 +126,58 @@ describe("HIPAA_ELIGIBLE_PROVIDERS constant", () => {
     expect(HIPAA_ELIGIBLE_PROVIDERS.has("azure")).toBe(true);
     expect(HIPAA_ELIGIBLE_PROVIDERS.has("bedrock")).toBe(true);
     expect(HIPAA_ELIGIBLE_PROVIDERS.size).toBe(2);
+  });
+});
+
+describe("resolveAiBaseUrl — the variable is named per provider, not per SDK", () => {
+  const KEYS = [
+    "AI_INTEGRATIONS_BEDROCK_BASE_URL",
+    "AI_INTEGRATIONS_OPENAI_BASE_URL",
+  ] as const;
+
+  beforeEach(() => {
+    for (const k of KEYS) delete process.env[k];
+  });
+  afterEach(() => {
+    for (const k of KEYS) delete process.env[k];
+  });
+
+  it("reads the BEDROCK-named variable for the bedrock provider", () => {
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
+    expect(resolveAiBaseUrl("bedrock")).toBe(
+      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic",
+    );
+  });
+
+  it("prefers the BEDROCK name over the legacy OPENAI name when both are set", () => {
+    // The whole point of the rename: an environment mid-migration must resolve
+    // to the new value, not silently keep using the stale OpenAI-shaped URL.
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
+    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL =
+      "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1";
+    expect(resolveAiBaseUrl("bedrock")).toBe(
+      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic",
+    );
+  });
+
+  it("falls back to the legacy OPENAI name so a pre-rename deploy still boots", () => {
+    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://legacy.example/v1";
+    expect(resolveAiBaseUrl("bedrock")).toBe("https://legacy.example/v1");
+  });
+
+  it("does NOT read the BEDROCK name for azure — that endpoint really is OpenAI-shaped", () => {
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL = "https://bedrock.example/anthropic";
+    expect(resolveAiBaseUrl("azure")).toBeUndefined();
+
+    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://azure.example/openai";
+    expect(resolveAiBaseUrl("azure")).toBe("https://azure.example/openai");
+  });
+
+  it("treats a whitespace-only value as unset rather than as a URL", () => {
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL = "   ";
+    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://legacy.example/v1";
+    expect(resolveAiBaseUrl("bedrock")).toBe("https://legacy.example/v1");
   });
 });
