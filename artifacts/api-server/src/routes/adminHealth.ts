@@ -262,11 +262,25 @@ router.get(
       return;
     }
 
-    const client = getOpenAI();
+    // getOpenAI() calls resolveAiProvider(), which THROWS in production when
+    // the provider is not HIPAA-eligible. That throw is deliberate at the
+    // runtime call sites -- a prod deploy pointed at a non-BAA provider must
+    // fail loudly -- but it must never escape HERE. This endpoint exists to
+    // tell an operator what is misconfigured; letting it 500 on the exact
+    // misconfiguration it is meant to describe sends them to the logs to
+    // rediscover what this response could have told them.
+    let client: ReturnType<typeof getOpenAI> = null;
+    let constructionError = false;
+    try {
+      client = getOpenAI();
+    } catch {
+      // Swallow the reason deliberately: it can name env vars and provider
+      // values. envIssues already carries the actionable detail.
+      constructionError = true;
+    }
     if (!client) {
-      // Client factory returned null despite env looking valid — surface
-      // it as a config issue but never echo the underlying reason (which
-      // could be a thrown error from resolveAiProvider).
+      // Client factory returned null or threw despite env looking valid —
+      // surface it as a config issue but never echo the underlying reason.
       res.status(200).json({
         provider: env.provider,
         configured: false,
@@ -275,7 +289,11 @@ router.get(
         ping: {
           ok: false,
           category: "unknown" as PingErrorCategory,
-          message: "AI client could not be constructed",
+          message: constructionError
+            ? "AI client could not be constructed — the configured " +
+              "AI_INTEGRATIONS_PROVIDER is rejected in production (only " +
+              "'azure' and 'bedrock' are HIPAA-eligible)"
+            : "AI client could not be constructed",
         },
         warnings: env.warnings,
       });

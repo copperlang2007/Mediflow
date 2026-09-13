@@ -380,6 +380,41 @@ describe("GET /admin/health/ai — defense in depth", () => {
     expect(res.body.ping.ok).toBe(false);
   });
 
+  it("still answers 200 when the prod HIPAA guard rejects the provider", async () => {
+    // Regression: getOpenAI() calls resolveAiProvider(), which THROWS in
+    // production for a non-HIPAA-eligible provider. That call sat outside any
+    // try/catch, so /admin/health/ai returned 500 on exactly the
+    // misconfiguration it exists to describe -- the operator gets an opaque
+    // error from the endpoint they opened to find out what is wrong.
+    const priorEnv = process.env.NODE_ENV;
+    // A COMPLETE openai config: validateEnv() finds no issues, so it reports
+    // configured and falls through to getOpenAI() -- which is the only way to
+    // reach the throw. An incomplete config early-returns before it.
+    process.env.AI_INTEGRATIONS_PROVIDER = "openai";
+    process.env.AI_INTEGRATIONS_OPENAI_API_KEY = TEST_API_KEY;
+    process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://api.openai.com/v1";
+    process.env.NODE_ENV = "production";
+    resetOpenAIClient();
+
+    const envUser = await freshAdmin();
+    const res = await request(app)
+      .get("/api/admin/health/ai")
+      .set(withAuth(envUser.id));
+
+    process.env.NODE_ENV = priorEnv;
+    delete process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+    setAzureEnv();
+    resetOpenAIClient();
+
+    expect(res.status).toBe(200);
+    expect(res.body.configured).toBe(false);
+    expect(res.body.ping.ok).toBe(false);
+    // Names the real cause instead of the generic message.
+    expect(res.body.ping.message).toContain("HIPAA-eligible");
+    // And still never echoes the key.
+    expect(JSON.stringify(res.body)).not.toContain(TEST_API_KEY);
+  });
+
   it("does not report azure as configured when ONLY the bedrock key is set", async () => {
     // Regression: validateEnv() used to read the bedrock name regardless of
     // provider, while resolveAiApiKey() only falls back to it for bedrock. An
