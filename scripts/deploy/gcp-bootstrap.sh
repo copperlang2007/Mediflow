@@ -329,7 +329,7 @@ Add these as GitHub Actions SECRETS on ${GITHUB_REPO}
   GCP_NETWORK                 ${NETWORK}
 
 Plus the third-party credentials listed in docs/DEPLOY_GCP_PRODUCTION.md
-(CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY, AI_INTEGRATIONS_OPENAI_API_KEY,
+(CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY, AI_INTEGRATIONS_BEDROCK_API_KEY,
 AI_INTEGRATIONS_OPENAI_BASE_URL, and any optional ones you use).
 
 Then push to ${GITHUB_BRANCH} or run the

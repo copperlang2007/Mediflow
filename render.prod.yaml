@@ -103,7 +103,7 @@ services:
       - key: ALLOWED_ORIGIN # set to the service's public URL by the deploy script
         sync: false
       # Bedrock API key (Bearer token) consumed by the OpenAI SDK client.
-      - key: AI_INTEGRATIONS_OPENAI_API_KEY
+      - key: AI_INTEGRATIONS_BEDROCK_API_KEY
         sync: false
       # Bedrock's ANTHROPIC MESSAGES endpoint, e.g.
       # https://bedrock-runtime.<region>.amazonaws.com/anthropic

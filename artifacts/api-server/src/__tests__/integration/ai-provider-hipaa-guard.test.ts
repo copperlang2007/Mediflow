@@ -18,6 +18,8 @@ import {
   assertAiProviderHipaaCompliant,
   HIPAA_ELIGIBLE_PROVIDERS,
   resolveAiBaseUrl,
+  resolveAiApiKey,
+  aiApiKeyVarName,
 } from "../../lib/aiProvider";
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
@@ -179,5 +181,51 @@ describe("resolveAiBaseUrl — the variable is named per provider, not per SDK",
     process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL = "   ";
     process.env.AI_INTEGRATIONS_OPENAI_BASE_URL = "https://legacy.example/v1";
     expect(resolveAiBaseUrl("bedrock")).toBe("https://legacy.example/v1");
+  });
+});
+
+describe("resolveAiApiKey — the credential is a Bedrock token, not an OpenAI key", () => {
+  const KEYS = [
+    "AI_INTEGRATIONS_BEDROCK_API_KEY",
+    "AI_INTEGRATIONS_OPENAI_API_KEY",
+  ] as const;
+
+  beforeEach(() => {
+    for (const k of KEYS) delete process.env[k];
+  });
+  afterEach(() => {
+    for (const k of KEYS) delete process.env[k];
+  });
+
+  it("reads the BEDROCK-named variable for the bedrock provider", () => {
+    process.env.AI_INTEGRATIONS_BEDROCK_API_KEY = "bedrock-token";
+    expect(resolveAiApiKey("bedrock")).toBe("bedrock-token");
+  });
+
+  it("prefers the BEDROCK name over the legacy OPENAI name when both are set", () => {
+    process.env.AI_INTEGRATIONS_BEDROCK_API_KEY = "new-token";
+    process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "stale-token";
+    expect(resolveAiApiKey("bedrock")).toBe("new-token");
+  });
+
+  it("falls back to the legacy OPENAI name so a pre-rename deploy still boots", () => {
+    process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "legacy-token";
+    expect(resolveAiApiKey("bedrock")).toBe("legacy-token");
+  });
+
+  it("does NOT read the bedrock name for azure — azure's key really is OpenAI-shaped", () => {
+    process.env.AI_INTEGRATIONS_BEDROCK_API_KEY = "bedrock-token";
+    expect(resolveAiApiKey("azure")).toBeUndefined();
+  });
+
+  it("treats a whitespace-only value as unset", () => {
+    process.env.AI_INTEGRATIONS_BEDROCK_API_KEY = "   ";
+    process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "real-token";
+    expect(resolveAiApiKey("bedrock")).toBe("real-token");
+  });
+
+  it("names the canonical variable per provider for operator-facing messages", () => {
+    expect(aiApiKeyVarName("bedrock")).toBe("AI_INTEGRATIONS_BEDROCK_API_KEY");
+    expect(aiApiKeyVarName("azure")).toBe("AI_INTEGRATIONS_OPENAI_API_KEY");
   });
 });

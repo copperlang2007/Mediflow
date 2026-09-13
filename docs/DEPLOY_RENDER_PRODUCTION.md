@@ -32,7 +32,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `RENDER_API_KEY` | Step 1 above. |
 | `CLERK_SECRET_KEY` | Clerk dashboard → API Keys. Must be a **live** key (`sk_live_…`). |
 | `CLERK_PUBLISHABLE_KEY` | Clerk dashboard → API Keys. Must be **live** (`pk_live_…`). Also baked into the web bundle at build. |
-| `AI_INTEGRATIONS_OPENAI_API_KEY` | Your **Amazon Bedrock API key** (used as a Bearer token by the OpenAI SDK). Bedrock is HIPAA/BAA-covered under your AWS BAA; the server refuses non-BAA providers in prod. |
+| `AI_INTEGRATIONS_BEDROCK_API_KEY` | Your **Amazon Bedrock API key** (used as a Bearer token by the OpenAI SDK). Bedrock is HIPAA/BAA-covered under your AWS BAA; the server refuses non-BAA providers in prod. |
 | `AI_INTEGRATIONS_BEDROCK_BASE_URL` | Bedrock's **Anthropic Messages** endpoint for your region, e.g. `https://bedrock-runtime.us-east-1.amazonaws.com/anthropic`. **Not** `/openai/v1`: AWS lists Chat Completions as unsupported for every Anthropic model, so Claude is unreachable over that path. The legacy `AI_INTEGRATIONS_OPENAI_BASE_URL` name is still read as a fallback so a pre-rename service keeps booting. |
 | `PRIVATE_OBJECT_DIR` | GCS bucket/path for private PHI documents (e.g. `mediflow-prod/private`). Hard-required at boot. |
 

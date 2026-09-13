@@ -235,7 +235,7 @@ All Replit coupling is removed from MediFlow. References found in the repo today
 - **Remove the Replit proxy** from the AI client dev path (§7). Dev → standard OpenAI base URL; prod → Azure OpenAI (unchanged guard).
 - **Single AI entry point:** all AI calls (chat, draft, compliance report, **plus** the dialer's planned agent-assist and transcript parsing) go through `buildOpenAIClient()` / `aiProvider.ts`.
 - **Transcript parsing & agent-assist run inside MediFlow**, invoked on `call.transcript.ready` (§6), so PHI stays inside the Azure-OpenAI BAA boundary. The dialer never calls an LLM directly with PHI.
-- **Env after consolidation:** `AI_INTEGRATIONS_PROVIDER` (`openai`|`azure`), `AI_INTEGRATIONS_OPENAI_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL` (no Replit), Azure: `AI_INTEGRATIONS_AZURE_RESOURCE`, `AI_INTEGRATIONS_AZURE_DEPLOYMENT`, `AI_INTEGRATIONS_AZURE_API_VERSION`.
+- **Env after consolidation:** `AI_INTEGRATIONS_PROVIDER` (`openai`|`azure`), `AI_INTEGRATIONS_BEDROCK_API_KEY`, `AI_INTEGRATIONS_OPENAI_BASE_URL` (no Replit), Azure: `AI_INTEGRATIONS_AZURE_RESOURCE`, `AI_INTEGRATIONS_AZURE_DEPLOYMENT`, `AI_INTEGRATIONS_AZURE_API_VERSION`.
 
 > **Recorded alternative:** if the team later wants Claude's long-context compliance reasoning, the BAA-clean route is **Anthropic via AWS Bedrock**, added *behind* `aiProvider.ts` as a third provider value — not by splitting providers across services. Not part of Option A.
 

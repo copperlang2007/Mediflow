@@ -15,7 +15,7 @@ can keep using OpenAI direct.
 | Variable | Required | Default | Notes |
 |---|---|---|---|
 | `AI_INTEGRATIONS_PROVIDER` | no | `openai` | `openai` or `azure`. Set to `azure` in prod. |
-| `AI_INTEGRATIONS_OPENAI_API_KEY` | yes | — | API key for whichever provider is selected. |
+| `AI_INTEGRATIONS_BEDROCK_API_KEY` | yes | — | API key for whichever provider is selected. |
 
 ### OpenAI direct (`AI_INTEGRATIONS_PROVIDER=openai`)
 

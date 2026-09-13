@@ -115,6 +115,51 @@ export function resolveAiBaseUrl(
 }
 
 /**
+ * The API key for the configured provider.
+ *
+ * Named per PROVIDER for the same reason as the base URL: for bedrock this
+ * value is an AWS Bedrock bearer token minted in the operator's own AWS
+ * account and covered by their AWS BAA. It is NOT an OpenAI credential and
+ * never reaches api.openai.com. Calling it AI_INTEGRATIONS_OPENAI_API_KEY
+ * told every operator the opposite — that MediFlow wanted an OpenAI account —
+ * which is both false and, in a PHI system, alarming on its face.
+ *
+ *   - bedrock       → AI_INTEGRATIONS_BEDROCK_API_KEY
+ *   - azure/openai  → AI_INTEGRATIONS_OPENAI_API_KEY
+ *
+ * Azure keeps the OPENAI name because there the name is true: the credential
+ * really is an OpenAI-shaped API key issued by Azure OpenAI.
+ *
+ * The legacy name remains readable as a FALLBACK (not an alias) for bedrock
+ * so an environment configured before this rename keeps booting.
+ */
+export function resolveAiApiKey(
+  provider: AiProvider = resolveAiProvider(),
+): string | undefined {
+  if (provider === "bedrock") {
+    return (
+      process.env["AI_INTEGRATIONS_BEDROCK_API_KEY"]?.trim() ||
+      process.env["AI_INTEGRATIONS_OPENAI_API_KEY"]?.trim() ||
+      undefined
+    );
+  }
+  return process.env["AI_INTEGRATIONS_OPENAI_API_KEY"]?.trim() || undefined;
+}
+
+/**
+ * The env var name an operator should set for this provider's API key —
+ * used in error/health messages so they name the CANONICAL variable rather
+ * than the legacy one.
+ */
+export function aiApiKeyVarName(
+  provider: AiProvider = resolveAiProvider(),
+): string {
+  return provider === "bedrock"
+    ? "AI_INTEGRATIONS_BEDROCK_API_KEY"
+    : "AI_INTEGRATIONS_OPENAI_API_KEY";
+}
+
+/**
  * Boot-time assertion. Call once at app/worker bootstrap so a
  * misconfigured production deploy fails fast — before the first AI call.
  * Throws the same error as `resolveAiProvider()`.

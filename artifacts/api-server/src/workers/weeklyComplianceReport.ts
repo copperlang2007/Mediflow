@@ -29,6 +29,7 @@ import {
   resolveAiProvider,
   resolveAiModel,
   resolveAiBaseUrl,
+  resolveAiApiKey,
 } from "../lib/aiProvider";
 
 // Provider dispatch — `azure` is the HIPAA-eligible (BAA-covered) path.
@@ -39,10 +40,10 @@ import {
 let _openai: OpenAI | null = null;
 function getOpenAI(): OpenAI | null {
   if (_openai) return _openai;
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-  if (!apiKey) return null;
   // Throws in production if the provider is not the HIPAA-eligible value.
   const provider = resolveAiProvider();
+  const apiKey = resolveAiApiKey(provider);
+  if (!apiKey) return null;
   try {
     if (provider === "azure") {
       const resource = process.env.AI_INTEGRATIONS_AZURE_RESOURCE;

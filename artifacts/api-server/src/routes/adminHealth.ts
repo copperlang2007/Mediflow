@@ -55,7 +55,12 @@ function validateEnv(): EnvValidation {
   const warnings: string[] = [];
 
   const rawProvider = (process.env.AI_INTEGRATIONS_PROVIDER ?? "").toLowerCase();
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  // Either name is accepted for bedrock (canonical first, legacy fallback),
+  // matching resolveAiApiKey(). The missing-key issue below names whichever
+  // variable this provider should actually use.
+  const apiKey =
+    process.env.AI_INTEGRATIONS_BEDROCK_API_KEY?.trim() ||
+    process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.trim();
 
   let provider: ProviderKind;
   if (rawProvider === "azure") provider = "azure";
@@ -70,7 +75,20 @@ function validateEnv(): EnvValidation {
   }
 
   if (!apiKey) {
-    issues.push("AI_INTEGRATIONS_OPENAI_API_KEY missing");
+    issues.push(
+      provider === "bedrock"
+        ? "AI_INTEGRATIONS_BEDROCK_API_KEY missing"
+        : "AI_INTEGRATIONS_OPENAI_API_KEY missing",
+    );
+  } else if (
+    provider === "bedrock" &&
+    !process.env.AI_INTEGRATIONS_BEDROCK_API_KEY?.trim()
+  ) {
+    warnings.push(
+      "AI_INTEGRATIONS_BEDROCK_API_KEY is unset; falling back to the legacy " +
+        "AI_INTEGRATIONS_OPENAI_API_KEY. Rename it — the value is a Bedrock " +
+        "token, not an OpenAI credential.",
+    );
   }
 
   // HIPAA guard: only `azure` and `bedrock` are BAA-eligible. Surface a

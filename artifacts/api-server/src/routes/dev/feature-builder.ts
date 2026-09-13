@@ -35,7 +35,12 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import OpenAI, { AzureOpenAI } from "openai";
-import { resolveAiProvider, resolveAiBaseUrl } from "../../lib/aiProvider";
+import {
+  resolveAiProvider,
+  resolveAiBaseUrl,
+  resolveAiApiKey,
+  aiApiKeyVarName,
+} from "../../lib/aiProvider";
 import {
   requireAuth,
   requirePermission,
@@ -147,11 +152,11 @@ export function setOpenAIClientFactory(
 
 function getOpenAI(): AiClient | null {
   if (_factory) return _factory();
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-  if (!apiKey) return null;
   // Throws in production if the provider is not the HIPAA-eligible value
   // — see `lib/aiProvider.ts`.
   const provider = resolveAiProvider();
+  const apiKey = resolveAiApiKey(provider);
+  if (!apiKey) return null;
   try {
     if (provider === "azure") {
       // Azure OpenAI is the HIPAA-eligible path. The deployment name in
@@ -213,8 +218,7 @@ router.post(
     const ai = getOpenAI();
     if (!ai) {
       res.status(503).json({
-        error:
-          "AI integration is not configured (AI_INTEGRATIONS_OPENAI_API_KEY/BASE_URL).",
+        error: `AI integration is not configured (${aiApiKeyVarName()}/BASE_URL).`,
       });
       return;
     }

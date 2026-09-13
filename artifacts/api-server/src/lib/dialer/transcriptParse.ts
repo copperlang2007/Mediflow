@@ -21,6 +21,7 @@ import {
   resolveAiProvider,
   resolveAiModel,
   resolveAiBaseUrl,
+  resolveAiApiKey,
 } from "../aiProvider";
 import { logger } from "../logger";
 
@@ -123,10 +124,10 @@ export interface TranscriptAiClient {
  * when AI is not configured — callers degrade gracefully (parse is skipped).
  */
 function buildDefaultAiClient(): TranscriptAiClient | null {
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-  if (!apiKey) return null;
   // Throws in production if the provider is not the HIPAA-eligible value.
   const provider = resolveAiProvider();
+  const apiKey = resolveAiApiKey(provider);
+  if (!apiKey) return null;
   try {
     if (provider === "azure") {
       const resource = process.env.AI_INTEGRATIONS_AZURE_RESOURCE;
