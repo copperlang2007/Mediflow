@@ -105,6 +105,14 @@ services:
       # Bedrock API key (Bearer token) consumed by the OpenAI SDK client.
       - key: AI_INTEGRATIONS_BEDROCK_API_KEY
         sync: false
+      # Legacy name, still read as a fallback by resolveAiApiKey() so a
+      # pre-rename Render service keeps booting. Declared for the same reason
+      # the legacy base URL is below: on the manual blueprint-connect path
+      # Render does not populate undeclared vars, so an operator whose only
+      # pre-migration secret is this one would deploy with NO key at all and
+      # AI would fail silently at first request. Set the BEDROCK one above.
+      - key: AI_INTEGRATIONS_OPENAI_API_KEY
+        sync: false
       # Bedrock's ANTHROPIC MESSAGES endpoint, e.g.
       # https://bedrock-runtime.<region>.amazonaws.com/anthropic
       # NOT /openai/v1 — AWS lists Chat Completions as unsupported for every

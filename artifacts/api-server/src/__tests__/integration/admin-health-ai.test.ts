@@ -379,4 +379,26 @@ describe("GET /admin/health/ai — defense in depth", () => {
     expect(res.body.envIssues).toContain("AI_INTEGRATIONS_OPENAI_API_KEY missing");
     expect(res.body.ping.ok).toBe(false);
   });
+
+  it("does not report azure as configured when ONLY the bedrock key is set", async () => {
+    // Regression: validateEnv() used to read the bedrock name regardless of
+    // provider, while resolveAiApiKey() only falls back to it for bedrock. An
+    // azure deploy holding only AI_INTEGRATIONS_BEDROCK_API_KEY therefore
+    // reported {configured: true, envIssues: []} while getOpenAI() returned
+    // null -- the health check contradicted the runtime it exists to describe.
+    delete process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+    process.env.AI_INTEGRATIONS_BEDROCK_API_KEY = "bedrock-only-key";
+    resetOpenAIClient();
+
+    const envUser = await freshAdmin();
+    const res = await request(app)
+      .get("/api/admin/health/ai")
+      .set(withAuth(envUser.id));
+
+    delete process.env.AI_INTEGRATIONS_BEDROCK_API_KEY;
+
+    expect(res.status).toBe(200);
+    expect(res.body.envValid).toBe(false);
+    expect(res.body.envIssues).toContain("AI_INTEGRATIONS_OPENAI_API_KEY missing");
+  });
 });

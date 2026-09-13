@@ -55,12 +55,6 @@ function validateEnv(): EnvValidation {
   const warnings: string[] = [];
 
   const rawProvider = (process.env.AI_INTEGRATIONS_PROVIDER ?? "").toLowerCase();
-  // Either name is accepted for bedrock (canonical first, legacy fallback),
-  // matching resolveAiApiKey(). The missing-key issue below names whichever
-  // variable this provider should actually use.
-  const apiKey =
-    process.env.AI_INTEGRATIONS_BEDROCK_API_KEY?.trim() ||
-    process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.trim();
 
   let provider: ProviderKind;
   if (rawProvider === "azure") provider = "azure";
@@ -73,6 +67,17 @@ function validateEnv(): EnvValidation {
     provider = "unset";
     issues.push(`AI_INTEGRATIONS_PROVIDER has unknown value '${rawProvider}'`);
   }
+
+  // Provider-aware, and deliberately identical to resolveAiApiKey(): only
+  // bedrock falls back to the legacy name. Reading both regardless of provider
+  // would report {configured: true} for an azure deploy that has only the
+  // bedrock key set, while getOpenAI() returns null -- a health check that
+  // contradicts the runtime is worse than no health check.
+  const apiKey =
+    provider === "bedrock"
+      ? process.env.AI_INTEGRATIONS_BEDROCK_API_KEY?.trim() ||
+        process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.trim()
+      : process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.trim();
 
   if (!apiKey) {
     issues.push(
