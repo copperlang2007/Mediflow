@@ -218,7 +218,10 @@ router.post(
     const ai = getOpenAI();
     if (!ai) {
       res.status(503).json({
-        error: `AI integration is not configured (${aiApiKeyVarName()}/BASE_URL).`,
+        // This branch is reached when the key is missing OR the client threw,
+        // and BASE_URL is irrelevant for azure. Naming a cause we have not
+        // established sends the operator to the wrong variable.
+        error: `AI integration is not configured (check ${aiApiKeyVarName()} and the provider's base URL).`,
       });
       return;
     }

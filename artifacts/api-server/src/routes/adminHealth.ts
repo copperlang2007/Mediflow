@@ -28,6 +28,7 @@ import {
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { getOpenAI } from "./ai";
 import { logger } from "../lib/logger";
+import { resolveAiApiKey, aiApiKeyVarName } from "../lib/aiProvider";
 
 const router: IRouter = Router();
 
@@ -68,23 +69,17 @@ function validateEnv(): EnvValidation {
     issues.push(`AI_INTEGRATIONS_PROVIDER has unknown value '${rawProvider}'`);
   }
 
-  // Provider-aware, and deliberately identical to resolveAiApiKey(): only
-  // bedrock falls back to the legacy name. Reading both regardless of provider
-  // would report {configured: true} for an azure deploy that has only the
-  // bedrock key set, while getOpenAI() returns null -- a health check that
-  // contradicts the runtime is worse than no health check.
-  const apiKey =
-    provider === "bedrock"
-      ? process.env.AI_INTEGRATIONS_BEDROCK_API_KEY?.trim() ||
-        process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.trim()
-      : process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.trim();
+  // Call the SAME resolver the runtime uses rather than re-deriving the rule.
+  // A local copy already drifted once in this PR: it read both names
+  // regardless of provider while resolveAiApiKey() only falls back for
+  // bedrock, so an azure deploy holding only the bedrock key reported
+  // {configured: true} while getOpenAI() returned null. `unset` resolves as
+  // openai, matching resolveAiProvider()'s own default.
+  const resolverProvider = provider === "unset" ? "openai" : provider;
+  const apiKey = resolveAiApiKey(resolverProvider);
 
   if (!apiKey) {
-    issues.push(
-      provider === "bedrock"
-        ? "AI_INTEGRATIONS_BEDROCK_API_KEY missing"
-        : "AI_INTEGRATIONS_OPENAI_API_KEY missing",
-    );
+    issues.push(`${aiApiKeyVarName(resolverProvider)} missing`);
   } else if (
     provider === "bedrock" &&
     !process.env.AI_INTEGRATIONS_BEDROCK_API_KEY?.trim()

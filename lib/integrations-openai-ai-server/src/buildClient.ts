@@ -22,6 +22,15 @@ export const HIPAA_ELIGIBLE_PROVIDERS: ReadonlySet<string> = new Set([
 export function buildOpenAIClient(): OpenAI {
   const provider = (process.env.AI_INTEGRATIONS_PROVIDER ?? "openai").toLowerCase();
 
+  if (process.env.NODE_ENV === "production" && !HIPAA_ELIGIBLE_PROVIDERS.has(provider)) {
+    throw new Error(
+      "FATAL: AI_INTEGRATIONS_PROVIDER must be a HIPAA-eligible provider " +
+        "('azure' or 'bedrock') in production — the standard OpenAI API has no " +
+        "HIPAA BAA and must not receive PHI. " +
+        `Got: ${process.env.AI_INTEGRATIONS_PROVIDER ?? "<unset>"}`,
+    );
+  }
+
   // Named per PROVIDER, not per SDK. For bedrock this credential is an AWS
   // Bedrock bearer token from the operator's own account, covered by their
   // AWS BAA -- it is not an OpenAI credential and never reaches
@@ -40,15 +49,6 @@ export function buildOpenAIClient(): OpenAI {
         : "AI_INTEGRATIONS_OPENAI_API_KEY";
     throw new Error(
       `${expectedKeyVar} must be set for provider "${provider}". Did you forget to provision the AI integration?`,
-    );
-  }
-
-  if (process.env.NODE_ENV === "production" && !HIPAA_ELIGIBLE_PROVIDERS.has(provider)) {
-    throw new Error(
-      "FATAL: AI_INTEGRATIONS_PROVIDER must be a HIPAA-eligible provider " +
-        "('azure' or 'bedrock') in production — the standard OpenAI API has no " +
-        "HIPAA BAA and must not receive PHI. " +
-        `Got: ${process.env.AI_INTEGRATIONS_PROVIDER ?? "<unset>"}`,
     );
   }
 
