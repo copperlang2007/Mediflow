@@ -34,6 +34,7 @@ vi.mock("@anthropic-ai/sdk", () => ({
 }));
 
 import {
+  bedrockHostKind,
   BedrockEmptyStreamError,
   createBedrockAnthropicClient,
   normalizeBedrockModelId,
@@ -764,6 +765,19 @@ describe("bedrock Anthropic adapter — response translation", () => {
     ]) {
       expect(normalizeBedrockModelId("claude-sonnet-5", url)).toBe("claude-sonnet-5");
     }
+  });
+
+  it("classifies hosts one way, so the adapter and health check cannot disagree", () => {
+    // These two had drifted: the adapter matched a hostname, /admin/health/ai
+    // matched a substring, so an alias containing "bedrock-runtime" made the
+    // health check warn about a host the adapter declined to classify.
+    // Reported by the AWS review agent on PR #207.
+    expect(bedrockHostKind("https://bedrock-runtime.us-east-1.amazonaws.com/anthropic")).toBe("runtime");
+    expect(bedrockHostKind("https://bedrock-mantle.us-east-1.api.aws/anthropic")).toBe("mantle");
+    expect(bedrockHostKind("https://bedrock-runtime.us-gov-west-1.amazonaws.com/anthropic")).toBe("non-commercial");
+    expect(bedrockHostKind("https://bedrock-runtime.cn-north-1.amazonaws.com.cn/anthropic")).toBe("non-commercial");
+    expect(bedrockHostKind("https://foo.bedrock-runtime.internal.corp/anthropic")).toBe("unknown");
+    expect(bedrockHostKind("not a url")).toBe("unknown");
   });
 
   it("still prefixes the two hostname shapes AWS documents", () => {

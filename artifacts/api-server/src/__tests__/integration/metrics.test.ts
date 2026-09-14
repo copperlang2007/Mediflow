@@ -151,3 +151,22 @@ describe("GET /metrics", () => {
     }
   });
 });
+
+describe("refreshQueueGaugesIfPossible — a missing database costs the queue gauges only", () => {
+  it("does not throw when DATABASE_URL is unset", async () => {
+    // Making jobs.ts a lazy import moved its DATABASE_URL throw from load time
+    // to scrape time. Outside the try it escaped and turned /metrics into a
+    // 500 that served NO metrics -- not even the process and HTTP ones that
+    // need no database at all.
+    // Reported by the AWS review agent on PR #207.
+    const prior = process.env.DATABASE_URL;
+    delete process.env.DATABASE_URL;
+    try {
+      const { refreshQueueGaugesIfPossible } = await import("../../lib/metrics");
+      await expect(refreshQueueGaugesIfPossible()).resolves.toBeUndefined();
+    } finally {
+      if (prior === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = prior;
+    }
+  });
+});

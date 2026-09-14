@@ -33,7 +33,10 @@ import {
   aiApiKeyVarName,
   resolveAiModel,
 } from "../lib/aiProvider";
-import { normalizeBedrockModelId } from "../lib/ai/bedrockAnthropicClient";
+import {
+  normalizeBedrockModelId,
+  bedrockHostKind,
+} from "../lib/ai/bedrockAnthropicClient";
 
 const router: IRouter = Router();
 
@@ -195,9 +198,14 @@ function validateEnv(): EnvValidation {
     // deploy on an unverified belief could refuse a config that works. Say
     // what looks wrong and let the ping be the arbiter.
     // Raised as a P2 by the Codex reviewer on PR #207.
-    const host = bedrockBaseUrl ?? legacyBaseUrl ?? "";
-    const isMantle = host.includes("bedrock-mantle");
-    const isRuntime = host.includes("bedrock-runtime");
+    // Ask the adapter, rather than re-deriving it: a substring test here
+    // disagreed with the adapter's hostname match, so an alias merely
+    // containing "bedrock-runtime" produced a model/host mismatch warning for
+    // a host the adapter had correctly declined to classify.
+    // Reported by the AWS review agent on PR #207.
+    const hostKind = bedrockHostKind(bedrockBaseUrl ?? legacyBaseUrl ?? "");
+    const isMantle = hostKind === "mantle";
+    const isRuntime = hostKind === "runtime";
     if (isMantle && /^(global|us|eu|apac)\.anthropic\./.test(effectiveModel)) {
       warnings.push(
         `AI_INTEGRATIONS_MODEL "${effectiveModel}" carries a bedrock-runtime inference-profile prefix, but the base URL names the bedrock-mantle host, which is documented with the plain "anthropic." form. If AI calls return model-not-found, try "${effectiveModel.replace(/^[a-z]+\./, "")}".`,
