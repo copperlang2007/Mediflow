@@ -24,52 +24,19 @@ import {
   notificationsTable,
   usersTable,
 } from "@workspace/db";
-import OpenAI, { AzureOpenAI } from "openai";
-import {
-  resolveAiProvider,
-  resolveAiModel,
-  resolveAiBaseUrl,
-  resolveAiApiKey,
-} from "../lib/aiProvider";
+import { buildAiClient } from "../lib/ai/buildAiClient";
+import type { ChatCompletionClient } from "../lib/ai/bedrockAnthropicClient";
+import { resolveAiModel } from "../lib/aiProvider";
 
-// Provider dispatch — `azure` is the HIPAA-eligible (BAA-covered) path.
 // This worker drafts compliance reports from agent PHI, so it MUST go
-// through the same guarded provider selection as `routes/ai.ts`.
-// `resolveAiProvider()` hard-fails in production unless the provider is
-// `azure` — see `lib/aiProvider.ts`.
-let _openai: OpenAI | null = null;
-function getOpenAI(): OpenAI | null {
-  if (_openai) return _openai;
-  // resolveAiProvider() is INSIDE the try. The authoritative fail-fast for a
-  // non-BAA provider is assertAiProviderHipaaCompliant() at bootstrap
-  // (index.ts) -- the process refuses to start, so no request is ever served
-  // by a misconfigured deploy. Re-throwing here adds nothing and costs the
-  // caller's graceful-degradation contract (the transcript webhook must not
-  // 5xx; a worker must not die). Belt-and-braces: return null and let the
-  // boot guard be the thing that fails loudly.
-  try {
-    const provider = resolveAiProvider();
-    const apiKey = resolveAiApiKey(provider);
-    if (!apiKey) return null;
-    if (provider === "azure") {
-      const resource = process.env.AI_INTEGRATIONS_AZURE_RESOURCE;
-      const endpoint =
-        process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ??
-        (resource ? `https://${resource}.openai.azure.com` : undefined);
-      if (!endpoint) return null;
-      const apiVersion =
-        process.env.AI_INTEGRATIONS_AZURE_API_VERSION ?? "2024-02-15-preview";
-      const deployment = process.env.AI_INTEGRATIONS_AZURE_DEPLOYMENT;
-      _openai = new AzureOpenAI({ apiKey, endpoint, apiVersion, deployment });
-      return _openai;
-    }
-    const baseURL = resolveAiBaseUrl(provider);
-    if (!baseURL) return null;
-    _openai = new OpenAI({ apiKey, baseURL });
-    return _openai;
-  } catch {
-    return null;
-  }
+// through the same guarded construction as every other AI path —
+// `lib/ai/buildAiClient.ts`, gated by `resolveAiProvider()`, which hard-fails
+// in production on a provider with no BAA.
+let _aiClient: ChatCompletionClient | null = null;
+function getOpenAI(): ChatCompletionClient | null {
+  if (_aiClient) return _aiClient;
+  _aiClient = buildAiClient();
+  return _aiClient;
 }
 import { ObjectStorageService } from "../lib/objectStorage";
 import { buildComplianceReportPdf } from "../lib/complianceReportPdf";
