@@ -417,6 +417,43 @@ describe("GET /admin/health/ai — defense in depth", () => {
     expect(JSON.stringify(res.body)).not.toContain(TEST_API_KEY);
   });
 
+  it("hints the application's own default model when AI_INTEGRATIONS_MODEL is unset on bedrock", async () => {
+    // Regression: validateEnv() left modelHint at the OpenAI placeholder
+    // ("gpt-4o-mini") when the variable was unset, while the application
+    // resolves a Claude default. The ping therefore sent a non-Claude id that
+    // normalizeBedrockModelId() passes through untouched, so Bedrock returned
+    // model-not-found and a correctly configured default deploy failed its
+    // OWN health check. Reported independently by two review bots.
+    const priorModel = process.env.AI_INTEGRATIONS_MODEL;
+    delete process.env.AI_INTEGRATIONS_MODEL;
+    delete process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+    process.env.AI_INTEGRATIONS_PROVIDER = "bedrock";
+    process.env.AI_INTEGRATIONS_BEDROCK_API_KEY = TEST_API_KEY;
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
+    resetOpenAIClient();
+
+    const envUser = await freshAdmin();
+    const res = await request(app)
+      .get("/api/admin/health/ai")
+      .set(withAuth(envUser.id));
+
+    if (priorModel === undefined) delete process.env.AI_INTEGRATIONS_MODEL;
+    else process.env.AI_INTEGRATIONS_MODEL = priorModel;
+    delete process.env.AI_INTEGRATIONS_BEDROCK_API_KEY;
+    delete process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL;
+    setAzureEnv();
+    resetOpenAIClient();
+
+    expect(res.status).toBe(200);
+    // The warning names the model actually being used, and it is a Claude id.
+    const warned = res.body.warnings.join(" ");
+    expect(warned).toContain("AI_INTEGRATIONS_MODEL unset");
+    expect(warned).toContain("claude-");
+    expect(warned).not.toContain("gpt-");
+    expect(JSON.stringify(res.body)).not.toContain(TEST_API_KEY);
+  });
+
   it("does not report azure as configured when ONLY the bedrock key is set", async () => {
     // Regression: validateEnv() used to read the bedrock name regardless of
     // provider, while resolveAiApiKey() only falls back to it for bedrock. An

@@ -193,6 +193,14 @@ duplication, which nobody wants back.
   eighth mutation survived and exposed a redundant branch in
   `normalizeBedrockModelId()`, which was then removed rather than papered over.
 - Repo-wide `tsc` clean across all five workspaces.
+- Three findings from the first automated review round were confirmed and
+  fixed, each with a test that fails without the fix: the `json_schema`
+  envelope was serialized whole (Copilot); `/admin/health/ai` left its model
+  hint at the OpenAI placeholder, so a correctly configured default bedrock
+  deploy failed its own health check (Copilot and Codex, independently); and
+  the Render deployment doc still described the Bedrock key as being used by
+  the OpenAI SDK (Copilot). The health-check finding is the sharpest: this PR
+  claimed to repair that endpoint and had left it broken a second way.
 
 ## Follow-Up Actions
 
