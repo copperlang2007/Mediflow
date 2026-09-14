@@ -280,7 +280,7 @@ router.post(
     const channelInstructions =
       channel === "sms"
         ? "Draft a concise, professional SMS message (max 160 characters). No subject line. Return ONLY the message text."
-        : "Draft a professional email with a subject line and body. Return JSON with keys 'subject' (string) and 'body' (string). The body should use plain text with paragraphs.";
+        : "Draft a professional email with a subject line and body. Return JSON with keys 'subject' (string) and 'body' (string). The body should use plain text with paragraphs. Return the raw JSON object only — no markdown code fences, no commentary before or after.";
 
     const prompt = [
       `You are drafting outreach for a Medicare insurance agent.`,
@@ -320,8 +320,14 @@ router.post(
         // have repaired Bedrock by breaking email drafting outright on every
         // such Azure deployment: a strictly worse trade than the fenced-output
         // bug it set out to solve.
-        // Both reported by the AWS review agent on PR #207 — the second
-        // catching the regression the first one caused.
+        // Gating it left Azure with no anti-fence instruction at all, since
+        // the adapter was the only thing adding one. So the instruction now
+        // lives in the user prompt above, where BOTH providers see it, and
+        // this field is a bedrock-only upgrade rather than the sole carrier of
+        // it. That is the same principle as before — make the instruction
+        // land — applied to the provider the gate had quietly excluded.
+        // All three reported by the AWS review agent on PR #207, each one
+        // catching the gap left by the previous fix.
         ...(channel === "email" && resolveAiProvider() === "bedrock"
           ? { response_format: { type: "json_object" as const } }
           : {}),

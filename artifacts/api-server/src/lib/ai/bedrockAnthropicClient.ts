@@ -100,6 +100,17 @@ export interface ChatCompletionRequestOptions {
 export interface ChatCompletionResponse {
   /** The model the provider reports having served. `/admin/health/ai` reads it. */
   model?: string;
+  /**
+   * Why generation stopped, verbatim from Anthropic (`end_turn`, `max_tokens`,
+   * `stop_sequence`, `tool_use`). Exposed because `max_tokens` is otherwise
+   * indistinguishable from a complete reply: the response is a well-formed
+   * string that simply stops mid-thought. `feature-builder` writes generated
+   * files to a git branch, so a truncated file can be committed and reviewed
+   * as though it were finished.
+   * Optional because the Azure/OpenAI path does not set it.
+   * Reported by the AWS review agent on PR #207.
+   */
+  stopReason?: string;
   choices: Array<{ message: { content: string | null } }>;
 }
 
@@ -343,24 +354,24 @@ function applyResponseFormat(
     // wrong answer is the expensive kind, and because this discriminator has
     // already been wrong once.
     // Reported by the AWS review agent on PR #207.
-    const SCHEMA_KEYWORDS = [
-      "type",
-      "properties",
-      "oneOf",
-      "anyOf",
-      "allOf",
-      "$ref",
-      "$schema",
-      "enum",
-      "const",
-    ] as const;
+    // Recognise the envelope by what it IS, not by what it lacks. An OpenAI
+    // `json_schema` envelope carries exactly `name`, `schema`, and optionally
+    // `strict` -- nothing else. Blocklisting schema keywords instead was a
+    // guess at the ways a bare schema might announce itself, and it kept
+    // missing some: a schema whose top-level keys are `required`, `name` and
+    // `schema` names no listed keyword, so it read as an envelope and its
+    // `required` constraint vanished without an error. An allowlist cannot
+    // have that gap, because it enumerates the one shape that is real.
+    // Third report on this discriminator from the AWS review agent on PR #207;
+    // the first two fixes each narrowed the hole instead of closing it.
+    const ENVELOPE_KEYS = ["name", "schema", "strict"];
     const isEnvelope =
       typeof env === "object" &&
       env !== null &&
       typeof (env as { name?: unknown }).name === "string" &&
       typeof (env as { schema?: unknown }).schema === "object" &&
       (env as { schema?: unknown }).schema !== null &&
-      !SCHEMA_KEYWORDS.some((k) => k in env);
+      Object.keys(env).every((k) => ENVELOPE_KEYS.includes(k));
     const schema = isEnvelope ? (env as { schema: unknown }).schema : env;
     instruction =
       "Respond with a single valid JSON object and nothing else. " +
@@ -433,6 +444,7 @@ export function createBedrockAnthropicClient(opts: {
       const message = await client.messages.create(params, requestOptions);
       return {
         model: message.model,
+        stopReason: message.stop_reason ?? undefined,
         choices: [{ message: { content: textOf(message) } }],
       };
     }

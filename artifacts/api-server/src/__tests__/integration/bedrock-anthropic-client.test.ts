@@ -656,6 +656,77 @@ describe("bedrock Anthropic adapter — response translation", () => {
     expect(system).not.toMatch(/^\s*\{"deprecated":true\}\s*$/m);
   });
 
+  it("keeps a bare schema whose only keywords are unlisted ones", async () => {
+    // The allowlist's reason for existing: `required`/`name`/`schema` names no
+    // JSON-Schema keyword a blocklist would have listed, so the blocklist read
+    // it as an envelope and dropped `required` silently.
+    // Reported by the AWS review agent on PR #207.
+    create.mockResolvedValue({
+      model: "anthropic.claude-sonnet-5",
+      content: [{ type: "text", text: "{}" }],
+    });
+
+    await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      messages: [{ role: "user", content: "hi" }],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          required: ["hijacked"],
+          name: "x",
+          schema: { deprecated: true },
+        },
+      },
+    });
+
+    expect(create.mock.calls[0]![0].system as string).toContain("hijacked");
+  });
+
+  it("still unwraps a real OpenAI envelope, which carries only name/schema/strict", async () => {
+    // The allowlist must not reject the one shape it exists to recognise --
+    // /dev/feature-builder/plan sends exactly this.
+    create.mockResolvedValue({
+      model: "anthropic.claude-sonnet-5",
+      content: [{ type: "text", text: "{}" }],
+    });
+
+    await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      messages: [{ role: "user", content: "hi" }],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "plan",
+          strict: true,
+          schema: { type: "object", properties: { a: { type: "string" } } },
+        },
+      },
+    });
+
+    const system = create.mock.calls[0]![0].system as string;
+    // Unwrapped: the inner schema reaches the model, the wrapper does not.
+    expect(system).toContain('"properties"');
+    expect(system).not.toContain('"plan"');
+  });
+
+  it("reports stop_reason so a truncated reply is distinguishable from a finished one", async () => {
+    // A max_tokens stop returns well-formed text that simply stops. Without
+    // this, feature-builder commits the fragment to a git branch.
+    // Reported by the AWS review agent on PR #207.
+    create.mockResolvedValue({
+      model: "anthropic.claude-sonnet-5",
+      stop_reason: "max_tokens",
+      content: [{ type: "text", text: "half a fi" }],
+    });
+
+    const res = await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    expect((res as { stopReason?: string }).stopReason).toBe("max_tokens");
+  });
+
   it("counts each degradation, so the ADR follow-ups can be scheduled on rates", async () => {
     // A warn log answers "did this ever happen". It does not answer "is this
     // 0.01% or 5% of calls", which is the only question that decides whether

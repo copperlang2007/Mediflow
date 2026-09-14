@@ -131,6 +131,13 @@ export interface AiClient {
         max_completion_tokens?: number;
         stream?: false;
       }) => Promise<{
+        // Kept in step with ChatCompletionResponse in
+        // lib/ai/bedrockAnthropicClient.ts, which this structurally duplicates
+        // so the route's test double stays simple. `stopReason` had to be
+        // added in both places; a field missing here is invisible at the call
+        // site rather than a type error, so the two shapes drifting is a real
+        // hazard worth noting where the next person will see it.
+        stopReason?: string;
         choices: Array<{ message: { content: string | null } }>;
       }>;
     };
@@ -299,6 +306,20 @@ async function generateFileContent(
     stream: false,
     max_completion_tokens: 8000,
   });
+  // A `max_tokens` stop is a silent truncation: the text is well-formed and
+  // simply stops mid-thought. Without this check /apply commits the fragment
+  // to a git branch and typechecks it -- and a truncation landing inside a
+  // comment or string literal can typecheck clean, putting a broken file into
+  // a PR that reads as complete. Admin-gated and human-reviewed, so this is a
+  // loud failure rather than a silent bad file, which is the trade this PR
+  // keeps making.
+  // Reported by the AWS review agent on PR #207.
+  if (response.stopReason === "max_tokens") {
+    throw new Error(
+      `AI generation for ${filePath} hit the ${8000}-token cap and was ` +
+        `truncated. Refusing to emit a partial file.`,
+    );
+  }
   const text = response.choices[0]?.message?.content ?? "";
   // Defensive: strip ```lang fences if the model adds them despite the
   // system prompt asking it not to.
