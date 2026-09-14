@@ -374,24 +374,49 @@ function applyResponseFormat(
     // wrong answer is the expensive kind, and because this discriminator has
     // already been wrong once.
     // Reported by the AWS review agent on PR #207.
-    // Recognise the envelope by what it IS, not by what it lacks. An OpenAI
-    // `json_schema` envelope carries exactly `name`, `schema`, and optionally
-    // `strict` -- nothing else. Blocklisting schema keywords instead was a
-    // guess at the ways a bare schema might announce itself, and it kept
-    // missing some: a schema whose top-level keys are `required`, `name` and
-    // `schema` names no listed keyword, so it read as an envelope and its
-    // `required` constraint vanished without an error. An allowlist cannot
-    // have that gap, because it enumerates the one shape that is real.
-    // Third report on this discriminator from the AWS review agent on PR #207;
-    // the first two fixes each narrowed the hole instead of closing it.
-    const ENVELOPE_KEYS = ["name", "schema", "strict"];
+    // Fourth attempt at this discriminator, and the previous three failed the
+    // same way: each enumerated one side of the distinction and was wrong
+    // about a member it had not thought of. Blocklisting schema keywords
+    // missed `required`. Allowlisting envelope keys missed `description`, a
+    // documented OpenAI field. Enumerating either side alone will keep losing
+    // to whichever list is incomplete, and the failure is always silent -- the
+    // wrong half reaches the model and the caller gets structurally-wrong JSON
+    // with no error.
+    //
+    // So require BOTH halves to agree: it is an envelope only if it looks like
+    // one (a `name` string wrapping a `schema` object) AND does not look like a
+    // schema (no JSON-Schema keyword at the top level). Extra envelope fields
+    // no longer matter, so `description` and anything OpenAI adds later is
+    // fine; and a bare schema that happens to carry `name`/`schema` still
+    // declares itself through its keywords. Both previous bugs are closed by
+    // the same condition rather than by a longer list.
+    // Reported four times by the AWS review agent on PR #207.
+    const SCHEMA_KEYWORDS = [
+      "type",
+      "properties",
+      "required",
+      "items",
+      "oneOf",
+      "anyOf",
+      "allOf",
+      "not",
+      "enum",
+      "const",
+      "$ref",
+      "$schema",
+      "$defs",
+      "definitions",
+      "additionalProperties",
+      "patternProperties",
+      "prefixItems",
+    ];
     const isEnvelope =
       typeof env === "object" &&
       env !== null &&
       typeof (env as { name?: unknown }).name === "string" &&
       typeof (env as { schema?: unknown }).schema === "object" &&
       (env as { schema?: unknown }).schema !== null &&
-      Object.keys(env).every((k) => ENVELOPE_KEYS.includes(k));
+      !SCHEMA_KEYWORDS.some((k) => k in env);
     const schema = isEnvelope ? (env as { schema: unknown }).schema : env;
     instruction =
       "Respond with a single valid JSON object and nothing else. " +
