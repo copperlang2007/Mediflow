@@ -174,6 +174,14 @@ function validateEnv(): EnvValidation {
       warnings.push(
         `AI_INTEGRATIONS_MODEL "${modelHint}" is sent to Bedrock as "${effectiveModel}" — the endpoint's required provider prefix is added automatically. Set a fully-qualified id to control the routing yourself.`,
       );
+    } else if (modelHint.startsWith("claude-")) {
+      // A bare id that came back unchanged means the base URL host is neither
+      // bedrock-mantle nor bedrock-runtime, so the adapter declined to guess a
+      // provider prefix. Bedrock will reject the bare id; say so here rather
+      // than letting it surface as an opaque model-not-found.
+      issues.push(
+        `AI_INTEGRATIONS_MODEL "${modelHint}" has no Bedrock provider prefix and the base URL host is not recognised, so one cannot be inferred. Set a fully-qualified id (e.g. global.anthropic.${modelHint}).`,
+      );
     }
     modelHint = effectiveModel;
   } else if (provider === "openai") {
