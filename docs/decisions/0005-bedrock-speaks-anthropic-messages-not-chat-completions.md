@@ -200,7 +200,13 @@ duplication, which nobody wants back.
   deploy failed its own health check (Copilot and Codex, independently); and
   the Render deployment doc still described the Bedrock key as being used by
   the OpenAI SDK (Copilot). The health-check finding is the sharpest: this PR
-  claimed to repair that endpoint and had left it broken a second way.
+  claimed to repair that endpoint and had left it broken a second way. A third
+  reviewer (the AWS DevOps agent) named the consequence the other two did not:
+  a false negative there would have caused an operator following **this ADR's
+  own empirical gate** to roll back a healthy deploy. That makes the gate below
+  only as trustworthy as the endpoint it reads, which is why the endpoint now
+  resolves its model through the same `resolveAiModel()` the application uses
+  rather than carrying a second, drifting copy of the default.
 
 ## Follow-Up Actions
 
