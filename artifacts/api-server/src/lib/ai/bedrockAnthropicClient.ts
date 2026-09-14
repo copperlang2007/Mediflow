@@ -175,10 +175,11 @@ function splitMessages(messages: Array<{ role: string; content: string }>): {
 /**
  * Emulate `response_format` in the system prompt.
  *
- * Bedrock does not support structured outputs, so this is an instruction and
- * not a contract — callers must still parse defensively. Returning the
- * instruction rather than mutating anything keeps that visible at the call
- * site below.
+ * The adapter deliberately does not rely on server-enforced structured
+ * outputs (the vendor docs disagree about whether Bedrock has them — see the
+ * module header), so this is an instruction and not a contract: callers must
+ * still parse defensively. Returning the instruction rather than mutating
+ * anything keeps that visible at the call site below.
  */
 function applyResponseFormat(
   system: string | undefined,
@@ -193,11 +194,18 @@ function applyResponseFormat(
       "Respond with a single valid JSON object and nothing else. " +
       "Do not wrap it in markdown code fences and do not add commentary.";
   } else if (rf.type === "json_schema" && rf.json_schema) {
+    // OpenAI's `json_schema` value is an ENVELOPE — `{ name, schema, strict? }`
+    // — not the schema itself. Serializing the envelope would instruct the
+    // model to emit an object with `name` and `schema` keys, so
+    // /feature-builder/plan would reject every plan it generated. Unwrap it.
+    const env = rf.json_schema as { schema?: unknown };
+    const schema =
+      env && typeof env === "object" && "schema" in env ? env.schema : env;
     instruction =
       "Respond with a single valid JSON object and nothing else. " +
       "Do not wrap it in markdown code fences and do not add commentary. " +
       "The object must conform to this JSON Schema:\n" +
-      JSON.stringify(rf.json_schema);
+      JSON.stringify(schema);
   }
 
   if (!instruction) return system;

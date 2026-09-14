@@ -28,7 +28,11 @@ import {
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { getOpenAI } from "./ai";
 import { logger } from "../lib/logger";
-import { resolveAiApiKey, aiApiKeyVarName } from "../lib/aiProvider";
+import {
+  resolveAiApiKey,
+  aiApiKeyVarName,
+  resolveAiModel,
+} from "../lib/aiProvider";
 
 const router: IRouter = Router();
 
@@ -145,8 +149,12 @@ function validateEnv(): EnvValidation {
     }
     const model = process.env.AI_INTEGRATIONS_MODEL?.trim();
     if (!model) {
+      // Resolve the SAME default the application uses. Leaving the hint at
+      // the OpenAI placeholder made the ping send a non-Claude model id, so a
+      // correctly configured default deploy failed its own health check.
+      modelHint = resolveAiModel("bedrock");
       warnings.push(
-        "AI_INTEGRATIONS_MODEL unset — using the default; set a Bedrock model id (e.g. us.anthropic.claude-sonnet-5)",
+        `AI_INTEGRATIONS_MODEL unset — using the default (${modelHint}); set one to pin a Bedrock model id (e.g. us.anthropic.claude-sonnet-5)`,
       );
     } else {
       modelHint = model;

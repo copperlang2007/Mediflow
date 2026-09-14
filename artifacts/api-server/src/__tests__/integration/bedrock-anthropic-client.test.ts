@@ -200,17 +200,40 @@ describe("bedrock Anthropic adapter — response_format emulation", () => {
     expect(sent.system).toContain("single valid JSON object");
   });
 
-  it("inlines the schema for json_schema", async () => {
+  it("unwraps the OpenAI json_schema envelope and inlines the inner schema", async () => {
+    // OpenAI's `json_schema` value is `{ name, schema }`. Serializing the
+    // envelope would tell the model to emit an object with `name` and
+    // `schema` keys, so /feature-builder/plan would reject its own output.
     await client().chat.completions.create({
       model: "claude-sonnet-5",
       messages: [{ role: "user", content: "go" }],
       response_format: {
         type: "json_schema",
-        json_schema: { name: "plan", schema: { type: "object" } },
+        json_schema: {
+          name: "FeaturePlan",
+          schema: {
+            type: "object",
+            properties: { branchSlug: { type: "string" } },
+          },
+        },
       },
     });
 
-    expect(create.mock.calls[0]![0].system).toContain('"name":"plan"');
+    const system = create.mock.calls[0]![0].system as string;
+    expect(system).toContain('"branchSlug"');
+    expect(system).not.toContain('"name":"FeaturePlan"');
+  });
+
+  it("inlines a bare schema that is not wrapped in an envelope", async () => {
+    await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      messages: [{ role: "user", content: "go" }],
+      response_format: {
+        type: "json_schema",
+        json_schema: { type: "object", properties: { ok: { type: "boolean" } } },
+      },
+    });
+    expect(create.mock.calls[0]![0].system).toContain('"ok"');
   });
 
   it("leaves the system prompt untouched when no response_format is given", async () => {
