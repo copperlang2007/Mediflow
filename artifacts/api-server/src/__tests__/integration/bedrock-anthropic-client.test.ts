@@ -405,6 +405,31 @@ describe("bedrock Anthropic adapter — response_format emulation", () => {
     expect(system).not.toContain('"FeaturePlan"');
   });
 
+  it("unwraps an envelope carrying description, a documented OpenAI field", async () => {
+    // What killed the exact-key allowlist: `description` is real, and
+    // rejecting it sent the model {name, description, schema} AS the schema —
+    // structurally-wrong JSON back, no error anywhere.
+    // Fourth report on this discriminator from the AWS review agent on PR #207.
+    await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      messages: [{ role: "user", content: "go" }],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "FeaturePlan",
+          description: "a plan",
+          strict: true,
+          schema: { type: "object", properties: { branchSlug: { type: "string" } } },
+        },
+      },
+    });
+
+    const system = create.mock.calls[0]![0].system as string;
+    expect(system).toContain('"branchSlug"');
+    expect(system).not.toContain('"FeaturePlan"');
+    expect(system).not.toContain('"a plan"');
+  });
+
   it("inlines a bare schema that is not wrapped in an envelope", async () => {
     await client().chat.completions.create({
       model: "claude-sonnet-5",
