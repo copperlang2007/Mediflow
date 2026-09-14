@@ -149,13 +149,19 @@ const DEFAULT_MAX_TOKENS = 8192;
  * `global.anthropic.…`) reflects a routing the operator chose deliberately,
  * and a genuinely wrong id should fail as itself rather than as
  * `global.anthropic.<wrong id>`.
+ *
+ * We also decline to guess on a host we do not recognise. A private DNS alias,
+ * a VPC endpoint, or an empty base URL used to fall through to the
+ * `global.anthropic.` branch, silently pinning a routing nobody chose. Now the
+ * id passes through untouched and `/admin/health/ai` says the operator must
+ * qualify it themselves. Reported by the AWS review agent on PR #207.
  */
 export function normalizeBedrockModelId(model: string, baseURL = ""): string {
   const id = model.trim();
   if (!id.startsWith("claude-")) return id;
-  return baseURL.includes("bedrock-mantle")
-    ? `anthropic.${id}`
-    : `global.anthropic.${id}`;
+  if (baseURL.includes("bedrock-mantle")) return `anthropic.${id}`;
+  if (baseURL.includes("bedrock-runtime")) return `global.anthropic.${id}`;
+  return id;
 }
 
 /**
@@ -184,10 +190,26 @@ function splitMessages(messages: Array<{ role: string; content: string }>): {
     });
   }
 
-  // Messages must begin with a user turn. A history that opens on an
-  // assistant turn is a caller bug, but a 400 from Bedrock is a terrible way
-  // to learn it, so drop the leading assistant turns instead.
-  while (rest.length > 0 && rest[0]!.role === "assistant") rest.shift();
+  // Messages must begin with a user turn, so leading assistant turns have to
+  // go. This is NOT only a caller bug: /ai/chat accepts assistant turns in
+  // `history`, and the web client persists chat history to localStorage and
+  // sends the last HISTORY_CAP=50 entries -- a window that can legitimately
+  // open on an assistant turn. So a resumed conversation can lose the model's
+  // own previous reply, and the user just sees it "forget" what it said.
+  // Dropping is still the only option that does not 400, but it must leave a
+  // trace: without one, a report of lost context has nothing to point at.
+  // Reported by the AWS review agent on PR #207.
+  let dropped = 0;
+  while (rest.length > 0 && rest[0]!.role === "assistant") {
+    rest.shift();
+    dropped += 1;
+  }
+  if (dropped > 0) {
+    logger.warn(
+      { droppedTurns: dropped },
+      "bedrock adapter: dropped leading assistant turns (Messages must open on a user turn)",
+    );
+  }
 
   return {
     system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,

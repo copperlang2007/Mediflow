@@ -13,9 +13,13 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const create = vi.fn();
 const debugSpy = vi.fn();
+const warnSpy = vi.fn();
 
 vi.mock("../../lib/logger", () => ({
-  logger: { debug: (...a: unknown[]) => debugSpy(...a) },
+  logger: {
+    debug: (...a: unknown[]) => debugSpy(...a),
+    warn: (...a: unknown[]) => warnSpy(...a),
+  },
 }));
 
 const ctorOpts = vi.fn();
@@ -85,6 +89,16 @@ describe("normalizeBedrockModelId", () => {
   it("passes a non-Claude id through unchanged so it fails as itself", () => {
     expect(normalizeBedrockModelId("gpt-5.4", MANTLE)).toBe("gpt-5.4");
   });
+
+  it("declines to guess a prefix on an unrecognised host", () => {
+    // A private DNS alias or VPC endpoint used to fall through to the
+    // `global.` branch, silently pinning a routing nobody chose. Passing the
+    // id through means Bedrock rejects it and /admin/health/ai says why.
+    expect(
+      normalizeBedrockModelId("claude-sonnet-5", "https://ai.internal.corp/anthropic"),
+    ).toBe("claude-sonnet-5");
+    expect(normalizeBedrockModelId("claude-sonnet-5", "")).toBe("claude-sonnet-5");
+  });
 });
 
 describe("bedrock Anthropic adapter — authentication", () => {
@@ -118,6 +132,7 @@ describe("bedrock Anthropic adapter — authentication", () => {
 describe("bedrock Anthropic adapter — request translation", () => {
   beforeEach(() => {
     create.mockReset();
+    warnSpy.mockReset();
     create.mockResolvedValue(textReply());
   });
 
@@ -157,7 +172,11 @@ describe("bedrock Anthropic adapter — request translation", () => {
     ]);
   });
 
-  it("drops leading assistant turns rather than letting AWS 400", async () => {
+  it("drops leading assistant turns rather than letting AWS 400 — and says so", async () => {
+    // Reachable in production, not just a caller bug: /ai/chat accepts
+    // assistant turns in history and the web client sends the last 50
+    // messages, a window that can open on an assistant turn. The user sees
+    // the model "forget" its own reply, so the drop must leave a trace.
     await client().chat.completions.create({
       model: "claude-sonnet-5",
       messages: [
@@ -169,6 +188,18 @@ describe("bedrock Anthropic adapter — request translation", () => {
     expect(create.mock.calls[0]![0].messages).toEqual([
       { role: "user", content: "real" },
     ]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      { droppedTurns: 1 },
+      expect.stringContaining("dropped leading assistant turns"),
+    );
+  });
+
+  it("stays quiet when there is nothing to drop", async () => {
+    await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it("always sends max_tokens, which Anthropic requires", async () => {
