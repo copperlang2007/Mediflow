@@ -196,64 +196,89 @@ export function aiApiKeyVarName(
  * Throws the same error as `resolveAiProvider()`.
  */
 export function assertAiProviderHipaaCompliant(): void {
-  const provider = resolveAiProvider();
-  if (provider !== "bedrock") return;
+  resolveAiProvider();
+}
+
+/**
+ * Reasons the bedrock AI path cannot work, as operator-facing sentences.
+ * Empty when the routing config is sound (or the provider is not bedrock).
+ *
+ * These were briefly boot-FATAL errors, and that was a mistake worth naming:
+ * none of them is a SAFETY problem. The BAA guard above refuses to boot
+ * because the hazard is PHI reaching a vendor with no BAA — not booting is
+ * strictly safer than booting. A model id or a URL path is different. The
+ * hazard there is "AI does not work", and killing the process converts a
+ * degraded feature into a total outage of a Medicare CRM: contacts,
+ * enrollments, e-sign and commissions all go down because a chat feature was
+ * misconfigured. That is a worse outcome than the bug it was guarding, which
+ * is the one trade this work has consistently refused to make.
+ *
+ * The original goal stands — a broken AI config must not be silent — and is
+ * met by three louder-than-silent things that cost no availability: an ERROR
+ * at startup, `buildAiClient()` returning null so AI degrades cleanly, and
+ * `/admin/health/ai` reporting each of these as an issue.
+ * Raised by the AWS review agent on PR #207, which pointed out that an
+ * unmigrated Secret Manager entry would FATAL the next revision to roll.
+ */
+export function bedrockRoutingIssues(): string[] {
+  if (resolveAiProvider() !== "bedrock") return [];
+  const baseUrl = resolveAiBaseUrl("bedrock") ?? "";
+  if (!baseUrl) return []; // absent config is reported by the callers that name it
+  const model = resolveAiModel("bedrock");
+  const issues: string[] = [];
+
+  // Bedrock's `/anthropic` route serves Anthropic models and nothing else, so
+  // an id for any other family cannot work there under any prefix: the
+  // openai-side default `gpt-5.4` (which `resolveAiModel()` returns whenever
+  // the provider is not known at the call), an Amazon Nova id, or a typo like
+  // `claude5-sonnet` that misses the `claude-` shape.
+  //
+  // The prefix pattern allows hyphens because partition prefixes carry them --
+  // `us-gov.anthropic.…`, `cn-north-1.anthropic.…`. An earlier `[a-z]+`
+  // rejected exactly the ids a GovCloud or China operator must set, which made
+  // the escape hatch unusable on the two partitions it exists for.
+  const isAnthropicId =
+    model.startsWith("claude-") || /^([a-z][a-z0-9-]*\.)?anthropic\./.test(model);
+  if (!isAnthropicId) {
+    issues.push(
+      `AI_INTEGRATIONS_MODEL "${model}" is not an Anthropic model id, but ` +
+        `AI_INTEGRATIONS_PROVIDER=bedrock routes through Bedrock's Anthropic ` +
+        `Messages API, which serves no other model family. Set an Anthropic ` +
+        `id (e.g. global.anthropic.claude-sonnet-5).`,
+    );
+  }
+
+  // `/openai/v1` is the Chat Completions path, which AWS lists as unsupported
+  // for every Anthropic model. A base URL still pointing there is the precise
+  // misconfiguration this PR exists to eliminate, and it is also the most
+  // likely state of an environment configured before this change.
+  if (baseUrl.includes("/openai/v1")) {
+    issues.push(
+      `the Bedrock base URL "${baseUrl}" points at the OpenAI-compatible ` +
+        `/openai/v1 path, which AWS lists as unsupported for every Anthropic ` +
+        `model. Use the Anthropic Messages path instead (e.g. ` +
+        `https://bedrock-runtime.<region>.amazonaws.com/anthropic). If this ` +
+        `came from a legacy AI_INTEGRATIONS_OPENAI_BASE_URL secret, migrate it.`,
+    );
+  }
 
   // A bare `claude-…` id needs a provider prefix, and the adapter infers one
-  // from the endpoint host. On a host it does not recognise — GovCloud, China,
-  // a private DNS name in front of a VPC endpoint — it declines to guess and
-  // sends the id through unchanged, which Bedrock rejects.
-  //
-  // `/admin/health/ai` already reports this, but that endpoint is only
-  // consulted by someone who has gone looking. Without the check here, such a
-  // deploy boots clean, passes its container health check, serves every
-  // non-AI route, and fails only on the first AI request a user makes. That is
-  // exactly the class of green-and-broken deploy this PR exists to eliminate,
-  // so it fails at boot instead.
-  // Reported by the AWS review agent on PR #207.
-  const model = resolveAiModel("bedrock");
-  const baseUrl = resolveAiBaseUrl("bedrock") ?? "";
-  if (!baseUrl) return; // absent config is the caller's own error to report
-
-  // The bedrock path is served by `@anthropic-ai/sdk` against Bedrock's
-  // `/anthropic` Messages route, which serves Anthropic models and nothing
-  // else. An id for any other family cannot work there no matter how it is
-  // prefixed — an OpenAI id (the openai-side default `gpt-5.4`, which
-  // `resolveAiModel()` returns whenever the provider is not yet known at the
-  // call), an Amazon Nova id, or a typo like `claude5-sonnet` that misses the
-  // `claude-` shape all sail past a check that only looks at prefixes.
-  // Reported by the AWS review agent on PR #207.
-  const isAnthropicId =
-    model.startsWith("claude-") || /^([a-z]+\.)?anthropic\./.test(model);
-  if (!isAnthropicId) {
-    throw new Error(
-      `FATAL: AI_INTEGRATIONS_MODEL "${model}" is not an Anthropic model id, ` +
-        `but AI_INTEGRATIONS_PROVIDER=bedrock routes through Bedrock's ` +
-        `Anthropic Messages API, which serves no other model family. Set an ` +
-        `Anthropic id (e.g. global.anthropic.claude-sonnet-5).`,
+  // from the endpoint host. On a host it does not recognise -- GovCloud,
+  // China, a private DNS name in front of a VPC endpoint -- it declines to
+  // guess, and Bedrock rejects the bare id.
+  if (
+    isAnthropicId &&
+    normalizeBedrockModelId(model, baseUrl) === model &&
+    model.startsWith("claude-")
+  ) {
+    issues.push(
+      `AI_INTEGRATIONS_MODEL "${model}" has no Bedrock provider prefix and the ` +
+        `host in AI_INTEGRATIONS_BEDROCK_BASE_URL is not one this build ` +
+        `recognises, so a prefix cannot be inferred. Set a fully-qualified id ` +
+        `(e.g. global.anthropic.${model}, or us-gov.anthropic.${model} on ` +
+        `GovCloud).`,
     );
   }
 
-  // `/openai/v1` is the Chat Completions path. AWS lists Chat Completions as
-  // unsupported for every Anthropic model, so a base URL still pointing there
-  // is the precise misconfiguration this PR exists to eliminate — and it
-  // survives today because `normalizeBedrockModelId()` matches on host alone
-  // and happily prefixes an id destined for a path that cannot serve it.
-  if (baseUrl.includes("/openai/v1")) {
-    throw new Error(
-      `FATAL: the Bedrock base URL "${baseUrl}" points at the OpenAI-compatible ` +
-        `/openai/v1 path, which AWS lists as unsupported for every Anthropic ` +
-        `model. Use the Anthropic Messages path instead ` +
-        `(e.g. https://bedrock-runtime.<region>.amazonaws.com/anthropic).`,
-    );
-  }
-
-  if (normalizeBedrockModelId(model, baseUrl) === model && model.startsWith("claude-")) {
-    throw new Error(
-      `FATAL: AI_INTEGRATIONS_MODEL "${model}" has no Bedrock provider prefix ` +
-        `and the host in AI_INTEGRATIONS_BEDROCK_BASE_URL is not one this ` +
-        `build recognises, so a prefix cannot be inferred. Set a ` +
-        `fully-qualified model id (e.g. global.anthropic.${model}).`,
-    );
-  }
+  return issues;
 }
