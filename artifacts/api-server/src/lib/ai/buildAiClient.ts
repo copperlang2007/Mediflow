@@ -14,7 +14,10 @@
  * `assertAiProviderHipaaCompliant()` at bootstrap (`index.ts`): the process
  * refuses to start on a non-BAA provider in production, so a lazy throw here
  * would be unreachable in prod while breaking the callers' contracts (the
- * transcript webhook must not 5xx; a worker must not die).
+ * transcript webhook must not 5xx; a worker must not die). Bedrock ROUTING
+ * problems are handled here rather than at boot, for the reasons in
+ * `bedrockRoutingIssues()`: they break AI, not safety, and must not take the
+ * rest of the application down with them.
  */
 
 import OpenAI, { AzureOpenAI } from "openai";
@@ -22,6 +25,7 @@ import {
   resolveAiProvider,
   resolveAiApiKey,
   resolveAiBaseUrl,
+  bedrockRoutingIssues,
 } from "../aiProvider";
 import {
   createBedrockAnthropicClient,
@@ -79,6 +83,13 @@ export function buildAiClient(
     if (!baseURL) return null;
 
     if (provider === "bedrock") {
+      // A model id or base URL that cannot reach Bedrock's Anthropic route
+      // means every request would fail anyway. Returning null degrades the AI
+      // features cleanly -- a 503 from /ai/chat, a skipped transcript parse --
+      // instead of an opaque provider error mid-request, and it is why those
+      // checks no longer need to kill the process at boot. Startup logs them
+      // at ERROR and /admin/health/ai lists them.
+      if (bedrockRoutingIssues().length > 0) return null;
       return createBedrockAnthropicClient({ apiKey, baseURL });
     }
 

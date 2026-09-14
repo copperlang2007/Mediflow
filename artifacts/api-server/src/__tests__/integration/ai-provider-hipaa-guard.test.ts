@@ -16,6 +16,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   resolveAiProvider,
   assertAiProviderHipaaCompliant,
+  bedrockRoutingIssues,
   HIPAA_ELIGIBLE_PROVIDERS,
   resolveAiBaseUrl,
   resolveAiApiKey,
@@ -230,11 +231,12 @@ describe("resolveAiApiKey — the credential is a Bedrock token, not an OpenAI k
   });
 });
 
-describe("assertAiProviderHipaaCompliant — bedrock model routability at boot", () => {
-  // `/admin/health/ai` already reports an unroutable bare model id, but only
-  // to someone who goes looking. Without this check a GovCloud/China/private-
-  // DNS deploy boots clean, passes its container health check, serves every
-  // non-AI route, and fails on the first AI request a real user makes.
+describe("bedrockRoutingIssues — reported, never fatal", () => {
+  // These were boot-FATAL for three commits. They are not safety problems:
+  // the BAA guard refuses to boot because PHI could reach a vendor with no
+  // BAA, but a bad model id or URL path only means AI does not work. Killing
+  // the process for that takes contacts, e-sign and commissions down with the
+  // chat feature -- worse than the bug being guarded.
   const KEYS = [
     "AI_INTEGRATIONS_PROVIDER",
     "AI_INTEGRATIONS_MODEL",
@@ -242,6 +244,7 @@ describe("assertAiProviderHipaaCompliant — bedrock model routability at boot",
     "AI_INTEGRATIONS_OPENAI_BASE_URL",
   ] as const;
   const prior: Record<string, string | undefined> = {};
+  const RUNTIME = "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
 
   beforeEach(() => {
     for (const k of KEYS) {
@@ -257,90 +260,75 @@ describe("assertAiProviderHipaaCompliant — bedrock model routability at boot",
     }
   });
 
-  it("refuses to boot when a bare claude id cannot be prefixed for the host", () => {
-    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
-      "https://bedrock.internal.example.com/anthropic";
-    expect(() => assertAiProviderHipaaCompliant()).toThrow(
-      /no Bedrock provider prefix/,
-    );
-  });
-
-  it("boots on a recognised host, where the prefix is inferred at request time", () => {
-    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
-      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
-    expect(() => assertAiProviderHipaaCompliant()).not.toThrow();
-  });
-
-  it("boots on an unrecognised host when the operator qualified the id themselves", () => {
-    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
-      "https://bedrock.internal.example.com/anthropic";
-    process.env.AI_INTEGRATIONS_MODEL = "us.anthropic.claude-sonnet-5";
-    expect(() => assertAiProviderHipaaCompliant()).not.toThrow();
-  });
-
-  it("refuses to boot on a non-Anthropic model id", () => {
-    // The bedrock path speaks Bedrock's Anthropic Messages route, which serves
-    // no other family. `gpt-5.4` is reachable for real: resolveAiModel() with
-    // no provider argument returns the openai default.
-    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
-      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
-    for (const bad of ["gpt-5.4", "us.amazon.nova-lite", "claude5-sonnet"]) {
-      process.env.AI_INTEGRATIONS_MODEL = bad;
-      expect(() => assertAiProviderHipaaCompliant()).toThrow(
-        /is not an Anthropic model id/,
-      );
-    }
-  });
-
-  it("rejects the near-miss shapes a prefix check waves through", () => {
-    // Wrong case, missing family, and a hyphen where the dot belongs. Each
-    // looks close enough to a valid id to survive review and is rejected by
-    // Bedrock at request time, not before.
-    // Reported by the AWS review agent on PR #207.
-    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
-      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
-    for (const bad of [
-      "Claude-Sonnet-5",
-      "sonnet-5",
-      "us-anthropic.claude-sonnet-5",
+  it("never throws, whatever the routing config", () => {
+    // The property that matters most: no configuration of these two variables
+    // may stop the server from booting.
+    for (const [url, model] of [
+      [RUNTIME, "gpt-5.4"],
+      ["https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1", "us.anthropic.claude-sonnet-4-6"],
+      ["https://bedrock.internal.example.com/anthropic", "claude-sonnet-5"],
+      [RUNTIME, "Claude-Sonnet-5"],
     ]) {
-      process.env.AI_INTEGRATIONS_MODEL = bad;
-      expect(() => assertAiProviderHipaaCompliant()).toThrow(
-        /is not an Anthropic model id/,
-      );
-    }
-  });
-
-  it("accepts every Anthropic id shape, bare or regionally prefixed", () => {
-    // The boundary: this must not reject a configuration that works.
-    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
-      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
-    for (const good of [
-      "claude-sonnet-5",
-      "anthropic.claude-sonnet-5",
-      "us.anthropic.claude-sonnet-4-6",
-      "global.anthropic.claude-sonnet-5",
-    ]) {
-      process.env.AI_INTEGRATIONS_MODEL = good;
+      process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL = url;
+      process.env.AI_INTEGRATIONS_MODEL = model;
+      expect(() => bedrockRoutingIssues()).not.toThrow();
       expect(() => assertAiProviderHipaaCompliant()).not.toThrow();
+      expect(bedrockRoutingIssues().length).toBeGreaterThan(0);
     }
   });
 
-  it("refuses to boot on a base URL still pointing at /openai/v1", () => {
-    // Chat Completions is unsupported for every Anthropic model — the exact
-    // misconfiguration this PR exists to eliminate. It survived the earlier
-    // guard because the host matches `bedrock-runtime` and the path is never
-    // inspected.
+  it("reports a non-Anthropic model id", () => {
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL = RUNTIME;
+    for (const bad of ["gpt-5.4", "us.amazon.nova-lite", "claude5-sonnet", "Claude-Sonnet-5", "sonnet-5", "us-anthropic.claude-sonnet-5"]) {
+      process.env.AI_INTEGRATIONS_MODEL = bad;
+      expect(bedrockRoutingIssues().join(" ")).toContain("not an Anthropic model id");
+    }
+  });
+
+  it("reports a base URL still on the Chat Completions path, and names the legacy secret", () => {
+    // The realistic one: an environment configured before this change holds
+    // AI_INTEGRATIONS_OPENAI_BASE_URL, which both deploy paths promote into
+    // the canonical variable when the new name is unset.
     process.env.AI_INTEGRATIONS_MODEL = "us.anthropic.claude-sonnet-4-6";
     process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
       "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1";
-    expect(() => assertAiProviderHipaaCompliant()).toThrow(/openai\/v1/);
+    const joined = bedrockRoutingIssues().join(" ");
+    expect(joined).toContain("/openai/v1");
+    expect(joined).toContain("AI_INTEGRATIONS_OPENAI_BASE_URL");
   });
 
-  it("leaves a missing base URL to the caller that reports missing config", () => {
-    // An absent base URL is already an issue on /admin/health/ai and makes
-    // buildAiClient() return null. Throwing a MODEL error for it would name
-    // the wrong variable.
-    expect(() => assertAiProviderHipaaCompliant()).not.toThrow();
+  it("accepts the partition-prefixed ids GovCloud and China operators must set", () => {
+    // The escape hatch for the two partitions this guard declines to guess a
+    // prefix for. An earlier `[a-z]+` pattern rejected every hyphenated
+    // prefix, making the only correct ids on those partitions unusable.
+    // Reported by the AWS review agent on PR #207.
+    for (const [url, model] of [
+      ["https://bedrock-runtime.us-gov-west-1.amazonaws.com/anthropic", "us-gov.anthropic.claude-sonnet-5"],
+      ["https://bedrock-runtime.cn-north-1.amazonaws.com.cn/anthropic", "cn-north-1.anthropic.claude-sonnet-5"],
+    ]) {
+      process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL = url;
+      process.env.AI_INTEGRATIONS_MODEL = model;
+      expect(bedrockRoutingIssues()).toEqual([]);
+    }
+  });
+
+  it("still reports the bare id a GovCloud operator forgot to qualify", () => {
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock-runtime.us-gov-west-1.amazonaws.com/anthropic";
+    expect(bedrockRoutingIssues().join(" ")).toContain("no Bedrock provider prefix");
+  });
+
+  it("says nothing about a sound commercial configuration", () => {
+    // Must stay silent on what every deploy path actually produces, or the
+    // ERROR log is noise on every healthy boot.
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL = RUNTIME;
+    for (const good of ["claude-sonnet-5", "anthropic.claude-sonnet-5", "us.anthropic.claude-sonnet-4-6", "global.anthropic.claude-sonnet-5"]) {
+      process.env.AI_INTEGRATIONS_MODEL = good;
+      expect(bedrockRoutingIssues()).toEqual([]);
+    }
+  });
+
+  it("stays quiet when no base URL is set, which other callers report", () => {
+    expect(bedrockRoutingIssues()).toEqual([]);
   });
 });

@@ -45,6 +45,7 @@ const AI_ENV = [
   "AI_INTEGRATIONS_OPENAI_BASE_URL",
   "AI_INTEGRATIONS_AZURE_RESOURCE",
   "AI_INTEGRATIONS_AZURE_DEPLOYMENT",
+  "AI_INTEGRATIONS_MODEL",
 ] as const;
 
 describe("buildAiClient — provider dispatch", () => {
@@ -129,10 +130,30 @@ describe("buildAiClient — provider dispatch", () => {
     expect(anthropicCtor).not.toHaveBeenCalled();
   });
 
+  it("returns null when bedrock routing cannot work, so AI degrades and the app lives", () => {
+    // The other half of demoting the routing checks from boot-FATAL: the
+    // process stays up, and every AI path gets a null client (a 503 from
+    // /ai/chat, a skipped transcript parse) rather than an opaque provider
+    // error mid-request.
+    // Reported by the AWS review agent on PR #207.
+    process.env.AI_INTEGRATIONS_PROVIDER = "bedrock";
+    process.env.AI_INTEGRATIONS_BEDROCK_API_KEY = "bedrock-token";
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1";
+    process.env.AI_INTEGRATIONS_MODEL = "us.anthropic.claude-sonnet-4-6";
+
+    expect(buildAiClient()).toBeNull();
+    expect(anthropicCtor).not.toHaveBeenCalled();
+  });
+
   it("still reads the legacy key name so a pre-rename environment boots", () => {
     process.env.AI_INTEGRATIONS_PROVIDER = "bedrock";
     process.env.AI_INTEGRATIONS_OPENAI_API_KEY = "legacy-bedrock-token";
-    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL = "https://example.invalid";
+    // A ROUTABLE base URL: this case is about the key name, and a placeholder
+    // host now makes the client null for an unrelated reason (no provider
+    // prefix can be inferred), which would have passed for the wrong reason.
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
 
     expect(buildAiClient()).not.toBeNull();
     expect(anthropicCtor).toHaveBeenCalledWith(

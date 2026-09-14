@@ -22,7 +22,7 @@ import { getQueue, startWorkers } from "./lib/jobs";
 import { captureWorkerError } from "./lib/sentry";
 import { markWorkersReady } from "./lib/readiness";
 import { shutdown } from "./lib/shutdown";
-import { assertAiProviderHipaaCompliant } from "./lib/aiProvider";
+import { assertAiProviderHipaaCompliant, bedrockRoutingIssues } from "./lib/aiProvider";
 import { assertStorageBackendHipaaCompliant } from "./lib/objectStorage";
 import { assertEsignProviderHipaaCompliant } from "./lib/esign/factory";
 import { assertEsignSigningCredsAreProd } from "./lib/esign/pkiSigner";
@@ -53,6 +53,16 @@ async function bootstrap(): Promise<void> {
   // dies at boot rather than leaking PHI on the first patient
   // interaction. Mirrors the PHI_ENCRYPTION_KEY boot check (PR #64).
   assertAiProviderHipaaCompliant();
+
+  // Routing problems are NOT a boot failure. They stop AI from working, not
+  // from being safe -- and a Medicare CRM should not lose contacts, e-sign and
+  // commissions because a chat model id is wrong. They are logged at ERROR so
+  // a misconfigured deploy is loud rather than silent, `buildAiClient()`
+  // returns null so every AI path degrades instead of erroring mid-request,
+  // and `/admin/health/ai` lists them for whoever investigates.
+  for (const issue of bedrockRoutingIssues()) {
+    logger.error({ issue }, "AI routing misconfigured: AI features are disabled");
+  }
 
   // HIPAA guard: uploaded documents (signed PDFs, etc.) routinely embed PHI.
   // Storage is GCS-only (BAA-covered); in production this fails fast unless
