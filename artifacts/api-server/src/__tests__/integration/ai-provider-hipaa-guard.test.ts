@@ -229,3 +229,59 @@ describe("resolveAiApiKey — the credential is a Bedrock token, not an OpenAI k
     expect(aiApiKeyVarName("azure")).toBe("AI_INTEGRATIONS_OPENAI_API_KEY");
   });
 });
+
+describe("assertAiProviderHipaaCompliant — bedrock model routability at boot", () => {
+  // `/admin/health/ai` already reports an unroutable bare model id, but only
+  // to someone who goes looking. Without this check a GovCloud/China/private-
+  // DNS deploy boots clean, passes its container health check, serves every
+  // non-AI route, and fails on the first AI request a real user makes.
+  const KEYS = [
+    "AI_INTEGRATIONS_PROVIDER",
+    "AI_INTEGRATIONS_MODEL",
+    "AI_INTEGRATIONS_BEDROCK_BASE_URL",
+    "AI_INTEGRATIONS_OPENAI_BASE_URL",
+  ] as const;
+  const prior: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const k of KEYS) {
+      prior[k] = process.env[k];
+      delete process.env[k];
+    }
+    process.env.AI_INTEGRATIONS_PROVIDER = "bedrock";
+  });
+  afterEach(() => {
+    for (const k of KEYS) {
+      if (prior[k] === undefined) delete process.env[k];
+      else process.env[k] = prior[k];
+    }
+  });
+
+  it("refuses to boot when a bare claude id cannot be prefixed for the host", () => {
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock.internal.example.com/anthropic";
+    expect(() => assertAiProviderHipaaCompliant()).toThrow(
+      /no Bedrock provider prefix/,
+    );
+  });
+
+  it("boots on a recognised host, where the prefix is inferred at request time", () => {
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
+    expect(() => assertAiProviderHipaaCompliant()).not.toThrow();
+  });
+
+  it("boots on an unrecognised host when the operator qualified the id themselves", () => {
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock.internal.example.com/anthropic";
+    process.env.AI_INTEGRATIONS_MODEL = "us.anthropic.claude-sonnet-5";
+    expect(() => assertAiProviderHipaaCompliant()).not.toThrow();
+  });
+
+  it("leaves a missing base URL to the caller that reports missing config", () => {
+    // An absent base URL is already an issue on /admin/health/ai and makes
+    // buildAiClient() return null. Throwing a MODEL error for it would name
+    // the wrong variable.
+    expect(() => assertAiProviderHipaaCompliant()).not.toThrow();
+  });
+});

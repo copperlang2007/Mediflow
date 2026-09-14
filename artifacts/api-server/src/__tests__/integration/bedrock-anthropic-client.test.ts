@@ -34,6 +34,7 @@ vi.mock("@anthropic-ai/sdk", () => ({
 }));
 
 import {
+  BedrockEmptyStreamError,
   createBedrockAnthropicClient,
   normalizeBedrockModelId,
 } from "../../lib/ai/bedrockAnthropicClient";
@@ -494,7 +495,13 @@ describe("bedrock Anthropic adapter — response translation", () => {
       messages: [{ role: "user", content: "hi" }],
     });
     const chunks = [];
-    for await (const chunk of stream) chunks.push(chunk);
+    // The caller got no text at all, so the stream must FAIL rather than end:
+    // a clean end reads as "answer complete" to every consumer -- /ai/chat
+    // would send `done: true` after zero content frames, and the weekly
+    // compliance report would persist an empty PDF.
+    await expect(async () => {
+      for await (const chunk of stream) chunks.push(chunk);
+    }).rejects.toThrow(BedrockEmptyStreamError);
 
     expect(chunks).toEqual([]);
     // One summary line per stream, not one per delta: a per-delta line would
@@ -573,5 +580,25 @@ describe("bedrock Anthropic adapter — response translation", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it("does not throw on a stream that was simply empty", async () => {
+    // The boundary of the empty-stream error: it fires only when the model
+    // produced deltas we could not render. A response with no deltas at all
+    // is a model outcome (a refusal, a zero-token completion), not an adapter
+    // defect -- turning that into a 500 would break callers for a case the
+    // adapter handled correctly.
+    create.mockResolvedValue((async function* () {})());
+
+    const stream = await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      stream: true,
+      messages: [{ role: "user", content: "hi" }],
+    });
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+
+    expect(chunks).toEqual([]);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
