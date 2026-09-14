@@ -497,6 +497,16 @@ router.post(
 
       res.write(`data: ${JSON.stringify({ done: true, reportLength: fullReport.length, documentId })}\n\n`);
     } catch (err) {
+      // Whatever text accumulated before the throw is DISCARDED, deliberately.
+      // Persisting it would file a Medicare compliance document that looks
+      // finished and is not — worse than no document, because a missing report
+      // gets regenerated on the next weekly run while a truncated one gets
+      // filed and cited. This is the same reason /ai/compliance-report is the
+      // one route with no AbortController: a client disconnect must not
+      // persist a half-written report either.
+      // Proposed twice by the AWS review agent on PR #207 (persist the partial,
+      // then re-raise); declined both times, and written down here so the
+      // third reader does not have to re-derive it.
       logger.error({ err }, "AI compliance report stream failed");
       res.write(`data: ${JSON.stringify({ error: "AI service unavailable" })}\n\n`);
     } finally {
