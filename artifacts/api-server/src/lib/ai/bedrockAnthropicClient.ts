@@ -74,6 +74,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../logger";
+import { recordAiDegradation } from "../metrics";
 
 /**
  * The Chat Completions surface MediFlow actually uses — the union of what the
@@ -237,6 +238,7 @@ function splitMessages(messages: Array<{ role: string; content: string }>): {
       { emptyTurns: emptyDropped },
       "bedrock adapter: skipped empty-content turns (Messages rejects empty text blocks)",
     );
+    recordAiDegradation("dropped_empty_turns", "bedrock_adapter");
   }
 
   // Messages must begin with a user turn, so leading assistant turns have to
@@ -258,6 +260,7 @@ function splitMessages(messages: Array<{ role: string; content: string }>): {
       { droppedTurns: dropped },
       "bedrock adapter: dropped leading assistant turns (Messages must open on a user turn)",
     );
+    recordAiDegradation("dropped_assistant_turns", "bedrock_adapter");
   }
 
   return {
@@ -427,6 +430,7 @@ export function createBedrockAnthropicClient(opts: {
             },
             "bedrock stream: dropped non-text deltas",
           );
+          recordAiDegradation("dropped_non_text_deltas", "bedrock_adapter");
         }
         // A warning alone is not enough when the caller got nothing. Every
         // consumer of this iterator treats "stream ended" as "answer
@@ -442,6 +446,7 @@ export function createBedrockAnthropicClient(opts: {
         // not render. A genuinely empty response (no deltas at all) is a
         // model outcome, not an adapter defect, and stays a warning.
         if (textChunks === 0 && droppedTypes.size > 0) {
+          recordAiDegradation("empty_stream", "bedrock_adapter");
           throw new BedrockEmptyStreamError(
             Object.fromEntries(droppedTypes),
           );

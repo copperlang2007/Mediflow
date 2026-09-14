@@ -53,6 +53,7 @@ import {
 import { ObjectStorageService } from "../lib/objectStorage";
 import { buildComplianceReportPdf } from "../lib/complianceReportPdf";
 import { logger } from "../lib/logger";
+import { recordAiDegradation } from "../lib/metrics";
 
 const storageService = new ObjectStorageService();
 
@@ -324,6 +325,10 @@ router.post(
           res.json({ draft: parsed.body ?? text, subject: parsed.subject ?? "", aiAssisted: true });
           return;
         } catch {
+          // Reached when the model returns non-JSON despite the declared
+          // response_format. The agent sees a visibly broken draft, so this
+          // self-reports -- but only once a human complains. Count it.
+          recordAiDegradation("json_parse_failed", "ai_draft_email");
           res.json({ draft: text, subject: "", aiAssisted: true });
           return;
         }

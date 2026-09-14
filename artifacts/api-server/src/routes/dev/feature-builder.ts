@@ -42,6 +42,7 @@ import {
 } from "../../middlewares/requireAuth";
 import { requireMfa } from "../../middlewares/requireMfa";
 import { auditMiddleware } from "../../middlewares/auditMiddleware";
+import { recordAiDegradation } from "../../lib/metrics";
 import {
   buildCodebaseContext,
   FeaturePlan,
@@ -234,6 +235,10 @@ router.post(
       const json = JSON.parse(raw);
       plan = FeaturePlan.parse(json);
     } catch (err) {
+      // The 502 rate here IS the prompt-emulated-schema failure rate on
+      // Bedrock (ADR 0005). Counted so the retry-with-repair follow-up is
+      // scheduled on evidence rather than a hunch.
+      recordAiDegradation("json_parse_failed", "feature_builder");
       res.status(502).json({
         error: "AI returned an invalid plan",
         detail: err instanceof Error ? err.message : String(err),

@@ -38,6 +38,19 @@ import {
   createBedrockAnthropicClient,
   normalizeBedrockModelId,
 } from "../../lib/ai/bedrockAnthropicClient";
+import { aiProviderDegradationTotal } from "../../lib/metrics";
+
+async function degradationCount(
+  reason: string,
+  site = "bedrock_adapter",
+): Promise<number> {
+  const m = await aiProviderDegradationTotal.get();
+  return (
+    m.values.find(
+      (v) => v.labels.reason === reason && v.labels.site === site,
+    )?.value ?? 0
+  );
+}
 
 function textReply(text = "ok") {
   return {
@@ -580,6 +593,29 @@ describe("bedrock Anthropic adapter — response translation", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it("counts each degradation, so the ADR follow-ups can be scheduled on rates", async () => {
+    // A warn log answers "did this ever happen". It does not answer "is this
+    // 0.01% or 5% of calls", which is the only question that decides whether
+    // retry-with-repair and client-side history slicing are worth building.
+    // Asserting the DELTA, not an absolute, so the test does not depend on
+    // what other cases in this file already recorded.
+    const before = await degradationCount("dropped_assistant_turns");
+    create.mockResolvedValue({
+      model: "anthropic.claude-sonnet-5",
+      content: [{ type: "text", text: "ok" }],
+    });
+
+    await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      messages: [
+        { role: "assistant", content: "earlier reply" },
+        { role: "user", content: "hi" },
+      ],
+    });
+
+    expect(await degradationCount("dropped_assistant_turns")).toBe(before + 1);
   });
 
   it("does not throw on a stream that was simply empty", async () => {
