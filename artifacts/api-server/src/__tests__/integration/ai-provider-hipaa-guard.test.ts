@@ -292,6 +292,25 @@ describe("assertAiProviderHipaaCompliant — bedrock model routability at boot",
     }
   });
 
+  it("rejects the near-miss shapes a prefix check waves through", () => {
+    // Wrong case, missing family, and a hyphen where the dot belongs. Each
+    // looks close enough to a valid id to survive review and is rejected by
+    // Bedrock at request time, not before.
+    // Reported by the AWS review agent on PR #207.
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
+    for (const bad of [
+      "Claude-Sonnet-5",
+      "sonnet-5",
+      "us-anthropic.claude-sonnet-5",
+    ]) {
+      process.env.AI_INTEGRATIONS_MODEL = bad;
+      expect(() => assertAiProviderHipaaCompliant()).toThrow(
+        /is not an Anthropic model id/,
+      );
+    }
+  });
+
   it("accepts every Anthropic id shape, bare or regionally prefixed", () => {
     // The boundary: this must not reject a configuration that works.
     process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
