@@ -494,7 +494,7 @@ describe("bedrock Anthropic adapter — response translation", () => {
       stream: true,
       messages: [{ role: "user", content: "hi" }],
     });
-    const chunks = [];
+    const chunks: unknown[] = [];
     // The caller got no text at all, so the stream must FAIL rather than end:
     // a clean end reads as "answer complete" to every consumer -- /ai/chat
     // would send `done: true` after zero content frames, and the weekly
