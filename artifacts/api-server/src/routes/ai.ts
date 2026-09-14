@@ -180,13 +180,31 @@ router.post(
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
 
+    // Stop generating when the browser goes away. `res.write()` on a dead
+    // socket returns false without throwing, so without this the loop runs to
+    // natural completion -- up to max_completion_tokens of Bedrock output that
+    // is billed and thrown away, with the connection slot held for the whole
+    // generation. Reported by the AWS review agent on PR #207.
+    //
+    // `close` also fires on a normal end, after the loop is done; aborting a
+    // finished stream is a no-op, so there is no truncation risk here.
+    const controller = new AbortController();
+    let clientGone = false;
+    res.on("close", () => {
+      clientGone = true;
+      controller.abort();
+    });
+
     try {
-      const stream = await aiClient.chat.completions.create({
-        model: resolveAiModel(),
-        max_completion_tokens: 8192,
-        messages: chatMessages,
-        stream: true,
-      });
+      const stream = await aiClient.chat.completions.create(
+        {
+          model: resolveAiModel(),
+          max_completion_tokens: 8192,
+          messages: chatMessages,
+          stream: true,
+        },
+        { signal: controller.signal },
+      );
 
       for await (const chunk of stream) {
         const content = chunk.choices[0]?.delta?.content;
@@ -197,8 +215,16 @@ router.post(
 
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     } catch (err) {
-      logger.error({ err }, "AI chat stream failed");
-      res.write(`data: ${JSON.stringify({ error: "AI service unavailable" })}\n\n`);
+      // An abort we caused is not a failure -- and there is nobody left to
+      // read the error frame anyway.
+      if (clientGone) {
+        logger.info("AI chat stream aborted: client disconnected");
+      } else {
+        logger.error({ err }, "AI chat stream failed");
+        res.write(
+          `data: ${JSON.stringify({ error: "AI service unavailable" })}\n\n`,
+        );
+      }
     } finally {
       res.end();
     }
@@ -368,6 +394,15 @@ router.post(
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
 
+    // NO AbortController here, deliberately -- unlike /ai/chat above.
+    //
+    // This route's real output is the PDF persisted below, not the stream; the
+    // stream is just progress. Cancelling on client disconnect would leave
+    // `fullReport` truncated and then persist THAT as a compliance document,
+    // which is worse than the wasted tokens it saves: a partial compliance
+    // report in object storage looks complete to whoever opens it next.
+    // Letting the generation finish costs tokens and produces a correct
+    // artifact the operator can still retrieve.
     try {
       const stream = await aiClient.chat.completions.create({
         model: resolveAiModel(),
