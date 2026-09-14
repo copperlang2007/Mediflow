@@ -33,6 +33,7 @@ import {
   aiApiKeyVarName,
   resolveAiModel,
 } from "../lib/aiProvider";
+import { normalizeBedrockModelId } from "../lib/ai/bedrockAnthropicClient";
 
 const router: IRouter = Router();
 
@@ -159,6 +160,22 @@ function validateEnv(): EnvValidation {
     } else {
       modelHint = model;
     }
+    // The adapter rewrites a bare `claude-…` id with the provider prefix the
+    // configured endpoint host needs. That rewrite is invisible to the
+    // operator: a model with no GLOBAL inference profile comes back as an
+    // opaque model-not-found with no hint that the id they set is not the id
+    // that was sent. Surface both so the transformation is legible.
+    // Reported by the AWS review agent on PR #207.
+    const effectiveModel = normalizeBedrockModelId(
+      modelHint,
+      bedrockBaseUrl ?? legacyBaseUrl ?? "",
+    );
+    if (effectiveModel !== modelHint) {
+      warnings.push(
+        `AI_INTEGRATIONS_MODEL "${modelHint}" is sent to Bedrock as "${effectiveModel}" — the endpoint's required provider prefix is added automatically. Set a fully-qualified id to control the routing yourself.`,
+      );
+    }
+    modelHint = effectiveModel;
   } else if (provider === "openai") {
     if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
       issues.push("AI_INTEGRATIONS_OPENAI_BASE_URL missing");
@@ -343,7 +360,11 @@ router.get(
         ping: {
           ok: true,
           latencyMs,
+          // `model` is what the provider echoed back; `modelRequested` is what
+          // we asked for. They differ whenever the adapter added a prefix, and
+          // an operator comparing the health page to their env var needs both.
           model: reportedModel,
+          modelRequested: env.modelHint,
         },
         warnings: env.warnings,
       });
