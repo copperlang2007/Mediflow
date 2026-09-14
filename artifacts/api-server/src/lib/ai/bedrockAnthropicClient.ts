@@ -73,6 +73,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { logger } from "../logger";
 
 /**
  * The Chat Completions surface MediFlow actually uses — the union of what the
@@ -305,12 +306,21 @@ export function createBedrockAnthropicClient(opts: {
     return {
       async *[Symbol.asyncIterator]() {
         for await (const event of upstream) {
-          if (
-            event.type === "content_block_delta" &&
-            event.delta.type === "text_delta"
-          ) {
+          if (event.type !== "content_block_delta") continue;
+          if (event.delta.type === "text_delta") {
             yield { choices: [{ delta: { content: event.delta.text } }] };
+            continue;
           }
+          // Anything that is not text is dropped -- correct today (the SSE
+          // routes write every chunk straight to the browser), but if a future
+          // model default or prompt change starts producing thinking_delta or
+          // input_json_delta blocks, the stream would go silently empty with
+          // no error anywhere. Leave a trace so that is diagnosable rather
+          // than a mystery. Reported by the AWS review agent on PR #207.
+          logger.debug(
+            { deltaType: event.delta.type },
+            "bedrock stream: dropped a non-text delta",
+          );
         }
       },
     };

@@ -476,6 +476,13 @@ describe("GET /admin/health/ai — defense in depth", () => {
     // failure this test exists to prevent.
     expect(res.body.ping.ok).toBe(true);
     expect(res.body.ping.model).toContain("claude-");
+    // The adapter's prefix rewrite must be visible. An operator who set a
+    // bare id and gets model-not-found needs to see the id we actually sent,
+    // not just the one they configured.
+    expect(res.body.ping.modelRequested).toBe(
+      "global.anthropic.claude-sonnet-5",
+    );
+    expect(warned).toMatch(/is sent to Bedrock as/);
     expect(JSON.stringify(res.body)).not.toContain(TEST_API_KEY);
   });
 

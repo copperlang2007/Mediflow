@@ -12,6 +12,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const create = vi.fn();
+const debugSpy = vi.fn();
+
+vi.mock("../../lib/logger", () => ({
+  logger: { debug: (...a: unknown[]) => debugSpy(...a) },
+}));
 
 const ctorOpts = vi.fn();
 
@@ -339,5 +344,33 @@ describe("bedrock Anthropic adapter — response translation", () => {
     // text would pass even if every event were forwarded.
     expect(chunks).toEqual(["Hel", "lo"]);
     expect(create.mock.calls[0]![0].stream).toBe(true);
+  });
+
+  it("logs the non-text deltas it drops, so a silent-empty stream is diagnosable", async () => {
+    // Dropping non-text deltas is correct today, but if a future model or
+    // prompt change starts producing them the SSE stream would go empty with
+    // no error anywhere. The debug line is the only trace that would exist.
+    create.mockResolvedValue(
+      (async function* () {
+        yield {
+          type: "content_block_delta",
+          delta: { type: "thinking_delta", thinking: "…" },
+        };
+      })(),
+    );
+
+    const stream = await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      stream: true,
+      messages: [{ role: "user", content: "hi" }],
+    });
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+
+    expect(chunks).toEqual([]);
+    expect(debugSpy).toHaveBeenCalledWith(
+      { deltaType: "thinking_delta" },
+      expect.stringContaining("non-text delta"),
+    );
   });
 });
