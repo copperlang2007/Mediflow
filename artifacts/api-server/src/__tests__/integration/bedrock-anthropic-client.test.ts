@@ -90,6 +90,25 @@ describe("normalizeBedrockModelId", () => {
     expect(normalizeBedrockModelId("gpt-5.4", MANTLE)).toBe("gpt-5.4");
   });
 
+  it("declines to guess in the GovCloud and China partitions", () => {
+    // Both hostnames contain `bedrock-runtime`, so they would otherwise
+    // inherit the commercial `global.` inference profile -- an id that need
+    // not exist in those partitions at all. They are also the last places to
+    // silently guess at routing.
+    expect(
+      normalizeBedrockModelId(
+        "claude-sonnet-5",
+        "https://bedrock-runtime.us-gov-west-1.amazonaws.com/anthropic",
+      ),
+    ).toBe("claude-sonnet-5");
+    expect(
+      normalizeBedrockModelId(
+        "claude-sonnet-5",
+        "https://bedrock-runtime.cn-north-1.amazonaws.com.cn/anthropic",
+      ),
+    ).toBe("claude-sonnet-5");
+  });
+
   it("declines to guess a prefix on an unrecognised host", () => {
     // A private DNS alias or VPC endpoint used to fall through to the
     // `global.` branch, silently pinning a routing nobody chose. Passing the
@@ -319,6 +338,7 @@ describe("bedrock Anthropic adapter — response_format emulation", () => {
 describe("bedrock Anthropic adapter — response translation", () => {
   beforeEach(() => {
     create.mockReset();
+    warnSpy.mockReset();
   });
 
   it("returns the Chat Completions non-streaming shape", async () => {
@@ -377,7 +397,7 @@ describe("bedrock Anthropic adapter — response translation", () => {
     expect(create.mock.calls[0]![0].stream).toBe(true);
   });
 
-  it("logs the non-text deltas it drops, so a silent-empty stream is diagnosable", async () => {
+  it("warns once about the non-text deltas it drops, so a silent-empty stream is diagnosable", async () => {
     // Dropping non-text deltas is correct today, but if a future model or
     // prompt change starts producing them the SSE stream would go empty with
     // no error anywhere. The debug line is the only trace that would exist.
@@ -399,9 +419,81 @@ describe("bedrock Anthropic adapter — response translation", () => {
     for await (const chunk of stream) chunks.push(chunk);
 
     expect(chunks).toEqual([]);
-    expect(debugSpy).toHaveBeenCalledWith(
-      { deltaType: "thinking_delta" },
-      expect.stringContaining("non-text delta"),
+    // One summary line per stream, not one per delta: a per-delta line would
+    // be thousands of entries for a single response, which is exactly why the
+    // original was a debug nobody would see.
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        droppedDeltaTypes: { thinking_delta: 1 },
+        textChunks: 0,
+        emptyStream: true,
+      }),
+      expect.stringContaining("non-text deltas"),
+    );
+  });
+
+  it("says nothing when a stream is all text", async () => {
+    // The warn must fire on the exception, not on every stream -- otherwise it
+    // is noise and gets filtered, which is how it stops being alarmable.
+    create.mockResolvedValue(
+      (async function* () {
+        yield {
+          type: "message_start",
+        };
+        yield {
+          type: "content_block_delta",
+          delta: { type: "text_delta", text: "all good" },
+        };
+      })(),
+    );
+
+    const stream = await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      stream: true,
+      messages: [{ role: "user", content: "hi" }],
+    });
+    for await (const _ of stream) void _;
+
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("summarises many dropped deltas in one line, and flags a non-empty stream", async () => {
+    create.mockResolvedValue(
+      (async function* () {
+        for (let i = 0; i < 500; i += 1) {
+          yield {
+            type: "content_block_delta",
+            delta: { type: "thinking_delta", thinking: "…" },
+          };
+        }
+        yield {
+          type: "content_block_delta",
+          delta: { type: "text_delta", text: "hi" },
+        };
+        yield {
+          type: "content_block_delta",
+          delta: { type: "input_json_delta", partial_json: "{}" },
+        };
+      })(),
+    );
+
+    const stream = await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      stream: true,
+      messages: [{ role: "user", content: "hi" }],
+    });
+    for await (const _ of stream) void _;
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        droppedDeltaTypes: { thinking_delta: 500, input_json_delta: 1 },
+        textChunks: 1,
+        // Content did reach the caller, so this is degraded, not silent.
+        emptyStream: false,
+      }),
+      expect.anything(),
     );
   });
 });

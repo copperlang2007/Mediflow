@@ -152,13 +152,25 @@ const DEFAULT_MAX_TOKENS = 8192;
  *
  * We also decline to guess on a host we do not recognise. A private DNS alias,
  * a VPC endpoint, or an empty base URL used to fall through to the
- * `global.anthropic.` branch, silently pinning a routing nobody chose. Now the
- * id passes through untouched and `/admin/health/ai` says the operator must
- * qualify it themselves. Reported by the AWS review agent on PR #207.
+ * `global.anthropic.` branch, silently pinning a routing nobody chose.
+ *
+ * The same applies to the AWS GovCloud and China partitions. Their hostnames
+ * contain `bedrock-runtime`, so they would otherwise inherit the commercial
+ * `global.` inference profile -- an id that need not exist there at all. Both
+ * are the LAST places to silently guess at routing, so they are excluded and
+ * the operator must qualify the id themselves.
+ *
+ * In every declined case the id passes through untouched and
+ * `/admin/health/ai` raises an issue saying so. Reported by the AWS review
+ * agent on PR #207.
  */
 export function normalizeBedrockModelId(model: string, baseURL = ""): string {
   const id = model.trim();
   if (!id.startsWith("claude-")) return id;
+  // GovCloud (`*.us-gov-*.amazonaws.com`) and China (`*.amazonaws.com.cn`).
+  const nonCommercialPartition =
+    baseURL.includes("us-gov-") || baseURL.includes(".amazonaws.com.cn");
+  if (nonCommercialPartition) return id;
   if (baseURL.includes("bedrock-mantle")) return `anthropic.${id}`;
   if (baseURL.includes("bedrock-runtime")) return `global.anthropic.${id}`;
   return id;
@@ -327,21 +339,41 @@ export function createBedrockAnthropicClient(opts: {
     );
     return {
       async *[Symbol.asyncIterator]() {
+        // Anything that is not text is dropped -- correct today (the SSE routes
+        // write every chunk straight to the browser), but if a future model
+        // default or prompt change starts producing thinking_delta or
+        // input_json_delta blocks, the stream would go silently empty with no
+        // error anywhere: /ai/chat appears to hang, the compliance report comes
+        // out blank. Summarise ONCE at the end rather than logging per delta --
+        // a per-delta line would be thousands of entries for a single response,
+        // which is why this can be a warn (above the default level, so it is
+        // actually alarmable) instead of a debug nobody sees.
+        // Reported by the AWS review agent on PR #207.
+        let textChunks = 0;
+        const droppedTypes = new Map<string, number>();
+
         for await (const event of upstream) {
           if (event.type !== "content_block_delta") continue;
           if (event.delta.type === "text_delta") {
+            textChunks += 1;
             yield { choices: [{ delta: { content: event.delta.text } }] };
             continue;
           }
-          // Anything that is not text is dropped -- correct today (the SSE
-          // routes write every chunk straight to the browser), but if a future
-          // model default or prompt change starts producing thinking_delta or
-          // input_json_delta blocks, the stream would go silently empty with
-          // no error anywhere. Leave a trace so that is diagnosable rather
-          // than a mystery. Reported by the AWS review agent on PR #207.
-          logger.debug(
-            { deltaType: event.delta.type },
-            "bedrock stream: dropped a non-text delta",
+          droppedTypes.set(
+            event.delta.type,
+            (droppedTypes.get(event.delta.type) ?? 0) + 1,
+          );
+        }
+
+        if (droppedTypes.size > 0) {
+          logger.warn(
+            {
+              droppedDeltaTypes: Object.fromEntries(droppedTypes),
+              textChunks,
+              // The dangerous case: the caller got NOTHING and no error.
+              emptyStream: textChunks === 0,
+            },
+            "bedrock stream: dropped non-text deltas",
           );
         }
       },
