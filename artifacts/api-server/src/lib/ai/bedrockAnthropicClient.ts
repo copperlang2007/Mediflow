@@ -191,15 +191,33 @@ function splitMessages(messages: Array<{ role: string; content: string }>): {
   const systemParts: string[] = [];
   const rest: Anthropic.MessageParam[] = [];
 
+  let emptyDropped = 0;
   for (const m of messages) {
     if (m.role === "system") {
       systemParts.push(m.content);
+      continue;
+    }
+    // An empty text block is rejected by the Messages API with a 400, which
+    // /ai/chat surfaces to the user as an opaque "AI service unavailable".
+    // Empty turns are reachable: the web client persists chat history to
+    // localStorage, so closing a tab mid-stream -- before the first delta --
+    // leaves an assistant turn with content "" that is replayed on every
+    // later request. Skipping it loses nothing that was ever there.
+    // Reported by the AWS review agent on PR #207.
+    if (m.content.trim() === "") {
+      emptyDropped += 1;
       continue;
     }
     rest.push({
       role: m.role === "assistant" ? "assistant" : "user",
       content: m.content,
     });
+  }
+  if (emptyDropped > 0) {
+    logger.warn(
+      { emptyTurns: emptyDropped },
+      "bedrock adapter: skipped empty-content turns (Messages rejects empty text blocks)",
+    );
   }
 
   // Messages must begin with a user turn, so leading assistant turns have to
