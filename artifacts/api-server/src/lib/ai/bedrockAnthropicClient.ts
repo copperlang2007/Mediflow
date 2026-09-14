@@ -198,12 +198,32 @@ export class BedrockEmptyStreamError extends Error {
 export function normalizeBedrockModelId(model: string, baseURL = ""): string {
   const id = model.trim();
   if (!id.startsWith("claude-")) return id;
+
+  // Match the HOSTNAME, not any substring of the URL. A substring test meant a
+  // private DNS alias that merely contains the string -- `bedrock-runtime.
+  // internal.corp`, `foo.bedrock-runtime.example.com` in front of a VPC
+  // endpoint -- was read as a commercial AWS host and got `global.anthropic.`
+  // prepended, a routing guess made on a name that says nothing about where
+  // the traffic goes. ADR 0005 already calls this inference "a guess in a
+  // config path, and a thing to keep an eye on"; this narrows it to the two
+  // hostname shapes AWS actually documents.
+  // Reported by the AWS review agent on PR #207.
+  let host: string;
+  try {
+    host = new URL(baseURL).hostname;
+  } catch {
+    return id; // not a URL we can reason about: make no guess
+  }
+
   // GovCloud (`*.us-gov-*.amazonaws.com`) and China (`*.amazonaws.com.cn`).
-  const nonCommercialPartition =
-    baseURL.includes("us-gov-") || baseURL.includes(".amazonaws.com.cn");
-  if (nonCommercialPartition) return id;
-  if (baseURL.includes("bedrock-mantle")) return `anthropic.${id}`;
-  if (baseURL.includes("bedrock-runtime")) return `global.anthropic.${id}`;
+  if (/\.us-gov-/.test(host) || host.endsWith(".amazonaws.com.cn")) return id;
+
+  if (/^bedrock-mantle\.[a-z0-9-]+\.api\.aws$/.test(host)) {
+    return `anthropic.${id}`;
+  }
+  if (/^bedrock-runtime\.[a-z0-9-]+\.amazonaws\.com$/.test(host)) {
+    return `global.anthropic.${id}`;
+  }
   return id;
 }
 

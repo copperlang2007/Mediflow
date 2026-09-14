@@ -138,7 +138,12 @@ export interface AiClient {
         // site rather than a type error, so the two shapes drifting is a real
         // hazard worth noting where the next person will see it.
         stopReason?: string;
-        choices: Array<{ message: { content: string | null } }>;
+        choices: Array<{
+          message: { content: string | null };
+          // OpenAI/Azure's truncation signal. The Bedrock adapter reports the
+          // same event as `stopReason` instead.
+          finish_reason?: string;
+        }>;
       }>;
     };
   };
@@ -314,7 +319,17 @@ async function generateFileContent(
   // loud failure rather than a silent bad file, which is the trade this PR
   // keeps making.
   // Reported by the AWS review agent on PR #207.
-  if (response.stopReason === "max_tokens") {
+  // Both shapes, because the two providers name the same event differently:
+  // Anthropic reports `stop_reason: "max_tokens"` (surfaced as `stopReason` by
+  // the adapter), OpenAI/Azure reports `choices[0].finish_reason: "length"` and
+  // never sets `stopReason`. Checking only the first made this guard a no-op on
+  // exactly the provider it was not written against, which is a guard that
+  // reads as protection without being any.
+  // Reported by the AWS review agent on PR #207.
+  const finishReason = (
+    response as { choices?: Array<{ finish_reason?: string }> }
+  ).choices?.[0]?.finish_reason;
+  if (response.stopReason === "max_tokens" || finishReason === "length") {
     throw new Error(
       `AI generation for ${filePath} hit the ${8000}-token cap and was ` +
         `truncated. Refusing to emit a partial file.`,
