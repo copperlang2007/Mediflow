@@ -22,7 +22,12 @@ import { getQueue, startWorkers } from "./lib/jobs";
 import { captureWorkerError } from "./lib/sentry";
 import { markWorkersReady } from "./lib/readiness";
 import { shutdown } from "./lib/shutdown";
-import { assertAiProviderHipaaCompliant, bedrockRoutingIssues } from "./lib/aiProvider";
+import {
+  assertAiProviderHipaaCompliant,
+  bedrockRoutingIssues,
+  resolveAiProvider,
+  resolveAiBaseUrl,
+} from "./lib/aiProvider";
 import { assertStorageBackendHipaaCompliant } from "./lib/objectStorage";
 import { assertEsignProviderHipaaCompliant } from "./lib/esign/factory";
 import { assertEsignSigningCredsAreProd } from "./lib/esign/pkiSigner";
@@ -62,6 +67,36 @@ async function bootstrap(): Promise<void> {
   // and `/admin/health/ai` lists them for whoever investigates.
   for (const issue of bedrockRoutingIssues()) {
     logger.error({ issue }, "AI routing misconfigured: AI features are disabled");
+  }
+
+  // Name the endpoint actually resolved, on every boot, healthy or not. The
+  // failure this is for is silent by construction: an environment that never
+  // migrated off AI_INTEGRATIONS_OPENAI_BASE_URL still boots, still serves
+  // every non-AI route, still passes its container health check -- and the
+  // stale value is only discovered by a user whose AI request fails. A host
+  // and path in the startup log turns that into something an operator can
+  // spot at a glance, before traffic arrives.
+  //
+  // HOST AND PATH ONLY, never the full URL and never the key: base URLs are
+  // not secrets but they are adjacent to them in every log pipeline, and the
+  // question this answers ("which endpoint did we resolve?") needs nothing
+  // more.
+  // Reported by the AWS review agent on PR #207.
+  try {
+    const aiProvider = resolveAiProvider();
+    const aiBaseUrl = resolveAiBaseUrl(aiProvider);
+    const parsed = aiBaseUrl ? new URL(aiBaseUrl) : undefined;
+    logger.info(
+      {
+        aiProvider,
+        aiEndpointHost: parsed?.hostname ?? null,
+        aiEndpointPath: parsed?.pathname ?? null,
+      },
+      "AI provider resolved",
+    );
+  } catch {
+    // A malformed or absent base URL is already reported by the checks above
+    // and by /admin/health/ai; a log line must never be what stops a boot.
   }
 
   // HIPAA guard: uploaded documents (signed PDFs, etc.) routinely embed PHI.

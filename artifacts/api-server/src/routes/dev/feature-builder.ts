@@ -233,6 +233,26 @@ router.post(
         },
         stream: false,
       });
+      // The same truncation check /apply's generateFileContent does. Without
+      // it here, a plan large enough to hit the cap comes back as truncated
+      // JSON and surfaces as "Unexpected end of JSON input" — a message that
+      // tells the developer to fix their prompt when the actual fix is to
+      // raise the cap. Two sibling paths through the same model disagreeing on
+      // how they report the same event is how people learn to distrust the
+      // error text.
+      // Reported by the AWS review agent on PR #207.
+      const finish = (
+        response as { choices?: Array<{ finish_reason?: string }> }
+      ).choices?.[0]?.finish_reason;
+      if (response.stopReason === "max_tokens" || finish === "length") {
+        res.status(502).json({
+          error: "AI plan generation was truncated at the token cap",
+          detail:
+            "The model stopped because it hit max_tokens, so the plan JSON is " +
+            "incomplete. Shorten the request, or raise the cap.",
+        });
+        return;
+      }
       raw = response.choices[0]?.message?.content ?? "";
     } catch (err) {
       res.status(503).json({
