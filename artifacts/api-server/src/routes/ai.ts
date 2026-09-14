@@ -1,5 +1,5 @@
 /**
- * AI assistant routes — context-aware OpenAI chat, outreach drafting,
+ * AI assistant routes — context-aware LLM chat, outreach drafting,
  * and compliance intelligence reports.
  *
  * POST /ai/chat            — SSE streaming context-aware chat
@@ -22,56 +22,23 @@ import {
   contactsTable,
   documentsTable,
 } from "@workspace/db";
-import OpenAI, { AzureOpenAI } from "openai";
-import {
-  resolveAiProvider,
-  resolveAiModel,
-  resolveAiBaseUrl,
-  resolveAiApiKey,
-} from "../lib/aiProvider";
+import { resolveAiModel } from "../lib/aiProvider";
+import { buildAiClient } from "../lib/ai/buildAiClient";
+import type { ChatCompletionClient } from "../lib/ai/bedrockAnthropicClient";
 
-// Provider dispatch — `azure` is the HIPAA-eligible path (BAA coverage),
-// `openai` is the direct API for dev/staging only. The provider is
-// resolved through `resolveAiProvider()`, which hard-fails in production
-// unless `AI_INTEGRATIONS_PROVIDER=azure` — see `lib/aiProvider.ts`.
-let _openai: OpenAI | null = null;
-export function getOpenAI(): OpenAI | null {
-  if (_openai) return _openai;
-  // resolveAiProvider() is INSIDE the try. The authoritative fail-fast for a
-  // non-BAA provider is assertAiProviderHipaaCompliant() at bootstrap
-  // (index.ts) -- the process refuses to start, so no request is ever served
-  // by a misconfigured deploy. Re-throwing here adds nothing and costs the
-  // caller's graceful-degradation contract (the transcript webhook must not
-  // 5xx; a worker must not die). Belt-and-braces: return null and let the
-  // boot guard be the thing that fails loudly.
-  try {
-    const provider = resolveAiProvider();
-    const apiKey = resolveAiApiKey(provider);
-    if (!apiKey) return null;
-    if (provider === "azure") {
-      const resource = process.env.AI_INTEGRATIONS_AZURE_RESOURCE;
-      const endpoint =
-        process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ??
-        (resource ? `https://${resource}.openai.azure.com` : undefined);
-      if (!endpoint) return null;
-      const apiVersion =
-        process.env.AI_INTEGRATIONS_AZURE_API_VERSION ?? "2024-02-15-preview";
-      const deployment = process.env.AI_INTEGRATIONS_AZURE_DEPLOYMENT;
-      _openai = new AzureOpenAI({ apiKey, endpoint, apiVersion, deployment });
-      return _openai;
-    }
-    const baseURL = resolveAiBaseUrl(provider);
-    if (!baseURL) return null;
-    _openai = new OpenAI({ apiKey, baseURL });
-    return _openai;
-  } catch {
-    return null;
-  }
+// Provider dispatch lives in `lib/ai/buildAiClient.ts` — one construction
+// site for every AI path, gated by `resolveAiProvider()`. On bedrock the
+// returned client is the Anthropic Messages adapter wearing this same shape.
+let _aiClient: ChatCompletionClient | null = null;
+export function getOpenAI(): ChatCompletionClient | null {
+  if (_aiClient) return _aiClient;
+  _aiClient = buildAiClient();
+  return _aiClient;
 }
 
 /** Test-only — reset the memoized client between tests. */
 export function _resetOpenAIClient(): void {
-  _openai = null;
+  _aiClient = null;
 }
 import {
   requireAuth,

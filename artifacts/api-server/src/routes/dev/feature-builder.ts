@@ -34,13 +34,8 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import OpenAI, { AzureOpenAI } from "openai";
-import {
-  resolveAiProvider,
-  resolveAiBaseUrl,
-  resolveAiApiKey,
-  aiApiKeyVarName,
-} from "../../lib/aiProvider";
+import { buildAiClient } from "../../lib/ai/buildAiClient";
+import { aiApiKeyVarName, resolveAiModel } from "../../lib/aiProvider";
 import {
   requireAuth,
   requirePermission,
@@ -56,10 +51,10 @@ import {
 
 const router: IRouter = Router();
 
-// OpenAI model is configurable so we can swap versions without a code change.
-// Defaults to the model the agent was originally tested against.
+// Model is configurable so we can swap versions without a code change.
+// Defaults to the provider's default (see resolveAiModel).
 const FEATURE_BUILDER_MODEL =
-  process.env.FEATURE_BUILDER_MODEL ?? "gpt-5.4";
+  process.env.FEATURE_BUILDER_MODEL ?? resolveAiModel();
 
 // Every route here requires the caller hold dev_console:admin. The
 // parent /dev router already applies `devOnly`, so an unset env var
@@ -118,11 +113,11 @@ export function _clearPlanStore(): void {
 }
 
 // ---------------------------------------------------------------------------
-// OpenAI client — pluggable so tests can inject a fake.
+// AI client — pluggable so tests can inject a fake.
 // ---------------------------------------------------------------------------
 
 /**
- * Minimal subset of the OpenAI client we actually use, narrow enough to
+ * Minimal subset of the chat-completion surface we actually use, narrow enough to
  * be trivial to mock in tests via setOpenAIClientFactory().
  */
 export interface AiClient {
@@ -152,47 +147,13 @@ export function setOpenAIClientFactory(
 
 function getOpenAI(): AiClient | null {
   if (_factory) return _factory();
-  // resolveAiProvider() is INSIDE the try. The authoritative fail-fast for a
-  // non-BAA provider is assertAiProviderHipaaCompliant() at bootstrap
-  // (index.ts) -- the process refuses to start, so no request is ever served
-  // by a misconfigured deploy. Re-throwing here adds nothing and costs the
-  // caller's graceful-degradation contract (the transcript webhook must not
-  // 5xx; a worker must not die). Belt-and-braces: return null and let the
-  // boot guard be the thing that fails loudly.
-  try {
-    const provider = resolveAiProvider();
-    const apiKey = resolveAiApiKey(provider);
-    if (!apiKey) return null;
-    if (provider === "azure") {
-      // Azure OpenAI is the HIPAA-eligible path. The deployment name in
-      // the URL (set on the client) overrides the `model` field sent in
-      // the request body, so callers can keep passing FEATURE_BUILDER_MODEL
-      // — we just route to the corresponding Azure deployment.
-      const resource = process.env.AI_INTEGRATIONS_AZURE_RESOURCE;
-      const endpoint =
-        process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ??
-        (resource ? `https://${resource}.openai.azure.com` : undefined);
-      if (!endpoint) return null;
-      const apiVersion =
-        process.env.AI_INTEGRATIONS_AZURE_API_VERSION ?? "2024-02-15-preview";
-      // Fall back to FEATURE_BUILDER_MODEL when no Azure-specific
-      // deployment is set — common when the Azure deployment was named
-      // after the model.
-      const deployment =
-        process.env.AI_INTEGRATIONS_AZURE_DEPLOYMENT ?? FEATURE_BUILDER_MODEL;
-      return new AzureOpenAI({
-        apiKey,
-        endpoint,
-        apiVersion,
-        deployment,
-      }) as unknown as AiClient;
-    }
-    const baseURL = resolveAiBaseUrl(provider);
-    if (!baseURL) return null;
-    return new OpenAI({ apiKey, baseURL }) as unknown as AiClient;
-  } catch {
-    return null;
-  }
+  // All provider dispatch lives in `lib/ai/buildAiClient.ts`. The Azure
+  // deployment name in the URL overrides the `model` field in the body, so
+  // pass FEATURE_BUILDER_MODEL as the deployment fallback to keep routing to
+  // the matching deployment when AI_INTEGRATIONS_AZURE_DEPLOYMENT is unset.
+  return buildAiClient({
+    azureDeploymentFallback: FEATURE_BUILDER_MODEL,
+  }) as unknown as AiClient | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -7,10 +7,14 @@
  *
  *   - `azure`   — Azure OpenAI. BAA-covered: Microsoft offers a BAA for
  *                 Azure OpenAI.
- *   - `bedrock` — Amazon Bedrock's OpenAI-compatible Chat Completions API.
- *                 BAA-covered: AWS offers a BAA covering Bedrock, and the
- *                 endpoint speaks the OpenAI wire format, so it is consumed
- *                 through the same `openai` SDK client (base URL + API key).
+ *   - `bedrock` — Claude in Amazon Bedrock, served through the Anthropic
+ *                 Messages API at
+ *                 `https://bedrock-mantle.<region>.api.aws/anthropic`.
+ *                 BAA-covered: AWS offers a BAA covering Bedrock. It does NOT
+ *                 speak the OpenAI wire format — Chat Completions is
+ *                 unsupported for every Anthropic model — so it is consumed
+ *                 through `@anthropic-ai/sdk` behind the adapter in
+ *                 `lib/ai/bedrockAnthropicClient.ts` (base URL + bearer token).
  *   - `openai`  — the standard `api.openai.com` API. OpenAI does NOT offer
  *                 a HIPAA BAA for this endpoint, so it must NEVER receive
  *                 PHI. Allowed only in dev/test.
@@ -71,14 +75,39 @@ export function resolveAiProvider(): AiProvider {
 }
 
 /**
- * The chat model to request. Bedrock requires a Bedrock model id (e.g.
- * `us.anthropic.claude-sonnet-4-6`); Azure/OpenAI use their own model names.
- * Configurable via `AI_INTEGRATIONS_MODEL` so the same code path serves every
- * provider; defaults to the historical value so existing Azure/OpenAI deploys
- * are unaffected.
+ * The default model for a provider that has not set `AI_INTEGRATIONS_MODEL`.
+ *
+ * The historical default (`gpt-5.4`) is an OpenAI model name and is kept for
+ * azure/openai so existing deploys are unaffected. It is meaningless on
+ * Bedrock, where an unset variable previously produced a model-not-found error
+ * on the first AI request of an otherwise healthy deploy.
+ *
+ * The bare id is deliberate: Bedrock's required provider prefix depends on
+ * which endpoint host the base URL names, so `normalizeBedrockModelId()` adds
+ * the right one at request time rather than baking one in here.
  */
-export function resolveAiModel(): string {
-  return process.env.AI_INTEGRATIONS_MODEL?.trim() || "gpt-5.4";
+export const DEFAULT_BEDROCK_MODEL = "claude-sonnet-5";
+const DEFAULT_OPENAI_MODEL = "gpt-5.4";
+
+/**
+ * The chat model to request. Configurable via `AI_INTEGRATIONS_MODEL` so the
+ * same code path serves every provider.
+ *
+ * Deliberately never throws, even in production on a non-BAA provider. Two
+ * modules (`transcriptParse`, `feature-builder`) read a model id at module
+ * scope, and imports run before `bootstrap()` — a throw here would turn the
+ * boot guard's clear FATAL into an opaque import-time crash. Choosing a
+ * default model sends nothing anywhere; the guard still stops the process.
+ */
+export function resolveAiModel(provider?: AiProvider): string {
+  const configured = process.env.AI_INTEGRATIONS_MODEL?.trim();
+  if (configured) return configured;
+  let resolved = provider;
+  if (!resolved) {
+    const raw = (process.env.AI_INTEGRATIONS_PROVIDER ?? "").toLowerCase();
+    resolved = isHipaaEligible(raw) ? raw : "openai";
+  }
+  return resolved === "bedrock" ? DEFAULT_BEDROCK_MODEL : DEFAULT_OPENAI_MODEL;
 }
 
 /**
@@ -92,8 +121,8 @@ export function resolveAiModel(): string {
  *
  * Bedrock's endpoint is not an OpenAI endpoint. AWS's compatibility matrix
  * lists Chat Completions as NOT supported for every Anthropic model — Claude
- * is reachable over Converse, Invoke, or the Anthropic Messages interface at
- * `https://bedrock-runtime.<region>.amazonaws.com/anthropic`, never over
+ * in Amazon Bedrock is reachable over the Anthropic Messages API at
+ * `https://bedrock-mantle.<region>.api.aws/anthropic`, never over
  * `/openai/v1`. Calling that variable AI_INTEGRATIONS_OPENAI_BASE_URL while it
  * holds an Anthropic endpoint is how a deploy ends up green and broken.
  *

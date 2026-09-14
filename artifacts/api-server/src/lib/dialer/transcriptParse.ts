@@ -5,24 +5,20 @@
  * MediFlow and then purges its own copy (§6.1). PHI must stay inside MediFlow's
  * BAA-covered boundary, so the AI parse that turns the transcript into
  * structured agent-assist runs ENTIRELY MediFlow-side and goes through the
- * single AI entry point (`aiProvider.ts` — Azure OpenAI is the only HIPAA-BAA
- * provider in production, §8). The dialer never calls an LLM with PHI, and the
+ * single AI entry point (`aiProvider.ts` — only BAA-covered providers, Azure
+ * OpenAI and Amazon Bedrock, are allowed in production, §8). The dialer never
+ * calls an LLM with PHI, and the
  * parsed result is never sent back to the dialer.
  *
  * This module is transport-free: it takes transcript text + minimal call
  * context and returns a typed `TranscriptParseResult`. The AI client is
  * INJECTABLE (`TranscriptAiClient`) so tests use a mock and no real network
  * call is ever made. The production default is resolved lazily and is gated by
- * `resolveAiProvider()`, which hard-fails in prod unless the provider is Azure.
+ * `resolveAiProvider()`, which hard-fails in prod on a non-BAA provider.
  */
-import OpenAI, { AzureOpenAI } from "openai";
+import { buildAiClient } from "../ai/buildAiClient";
 import { z } from "zod/v4";
-import {
-  resolveAiProvider,
-  resolveAiModel,
-  resolveAiBaseUrl,
-  resolveAiApiKey,
-} from "../aiProvider";
+import { resolveAiModel } from "../aiProvider";
 import { logger } from "../logger";
 
 /** Disposition the model suggests for the call (advisory — agent confirms). */
@@ -96,8 +92,9 @@ export interface TranscriptParseContext {
 }
 
 /**
- * The single chat-completion surface this module needs. Mirrors the OpenAI /
- * AzureOpenAI SDK shape so the real client satisfies it directly, while tests
+ * The single chat-completion surface this module needs. Mirrors the Chat
+ * Completions shape that `buildAiClient()` returns for every provider (on
+ * bedrock that is the Anthropic Messages adapter), while tests
  * inject a tiny mock. Injecting the client is what keeps the test suite fully
  * offline AND lets us assert that parsing never reaches for the network.
  */
@@ -118,45 +115,15 @@ export interface TranscriptAiClient {
 }
 
 /**
- * Build the production AI client through the HIPAA guard. Mirrors
- * `routes/ai.ts#getOpenAI` so all AI construction stays consistent and gated by
- * `resolveAiProvider()` (throws in prod unless provider=azure). Returns null
- * when AI is not configured — callers degrade gracefully (parse is skipped).
+ * Build the production AI client through the HIPAA guard.
+ *
+ * All construction lives in `lib/ai/buildAiClient.ts` so every AI path in the
+ * app resolves the provider identically. Returns null when AI is not
+ * configured — callers degrade gracefully (parse is skipped) rather than
+ * 5xx-ing the transcript webhook.
  */
 function buildDefaultAiClient(): TranscriptAiClient | null {
-  // resolveAiProvider() is INSIDE the try. The authoritative fail-fast for a
-  // non-BAA provider is assertAiProviderHipaaCompliant() at bootstrap
-  // (index.ts) -- the process refuses to start, so no request is ever served
-  // by a misconfigured deploy. Re-throwing here adds nothing and costs the
-  // caller's graceful-degradation contract (the transcript webhook must not
-  // 5xx; a worker must not die). Belt-and-braces: return null and let the
-  // boot guard be the thing that fails loudly.
-  try {
-    const provider = resolveAiProvider();
-    const apiKey = resolveAiApiKey(provider);
-    if (!apiKey) return null;
-    if (provider === "azure") {
-      const resource = process.env.AI_INTEGRATIONS_AZURE_RESOURCE;
-      const endpoint =
-        process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ??
-        (resource ? `https://${resource}.openai.azure.com` : undefined);
-      if (!endpoint) return null;
-      const apiVersion =
-        process.env.AI_INTEGRATIONS_AZURE_API_VERSION ?? "2024-02-15-preview";
-      const deployment = process.env.AI_INTEGRATIONS_AZURE_DEPLOYMENT;
-      return new AzureOpenAI({
-        apiKey,
-        endpoint,
-        apiVersion,
-        deployment,
-      }) as unknown as TranscriptAiClient;
-    }
-    const baseURL = resolveAiBaseUrl(provider);
-    if (!baseURL) return null;
-    return new OpenAI({ apiKey, baseURL }) as unknown as TranscriptAiClient;
-  } catch {
-    return null;
-  }
+  return buildAiClient() as unknown as TranscriptAiClient | null;
 }
 
 const PARSE_SYSTEM_PROMPT = `You are MediFlow's agent-assist analyst for outbound Medicare insurance calls. You receive a single call transcript and return ONLY structured agent-assist JSON — never prose outside the JSON.

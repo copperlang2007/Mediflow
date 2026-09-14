@@ -317,15 +317,15 @@ router.get(
         {
           model: env.modelHint,
           max_tokens: 1,
-          messages: [{ role: "system", content: "ping" }],
+          // A user turn, not a system turn: the Anthropic Messages API
+          // (bedrock) rejects a request with no user message, and a health
+          // check that cannot run on the production provider is worthless.
+          messages: [{ role: "user", content: "ping" }],
         },
         { signal: controller.signal },
       );
       const latencyMs = Date.now() - startedAt;
-      const reportedModel =
-        typeof (response as { model?: string }).model === "string"
-          ? (response as { model: string }).model
-          : env.modelHint;
+      const reportedModel = response.model ?? env.modelHint;
 
       res.status(200).json({
         provider: env.provider,
