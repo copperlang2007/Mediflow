@@ -242,9 +242,11 @@ describe("bedrock Anthropic adapter — request translation", () => {
       ],
     });
 
+    // This originally asserted [user, user] -- encoding as correct the very
+    // sequence Anthropic rejects, so the test would have defended the bug the
+    // drop introduced. The turns are merged instead.
     expect(create.mock.calls[0]![0].messages).toEqual([
-      { role: "user", content: "real question" },
-      { role: "user", content: "follow up" },
+      { role: "user", content: "real question\n\nfollow up" },
     ]);
     expect(warnSpy).toHaveBeenCalledWith(
       { emptyTurns: 2 },
@@ -593,6 +595,65 @@ describe("bedrock Anthropic adapter — response translation", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it("merges the same-role pair an empty-turn drop creates, instead of 400ing", async () => {
+    // The exact history the empty-turn drop was written for: a tab closed
+    // mid-stream leaves assistant(""), which is dropped -- leaving [user,
+    // user], which Messages rejects with the same 400 the drop existed to
+    // avoid. Both user turns are real text, so merging loses nothing.
+    // Reported by the AWS review agent on PR #207.
+    create.mockResolvedValue({
+      model: "anthropic.claude-sonnet-5",
+      content: [{ type: "text", text: "ok" }],
+    });
+
+    await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      messages: [
+        { role: "user", content: "first question" },
+        { role: "assistant", content: "   " },
+        { role: "user", content: "second question" },
+      ],
+    });
+
+    const sent = create.mock.calls[0]![0].messages;
+    expect(sent).toEqual([
+      { role: "user", content: "first question\n\nsecond question" },
+    ]);
+    // Roles must alternate, which is the property Anthropic actually enforces.
+    for (let i = 1; i < sent.length; i += 1) {
+      expect(sent[i].role).not.toBe(sent[i - 1].role);
+    }
+  });
+
+  it("keeps a top-level oneOf schema whole rather than reading it as an envelope", async () => {
+    // A bare schema that happens to carry `name` and `schema` fields was
+    // misread as an OpenAI envelope, and only the inner subtree reached the
+    // model -- constraints gone, no error, technically-valid garbage back.
+    // Reported by the AWS review agent on PR #207.
+    create.mockResolvedValue({
+      model: "anthropic.claude-sonnet-5",
+      content: [{ type: "text", text: "{}" }],
+    });
+
+    await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      messages: [{ role: "user", content: "hi" }],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          oneOf: [{ type: "object" }],
+          name: "x",
+          schema: { deprecated: true },
+        },
+      },
+    });
+
+    const system = create.mock.calls[0]![0].system as string;
+    expect(system).toContain("oneOf");
+    // The trap: unwrapping would have sent ONLY this fragment.
+    expect(system).not.toMatch(/^\s*\{"deprecated":true\}\s*$/m);
   });
 
   it("counts each degradation, so the ADR follow-ups can be scheduled on rates", async () => {
