@@ -199,10 +199,18 @@ export async function refreshQueueGaugesIfPossible(): Promise<void> {
   // single counter -- unusable without a database. A counter is the lightest
   // thing in the codebase; it should not drag the job queue in behind it.
   // Only this function, which runs on a /metrics scrape, actually needs pg-boss.
-  const { JOB_NAMES, peekQueue } = await import("./jobs");
-  const boss = peekQueue();
-  if (!boss) return; // pg-boss not started — skip
   try {
+    // Inside the try, not above it. `jobs.ts` throws on a missing DATABASE_URL
+    // while its module body runs, and making the import lazy moved that throw
+    // from load time to scrape time -- where, outside the try, it escaped and
+    // turned /metrics into a 500 that served NO metrics at all, not even the
+    // process and HTTP ones that need no database. A queue gauge being
+    // unavailable must cost the queue gauges and nothing else.
+    // Reported by the AWS review agent on PR #207.
+    const { JOB_NAMES, peekQueue } = await import("./jobs");
+    const boss = peekQueue();
+    if (!boss) return; // pg-boss not started — skip
+
     // Single round-trip: getQueues() returns QueueResult[] with
     // queuedCount/activeCount/deferredCount for every queue we ask for.
     const queueNames = Object.values(JOB_NAMES) as string[];
@@ -214,8 +222,9 @@ export async function refreshQueueGaugesIfPossible(): Promise<void> {
     }
   } catch (err) {
     // Per-queue failures land here (e.g. queue doesn't exist yet on
-    // first boot). Log at debug so prod logs don't fill — Prometheus
-    // sees the last-known values.
+    // first boot), as does an absent DATABASE_URL. Log at debug so prod logs
+    // don't fill — Prometheus sees the last-known values, and every other
+    // metric still serves.
     logger.debug({ err }, "pg-boss queue depth refresh failed");
   }
 }

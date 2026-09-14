@@ -195,6 +195,37 @@ export class BedrockEmptyStreamError extends Error {
   }
 }
 
+/**
+ * Which documented Bedrock endpoint a base URL names, by HOSTNAME.
+ *
+ * Exported because two places need the answer and they drifted: the adapter
+ * tightened to a hostname match while `/admin/health/ai` kept a substring
+ * test, so a private DNS alias containing "bedrock-runtime" made the health
+ * check warn about a model/host mismatch for a host the adapter had correctly
+ * declined to classify -- a contradiction in the one place an operator goes to
+ * reason about routing. One function now answers it for both.
+ * Reported by the AWS review agent on PR #207.
+ */
+export function bedrockHostKind(
+  baseURL: string,
+): "runtime" | "mantle" | "non-commercial" | "unknown" {
+  let host: string;
+  try {
+    host = new URL(baseURL).hostname;
+  } catch {
+    return "unknown";
+  }
+  // GovCloud (`*.us-gov-*.amazonaws.com`) and China (`*.amazonaws.com.cn`).
+  if (/\.us-gov-/.test(host) || host.endsWith(".amazonaws.com.cn")) {
+    return "non-commercial";
+  }
+  if (/^bedrock-mantle\.[a-z0-9-]+\.api\.aws$/.test(host)) return "mantle";
+  if (/^bedrock-runtime\.[a-z0-9-]+\.amazonaws\.com$/.test(host)) {
+    return "runtime";
+  }
+  return "unknown";
+}
+
 export function normalizeBedrockModelId(model: string, baseURL = ""): string {
   const id = model.trim();
   if (!id.startsWith("claude-")) return id;
@@ -208,22 +239,11 @@ export function normalizeBedrockModelId(model: string, baseURL = ""): string {
   // config path, and a thing to keep an eye on"; this narrows it to the two
   // hostname shapes AWS actually documents.
   // Reported by the AWS review agent on PR #207.
-  let host: string;
-  try {
-    host = new URL(baseURL).hostname;
-  } catch {
-    return id; // not a URL we can reason about: make no guess
-  }
-
-  // GovCloud (`*.us-gov-*.amazonaws.com`) and China (`*.amazonaws.com.cn`).
-  if (/\.us-gov-/.test(host) || host.endsWith(".amazonaws.com.cn")) return id;
-
-  if (/^bedrock-mantle\.[a-z0-9-]+\.api\.aws$/.test(host)) {
-    return `anthropic.${id}`;
-  }
-  if (/^bedrock-runtime\.[a-z0-9-]+\.amazonaws\.com$/.test(host)) {
-    return `global.anthropic.${id}`;
-  }
+  const kind = bedrockHostKind(baseURL);
+  if (kind === "mantle") return `anthropic.${id}`;
+  if (kind === "runtime") return `global.anthropic.${id}`;
+  // A non-commercial partition or an unrecognised host: make no guess, and let
+  // /admin/health/ai tell the operator to qualify the id themselves.
   return id;
 }
 
