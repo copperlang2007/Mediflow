@@ -143,6 +143,20 @@ down. Now there is.
   unilaterally. If the dropped-turn warn rate proves material, the cleaner fix
   is upstream — slice the client-side history window on a user boundary so
   nothing is lost and nothing is invented. Raised with the operator.
+- **Non-text deltas are dropped, and an all-dropped stream is an error.**
+  The adapter renders `text_delta` and nothing else. That is correct for every
+  feature MediFlow ships today, but a future model default or prompt change
+  could produce `thinking_delta` or `input_json_delta` blocks instead. A stream
+  made entirely of those would have ended cleanly with zero text, and every
+  consumer reads "stream ended" as "answer complete": `/ai/chat` would send
+  `done: true` after no content frames, and `weeklyComplianceReport` would
+  persist a zero-length PDF. A blank answer that reports success is worse than
+  a failure, because nobody investigates a success. That case now throws
+  `BedrockEmptyStreamError` into each caller's existing catch. The boundary is
+  deliberate: a stream with NO deltas at all is a model outcome (a refusal, a
+  zero-token completion), not an adapter defect, and stays a warning. A
+  partially-dropped stream also stays a warning — content did reach the caller,
+  so it is degraded, not silent. Raised by the AWS review agent on PR #207.
 - **An adapter is a layer.** It will diverge from both APIs over time, and it
   translates only the subset MediFlow uses — deliberately, so an unsupported
   option cannot be silently dropped, but it means a future feature (tool use,
@@ -156,6 +170,16 @@ down. Now there is.
   (`*.amazonaws.com.cn`) get no guess at all — the id passes through and
   `/admin/health/ai` raises an issue telling the operator to qualify it. A
   regulated partition is the last place to silently pick a routing.
+
+  That health-check issue is reported, but only to someone who goes looking, so
+  the same condition also fails the process at boot in
+  `assertAiProviderHipaaCompliant()`. Without it, a GovCloud/China/private-DNS
+  deploy boots clean, passes its container health check, serves every non-AI
+  route, and fails only on the first AI request a real user makes — precisely
+  the green-and-broken shape this ADR exists to eliminate. A MISSING base URL
+  is deliberately not covered here; it is already reported by the callers that
+  name that variable, and raising a model error for it would misdirect the
+  operator.
 
 ## Master Data Flywheel Impact
 
@@ -224,8 +248,8 @@ duplication, which nobody wants back.
 - Anthropic, *Claude in Amazon Bedrock* — the model-id table, the
   base-URL + bearer-token configuration for the standard client, and the
   unsupported-feature list.
-- `bedrock-anthropic-client.test.ts` (16 cases) and `build-ai-client.test.ts`
-  (6 cases): 22 passing. Mutation-tested — seven deliberate defects were
+- `bedrock-anthropic-client.test.ts` (29 cases), `build-ai-client.test.ts`
+  (6 cases) and `ai-provider-hipaa-guard.test.ts` (26 cases): 61 passing. Mutation-tested — seven deliberate defects were
   introduced (drop the system hoist, wrong model prefix, ignore the abort
   signal, emit non-text deltas, forward every stream event, skip the
   missing-key guard, bypass the provider guard) and every one was caught. An
