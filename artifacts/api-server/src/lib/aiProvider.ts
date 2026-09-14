@@ -32,6 +32,8 @@
  * `resolveAiProvider()` so the guard cannot be bypassed.
  */
 
+import { normalizeBedrockModelId } from "./ai/bedrockAnthropicClient";
+
 export type AiProvider = "azure" | "bedrock" | "openai";
 
 /**
@@ -194,5 +196,30 @@ export function aiApiKeyVarName(
  * Throws the same error as `resolveAiProvider()`.
  */
 export function assertAiProviderHipaaCompliant(): void {
-  resolveAiProvider();
+  const provider = resolveAiProvider();
+  if (provider !== "bedrock") return;
+
+  // A bare `claude-…` id needs a provider prefix, and the adapter infers one
+  // from the endpoint host. On a host it does not recognise — GovCloud, China,
+  // a private DNS name in front of a VPC endpoint — it declines to guess and
+  // sends the id through unchanged, which Bedrock rejects.
+  //
+  // `/admin/health/ai` already reports this, but that endpoint is only
+  // consulted by someone who has gone looking. Without the check here, such a
+  // deploy boots clean, passes its container health check, serves every
+  // non-AI route, and fails only on the first AI request a user makes. That is
+  // exactly the class of green-and-broken deploy this PR exists to eliminate,
+  // so it fails at boot instead.
+  // Reported by the AWS review agent on PR #207.
+  const model = resolveAiModel("bedrock");
+  const baseUrl = resolveAiBaseUrl("bedrock") ?? "";
+  if (!baseUrl) return; // absent config is the caller's own error to report
+  if (normalizeBedrockModelId(model, baseUrl) === model && model.startsWith("claude-")) {
+    throw new Error(
+      `FATAL: AI_INTEGRATIONS_MODEL "${model}" has no Bedrock provider prefix ` +
+        `and the host in AI_INTEGRATIONS_BEDROCK_BASE_URL is not one this ` +
+        `build recognises, so a prefix cannot be inferred. Set a ` +
+        `fully-qualified model id (e.g. global.anthropic.${model}).`,
+    );
+  }
 }

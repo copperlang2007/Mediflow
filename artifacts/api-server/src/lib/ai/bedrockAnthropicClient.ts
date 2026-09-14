@@ -164,6 +164,25 @@ const DEFAULT_MAX_TOKENS = 8192;
  * `/admin/health/ai` raises an issue saying so. Reported by the AWS review
  * agent on PR #207.
  */
+/**
+ * The stream carried only delta types this adapter cannot render as text
+ * (thinking, tool input, and anything a future model adds), so the caller
+ * would otherwise receive a successful-looking empty answer. Named so the
+ * failure is greppable in logs and distinguishable from an AWS-side error.
+ */
+export class BedrockEmptyStreamError extends Error {
+  readonly droppedDeltaTypes: Record<string, number>;
+
+  constructor(droppedDeltaTypes: Record<string, number>) {
+    super(
+      "bedrock stream produced no text: every delta was of an unrenderable " +
+        `type (${Object.keys(droppedDeltaTypes).join(", ")})`,
+    );
+    this.name = "BedrockEmptyStreamError";
+    this.droppedDeltaTypes = droppedDeltaTypes;
+  }
+}
+
 export function normalizeBedrockModelId(model: string, baseURL = ""): string {
   const id = model.trim();
   if (!id.startsWith("claude-")) return id;
@@ -407,6 +426,24 @@ export function createBedrockAnthropicClient(opts: {
               emptyStream: textChunks === 0,
             },
             "bedrock stream: dropped non-text deltas",
+          );
+        }
+        // A warning alone is not enough when the caller got nothing. Every
+        // consumer of this iterator treats "stream ended" as "answer
+        // complete": /ai/chat would send `done: true` after zero content
+        // frames (a blank answer that looks successful), and the weekly
+        // compliance report would persist a zero-length PDF. Both are worse
+        // than a failure, because nobody goes looking for a problem that
+        // reported success. Throwing here lands in each caller's existing
+        // catch: /ai/chat emits its error frame instead of `done`, and the
+        // report path skips persistence.
+        //
+        // Deliberately narrow: only when the model produced deltas we could
+        // not render. A genuinely empty response (no deltas at all) is a
+        // model outcome, not an adapter defect, and stays a warning.
+        if (textChunks === 0 && droppedTypes.size > 0) {
+          throw new BedrockEmptyStreamError(
+            Object.fromEntries(droppedTypes),
           );
         }
       },
