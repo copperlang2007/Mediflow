@@ -13,10 +13,14 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const create = vi.fn();
 
+const ctorOpts = vi.fn();
+
 vi.mock("@anthropic-ai/sdk", () => ({
   default: class {
     messages = { create };
-    constructor(public opts: unknown) {}
+    constructor(opts: unknown) {
+      ctorOpts(opts);
+    }
   },
 }));
 
@@ -75,6 +79,34 @@ describe("normalizeBedrockModelId", () => {
 
   it("passes a non-Claude id through unchanged so it fails as itself", () => {
     expect(normalizeBedrockModelId("gpt-5.4", MANTLE)).toBe("gpt-5.4");
+  });
+});
+
+describe("bedrock Anthropic adapter — authentication", () => {
+  beforeEach(() => {
+    ctorOpts.mockReset();
+    create.mockReset();
+    create.mockResolvedValue(textReply());
+  });
+
+  it("sends the Bedrock key in BOTH x-api-key and Authorization: Bearer", () => {
+    // AWS's two docs pages disagree: the page for this exact route shows
+    // `x-api-key`, the general Bedrock-API-key page says `Authorization:
+    // Bearer`. Until the live endpoint settles it, send both -- a wrong guess
+    // 401s every AI request and the health ping, while a redundant header
+    // costs one duplicated credential inside a TLS request the host already
+    // holds the key for.
+    createBedrockAnthropicClient({ apiKey: "bedrock-token", baseURL: RUNTIME });
+
+    const opts = ctorOpts.mock.calls[0]![0] as {
+      apiKey: string;
+      baseURL: string;
+      defaultHeaders: Record<string, string>;
+    };
+    // `apiKey` is what the SDK turns into x-api-key.
+    expect(opts.apiKey).toBe("bedrock-token");
+    expect(opts.defaultHeaders.Authorization).toBe("Bearer bedrock-token");
+    expect(opts.baseURL).toBe(RUNTIME);
   });
 });
 

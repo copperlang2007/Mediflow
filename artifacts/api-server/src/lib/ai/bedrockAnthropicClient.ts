@@ -30,14 +30,36 @@
  *
  * AUTHENTICATION
  * --------------
- * Both AWS and Anthropic document this exact path: point the standard
- * `Anthropic` client's `base_url` at the `/anthropic` route and pass the
- * Bedrock API key as `api_key` (the SDK sends it as `x-api-key`, which is what
- * AWS expects, and adds the required `anthropic-version` header itself).
- * That is what MediFlow has — a Bedrock API key minted in the operator's own
- * AWS account, covered by their AWS BAA. We deliberately do NOT use
- * `@anthropic-ai/bedrock-sdk`: its `AnthropicBedrockMantle` client signs with
- * SigV4 and needs AWS access keys, which this deploy does not carry.
+ * Both AWS and Anthropic document this path: point the standard `Anthropic`
+ * client's `base_url` at the `/anthropic` route and pass the Bedrock API key
+ * as `api_key`. The SDK sends it as `x-api-key` and adds the required
+ * `anthropic-version` header itself. MediFlow has exactly that — a Bedrock API
+ * key minted in the operator's own AWS account, covered by their AWS BAA.
+ *
+ * We send the key in BOTH `x-api-key` and `Authorization: Bearer`, because
+ * AWS's two documentation pages disagree and we cannot yet test against the
+ * live endpoint:
+ *
+ *   - *Inference using Anthropic Messages API* — the page for the exact route
+ *     we call — shows `-H "x-api-key: $AWS_BEARER_TOKEN_BEDROCK"` against
+ *     `bedrock-runtime…/anthropic/v1/messages`, and passes the key as
+ *     `api_key` in its Anthropic-SDK example.
+ *   - *Use an Amazon Bedrock API key* — the general page — says "include the
+ *     following as an authorization header: `Authorization: Bearer …`", and
+ *     every example on it uses that form (all against the native
+ *     `/model/<id>/converse` route, not `/anthropic`).
+ *
+ * The route-specific page is the better authority for this route, so
+ * `x-api-key` is what we lead with. But the failure mode if it is wrong is
+ * total — every AI request and the health ping 401 — while the cost of also
+ * sending the Bearer header is a duplicate credential in one TLS request to
+ * the same host that already has it. That asymmetry decides it. Drop the
+ * redundant header once the live endpoint has told us which one it honours.
+ * (Reported as a P1 by the Codex reviewer, reading the general page.)
+ *
+ * We deliberately do NOT use `@anthropic-ai/bedrock-sdk`: its
+ * `AnthropicBedrockMantle` client signs with SigV4 and needs AWS access keys,
+ * which this deploy does not carry.
  *
  * WHAT IS DELIBERATELY NOT TRANSLATED
  * -----------------------------------
@@ -236,6 +258,11 @@ export function createBedrockAnthropicClient(opts: {
   const client = new Anthropic({
     apiKey: opts.apiKey,
     baseURL: opts.baseURL,
+    // See AUTHENTICATION in the module header: AWS documents `x-api-key` for
+    // this route and `Authorization: Bearer` for Bedrock API keys generally.
+    // `apiKey` covers the first; this covers the second. `authToken` would be
+    // ignored here -- the SDK gives `apiKey` precedence over it.
+    defaultHeaders: { Authorization: `Bearer ${opts.apiKey}` },
   });
 
   async function create(
