@@ -76,10 +76,12 @@ describe("buildAiClient — provider dispatch", () => {
       "https://bedrock-mantle.us-east-1.api.aws/anthropic";
 
     expect(buildAiClient()).not.toBeNull();
-    expect(anthropicCtor).toHaveBeenCalledWith({
-      apiKey: "bedrock-token",
-      baseURL: "https://bedrock-mantle.us-east-1.api.aws/anthropic",
-    });
+    expect(anthropicCtor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKey: "bedrock-token",
+        baseURL: "https://bedrock-mantle.us-east-1.api.aws/anthropic",
+      }),
+    );
     // The whole point of PR: Bedrock does not speak Chat Completions.
     expect(openaiCtor).not.toHaveBeenCalled();
   });

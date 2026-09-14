@@ -109,6 +109,16 @@ down. Now there is.
   defensively and degrade on non-JSON, so the failure mode is a skipped parse,
   not a crash. Worth revisiting once the conflict is settled against the live
   account.
+- **The Bedrock credential is sent in two headers.** AWS's page for the
+  `/anthropic` Messages route documents `x-api-key`; AWS's general
+  "Use an Amazon Bedrock API key" page documents `Authorization: Bearer` (all
+  of its examples target the native `/model/<id>/converse` route instead). The
+  route-specific page is the better authority, so `x-api-key` leads, but the
+  cost of guessing wrong is every AI request and the health ping returning 401,
+  against a cost of one duplicated credential inside a TLS request to a host
+  that already holds it. Both are sent until the live endpoint settles it; the
+  redundant header should then be removed. Raised as a P1 by the Codex
+  reviewer, reading the general page.
 - **An adapter is a layer.** It will diverge from both APIs over time, and it
   translates only the subset MediFlow uses — deliberately, so an unsupported
   option cannot be silently dropped, but it means a future feature (tool use,
