@@ -20,6 +20,7 @@ import { buildAiClient } from "../ai/buildAiClient";
 import { z } from "zod/v4";
 import { resolveAiModel } from "../aiProvider";
 import { logger } from "../logger";
+import { recordAiDegradation } from "../metrics";
 
 /** Disposition the model suggests for the call (advisory — agent confirms). */
 export const SUGGESTED_DISPOSITION_CATEGORIES = [
@@ -232,6 +233,11 @@ export async function parseTranscript(
       { dialTicketId: ctx.dialTicketId ?? null },
       "Transcript parse: model returned non-JSON output — discarding",
     );
+    // `response_format` is a prompt instruction on Bedrock, not a
+    // server-enforced schema (ADR 0005), so this is the rate that says
+    // whether retry-with-repair is worth building. Enrichment is lost here
+    // but the webhook still 200s -- degradation, not an error.
+    recordAiDegradation("json_parse_failed", "transcript_parse");
     return null;
   }
 

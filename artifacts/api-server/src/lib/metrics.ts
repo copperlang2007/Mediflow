@@ -31,7 +31,6 @@ import {
   Gauge,
   collectDefaultMetrics,
 } from "prom-client";
-import { JOB_NAMES, peekQueue } from "./jobs";
 import { logger } from "./logger";
 
 export const metricsRegistry = new Registry();
@@ -106,6 +105,60 @@ export const jobDeadLetterTotal = new Counter({
   registers: [metricsRegistry],
 });
 
+// ---- AI provider degradation ----------------------------------------------
+
+/**
+ * Times an AI call completed but delivered less than it should have.
+ *
+ * ADR 0005 documents four behavioural gaps between Bedrock (Anthropic
+ * Messages) and Azure (Chat Completions): dropped leading assistant turns,
+ * prompt-emulated `response_format` in two flavours, and streams that carry
+ * no renderable text. Each was observable only as a warn log, which answers
+ * "did this ever happen" but not "is it happening to 0.01% or 5% of calls" —
+ * and every mitigation the ADR defers (retry-with-repair, stop-reason
+ * inspection, client-side history slicing) is worth building only at some
+ * rates and not others. Shipping those speculatively is how you get code
+ * nobody needed; this counter is what turns the decision into arithmetic.
+ *
+ * Raised five separate times by the AWS review agent on PR #207, which is
+ * itself the strongest evidence it was the missing piece.
+ *
+ * Cardinality: both labels are closed sets fixed at author time (see the
+ * union types below), so this cannot grow unbounded the way a raw path can.
+ * A degradation is NOT an error — the request still returned 2xx. Alert on
+ * the rate, not on any single occurrence.
+ */
+export type AiDegradationReason =
+  | "dropped_assistant_turns"
+  | "dropped_empty_turns"
+  | "dropped_non_text_deltas"
+  | "empty_stream"
+  | "json_parse_failed";
+
+export type AiDegradationSite =
+  | "bedrock_adapter"
+  | "transcript_parse"
+  | "feature_builder"
+  | "ai_draft_email";
+
+export const aiProviderDegradationTotal = new Counter({
+  name: "ai_provider_degradation_total",
+  help: "AI calls that returned successfully but delivered degraded output, labelled by reason and call site",
+  labelNames: ["reason", "site"] as const,
+  registers: [metricsRegistry],
+});
+
+/**
+ * Bump the degradation counter. Typed so a new reason or site has to be
+ * declared in the unions above rather than appearing as a stray label.
+ */
+export function recordAiDegradation(
+  reason: AiDegradationReason,
+  site: AiDegradationSite,
+): void {
+  aiProviderDegradationTotal.inc({ reason, site });
+}
+
 // ---- pg-boss queue gauges --------------------------------------------------
 
 /**
@@ -139,6 +192,13 @@ export const queueJobsGauge = new Gauge({
  * values plus the always-fresh runtime metrics.
  */
 export async function refreshQueueGaugesIfPossible(): Promise<void> {
+  // Imported lazily, not at module scope. `jobs.ts` throws on a missing
+  // DATABASE_URL while its module body runs, so a static import made this
+  // whole metrics module -- and therefore anything that wants to emit a
+  // single counter -- unusable without a database. A counter is the lightest
+  // thing in the codebase; it should not drag the job queue in behind it.
+  // Only this function, which runs on a /metrics scrape, actually needs pg-boss.
+  const { JOB_NAMES, peekQueue } = await import("./jobs");
   const boss = peekQueue();
   if (!boss) return; // pg-boss not started — skip
   try {
