@@ -727,6 +727,30 @@ describe("bedrock Anthropic adapter — response translation", () => {
     expect((res as { stopReason?: string }).stopReason).toBe("max_tokens");
   });
 
+  it("makes no routing guess for a private DNS alias that merely contains the AWS name", () => {
+    // A VPC-endpoint alias says nothing about where traffic actually goes, so
+    // prefixing it commercial is a guess on a name. Passing the id through
+    // unchanged is what makes /admin/health/ai report it instead.
+    // Reported by the AWS review agent on PR #207.
+    for (const url of [
+      "https://bedrock-runtime.internal.corp/anthropic",
+      "https://foo.bedrock-runtime.example.com/anthropic",
+      "https://bedrock-mantle.internal.corp/anthropic",
+    ]) {
+      expect(normalizeBedrockModelId("claude-sonnet-5", url)).toBe("claude-sonnet-5");
+    }
+  });
+
+  it("still prefixes the two hostname shapes AWS documents", () => {
+    // The boundary: narrowing the match must not stop the real hosts working.
+    expect(
+      normalizeBedrockModelId("claude-sonnet-5", "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic"),
+    ).toBe("global.anthropic.claude-sonnet-5");
+    expect(
+      normalizeBedrockModelId("claude-sonnet-5", "https://bedrock-mantle.us-east-1.api.aws/anthropic"),
+    ).toBe("anthropic.claude-sonnet-5");
+  });
+
   it("counts each degradation, so the ADR follow-ups can be scheduled on rates", async () => {
     // A warn log answers "did this ever happen". It does not answer "is this
     // 0.01% or 5% of calls", which is the only question that decides whether
