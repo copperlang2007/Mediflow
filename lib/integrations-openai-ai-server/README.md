@@ -14,8 +14,9 @@ can keep using OpenAI direct.
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
-| `AI_INTEGRATIONS_PROVIDER` | no | `openai` | `openai` or `azure`. Set to `azure` in prod. |
-| `AI_INTEGRATIONS_OPENAI_API_KEY` | yes | — | API key for whichever provider is selected. |
+| `AI_INTEGRATIONS_PROVIDER` | no | `openai` | `openai`, `azure`, or `bedrock`. Must be `azure` or `bedrock` in prod — those are the BAA-covered providers. |
+| `AI_INTEGRATIONS_OPENAI_API_KEY` | for `openai`/`azure` | — | OpenAI-shaped API key (Azure issues one too). |
+| `AI_INTEGRATIONS_BEDROCK_API_KEY` | for `bedrock` | — | AWS Bedrock bearer token from your own AWS account — **not** an OpenAI credential. The legacy `AI_INTEGRATIONS_OPENAI_API_KEY` is still read as a fallback. |
 
 ### OpenAI direct (`AI_INTEGRATIONS_PROVIDER=openai`)
 

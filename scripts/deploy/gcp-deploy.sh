@@ -14,7 +14,7 @@
 # Required env (set by the workflow from GitHub Secrets/Variables):
 #   GCP_PROJECT_ID, GCP_REGION, GCP_RUN_SA_EMAIL, GCP_CLOUDSQL_CONNECTION,
 #   GCP_PHI_BUCKET, CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY,
-#   AI_INTEGRATIONS_OPENAI_API_KEY, AI_INTEGRATIONS_BEDROCK_BASE_URL
+#   AI_INTEGRATIONS_BEDROCK_API_KEY, AI_INTEGRATIONS_BEDROCK_BASE_URL
 #   (AI_INTEGRATIONS_OPENAI_BASE_URL is still accepted as a legacy fallback)
 # Optional:
 #   GCP_NETWORK (default: default — must match gcp-bootstrap.sh's NETWORK,
@@ -40,7 +40,12 @@ set -euo pipefail
 : "${GCP_PHI_BUCKET:?}"
 : "${CLERK_SECRET_KEY:?}"
 : "${CLERK_PUBLISHABLE_KEY:?}"
-: "${AI_INTEGRATIONS_OPENAI_API_KEY:?}"
+# Canonical name first, legacy name as fallback -- same either-name contract
+# as the base URL. The value is an AWS Bedrock bearer token in both cases.
+if [ -z "$(printf '%s' "${AI_INTEGRATIONS_BEDROCK_API_KEY:-}" | tr -d '[:space:]')" ]; then
+  AI_INTEGRATIONS_BEDROCK_API_KEY="${AI_INTEGRATIONS_OPENAI_API_KEY:-}"
+fi
+: "${AI_INTEGRATIONS_BEDROCK_API_KEY:?Set AI_INTEGRATIONS_BEDROCK_API_KEY (the AWS Bedrock bearer token)}"
 # Canonical name is AI_INTEGRATIONS_BEDROCK_BASE_URL; the OPENAI-named
 # variable is a legacy fallback. Bedrock is not an OpenAI endpoint: AWS lists
 # Chat Completions as unsupported for every Anthropic model, so this holds an
@@ -109,7 +114,12 @@ sync_secret() {
 log "Syncing credentials to Secret Manager…"
 sync_secret mediflow-clerk-secret-key "${CLERK_SECRET_KEY}"
 sync_secret mediflow-clerk-publishable-key "${CLERK_PUBLISHABLE_KEY}"
-sync_secret mediflow-ai-openai-api-key "${AI_INTEGRATIONS_OPENAI_API_KEY}"
+# NOTE: the Secret Manager RESOURCE name stays mediflow-ai-openai-api-key.
+# Renaming it would require gcp-bootstrap.sh to create a new secret and grant
+# the deploy SA access to it before the next deploy could run -- a forced
+# extra operator step for a name nobody types. The operator-facing names (the
+# GitHub secret and the app env var) are what carry the rename.
+sync_secret mediflow-ai-openai-api-key "${AI_INTEGRATIONS_BEDROCK_API_KEY}"
 sync_secret mediflow-ai-bedrock-base-url "${AI_INTEGRATIONS_BEDROCK_BASE_URL}"
 
 # Optional secrets: every one of these already exists in Secret Manager
@@ -153,7 +163,7 @@ DIALER_WEBHOOK_SECRET=mediflow-dialer-webhook-secret:latest,\
 LEAD_QUEUE_WEBHOOK_SECRET=mediflow-lead-queue-webhook-secret:latest,\
 CLERK_SECRET_KEY=mediflow-clerk-secret-key:latest,\
 CLERK_PUBLISHABLE_KEY=mediflow-clerk-publishable-key:latest,\
-AI_INTEGRATIONS_OPENAI_API_KEY=mediflow-ai-openai-api-key:latest,\
+AI_INTEGRATIONS_BEDROCK_API_KEY=mediflow-ai-openai-api-key:latest,\
 AI_INTEGRATIONS_BEDROCK_BASE_URL=mediflow-ai-bedrock-base-url:latest"
 
 STATIC_ENV="NODE_ENV=production,\

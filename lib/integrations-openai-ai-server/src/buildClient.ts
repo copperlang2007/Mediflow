@@ -5,7 +5,7 @@
  *
  * HIPAA guard: MediFlow sends PHI to the LLM provider. Only BAA-covered
  * providers may receive it: `azure` (Microsoft BAA) and `bedrock` (AWS BAA,
- * via Bedrock's OpenAI-compatible endpoint). In production
+ * via Bedrock's Anthropic Messages endpoint). In production
  * (`NODE_ENV === "production"`) this builder hard-fails unless the provider
  * is HIPAA-eligible, so a misconfigured deploy cannot silently route PHI to
  * the standard OpenAI API (no BAA). In dev/test the standard API is allowed.
@@ -20,12 +20,6 @@ export const HIPAA_ELIGIBLE_PROVIDERS: ReadonlySet<string> = new Set([
 ]);
 
 export function buildOpenAIClient(): OpenAI {
-  if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
-    throw new Error(
-      "AI_INTEGRATIONS_OPENAI_API_KEY must be set. Did you forget to provision the OpenAI AI integration?",
-    );
-  }
-
   const provider = (process.env.AI_INTEGRATIONS_PROVIDER ?? "openai").toLowerCase();
 
   if (process.env.NODE_ENV === "production" && !HIPAA_ELIGIBLE_PROVIDERS.has(provider)) {
@@ -34,6 +28,27 @@ export function buildOpenAIClient(): OpenAI {
         "('azure' or 'bedrock') in production — the standard OpenAI API has no " +
         "HIPAA BAA and must not receive PHI. " +
         `Got: ${process.env.AI_INTEGRATIONS_PROVIDER ?? "<unset>"}`,
+    );
+  }
+
+  // Named per PROVIDER, not per SDK. For bedrock this credential is an AWS
+  // Bedrock bearer token from the operator's own account, covered by their
+  // AWS BAA -- it is not an OpenAI credential and never reaches
+  // api.openai.com. Azure keeps the OPENAI name because there it is true.
+  // The legacy name stays readable as a fallback so a pre-rename environment
+  // keeps booting.
+  const apiKey =
+    provider === "bedrock"
+      ? process.env.AI_INTEGRATIONS_BEDROCK_API_KEY?.trim() ||
+        process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.trim()
+      : process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.trim();
+  if (!apiKey) {
+    const expectedKeyVar =
+      provider === "bedrock"
+        ? "AI_INTEGRATIONS_BEDROCK_API_KEY"
+        : "AI_INTEGRATIONS_OPENAI_API_KEY";
+    throw new Error(
+      `${expectedKeyVar} must be set for provider "${provider}". Did you forget to provision the AI integration?`,
     );
   }
 
@@ -51,7 +66,7 @@ export function buildOpenAIClient(): OpenAI {
       process.env.AI_INTEGRATIONS_AZURE_API_VERSION ?? "2024-02-15-preview";
     const deployment = process.env.AI_INTEGRATIONS_AZURE_DEPLOYMENT;
     return new AzureOpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      apiKey,
       endpoint,
       apiVersion,
       deployment,
@@ -78,7 +93,7 @@ export function buildOpenAIClient(): OpenAI {
     );
   }
   return new OpenAI({
-    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+    apiKey,
     baseURL,
   });
 }

@@ -35,7 +35,12 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import OpenAI, { AzureOpenAI } from "openai";
-import { resolveAiProvider, resolveAiBaseUrl } from "../../lib/aiProvider";
+import {
+  resolveAiProvider,
+  resolveAiBaseUrl,
+  resolveAiApiKey,
+  aiApiKeyVarName,
+} from "../../lib/aiProvider";
 import {
   requireAuth,
   requirePermission,
@@ -147,12 +152,17 @@ export function setOpenAIClientFactory(
 
 function getOpenAI(): AiClient | null {
   if (_factory) return _factory();
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-  if (!apiKey) return null;
-  // Throws in production if the provider is not the HIPAA-eligible value
-  // — see `lib/aiProvider.ts`.
-  const provider = resolveAiProvider();
+  // resolveAiProvider() is INSIDE the try. The authoritative fail-fast for a
+  // non-BAA provider is assertAiProviderHipaaCompliant() at bootstrap
+  // (index.ts) -- the process refuses to start, so no request is ever served
+  // by a misconfigured deploy. Re-throwing here adds nothing and costs the
+  // caller's graceful-degradation contract (the transcript webhook must not
+  // 5xx; a worker must not die). Belt-and-braces: return null and let the
+  // boot guard be the thing that fails loudly.
   try {
+    const provider = resolveAiProvider();
+    const apiKey = resolveAiApiKey(provider);
+    if (!apiKey) return null;
     if (provider === "azure") {
       // Azure OpenAI is the HIPAA-eligible path. The deployment name in
       // the URL (set on the client) overrides the `model` field sent in
@@ -213,8 +223,10 @@ router.post(
     const ai = getOpenAI();
     if (!ai) {
       res.status(503).json({
-        error:
-          "AI integration is not configured (AI_INTEGRATIONS_OPENAI_API_KEY/BASE_URL).",
+        // This branch is reached when the key is missing OR the client threw,
+        // and BASE_URL is irrelevant for azure. Naming a cause we have not
+        // established sends the operator to the wrong variable.
+        error: `AI integration is not configured (check ${aiApiKeyVarName()} and the provider's base URL).`,
       });
       return;
     }

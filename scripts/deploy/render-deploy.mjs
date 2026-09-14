@@ -56,7 +56,6 @@ const KEY = required("RENDER_API_KEY");
 const REQUIRED_SECRETS = [
   "CLERK_SECRET_KEY", // sk_live_…
   "CLERK_PUBLISHABLE_KEY", // pk_live_…  (also mirrored to VITE_CLERK_PUBLISHABLE_KEY)
-  "AI_INTEGRATIONS_OPENAI_API_KEY", // Bedrock API key (Bearer token)
   "PRIVATE_OBJECT_DIR", // GCS bucket/path (hard-required at boot)
 ];
 
@@ -79,6 +78,16 @@ const REQUIRED_SECRETS = [
 const AI_BASE_URL_SECRETS = [
   "AI_INTEGRATIONS_BEDROCK_BASE_URL",
   "AI_INTEGRATIONS_OPENAI_BASE_URL",
+];
+
+/**
+ * The AI API key, under EITHER name. For bedrock this is an AWS Bedrock
+ * bearer token from the operator's own account -- never an OpenAI
+ * credential. BEDROCK is canonical; OPENAI is the legacy fallback.
+ */
+const AI_API_KEY_SECRETS = [
+  "AI_INTEGRATIONS_BEDROCK_API_KEY",
+  "AI_INTEGRATIONS_OPENAI_API_KEY",
 ];
 
 /** Optional credentials — passed through only when set (feature no-ops if absent). */
@@ -191,6 +200,17 @@ function preflight() {
       "FATAL: the following required GitHub Secrets are missing. Add them in\n" +
         "  Settings → Secrets and variables → Actions, then re-run:\n" +
         missing.map((n) => `   - ${n}`).join("\n"),
+    );
+    process.exit(1);
+  }
+  if (!AI_API_KEY_SECRETS.some((n) => (process.env[n] || "").trim())) {
+    console.error(
+      "FATAL: the AI API key is not set. Add ONE of these GitHub Secrets in\n" +
+        "  Settings \u2192 Secrets and variables \u2192 Actions, then re-run:\n" +
+        "   - AI_INTEGRATIONS_BEDROCK_API_KEY  (canonical; preferred)\n" +
+        "   - AI_INTEGRATIONS_OPENAI_API_KEY   (legacy name, still honored)\n" +
+        "  This is an AWS Bedrock bearer token from your own AWS account,\n" +
+        "  NOT an OpenAI credential.",
     );
     process.exit(1);
   }
@@ -368,6 +388,7 @@ function buildEnv(existing, databaseUrl, origin) {
   for (const name of [
     ...REQUIRED_SECRETS,
     ...AI_BASE_URL_SECRETS,
+    ...AI_API_KEY_SECRETS,
     ...OPTIONAL_SECRETS,
   ]) {
     const v = process.env[name];

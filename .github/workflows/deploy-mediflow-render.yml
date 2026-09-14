@@ -42,6 +42,7 @@ jobs:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          AI_INTEGRATIONS_BEDROCK_API_KEY: ${{ secrets.AI_INTEGRATIONS_BEDROCK_API_KEY }}
           AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
           AI_INTEGRATIONS_BEDROCK_BASE_URL: ${{ secrets.AI_INTEGRATIONS_BEDROCK_BASE_URL }}
           AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
@@ -52,9 +53,12 @@ jobs:
           if [ -z "$(printf '%s' "${AI_INTEGRATIONS_BEDROCK_BASE_URL:-}" | tr -d '[:space:]')" ]; then
             AI_INTEGRATIONS_BEDROCK_BASE_URL="${AI_INTEGRATIONS_OPENAI_BASE_URL:-}"
           fi
+          if [ -z "$(printf '%s' "${AI_INTEGRATIONS_BEDROCK_API_KEY:-}" | tr -d '[:space:]')" ]; then
+            AI_INTEGRATIONS_BEDROCK_API_KEY="${AI_INTEGRATIONS_OPENAI_API_KEY:-}"
+          fi
           missing=()
           for v in RENDER_API_KEY CLERK_SECRET_KEY CLERK_PUBLISHABLE_KEY \
-                   AI_INTEGRATIONS_OPENAI_API_KEY AI_INTEGRATIONS_BEDROCK_BASE_URL \
+                   AI_INTEGRATIONS_BEDROCK_API_KEY AI_INTEGRATIONS_BEDROCK_BASE_URL \
                    PRIVATE_OBJECT_DIR; do
             # Trim before testing, exactly as the GCP gate does: the app
             # trims these values and treats whitespace as unset, so a bare -z
@@ -96,6 +100,7 @@ jobs:
           # https://bedrock-runtime.<region>.amazonaws.com/anthropic
           # NOT /openai/v1 — AWS lists Chat Completions as unsupported for
           # every Anthropic model, so Claude is unreachable over that path.
+          AI_INTEGRATIONS_BEDROCK_API_KEY: ${{ secrets.AI_INTEGRATIONS_BEDROCK_API_KEY }}
           AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
           AI_INTEGRATIONS_BEDROCK_BASE_URL: ${{ secrets.AI_INTEGRATIONS_BEDROCK_BASE_URL }}
           AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}

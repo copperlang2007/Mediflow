@@ -43,6 +43,7 @@ jobs:
           GCP_PHI_BUCKET: ${{ secrets.GCP_PHI_BUCKET }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          AI_INTEGRATIONS_BEDROCK_API_KEY: ${{ secrets.AI_INTEGRATIONS_BEDROCK_API_KEY }}
           AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
           AI_INTEGRATIONS_BEDROCK_BASE_URL: ${{ secrets.AI_INTEGRATIONS_BEDROCK_BASE_URL }}
           AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
@@ -54,10 +55,16 @@ jobs:
           if [ -z "$(printf '%s' "${AI_INTEGRATIONS_BEDROCK_BASE_URL:-}" | tr -d '[:space:]')" ]; then
             AI_INTEGRATIONS_BEDROCK_BASE_URL="${AI_INTEGRATIONS_OPENAI_BASE_URL:-}"
           fi
+          # Same either-name contract for the API key. BEDROCK is canonical;
+          # the OPENAI name is the legacy fallback (the value is a Bedrock
+          # bearer token either way, never an OpenAI credential).
+          if [ -z "$(printf '%s' "${AI_INTEGRATIONS_BEDROCK_API_KEY:-}" | tr -d '[:space:]')" ]; then
+            AI_INTEGRATIONS_BEDROCK_API_KEY="${AI_INTEGRATIONS_OPENAI_API_KEY:-}"
+          fi
           missing=()
           for v in GCP_PROJECT_ID GCP_WIF_PROVIDER GCP_DEPLOY_SA_EMAIL GCP_RUN_SA_EMAIL \
                    GCP_CLOUDSQL_CONNECTION GCP_PHI_BUCKET CLERK_SECRET_KEY CLERK_PUBLISHABLE_KEY \
-                   AI_INTEGRATIONS_OPENAI_API_KEY AI_INTEGRATIONS_BEDROCK_BASE_URL; do
+                   AI_INTEGRATIONS_BEDROCK_API_KEY AI_INTEGRATIONS_BEDROCK_BASE_URL; do
             # Trim before testing: the app trims these values and treats
             # whitespace as unset, so a gate using bare -z would pass a
             # config the runtime then rejects.
@@ -100,8 +107,13 @@ jobs:
           # https://bedrock-runtime.<region>.amazonaws.com/anthropic
           # NOT /openai/v1 — AWS lists Chat Completions as unsupported for
           # every Anthropic model, so Claude is unreachable over that path.
+          # BOTH key names must reach the deploy step, for the same reason the
+          # base URL does: the gate's shell fallback is step-scoped and does
+          # not persist, so passing only one name would let an operator who
+          # followed the docs pass the gate and then hard-fail in the script.
+          AI_INTEGRATIONS_BEDROCK_API_KEY: ${{ secrets.AI_INTEGRATIONS_BEDROCK_API_KEY }}
           AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
-          # BOTH names must reach the deploy step. The gate's shell default is
+          # BOTH base-URL names must reach the deploy step. The gate's shell default is
           # step-scoped and does not persist here, so passing only the legacy
           # name would let an operator who followed the docs (canonical name
           # only) pass the gate and then hit an immediate exit in

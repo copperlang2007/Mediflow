@@ -21,6 +21,7 @@ import {
   resolveAiProvider,
   resolveAiModel,
   resolveAiBaseUrl,
+  resolveAiApiKey,
 } from "../aiProvider";
 import { logger } from "../logger";
 
@@ -123,11 +124,17 @@ export interface TranscriptAiClient {
  * when AI is not configured — callers degrade gracefully (parse is skipped).
  */
 function buildDefaultAiClient(): TranscriptAiClient | null {
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-  if (!apiKey) return null;
-  // Throws in production if the provider is not the HIPAA-eligible value.
-  const provider = resolveAiProvider();
+  // resolveAiProvider() is INSIDE the try. The authoritative fail-fast for a
+  // non-BAA provider is assertAiProviderHipaaCompliant() at bootstrap
+  // (index.ts) -- the process refuses to start, so no request is ever served
+  // by a misconfigured deploy. Re-throwing here adds nothing and costs the
+  // caller's graceful-degradation contract (the transcript webhook must not
+  // 5xx; a worker must not die). Belt-and-braces: return null and let the
+  // boot guard be the thing that fails loudly.
   try {
+    const provider = resolveAiProvider();
+    const apiKey = resolveAiApiKey(provider);
+    if (!apiKey) return null;
     if (provider === "azure") {
       const resource = process.env.AI_INTEGRATIONS_AZURE_RESOURCE;
       const endpoint =

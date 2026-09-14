@@ -28,6 +28,7 @@ import {
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { getOpenAI } from "./ai";
 import { logger } from "../lib/logger";
+import { resolveAiApiKey, aiApiKeyVarName } from "../lib/aiProvider";
 
 const router: IRouter = Router();
 
@@ -55,7 +56,6 @@ function validateEnv(): EnvValidation {
   const warnings: string[] = [];
 
   const rawProvider = (process.env.AI_INTEGRATIONS_PROVIDER ?? "").toLowerCase();
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
 
   let provider: ProviderKind;
   if (rawProvider === "azure") provider = "azure";
@@ -69,20 +69,41 @@ function validateEnv(): EnvValidation {
     issues.push(`AI_INTEGRATIONS_PROVIDER has unknown value '${rawProvider}'`);
   }
 
+  // Call the SAME resolver the runtime uses rather than re-deriving the rule.
+  // A local copy already drifted once in this PR: it read both names
+  // regardless of provider while resolveAiApiKey() only falls back for
+  // bedrock, so an azure deploy holding only the bedrock key reported
+  // {configured: true} while getOpenAI() returned null. `unset` resolves as
+  // openai, matching resolveAiProvider()'s own default.
+  const resolverProvider = provider === "unset" ? "openai" : provider;
+  const apiKey = resolveAiApiKey(resolverProvider);
+
   if (!apiKey) {
-    issues.push("AI_INTEGRATIONS_OPENAI_API_KEY missing");
+    issues.push(`${aiApiKeyVarName(resolverProvider)} missing`);
+  } else if (
+    provider === "bedrock" &&
+    !process.env.AI_INTEGRATIONS_BEDROCK_API_KEY?.trim()
+  ) {
+    warnings.push(
+      "AI_INTEGRATIONS_BEDROCK_API_KEY is unset; falling back to the legacy " +
+        "AI_INTEGRATIONS_OPENAI_API_KEY. Rename it — the value is a Bedrock " +
+        "token, not an OpenAI credential.",
+    );
   }
 
-  // HIPAA guard: only `azure` and `bedrock` are BAA-eligible. Surface a
-  // warning so the admin can see this state, but don't gate the check on it —
-  // the resolveAiProvider() in getOpenAI() will throw in production anyway.
+  // HIPAA guard: only `azure` and `bedrock` are BAA-eligible. In production
+  // this is an ISSUE, not a warning: such a deploy cannot legitimately serve
+  // AI at all (assertAiProviderHipaaCompliant() refuses to boot it), so
+  // reporting `configured: true` with a soft warning would describe a state
+  // the runtime does not permit. Filing it as an issue also means this
+  // endpoint names the real cause without depending on catching a throw.
   if (
     process.env.NODE_ENV === "production" &&
     provider !== "azure" &&
     provider !== "bedrock"
   ) {
-    warnings.push(
-      "Production deploys must use a HIPAA-eligible AI_INTEGRATIONS_PROVIDER (azure or bedrock)",
+    issues.push(
+      "AI_INTEGRATIONS_PROVIDER is not HIPAA-eligible (must be 'azure' or 'bedrock' in production)",
     );
   }
 
@@ -244,11 +265,25 @@ router.get(
       return;
     }
 
-    const client = getOpenAI();
+    // getOpenAI() calls resolveAiProvider(), which THROWS in production when
+    // the provider is not HIPAA-eligible. That throw is deliberate at the
+    // runtime call sites -- a prod deploy pointed at a non-BAA provider must
+    // fail loudly -- but it must never escape HERE. This endpoint exists to
+    // tell an operator what is misconfigured; letting it 500 on the exact
+    // misconfiguration it is meant to describe sends them to the logs to
+    // rediscover what this response could have told them.
+    let client: ReturnType<typeof getOpenAI> = null;
+    let constructionError = false;
+    try {
+      client = getOpenAI();
+    } catch {
+      // Swallow the reason deliberately: it can name env vars and provider
+      // values. envIssues already carries the actionable detail.
+      constructionError = true;
+    }
     if (!client) {
-      // Client factory returned null despite env looking valid — surface
-      // it as a config issue but never echo the underlying reason (which
-      // could be a thrown error from resolveAiProvider).
+      // Client factory returned null or threw despite env looking valid —
+      // surface it as a config issue but never echo the underlying reason.
       res.status(200).json({
         provider: env.provider,
         configured: false,
@@ -257,7 +292,11 @@ router.get(
         ping: {
           ok: false,
           category: "unknown" as PingErrorCategory,
-          message: "AI client could not be constructed",
+          message: constructionError
+            ? "AI client could not be constructed — the configured " +
+              "AI_INTEGRATIONS_PROVIDER is rejected in production (only " +
+              "'azure' and 'bedrock' are HIPAA-eligible)"
+            : "AI client could not be constructed",
         },
         warnings: env.warnings,
       });
