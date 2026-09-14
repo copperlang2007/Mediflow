@@ -224,6 +224,15 @@ router.post(
         res.write(
           `data: ${JSON.stringify({ error: "AI service unavailable" })}\n\n`,
         );
+        // The client clears its per-message streaming flag from `data.done`
+        // (ai-assistant.tsx), and an error frame carries no `done`, so the
+        // bubble kept its streaming indicator forever after the stream closed.
+        // It is not a hang -- the reader loop still exits on stream close and
+        // the `finally` clears the page-level streaming state -- but the
+        // message is left looking as though it is still being written.
+        // Reported by the AWS review agent on PR #207, which flagged the
+        // missing frame without establishing the client-side effect.
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
       }
     } finally {
       res.end();
@@ -294,6 +303,17 @@ router.post(
         max_completion_tokens: channel === "sms" ? 256 : 1024,
         messages: [{ role: "user", content: prompt }],
         stream: false,
+        // The email branch asks for JSON in the user prompt but never declared
+        // it here, so the adapter's "no markdown fences" instruction was never
+        // appended and a fenced reply fell into the catch below — handing the
+        // agent the literal ```json blob as the draft body and a blank
+        // subject. Declaring the format makes the instruction land, which is
+        // the fix; stripping fences afterwards would only hide the fact that
+        // the instruction was missing.
+        // Reported by the AWS review agent on PR #207.
+        ...(channel === "email"
+          ? { response_format: { type: "json_object" as const } }
+          : {}),
       });
 
       const text = response.choices[0]?.message?.content ?? "";
