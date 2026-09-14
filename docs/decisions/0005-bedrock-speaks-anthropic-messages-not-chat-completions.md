@@ -128,8 +128,21 @@ down. Now there is.
   cost of guessing wrong is every AI request and the health ping returning 401,
   against a cost of one duplicated credential inside a TLS request to a host
   that already holds it. Both are sent until the live endpoint settles it; the
-  redundant header should then be removed. Raised as a P1 by the Codex
-  reviewer, reading the general page.
+  redundant header should then be removed — see Follow-Up Actions for how to
+  tell which one authenticated, which is not self-evident from a 200. Raised as
+  a P1 by the Codex reviewer, reading the general page.
+- **Leading assistant turns are dropped, not preserved.** The Messages API
+  requires a user-first history, so a window opening on an assistant turn
+  loses that turn. The AWS review agent proposed a better mitigation than
+  dropping: seed a synthetic `{ role: "user", content: "Continue." }` ahead of
+  it, which satisfies the requirement while KEEPING the model's prior reply in
+  context. That is technically superior and deliberately not done here,
+  because MediFlow's chat transcripts concern Medicare beneficiaries and may
+  become compliance evidence: fabricating a user utterance that the user never
+  said, into a record of that kind, is not a decision an adapter should make
+  unilaterally. If the dropped-turn warn rate proves material, the cleaner fix
+  is upstream — slice the client-side history window on a user boundary so
+  nothing is lost and nothing is invented. Raised with the operator.
 - **An adapter is a layer.** It will diverge from both APIs over time, and it
   translates only the subset MediFlow uses — deliberately, so an unsupported
   option cannot be silently dropped, but it means a future feature (tool use,
@@ -239,6 +252,12 @@ duplication, which nobody wants back.
 1. **Verify against the live account.** Once the deploy is unblocked, call
    `/admin/health/ai` and confirm `ping.ok: true` and the reported model id.
    This ADR's Status stays qualified until then.
+1b. **Then drop the redundant auth header.** A `ping.ok: true` proves one of
+   the two headers worked, not which — so determine it deliberately rather
+   than by assumption: read the request in Bedrock CloudTrail, or A/B it by
+   removing one header and re-pinging. Delete the loser and its assertion in
+   `bedrock-anthropic-client.test.ts`. Method suggested by the AWS review
+   agent; without it this follow-up is not actually executable.
 2. **Resolve the structured-outputs contradiction** against the live endpoint
    and, if AWS is right, replace the prompt emulation with the real parameter.
 3. **Add provider-call telemetry** (latency, error class, model served, token
