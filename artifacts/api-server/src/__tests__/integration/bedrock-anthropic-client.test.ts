@@ -213,6 +213,41 @@ describe("bedrock Anthropic adapter — request translation", () => {
     );
   });
 
+  it("skips empty-content turns, which the Messages API rejects outright", async () => {
+    // Reachable: the web client persists chat history, so a tab closed
+    // mid-stream leaves an assistant turn with content "" replayed forever.
+    // Anthropic 400s on an empty text block and /ai/chat shows the user an
+    // opaque "AI service unavailable".
+    await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      messages: [
+        { role: "user", content: "real question" },
+        { role: "assistant", content: "" },
+        { role: "user", content: "   " },
+        { role: "user", content: "follow up" },
+      ],
+    });
+
+    expect(create.mock.calls[0]![0].messages).toEqual([
+      { role: "user", content: "real question" },
+      { role: "user", content: "follow up" },
+    ]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      { emptyTurns: 2 },
+      expect.stringContaining("empty-content turns"),
+    );
+  });
+
+  it("refuses cleanly when every turn is empty", async () => {
+    await expect(
+      client().chat.completions.create({
+        model: "claude-sonnet-5",
+        messages: [{ role: "user", content: "" }],
+      }),
+    ).rejects.toThrow(/at least one user message/);
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("stays quiet when there is nothing to drop", async () => {
     await client().chat.completions.create({
       model: "claude-sonnet-5",

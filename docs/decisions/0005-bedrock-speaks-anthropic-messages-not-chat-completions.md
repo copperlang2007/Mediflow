@@ -109,6 +109,17 @@ down. Now there is.
   defensively and degrade on non-JSON, so the failure mode is a skipped parse,
   not a crash. Worth revisiting once the conflict is settled against the live
   account.
+
+  It is, however, a **reliability delta between providers**, and should be
+  stated as one: on azure/openai `response_format` was server-enforced, so
+  `/dev/feature-builder/plan` only 502'd on a genuine model failure. On bedrock
+  the schema is a prompt instruction the model can violate — most likely by
+  wrapping its JSON in markdown fences — so that route can be expected to 502
+  somewhat more often than it did. It is dev-only and admin-gated, so the cost
+  is an operator retry rather than a user-facing failure. A bounded
+  retry-with-repair (feed the parse error back once) is the obvious mitigation
+  if the rate turns out to matter; measuring it first needs the provider
+  telemetry in Follow-Up Actions.
 - **The Bedrock credential is sent in two headers.** AWS's page for the
   `/anthropic` Messages route documents `x-api-key`; AWS's general
   "Use an Amazon Bedrock API key" page documents `Authorization: Bearer` (all
