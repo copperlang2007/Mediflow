@@ -437,6 +437,71 @@ describe("GET /admin/health/ai — defense in depth", () => {
     expect(JSON.stringify(res.body)).not.toContain(TEST_API_KEY);
   });
 
+  it("warns when a runtime-form model id is pointed at the mantle host", async () => {
+    // Every deploy path injects `us.anthropic.claude-sonnet-4-6`. An operator
+    // who switches ONLY the base URL to mantle keeps a model id that host is
+    // not documented to serve, and normalizeBedrockModelId() leaves qualified
+    // ids alone by design, so nothing else would notice.
+    // Raised as a P2 by the Codex reviewer on PR #207.
+    const priorModel = process.env.AI_INTEGRATIONS_MODEL;
+    process.env.AI_INTEGRATIONS_MODEL = "us.anthropic.claude-sonnet-4-6";
+    delete process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+    process.env.AI_INTEGRATIONS_PROVIDER = "bedrock";
+    process.env.AI_INTEGRATIONS_BEDROCK_API_KEY = TEST_API_KEY;
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock-mantle.us-east-1.api.aws/anthropic";
+    resetOpenAIClient();
+
+    const envUser = await freshAdmin();
+    const res = await request(app)
+      .get("/api/admin/health/ai")
+      .set(withAuth(envUser.id));
+
+    if (priorModel === undefined) delete process.env.AI_INTEGRATIONS_MODEL;
+    else process.env.AI_INTEGRATIONS_MODEL = priorModel;
+    delete process.env.AI_INTEGRATIONS_BEDROCK_API_KEY;
+    delete process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL;
+    setAzureEnv();
+    resetOpenAIClient();
+
+    expect(res.status).toBe(200);
+    const warned = res.body.warnings.join(" ");
+    expect(warned).toContain("bedrock-mantle");
+    // The actionable half: name the id to try instead.
+    expect(warned).toContain("anthropic.claude-sonnet-4-6");
+    // A WARNING, not an issue. AWS documents which form each host uses, not
+    // that either REJECTS the other's, so this must not gate a deploy.
+    expect(res.body.envIssues.join(" ")).not.toContain("bedrock-mantle");
+  });
+
+  it("does not warn when the runtime host and a runtime-form id agree", async () => {
+    // The boundary: this is the configuration every deploy path produces, and
+    // it must stay silent or the warning is noise on every healthy deploy.
+    const priorModel = process.env.AI_INTEGRATIONS_MODEL;
+    process.env.AI_INTEGRATIONS_MODEL = "us.anthropic.claude-sonnet-4-6";
+    delete process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+    process.env.AI_INTEGRATIONS_PROVIDER = "bedrock";
+    process.env.AI_INTEGRATIONS_BEDROCK_API_KEY = TEST_API_KEY;
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
+    resetOpenAIClient();
+
+    const envUser = await freshAdmin();
+    const res = await request(app)
+      .get("/api/admin/health/ai")
+      .set(withAuth(envUser.id));
+
+    if (priorModel === undefined) delete process.env.AI_INTEGRATIONS_MODEL;
+    else process.env.AI_INTEGRATIONS_MODEL = priorModel;
+    delete process.env.AI_INTEGRATIONS_BEDROCK_API_KEY;
+    delete process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL;
+    setAzureEnv();
+    resetOpenAIClient();
+
+    expect(res.status).toBe(200);
+    expect(res.body.warnings.join(" ")).not.toContain("model-not-found");
+  });
+
   it("hints the application's own default model when AI_INTEGRATIONS_MODEL is unset on bedrock", async () => {
     // Regression: validateEnv() left modelHint at the OpenAI placeholder
     // ("gpt-4o-mini") when the variable was unset, while the application
