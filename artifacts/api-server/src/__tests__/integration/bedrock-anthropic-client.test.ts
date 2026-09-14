@@ -346,6 +346,49 @@ describe("bedrock Anthropic adapter — response_format emulation", () => {
     expect(system).not.toContain('"name":"FeaturePlan"');
   });
 
+  it("does not mistake a bare schema with a `schema` property for an envelope", async () => {
+    // `schema` is a legal property name in JSON Schema. Testing only for its
+    // presence would treat such a schema AS the envelope and silently drop
+    // every other property it declares -- producing a corrupted prompt and a
+    // 502 on parse. Latent today; the bare-schema form is documented as
+    // supported, so a future caller could hit it.
+    await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      messages: [{ role: "user", content: "go" }],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          type: "object",
+          properties: { onlyField: { type: "string" } },
+          schema: { properties: { hijacked: { type: "string" } } },
+        },
+      },
+    });
+
+    const system = create.mock.calls[0]![0].system as string;
+    expect(system).toContain('"onlyField"');
+    expect(system).toContain('"hijacked"');
+  });
+
+  it("still unwraps a real envelope that carries extra keys", async () => {
+    await client().chat.completions.create({
+      model: "claude-sonnet-5",
+      messages: [{ role: "user", content: "go" }],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "FeaturePlan",
+          strict: true,
+          schema: { type: "object", properties: { kept: { type: "string" } } },
+        },
+      },
+    });
+
+    const system = create.mock.calls[0]![0].system as string;
+    expect(system).toContain('"kept"');
+    expect(system).not.toContain('"FeaturePlan"');
+  });
+
   it("inlines a bare schema that is not wrapped in an envelope", async () => {
     await client().chat.completions.create({
       model: "claude-sonnet-5",
