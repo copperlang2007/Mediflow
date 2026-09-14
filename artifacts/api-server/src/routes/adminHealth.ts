@@ -183,6 +183,30 @@ function validateEnv(): EnvValidation {
         `AI_INTEGRATIONS_MODEL "${modelHint}" has no Bedrock provider prefix and the base URL host is not recognised, so one cannot be inferred. Set a fully-qualified id (e.g. global.anthropic.${modelHint}).`,
       );
     }
+    // A QUALIFIED id passes through untouched, which is correct -- the
+    // operator's explicit choice always wins -- but it means a host/prefix
+    // mismatch is invisible. The two hosts use different id forms
+    // (`global.`/`us.anthropic.…` on bedrock-runtime, `anthropic.…` on
+    // bedrock-mantle), and every deploy path injects the runtime-form
+    // `us.anthropic.…` by default, so an operator who switches only the base
+    // URL to mantle keeps a model id that host is not documented to serve.
+    // A WARNING, not an issue, deliberately: AWS documents which form each
+    // host uses, but not that either host REJECTS the other's -- and gating a
+    // deploy on an unverified belief could refuse a config that works. Say
+    // what looks wrong and let the ping be the arbiter.
+    // Raised as a P2 by the Codex reviewer on PR #207.
+    const host = bedrockBaseUrl ?? legacyBaseUrl ?? "";
+    const isMantle = host.includes("bedrock-mantle");
+    const isRuntime = host.includes("bedrock-runtime");
+    if (isMantle && /^(global|us|eu|apac)\.anthropic\./.test(effectiveModel)) {
+      warnings.push(
+        `AI_INTEGRATIONS_MODEL "${effectiveModel}" carries a bedrock-runtime inference-profile prefix, but the base URL names the bedrock-mantle host, which is documented with the plain "anthropic." form. If AI calls return model-not-found, try "${effectiveModel.replace(/^[a-z]+\./, "")}".`,
+      );
+    } else if (isRuntime && /^anthropic\./.test(effectiveModel)) {
+      warnings.push(
+        `AI_INTEGRATIONS_MODEL "${effectiveModel}" uses the bedrock-mantle "anthropic." form, but the base URL names the bedrock-runtime host, which is documented with a regional prefix. If AI calls return model-not-found, try "global.${effectiveModel}".`,
+      );
+    }
     modelHint = effectiveModel;
   } else if (provider === "openai") {
     if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
