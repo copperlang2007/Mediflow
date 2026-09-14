@@ -126,7 +126,12 @@ down. Now there is.
 - **The endpoint-aware model prefix is inference.** It repairs a bare
   `claude-…` id by reading the base URL's host. An operator who sets a fully
   qualified id always wins; but the repair itself is a guess about intent, and
-  a guess in a config path is a thing to keep an eye on.
+  a guess in a config path is a thing to keep an eye on. It is deliberately
+  narrow: only the two documented commercial hosts are recognised, and an
+  unknown host, a private DNS alias, GovCloud (`us-gov-*`) or China
+  (`*.amazonaws.com.cn`) get no guess at all — the id passes through and
+  `/admin/health/ai` raises an issue telling the operator to qualify it. A
+  regulated partition is the last place to silently pick a routing.
 
 ## Master Data Flywheel Impact
 
