@@ -62,6 +62,26 @@ vi.mock("@workspace/db", dbF);
 vi.mock("@clerk/express", clerkF);
 vi.mock("../../lib/jobs", jobsF);
 vi.mock("openai", openaiF);
+// The bedrock path builds an @anthropic-ai/sdk client. Left unmocked, the
+// bedrock cases below issue a REAL outbound HTTPS request to
+// bedrock-runtime.<region>.amazonaws.com -- a network dependency in a test
+// suite that must be hermetic, ~4.5s of latency, a failure whenever the
+// runner has no outbound AWS access, and a test-shaped credential sent to a
+// third party. Reported by the AWS review agent on PR #207.
+vi.mock("@anthropic-ai/sdk", () => {
+  const create = vi.fn(async () => ({
+    id: "msg_test",
+    model: "global.anthropic.claude-sonnet-5",
+    content: [{ type: "text", text: "ok" }],
+    stop_reason: "end_turn",
+    usage: { input_tokens: 1, output_tokens: 1 },
+  }));
+  class FakeAnthropic {
+    messages = { create };
+    constructor(_opts: unknown) {}
+  }
+  return { default: FakeAnthropic, Anthropic: FakeAnthropic };
+});
 
 import { bootTestDb, shutdownTestDb, withAuth } from "../helpers/testApp";
 import { seedOrg, seedUser } from "../helpers/testDb";
@@ -451,6 +471,11 @@ describe("GET /admin/health/ai — defense in depth", () => {
     expect(warned).toContain("AI_INTEGRATIONS_MODEL unset");
     expect(warned).toContain("claude-");
     expect(warned).not.toContain("gpt-");
+    // Assert the PING, not just the warning text. Checking only the warning
+    // would let the bedrock ping path regress silently -- which is the exact
+    // failure this test exists to prevent.
+    expect(res.body.ping.ok).toBe(true);
+    expect(res.body.ping.model).toContain("claude-");
     expect(JSON.stringify(res.body)).not.toContain(TEST_API_KEY);
   });
 
