@@ -152,12 +152,17 @@ export function setOpenAIClientFactory(
 
 function getOpenAI(): AiClient | null {
   if (_factory) return _factory();
-  // Throws in production if the provider is not the HIPAA-eligible value
-  // — see `lib/aiProvider.ts`.
-  const provider = resolveAiProvider();
-  const apiKey = resolveAiApiKey(provider);
-  if (!apiKey) return null;
+  // resolveAiProvider() is INSIDE the try. The authoritative fail-fast for a
+  // non-BAA provider is assertAiProviderHipaaCompliant() at bootstrap
+  // (index.ts) -- the process refuses to start, so no request is ever served
+  // by a misconfigured deploy. Re-throwing here adds nothing and costs the
+  // caller's graceful-degradation contract (the transcript webhook must not
+  // 5xx; a worker must not die). Belt-and-braces: return null and let the
+  // boot guard be the thing that fails loudly.
   try {
+    const provider = resolveAiProvider();
+    const apiKey = resolveAiApiKey(provider);
+    if (!apiKey) return null;
     if (provider === "azure") {
       // Azure OpenAI is the HIPAA-eligible path. The deployment name in
       // the URL (set on the client) overrides the `model` field sent in

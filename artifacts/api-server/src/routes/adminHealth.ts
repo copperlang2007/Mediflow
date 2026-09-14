@@ -91,16 +91,19 @@ function validateEnv(): EnvValidation {
     );
   }
 
-  // HIPAA guard: only `azure` and `bedrock` are BAA-eligible. Surface a
-  // warning so the admin can see this state, but don't gate the check on it —
-  // the resolveAiProvider() in getOpenAI() will throw in production anyway.
+  // HIPAA guard: only `azure` and `bedrock` are BAA-eligible. In production
+  // this is an ISSUE, not a warning: such a deploy cannot legitimately serve
+  // AI at all (assertAiProviderHipaaCompliant() refuses to boot it), so
+  // reporting `configured: true` with a soft warning would describe a state
+  // the runtime does not permit. Filing it as an issue also means this
+  // endpoint names the real cause without depending on catching a throw.
   if (
     process.env.NODE_ENV === "production" &&
     provider !== "azure" &&
     provider !== "bedrock"
   ) {
-    warnings.push(
-      "Production deploys must use a HIPAA-eligible AI_INTEGRATIONS_PROVIDER (azure or bedrock)",
+    issues.push(
+      "AI_INTEGRATIONS_PROVIDER is not HIPAA-eligible (must be 'azure' or 'bedrock' in production)",
     );
   }
 

@@ -409,8 +409,10 @@ describe("GET /admin/health/ai — defense in depth", () => {
     expect(res.status).toBe(200);
     expect(res.body.configured).toBe(false);
     expect(res.body.ping.ok).toBe(false);
-    // Names the real cause instead of the generic message.
-    expect(res.body.ping.message).toContain("HIPAA-eligible");
+    // Names the real cause in envIssues — the endpoint's designed channel —
+    // rather than depending on catching a throw from the client factory.
+    expect(res.body.envValid).toBe(false);
+    expect(res.body.envIssues.join(" ")).toContain("HIPAA-eligible");
     // And still never echoes the key.
     expect(JSON.stringify(res.body)).not.toContain(TEST_API_KEY);
   });
