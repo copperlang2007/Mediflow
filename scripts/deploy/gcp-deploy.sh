@@ -88,8 +88,7 @@ sync_secret() {
   # The deploy SA holds secretVersionAdder, NOT admin — it can add versions but
   # cannot create a secret. A secret this script writes that gcp-bootstrap.sh
   # never created therefore fails here under `set -e`, mid-deploy, with a bare
-  # NOT_FOUND. That is exactly what happens to a project bootstrapped before
-  # mediflow-ai-bedrock-base-url existed, so say so instead of dying opaquely.
+  # NOT_FOUND, so diagnose that clearly instead of dying opaquely.
   #
   # Diagnose from the WRITE's own failure rather than a prior `secrets describe`:
   # describe needs secretmanager.secrets.get, which this role is not guaranteed
@@ -120,7 +119,11 @@ sync_secret mediflow-clerk-publishable-key "${CLERK_PUBLISHABLE_KEY}"
 # extra operator step for a name nobody types. The operator-facing names (the
 # GitHub secret and the app env var) are what carry the rename.
 sync_secret mediflow-ai-openai-api-key "${AI_INTEGRATIONS_BEDROCK_API_KEY}"
-sync_secret mediflow-ai-bedrock-base-url "${AI_INTEGRATIONS_BEDROCK_BASE_URL}"
+# NOTE: same compatibility rule for the Bedrock base URL: keep the operator-
+# facing GitHub/app env var canonical, but store it in the long-lived Secret
+# Manager resource so already-bootstrapped projects keep deploying without a
+# one-off IAM/bootstrap repair just for the rename.
+sync_secret mediflow-ai-openai-base-url "${AI_INTEGRATIONS_BEDROCK_BASE_URL}"
 
 # Optional secrets: every one of these already exists in Secret Manager
 # (created as an "unset" placeholder by gcp-bootstrap.sh, with this script's
@@ -164,7 +167,7 @@ LEAD_QUEUE_WEBHOOK_SECRET=mediflow-lead-queue-webhook-secret:latest,\
 CLERK_SECRET_KEY=mediflow-clerk-secret-key:latest,\
 CLERK_PUBLISHABLE_KEY=mediflow-clerk-publishable-key:latest,\
 AI_INTEGRATIONS_BEDROCK_API_KEY=mediflow-ai-openai-api-key:latest,\
-AI_INTEGRATIONS_BEDROCK_BASE_URL=mediflow-ai-bedrock-base-url:latest"
+AI_INTEGRATIONS_BEDROCK_BASE_URL=mediflow-ai-openai-base-url:latest"
 
 STATIC_ENV="NODE_ENV=production,\
 AI_INTEGRATIONS_PROVIDER=bedrock,\
