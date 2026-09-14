@@ -273,9 +273,24 @@ function applyResponseFormat(
     // — not the schema itself. Serializing the envelope would instruct the
     // model to emit an object with `name` and `schema` keys, so
     // /feature-builder/plan would reject every plan it generated. Unwrap it.
-    const env = rf.json_schema as { schema?: unknown };
-    const schema =
-      env && typeof env === "object" && "schema" in env ? env.schema : env;
+    //
+    // The discriminator is deliberately narrow. A bare JSON Schema is also
+    // accepted here (documented, and tested), and `schema` is a legal property
+    // name inside one — so testing only for the presence of a `schema` key
+    // would misread such a schema as an envelope and silently drop every other
+    // property it declares. An envelope is identified by a `name` STRING
+    // beside a `schema` OBJECT, and by the absence of the JSON-Schema keywords
+    // a bare schema would carry. Reported by the AWS review agent on PR #207.
+    const env = rf.json_schema;
+    const isEnvelope =
+      typeof env === "object" &&
+      env !== null &&
+      typeof (env as { name?: unknown }).name === "string" &&
+      typeof (env as { schema?: unknown }).schema === "object" &&
+      (env as { schema?: unknown }).schema !== null &&
+      !("type" in env) &&
+      !("properties" in env);
+    const schema = isEnvelope ? (env as { schema: unknown }).schema : env;
     instruction =
       "Respond with a single valid JSON object and nothing else. " +
       "Do not wrap it in markdown code fences and do not add commentary. " +
