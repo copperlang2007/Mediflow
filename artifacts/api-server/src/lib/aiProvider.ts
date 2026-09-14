@@ -214,6 +214,40 @@ export function assertAiProviderHipaaCompliant(): void {
   const model = resolveAiModel("bedrock");
   const baseUrl = resolveAiBaseUrl("bedrock") ?? "";
   if (!baseUrl) return; // absent config is the caller's own error to report
+
+  // The bedrock path is served by `@anthropic-ai/sdk` against Bedrock's
+  // `/anthropic` Messages route, which serves Anthropic models and nothing
+  // else. An id for any other family cannot work there no matter how it is
+  // prefixed — an OpenAI id (the openai-side default `gpt-5.4`, which
+  // `resolveAiModel()` returns whenever the provider is not yet known at the
+  // call), an Amazon Nova id, or a typo like `claude5-sonnet` that misses the
+  // `claude-` shape all sail past a check that only looks at prefixes.
+  // Reported by the AWS review agent on PR #207.
+  const isAnthropicId =
+    model.startsWith("claude-") || /^([a-z]+\.)?anthropic\./.test(model);
+  if (!isAnthropicId) {
+    throw new Error(
+      `FATAL: AI_INTEGRATIONS_MODEL "${model}" is not an Anthropic model id, ` +
+        `but AI_INTEGRATIONS_PROVIDER=bedrock routes through Bedrock's ` +
+        `Anthropic Messages API, which serves no other model family. Set an ` +
+        `Anthropic id (e.g. global.anthropic.claude-sonnet-5).`,
+    );
+  }
+
+  // `/openai/v1` is the Chat Completions path. AWS lists Chat Completions as
+  // unsupported for every Anthropic model, so a base URL still pointing there
+  // is the precise misconfiguration this PR exists to eliminate — and it
+  // survives today because `normalizeBedrockModelId()` matches on host alone
+  // and happily prefixes an id destined for a path that cannot serve it.
+  if (baseUrl.includes("/openai/v1")) {
+    throw new Error(
+      `FATAL: the Bedrock base URL "${baseUrl}" points at the OpenAI-compatible ` +
+        `/openai/v1 path, which AWS lists as unsupported for every Anthropic ` +
+        `model. Use the Anthropic Messages path instead ` +
+        `(e.g. https://bedrock-runtime.<region>.amazonaws.com/anthropic).`,
+    );
+  }
+
   if (normalizeBedrockModelId(model, baseUrl) === model && model.startsWith("claude-")) {
     throw new Error(
       `FATAL: AI_INTEGRATIONS_MODEL "${model}" has no Bedrock provider prefix ` +

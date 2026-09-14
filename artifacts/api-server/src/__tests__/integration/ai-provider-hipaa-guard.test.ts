@@ -278,6 +278,46 @@ describe("assertAiProviderHipaaCompliant — bedrock model routability at boot",
     expect(() => assertAiProviderHipaaCompliant()).not.toThrow();
   });
 
+  it("refuses to boot on a non-Anthropic model id", () => {
+    // The bedrock path speaks Bedrock's Anthropic Messages route, which serves
+    // no other family. `gpt-5.4` is reachable for real: resolveAiModel() with
+    // no provider argument returns the openai default.
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
+    for (const bad of ["gpt-5.4", "us.amazon.nova-lite", "claude5-sonnet"]) {
+      process.env.AI_INTEGRATIONS_MODEL = bad;
+      expect(() => assertAiProviderHipaaCompliant()).toThrow(
+        /is not an Anthropic model id/,
+      );
+    }
+  });
+
+  it("accepts every Anthropic id shape, bare or regionally prefixed", () => {
+    // The boundary: this must not reject a configuration that works.
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
+    for (const good of [
+      "claude-sonnet-5",
+      "anthropic.claude-sonnet-5",
+      "us.anthropic.claude-sonnet-4-6",
+      "global.anthropic.claude-sonnet-5",
+    ]) {
+      process.env.AI_INTEGRATIONS_MODEL = good;
+      expect(() => assertAiProviderHipaaCompliant()).not.toThrow();
+    }
+  });
+
+  it("refuses to boot on a base URL still pointing at /openai/v1", () => {
+    // Chat Completions is unsupported for every Anthropic model — the exact
+    // misconfiguration this PR exists to eliminate. It survived the earlier
+    // guard because the host matches `bedrock-runtime` and the path is never
+    // inspected.
+    process.env.AI_INTEGRATIONS_MODEL = "us.anthropic.claude-sonnet-4-6";
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1";
+    expect(() => assertAiProviderHipaaCompliant()).toThrow(/openai\/v1/);
+  });
+
   it("leaves a missing base URL to the caller that reports missing config", () => {
     // An absent base URL is already an issue on /admin/health/ai and makes
     // buildAiClient() return null. Throwing a MODEL error for it would name
