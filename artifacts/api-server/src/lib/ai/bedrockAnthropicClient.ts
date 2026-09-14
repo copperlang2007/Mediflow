@@ -263,9 +263,37 @@ function splitMessages(messages: Array<{ role: string; content: string }>): {
     recordAiDegradation("dropped_assistant_turns", "bedrock_adapter");
   }
 
+  // Dropping turns above can leave two same-role turns adjacent, and Messages
+  // rejects that with the same 400 the drop existed to avoid -- trading one
+  // opaque "AI service unavailable" for another, on exactly the tab-closed-
+  // mid-stream history the empty-turn drop was written for:
+  // [user, assistant(""), user] becomes [user, user].
+  // Joining beats dropping here: both turns are real user text, so a merge
+  // loses nothing, where discarding one would silently swallow something the
+  // user actually typed.
+  // Reported by the AWS review agent on PR #207.
+  const coalesced: Anthropic.MessageParam[] = [];
+  let merged = 0;
+  for (const m of rest) {
+    const prev = coalesced[coalesced.length - 1];
+    if (prev && prev.role === m.role) {
+      prev.content = `${prev.content as string}\n\n${m.content as string}`;
+      merged += 1;
+      continue;
+    }
+    coalesced.push({ ...m });
+  }
+  if (merged > 0) {
+    logger.warn(
+      { mergedTurns: merged },
+      "bedrock adapter: merged adjacent same-role turns (Messages requires alternation)",
+    );
+    recordAiDegradation("merged_same_role_turns", "bedrock_adapter");
+  }
+
   return {
     system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
-    messages: rest,
+    messages: coalesced,
   };
 }
 
@@ -304,14 +332,35 @@ function applyResponseFormat(
     // beside a `schema` OBJECT, and by the absence of the JSON-Schema keywords
     // a bare schema would carry. Reported by the AWS review agent on PR #207.
     const env = rf.json_schema;
+    // A bare schema announces itself with a JSON-Schema keyword. Checking only
+    // `type`/`properties` missed every other way to write a valid top-level
+    // schema -- `oneOf`, `anyOf`, `allOf`, `$ref`, `enum`, `const` -- so a
+    // schema built from those that also happened to carry `name` and `schema`
+    // fields would be read as an envelope, and only its inner `schema` subtree
+    // would reach the model. The constraints would vanish with no error: the
+    // model gets a permissive fragment and returns technically-valid garbage.
+    // No caller in the tree can trip this today; it is fixed because a silent
+    // wrong answer is the expensive kind, and because this discriminator has
+    // already been wrong once.
+    // Reported by the AWS review agent on PR #207.
+    const SCHEMA_KEYWORDS = [
+      "type",
+      "properties",
+      "oneOf",
+      "anyOf",
+      "allOf",
+      "$ref",
+      "$schema",
+      "enum",
+      "const",
+    ] as const;
     const isEnvelope =
       typeof env === "object" &&
       env !== null &&
       typeof (env as { name?: unknown }).name === "string" &&
       typeof (env as { schema?: unknown }).schema === "object" &&
       (env as { schema?: unknown }).schema !== null &&
-      !("type" in env) &&
-      !("properties" in env);
+      !SCHEMA_KEYWORDS.some((k) => k in env);
     const schema = isEnvelope ? (env as { schema: unknown }).schema : env;
     instruction =
       "Respond with a single valid JSON object and nothing else. " +

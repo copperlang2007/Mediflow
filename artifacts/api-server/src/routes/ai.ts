@@ -22,7 +22,7 @@ import {
   contactsTable,
   documentsTable,
 } from "@workspace/db";
-import { resolveAiModel } from "../lib/aiProvider";
+import { resolveAiModel, resolveAiProvider } from "../lib/aiProvider";
 import { buildAiClient } from "../lib/ai/buildAiClient";
 import type { ChatCompletionClient } from "../lib/ai/bedrockAnthropicClient";
 
@@ -311,8 +311,18 @@ router.post(
         // subject. Declaring the format makes the instruction land, which is
         // the fix; stripping fences afterwards would only hide the fact that
         // the instruction was missing.
-        // Reported by the AWS review agent on PR #207.
-        ...(channel === "email"
+        //
+        // Gated to bedrock, because the two providers treat this field very
+        // differently. The adapter turns it into a prompt instruction and
+        // cannot fail on it. Azure sends it to the real API, where a
+        // model/api-version pair predating json_object mode answers 400 —
+        // surfacing as a 503 from the catch below. Ungated, this fix would
+        // have repaired Bedrock by breaking email drafting outright on every
+        // such Azure deployment: a strictly worse trade than the fenced-output
+        // bug it set out to solve.
+        // Both reported by the AWS review agent on PR #207 — the second
+        // catching the regression the first one caused.
+        ...(channel === "email" && resolveAiProvider() === "bedrock"
           ? { response_format: { type: "json_object" as const } }
           : {}),
       });

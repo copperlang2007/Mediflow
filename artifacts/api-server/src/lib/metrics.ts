@@ -131,6 +131,7 @@ export const jobDeadLetterTotal = new Counter({
 export type AiDegradationReason =
   | "dropped_assistant_turns"
   | "dropped_empty_turns"
+  | "merged_same_role_turns"
   | "dropped_non_text_deltas"
   | "empty_stream"
   | "json_parse_failed";
