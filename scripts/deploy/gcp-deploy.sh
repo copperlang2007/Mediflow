@@ -139,10 +139,10 @@ declare -A OPTIONAL_SECRET_MAP=(
   [TWILIO_WEBHOOK_PUBLIC_HOST]=mediflow-twilio-webhook-host
   [RESEND_API_KEY]=mediflow-resend-api-key
   [SENTRY_DSN]=mediflow-sentry-dsn
-  [ESIGN_SIGNING_CERT_PEM]=mediflow-esign-cert-pem
-  [ESIGN_SIGNING_KEY_PEM]=mediflow-esign-key-pem
   [PUBLIC_OBJECT_SEARCH_PATHS]=mediflow-public-object-search-paths
 )
+sync_secret mediflow-esign-cert-pem "${ESIGN_SIGNING_CERT_PEM:-}"
+sync_secret mediflow-esign-key-pem "${ESIGN_SIGNING_KEY_PEM:-}"
 OPTIONAL_SECRETS_FLAG=""
 for var in "${!OPTIONAL_SECRET_MAP[@]}"; do
   val="${!var:-}"
@@ -166,11 +166,14 @@ DIALER_WEBHOOK_SECRET=mediflow-dialer-webhook-secret:latest,\
 LEAD_QUEUE_WEBHOOK_SECRET=mediflow-lead-queue-webhook-secret:latest,\
 CLERK_SECRET_KEY=mediflow-clerk-secret-key:latest,\
 CLERK_PUBLISHABLE_KEY=mediflow-clerk-publishable-key:latest,\
+ESIGN_SIGNING_CERT_PEM=mediflow-esign-cert-pem:latest,\
+ESIGN_SIGNING_KEY_PEM=mediflow-esign-key-pem:latest,\
 AI_INTEGRATIONS_BEDROCK_API_KEY=mediflow-ai-openai-api-key:latest,\
 AI_INTEGRATIONS_BEDROCK_BASE_URL=mediflow-ai-openai-base-url:latest"
 
 STATIC_ENV="NODE_ENV=production,\
 AI_INTEGRATIONS_PROVIDER=bedrock,\
+ESIGN_PROVIDER=docusign,\
 AI_INTEGRATIONS_MODEL=${AI_INTEGRATIONS_MODEL:-us.anthropic.claude-sonnet-4-6},\
 MFA_REQUIRED=true,\
 LOG_LEVEL=${LOG_LEVEL:-info},\
@@ -188,7 +191,9 @@ gcloud run deploy "${SERVICE}" \
   --network="${GCP_NETWORK}" \
   --subnet="${GCP_NETWORK}" \
   --vpc-egress=private-ranges-only \
-  --allow-unauthenticated \
+  --no-invoker-iam-check \
+  --memory=2Gi \
+  --cpu=2 \
   --min-instances="${MIN_INSTANCES:-1}" \
   --max-instances="${MAX_INSTANCES:-10}" \
   --set-env-vars="${STATIC_ENV}" \
