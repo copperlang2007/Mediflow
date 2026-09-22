@@ -186,7 +186,8 @@ fi
 # DATABASE_URL over the Cloud Run Cloud SQL Unix socket (no public IP, no
 # separate proxy sidecar — Cloud Run mounts the socket when
 # --add-cloudsql-instances is set on the service).
-DATABASE_URL="postgresql://${SQL_USER}:${DB_PASSWORD}@/${SQL_DB}?host=/cloudsql/${SQL_CONNECTION_NAME}"
+ENCODED_DB_PASSWORD="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${DB_PASSWORD}")"
+DATABASE_URL="postgresql://${SQL_USER}:${ENCODED_DB_PASSWORD}@localhost/${SQL_DB}?host=/cloudsql/${SQL_CONNECTION_NAME}"
 if ! gcloud secrets describe mediflow-database-url >/dev/null 2>&1; then
   printf '%s' "${DATABASE_URL}" | gcloud secrets create mediflow-database-url --data-file=-
 else
