@@ -201,6 +201,13 @@ if (webStaticDir) {
   app.use(express.static(webStaticDir, {
     index: false,
     maxAge: 0,
+    setHeaders: (res, filePath) => {
+      // index.html must never be cached: a stale copy references hashed
+      // bundles removed by later deploys, breaking the SPA on next load.
+      if (filePath.endsWith(`${path.sep}index.html`) || filePath.endsWith("/index.html")) {
+        res.setHeader("Cache-Control", "no-store, must-revalidate");
+      }
+    },
   }));
 
   // A missing hashed asset must surface as a 404 so browsers holding a stale

@@ -24,9 +24,49 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error("[ErrorBoundary]", error, info.componentStack);
+    // A stale index.html (cached before a redeploy) references hashed bundles
+    // that no longer exist, so lazy route imports reject. Reload once to fetch
+    // the fresh index.html with current asset hashes.
+    if (ErrorBoundary.isChunkLoadError(error) && !ErrorBoundary.hasReloadedForChunkError()) {
+      try {
+        sessionStorage.setItem(ErrorBoundary.RELOAD_FLAG, String(Date.now()));
+      } catch {
+        // sessionStorage unavailable — skip reload to avoid a loop.
+        return;
+      }
+      window.location.reload();
+    }
+  }
+
+  static RELOAD_FLAG = "mediflow:staleAssetReload";
+
+  static isChunkLoadError(error: Error | null): boolean {
+    if (!error) return false;
+    const message = error.message || "";
+    const name = error.name || "";
+    return (
+      name === "ChunkLoadError" ||
+      /Failed to fetch dynamically imported module/i.test(message) ||
+      /error loading dynamically imported module/i.test(message) ||
+      /Loading chunk \S+ failed/i.test(message) ||
+      /Importing a module script failed/i.test(message)
+    );
+  }
+
+  static hasReloadedForChunkError(): boolean {
+    try {
+      return Boolean(sessionStorage.getItem(ErrorBoundary.RELOAD_FLAG));
+    } catch {
+      return true;
+    }
   }
 
   handleReset = (): void => {
+    if (ErrorBoundary.isChunkLoadError(this.state.error)) {
+      try { sessionStorage.removeItem(ErrorBoundary.RELOAD_FLAG); } catch { /* ignore */ }
+      window.location.reload();
+      return;
+    }
     this.setState({ hasError: false, error: null });
   };
 
