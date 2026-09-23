@@ -85,7 +85,31 @@ app.use(
   }),
 );
 
-app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+// Clerk's frontend API loads its JavaScript and session endpoints from the
+// instance domain encoded in the publishable key. Keep CSP restricted to that
+// host rather than blocking authentication on the production origin.
+const clerkDomain = (() => {
+  const key = process.env.CLERK_PUBLISHABLE_KEY;
+  if (!key) return undefined;
+  try {
+    const domain = Buffer.from(key.split("_").slice(2).join("_"), "base64")
+      .toString("utf8").replace(/\$/, "");
+    return /^[a-z0-9.-]+$/i.test(domain) ? `https://${domain}` : undefined;
+  } catch {
+    return undefined;
+  }
+})();
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: {
+    directives: {
+      "script-src": ["'self'", ...(clerkDomain ? [clerkDomain] : [])],
+      "connect-src": ["'self'", ...(clerkDomain ? [clerkDomain] : [])],
+      "frame-src": ["'self'", ...(clerkDomain ? [clerkDomain] : [])],
+      "img-src": ["'self'", "data:", ...(clerkDomain ? [clerkDomain] : [])],
+    },
+  },
+}));
 
 // Stamp every response with the build SHA so ops can debug-by-curl.
 // Registered before routing so even 404s + error responses carry it.
