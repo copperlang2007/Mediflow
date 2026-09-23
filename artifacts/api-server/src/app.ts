@@ -122,21 +122,23 @@ app.use(buildShaHeader);
 // the histogram. See lib/metrics.ts for cardinality discipline.
 app.use(metricsMiddleware);
 
-// CORS — locked to exact known origin; never falls back to wildcard
-app.use(
-  cors({
-    credentials: true,
-    origin: allowedOrigin
-      ? (origin, callback) => {
-          if (!origin || origin === allowedOrigin) {
-            callback(null, true);
-          } else {
-            callback(new Error(`CORS: origin ${origin} not allowed`));
-          }
+// CORS applies to API and SSE responses. Public HTML and JavaScript are
+// served on the request's own host; applying the configured API origin to
+// those files breaks the app when Cloud Run exposes another service URL.
+const apiCors = cors({
+  credentials: true,
+  origin: allowedOrigin
+    ? (origin, callback) => {
+        if (!origin || origin === allowedOrigin) {
+          callback(null, true);
+        } else {
+          callback(new Error(`CORS: origin ${origin} not allowed`));
         }
-      : false,
-  }),
-);
+      }
+    : false,
+});
+app.use("/api", apiCors);
+app.use("/sse/notifications", apiCors);
 
 // Global rate limit: 500 requests / 15 minutes per IP
 const globalLimiter = rateLimit({
