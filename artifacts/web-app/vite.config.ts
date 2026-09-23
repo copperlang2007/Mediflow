@@ -64,6 +64,14 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     assetsDir: "static",
+    // The entry module is served with max-age=0. A stable, plain filename
+    // avoids client filters that reject hash-suffixed script URLs on run.app.
+    // Lazy route chunks retain hashes and only load after the app has mounted.
+    rollupOptions: {
+      output: {
+        entryFileNames: "app.js",
+      },
+    },
     emptyOutDir: true,
     reportCompressedSize: true,
     chunkSizeWarningLimit: 600,
