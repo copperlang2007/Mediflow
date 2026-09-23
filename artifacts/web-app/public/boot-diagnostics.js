@@ -22,12 +22,22 @@ function isHashedAssetUrl(url) {
   // Vite emits /assets/<name>-<hash>.<ext>; match the hash suffix.
   return /\/assets\/[^/]+-[A-Za-z0-9_-]{6,}\.[a-z0-9]+(?:$|\?)/.test(url);
 }
+function isBootCriticalTarget(target) {
+  if (!target || target === window) return false;
+  const tag = target.tagName;
+  if (tag === "SCRIPT") return true;
+  if (tag === "LINK") {
+    const rel = (target.rel || "").toLowerCase();
+    return rel === "stylesheet" || rel === "modulepreload" || rel === "preload";
+  }
+  return false;
+}
 
 window.addEventListener("error", (event) => {
   const target = event.target;
   const url = target?.src || target?.href || "";
   startupError = `Error at ${target?.tagName || "window"} ${url}: ${event.error?.stack || event.message || "resource failed"}`;
-  if (target && target !== window && isHashedAssetUrl(url)) {
+  if (isBootCriticalTarget(target) && isHashedAssetUrl(url)) {
     reloadForStaleAssets();
   }
 }, true);
@@ -54,16 +64,8 @@ window.addEventListener("vite:preloadError", (event) => {
     reloadForStaleAssets();
   }
 });
-// If the app boots successfully, clear the guard so future stale-asset events
-// can trigger a fresh reload attempt.
-window.addEventListener("load", () => {
-  setTimeout(() => {
-    const root = document.getElementById("root");
-    if (root && root.childElementCount > 0) {
-      try { sessionStorage.removeItem(RELOAD_FLAG); } catch (_e) {}
-    }
-  }, 5000);
-});
+// The React entrypoint clears RELOAD_FLAG only after React commits. Do not infer
+// success from #root children here: the diagnostic failure panel also adds one.
 
 setTimeout(() => {
   const root = document.getElementById("root");
