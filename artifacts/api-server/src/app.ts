@@ -203,11 +203,20 @@ if (webStaticDir) {
     maxAge: 0,
   }));
 
+  // A missing hashed asset must surface as a 404 so browsers holding a stale
+  // index.html (referencing a bundle from a prior deploy) fail loudly instead
+  // of executing the SPA shell as JavaScript.
+  app.use("/assets", (_req, res) => {
+    res.status(404).type("text/plain").send("Not Found");
+  });
+
   // SPA fallback for client-side routes on single-service hosts (Render,
   // Fly, Railway). Register before Clerk's API middleware so the shell can
   // render even when API credentials are still being wired. Keep API/ops
-  // endpoints out so failed API paths surface as API failures, not index.html.
-  app.get(/^(?!\/api(?:\/|$)|\/metrics$|\/version$).*/, (_req, res) => {
+  // endpoints and /assets out so failed API/asset paths surface as their own
+  // failures rather than index.html.
+  app.get(/^(?!\/api(?:\/|$)|\/assets(?:\/|$)|\/metrics$|\/version$).*/, (_req, res) => {
+    res.setHeader("Cache-Control", "no-store, must-revalidate");
     res.sendFile(path.join(webStaticDir, "index.html"));
   });
 } else {
