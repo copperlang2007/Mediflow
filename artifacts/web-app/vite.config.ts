@@ -66,27 +66,7 @@ export default defineConfig({
     emptyOutDir: true,
     reportCompressedSize: true,
     chunkSizeWarningLimit: 600,
-    rollupOptions: {
-      output: {
-        // Manual chunk-splitting: keep vendor bundles separate from app code
-        // so that browser caching survives incremental app updates.
-        manualChunks: {
-          "vendor-react": ["react", "react-dom"],
-          "vendor-clerk": ["@clerk/react"],
-          "vendor-query": ["@tanstack/react-query"],
-          "vendor-charts": ["recharts"],
-          "vendor-ui": [
-            "@radix-ui/react-dialog",
-            "@radix-ui/react-dropdown-menu",
-            "@radix-ui/react-tooltip",
-            "@radix-ui/react-select",
-            "@radix-ui/react-tabs",
-          ],
-          "vendor-router": ["wouter"],
-          "vendor-utils": ["date-fns", "zod", "clsx", "tailwind-merge"],
-        },
-      },
-    },
+
   },
   server: {
     port,
