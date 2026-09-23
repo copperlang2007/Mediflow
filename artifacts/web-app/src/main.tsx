@@ -10,12 +10,3 @@ if (!rootElement) {
 
 createRoot(rootElement).render(<App />);
 
-// A successful React mount proves the app booted, so allow one automatic
-// stale-asset recovery again if a later deploy invalidates a lazy-loaded chunk.
-queueMicrotask(() => {
-  try {
-    sessionStorage.removeItem("mediflow:staleAssetReload");
-  } catch {
-    // sessionStorage can be unavailable in restricted browser contexts.
-  }
-});
