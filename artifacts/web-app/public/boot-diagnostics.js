@@ -1,7 +1,7 @@
 // Keep the entry screen visible if the application bundle fails before React mounts.
 let startupError = "The application did not start.";
 window.addEventListener("error", (event) => {
-  startupError = event.error?.message || event.message || "A script failed to load.";
+  startupError = event.error?.message || event.message || `A script failed to load: ${event.target?.src || event.target?.href || "unknown resource"}`;
 }, true);
 window.addEventListener("unhandledrejection", (event) => {
   startupError = event.reason?.message || String(event.reason);
