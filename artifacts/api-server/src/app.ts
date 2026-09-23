@@ -31,6 +31,13 @@ import { getBuildInfo } from "./lib/buildInfo";
 
 const app: Express = express();
 
+// Cloud Run places one trusted proxy in front of the container. Resolve the
+// client IP from the proxy's X-Forwarded-For header for rate limiting, rather
+// than treating every visitor as the same Cloud Run hop.
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
+}
+
 function resolveWebStaticDir(): string | undefined {
   const explicit = process.env.WEB_STATIC_DIR?.trim();
   const candidates = [
@@ -113,6 +120,7 @@ const globalLimiter = rateLimit({
   max: 500,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { forwardedHeader: false }, // Express uses trusted X-Forwarded-For.
   message: { error: "Too many requests, please try again later." },
 });
 app.use(globalLimiter);
@@ -123,6 +131,7 @@ const authLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { forwardedHeader: false }, // Express uses trusted X-Forwarded-For.
   message: { error: "Too many authentication attempts, please try again." },
 });
 app.use("/api/auth", authLimiter);
