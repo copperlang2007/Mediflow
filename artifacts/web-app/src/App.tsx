@@ -233,16 +233,10 @@ function Landing() {
 }
 
 function HomeRedirect() {
-  return (
-    <>
-      <Show when="signed-in">
-        <Redirect to="/dashboard" />
-      </Show>
-      <Show when="signed-out">
-        <Landing />
-      </Show>
-    </>
-  );
+  const { isLoaded, isSignedIn } = useAuth();
+  // Clerk can be slow or unreachable; the public entry page must still render.
+  if (!isLoaded) return <Landing />;
+  return isSignedIn ? <Redirect to="/dashboard" /> : <Landing />;
 }
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
