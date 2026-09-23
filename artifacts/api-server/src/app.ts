@@ -191,13 +191,17 @@ const webStaticDir = resolveWebStaticDir();
 
 if (webStaticDir) {
   logger.info({ webStaticDir }, "Serving bundled web app");
-  app.use(
-    express.static(webStaticDir, {
-      index: false,
-      maxAge: "1y",
-      immutable: true,
-    }),
-  );
+  // Only content-hashed bundles are immutable. Public files such as the boot
+  // diagnostic and logo retain stable URLs and must refresh on deployment.
+  app.use("/assets", express.static(path.join(webStaticDir, "assets"), {
+    index: false,
+    maxAge: "1y",
+    immutable: true,
+  }));
+  app.use(express.static(webStaticDir, {
+    index: false,
+    maxAge: 0,
+  }));
 
   // SPA fallback for client-side routes on single-service hosts (Render,
   // Fly, Railway). Register before Clerk's API middleware so the shell can
