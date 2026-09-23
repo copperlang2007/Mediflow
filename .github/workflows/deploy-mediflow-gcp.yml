@@ -140,3 +140,43 @@ jobs:
           PUBLIC_OBJECT_SEARCH_PATHS: ${{ secrets.PUBLIC_OBJECT_SEARCH_PATHS }}
 
           GITHUB_SHA: ${{ github.sha }}
+
+      - name: Install pnpm for browser smoke
+        if: steps.gate.outputs.configured == 'true'
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node for browser smoke
+        if: steps.gate.outputs.configured == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Verify deployed page in Chromium
+        if: steps.gate.outputs.configured == 'true'
+        env:
+          GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+          export MEDIFLOW_URL="$(gcloud run services describe mediflow-prod --region "$GCP_REGION" --format='value(status.url)')"
+          node --input-type=module <<'NODE'
+          import { chromium } from '@playwright/test';
+          const browser = await chromium.launch();
+          try {
+            const page = await browser.newPage();
+            const errors = [];
+            page.on('pageerror', error => errors.push(error.message));
+            page.on('requestfailed', request => errors.push(`${request.url()}: ${request.failure()?.errorText}`));
+            await page.goto(process.env.MEDIFLOW_URL, { waitUntil: 'domcontentloaded' });
+            await page.getByRole('heading', { name: 'MediFlow', exact: true }).waitFor({ timeout: 20000 });
+            await page.goto(new URL('/sign-in', process.env.MEDIFLOW_URL).href, { waitUntil: 'domcontentloaded' });
+            await page.getByRole('textbox').first().waitFor({ timeout: 20000 });
+            console.log('Production landing and sign-in render in Chromium');
+          } catch (error) {
+            console.error('Production browser smoke failed:', error.message);
+            throw error;
+          } finally {
+            await browser.close();
+          }
+          NODE
