@@ -63,6 +63,7 @@ export default defineConfig({
   root: path.resolve(import.meta.dirname),
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
+    assetsDir: "static",
     emptyOutDir: true,
     reportCompressedSize: true,
     chunkSizeWarningLimit: 600,
