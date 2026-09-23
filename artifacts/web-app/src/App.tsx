@@ -535,6 +535,16 @@ function ClerkProviderWithRoutes() {
 }
 
 function App() {
+  // Reset the one-time stale-asset retry only after React has actually
+  // committed. Clearing it in the entry module can create a reload loop.
+  useEffect(() => {
+    try {
+      sessionStorage.removeItem("mediflow:staleAssetReload");
+    } catch {
+      // Storage can be unavailable in restricted browser contexts.
+    }
+  }, []);
+
   if (!clerkPubKey) {
     return <DeploymentConfigRequired />;
   }
