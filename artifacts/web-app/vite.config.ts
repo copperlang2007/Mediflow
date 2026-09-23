@@ -43,6 +43,18 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss({ optimize: false }),
+    {
+      name: "classic-entry-script",
+      transformIndexHtml: {
+        order: "post" as const,
+        handler(html: string) {
+          return html.replace(
+            '<script type="module" crossorigin src="/app.js"></script>',
+            '<script defer src="/app.js"></script>',
+          );
+        },
+      },
+    },
     // Production: emit gzip + brotli compressed assets alongside originals.
     // The CDN / static host serves the pre-compressed files automatically.
     ...(process.env.NODE_ENV === "production"
@@ -64,12 +76,13 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     assetsDir: "static",
-    // The entry module is served with max-age=0. A stable, plain filename
-    // avoids client filters that reject hash-suffixed script URLs on run.app.
-    // Lazy route chunks retain hashes and only load after the app has mounted.
+    // Serve one self-contained classic script at an uncached, stable URL.
+    // This avoids module loading for browsers failing to fetch the entry.
     rollupOptions: {
       output: {
         entryFileNames: "app.js",
+        format: "iife",
+        inlineDynamicImports: true,
       },
     },
     emptyOutDir: true,
