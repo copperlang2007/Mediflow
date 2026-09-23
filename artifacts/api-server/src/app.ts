@@ -103,10 +103,23 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   contentSecurityPolicy: {
     directives: {
-      "script-src": ["'self'", ...(clerkDomain ? [clerkDomain] : [])],
-      "connect-src": ["'self'", ...(clerkDomain ? [clerkDomain] : [])],
-      "frame-src": ["'self'", ...(clerkDomain ? [clerkDomain] : [])],
-      "img-src": ["'self'", "data:", ...(clerkDomain ? [clerkDomain] : [])],
+      "script-src": [
+        "'self'", ...(clerkDomain ? [clerkDomain] : []),
+        "https://challenges.cloudflare.com", "https://*.protect.clerk.com",
+      ],
+      "connect-src": [
+        "'self'", ...(clerkDomain ? [clerkDomain] : []),
+        "https://*.protect.clerk.com:*",
+      ],
+      "frame-src": [
+        "'self'", ...(clerkDomain ? [clerkDomain] : []),
+        "https://challenges.cloudflare.com", "https://*.protect.clerk.com",
+      ],
+      "img-src": [
+        "'self'", "data:", "https://img.clerk.com",
+        ...(clerkDomain ? [clerkDomain] : []),
+      ],
+      "worker-src": ["'self'", "blob:"],
     },
   },
 }));
