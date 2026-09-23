@@ -9,7 +9,7 @@ name: Deploy MediFlow (Google Cloud • production)
 
 on:
   push:
-    branches: [claude/google-cloud-deployment-ml41c2]
+    branches: [main]
   workflow_dispatch: {}
 
 concurrency:
