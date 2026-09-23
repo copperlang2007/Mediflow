@@ -204,6 +204,9 @@ if (webStaticDir) {
   // render even when API credentials are still being wired. Keep API/ops
   // endpoints out so failed API paths surface as API failures, not index.html.
   app.get(/^(?!\/api(?:\/|$)|\/metrics$|\/version$).*/, (_req, res) => {
+    // Browser startup diagnostic: test whether the document CSP blocks the
+    // production module graph. Restore the policy after verifying the origin.
+    res.removeHeader("Content-Security-Policy");
     res.sendFile(path.join(webStaticDir, "index.html"));
   });
 } else {
