@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type {
-  LeadListResponseDataItem, LeadStats,
+  LeadListResponseDataItem, LeadStats, Contact,
   CreateLeadBody, UpdateLeadBody,
 } from "@workspace/api-client-react";
 import {
-  useGetLeads, useCreateLead, useUpdateLead, useConvertLead, useGetLeadStats,
+  useGetLeads, useGetContacts, useCreateLead, useUpdateLead, useConvertLead, useGetLeadStats,
   getGetLeadsQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,13 +15,47 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Plus, Target, ArrowRight, Star } from "lucide-react";
+import { Plus, Target, ArrowRight, Star, CircleHelp } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { LEAD_STATUS_STYLES, initials } from "./shared";
+
+
+function FieldHelp({ label, children }: { label: string; children: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={`About ${label}`}
+          aria-description={children}
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <CircleHelp className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-64 text-sm">{children}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+export function leadCreateErrorMessage(error: unknown): string {
+  if (error && typeof error === "object") {
+    const data = (error as { data?: unknown }).data;
+    if (data && typeof data === "object") {
+      const message = (data as { error?: unknown }).error;
+      if (typeof message === "string" && message.trim()) return message;
+    }
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.replace(/^HTTP \\d+[^:]*:\\s*/, "");
+  }
+  return "Failed to create lead";
+}
 
 export default function LeadsTab() {
   const qc = useQueryClient();
@@ -31,12 +65,14 @@ export default function LeadsTab() {
 
   const { data, isLoading } = useGetLeads({ status: statusFilter === "all" ? undefined : statusFilter, limit: 100 });
   const { data: stats } = useGetLeadStats();
+  const { data: contactsData, isLoading: contactsLoading } = useGetContacts({ limit: 100 });
   const { mutateAsync: createLead, isPending } = useCreateLead();
   const { mutateAsync: convertLead } = useConvertLead();
   const { mutateAsync: updateLead } = useUpdateLead();
 
   const leads: LeadListResponseDataItem[] = data?.data ?? [];
   const leadStats = stats as LeadStats | undefined;
+  const contacts: Contact[] = contactsData?.data ?? [];
 
   const handleCreate = async () => {
     if (!form.contactId) { toast.error("Contact ID required"); return; }
@@ -45,7 +81,7 @@ export default function LeadsTab() {
       toast.success("Lead created");
       setAddOpen(false);
       void qc.invalidateQueries({ queryKey: getGetLeadsQueryKey() });
-    } catch { toast.error("Failed to create lead"); }
+    } catch (error) { toast.error(leadCreateErrorMessage(error)); }
   };
 
   const handleConvert = async (id: string) => {
@@ -157,26 +193,60 @@ export default function LeadsTab() {
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>New Lead</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>New Lead</DialogTitle>
+            <DialogDescription>
+              Connect an existing CRM contact to a new sales opportunity.
+            </DialogDescription>
+          </DialogHeader>
           <div className="space-y-3 py-2">
             <div className="space-y-1.5">
-              <Label>Contact ID *</Label>
-              <Input placeholder="Paste contact ID…" value={form.contactId} onChange={(e) => setForm((f) => ({ ...f, contactId: e.target.value }))} />
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="lead-contact">Contact *</Label>
+                <FieldHelp label="contact">The person this sales opportunity belongs to.</FieldHelp>
+              </div>
+              <Select value={form.contactId} onValueChange={(value) => setForm((f) => ({ ...f, contactId: value }))}>
+                <SelectTrigger id="lead-contact" aria-label="Contact">
+                  <SelectValue placeholder={contactsLoading ? "Loading contacts…" : "Select a contact…"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {contacts.map((contact) => (
+                    <SelectItem key={contact.id} value={contact.id}>
+                      {contact.firstName} {contact.lastName}
+                      {contact.email ? ` — ${contact.email}` : contact.phone ? ` — ${contact.phone}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!contactsLoading && contacts.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  No contacts yet. Create a contact before creating a lead.
+                </p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Source</Label>
-                <Input placeholder="e.g. Web form" value={form.source ?? ""} onChange={(e) => setForm((f) => ({ ...f, source: e.target.value || null }))} />
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="lead-source">Source</Label>
+                  <FieldHelp label="source">Where this lead came from, such as Referral, Website, or Direct Mail.</FieldHelp>
+                </div>
+                <Input id="lead-source" placeholder="e.g. Web form" value={form.source ?? ""} onChange={(e) => setForm((f) => ({ ...f, source: e.target.value || null }))} />
               </div>
               <div className="space-y-1.5">
-                <Label>Score (0–100)</Label>
-                <Input type="number" min="0" max="100" value={form.score ?? 0} onChange={(e) => setForm((f) => ({ ...f, score: parseInt(e.target.value) || 0 }))} />
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="lead-score">Score (0–100)</Label>
+                  <FieldHelp label="score">Lead priority from 0 to 100. Higher scores indicate stronger opportunities.</FieldHelp>
+                </div>
+                <Input id="lead-score" type="number" min="0" max="100" value={form.score ?? 0} onChange={(e) => setForm((f) => ({ ...f, score: parseInt(e.target.value) || 0 }))} />
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label>Status</Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="lead-status">Status</Label>
+                <FieldHelp label="status">New means not yet contacted; Contacted means outreach started; Qualified means ready for the next sales step.</FieldHelp>
+              </div>
               <Select value={form.status ?? "new"} onValueChange={(v) => setForm((f) => ({ ...f, status: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger id="lead-status" aria-label="Status"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="new">New</SelectItem>
                   <SelectItem value="contacted">Contacted</SelectItem>
@@ -187,7 +257,9 @@ export default function LeadsTab() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={isPending}>{isPending ? "Creating…" : "Create Lead"}</Button>
+            <Button onClick={handleCreate} disabled={isPending || contactsLoading || contacts.length === 0 || !form.contactId}>
+              {isPending ? "Creating…" : "Create Lead"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
