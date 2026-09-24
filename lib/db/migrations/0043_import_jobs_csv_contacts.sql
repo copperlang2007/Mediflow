@@ -1,6 +1,15 @@
 -- Bring legacy import_jobs (0000) in line with the CSV import routes.
 -- Keep the legacy columns/data for existing imports.
 ALTER TABLE import_jobs ADD COLUMN IF NOT EXISTS user_id text;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'import_jobs_user_id_users_id_fk'
+    AND conrelid = 'import_jobs'::regclass)
+  THEN
+    ALTER TABLE import_jobs ADD CONSTRAINT import_jobs_user_id_users_id_fk
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 ALTER TABLE import_jobs ADD COLUMN IF NOT EXISTS import_type text NOT NULL DEFAULT 'csv_contacts';
 ALTER TABLE import_jobs ADD COLUMN IF NOT EXISTS created_count integer NOT NULL DEFAULT 0;
 ALTER TABLE import_jobs ADD COLUMN IF NOT EXISTS updated_count integer NOT NULL DEFAULT 0;
