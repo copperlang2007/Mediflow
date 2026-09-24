@@ -169,7 +169,7 @@ jobs:
             page.on('pageerror', error => errors.push(error.message));
             page.on('requestfailed', request => errors.push(`${request.url()}: ${request.failure()?.errorText}`));
             await page.goto(process.env.MEDIFLOW_URL, { waitUntil: 'domcontentloaded' });
-            await page.getByRole('heading', { name: 'MediFlow', exact: true }).waitFor({ timeout: 20000 });
+            await page.getByRole('heading', { name: 'Your agency, moving together.' }).waitFor({ timeout: 20000 });
             await page.goto(new URL('/sign-in', process.env.MEDIFLOW_URL).href, { waitUntil: 'domcontentloaded' });
             await page.getByRole('textbox').first().waitFor({ timeout: 20000 });
             console.log('Production landing and sign-in render in Chromium');
