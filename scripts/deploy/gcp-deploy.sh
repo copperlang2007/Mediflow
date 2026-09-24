@@ -201,15 +201,17 @@ gcloud run deploy "${SERVICE}" \
   --quiet
 
 SERVICE_URL="$(gcloud run services describe "${SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
+PROJECT_NUMBER="$(gcloud projects describe "${GCP_PROJECT_ID}" --format='value(projectNumber)')"
+LEGACY_SERVICE_URL="https://${SERVICE}-${PROJECT_NUMBER}.${GCP_REGION}.run.app"
 ORIGIN="${APP_ORIGIN:-$SERVICE_URL}"
-log "Public origins (ALLOWED_ORIGIN): ${ORIGIN} | ${SERVICE_URL}"
+log "Public origins (ALLOWED_ORIGIN): ${ORIGIN} | ${SERVICE_URL} | ${LEGACY_SERVICE_URL}"
 
 # Both CORS and invitation links need the public URL, which is only known
 # after the first deploy. Keep them in the same metadata-only update.
 gcloud run services update "${SERVICE}" \
   --project="${GCP_PROJECT_ID}" \
   --region="${GCP_REGION}" \
-  --update-env-vars="ALLOWED_ORIGIN=${ORIGIN}|${SERVICE_URL},APP_BASE_URL=${ORIGIN}" \
+  --update-env-vars="ALLOWED_ORIGIN=${ORIGIN}|${SERVICE_URL}|${LEGACY_SERVICE_URL},APP_BASE_URL=${ORIGIN}" \
   --quiet
 
 echo ""
