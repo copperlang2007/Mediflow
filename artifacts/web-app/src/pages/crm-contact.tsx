@@ -41,6 +41,7 @@ import {
 import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import CreateLeadDialog from "@/pages/crm/CreateLeadDialog";
 import {
   useContactCallSummaries,
   type CallSummary,
@@ -791,6 +792,7 @@ export default function ContactDetailPage() {
   const [smsOpen, setSmsOpen] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+  const [leadOpen, setLeadOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<UpdateContactBody>({});
 
@@ -881,6 +883,7 @@ export default function ContactDetailPage() {
           <div className="flex flex-wrap gap-2 shrink-0">
             {c.phone && !c.optOutSms && <Button size="sm" variant="outline" onClick={() => setSmsOpen(true)}><MessageSquare className="h-4 w-4 mr-1" />SMS</Button>}
             {c.email && !c.optOutEmail && <Button size="sm" variant="outline" onClick={() => setEmailOpen(true)}><Mail className="h-4 w-4 mr-1" />Email</Button>}
+            <Button size="sm" variant="outline" onClick={() => setLeadOpen(true)}><Plus className="h-4 w-4 mr-1" />Create Lead</Button>
             <Button size="sm" variant="outline" onClick={() => setLogOpen(true)}><ActivityIcon className="h-4 w-4 mr-1" />Log</Button>
             <Button size="sm" variant="outline" onClick={openEdit}><Edit className="h-4 w-4 mr-1" />Edit</Button>
           </div>
@@ -911,6 +914,7 @@ export default function ContactDetailPage() {
 
       {/* Modals */}
       <SendSmsModal contactId={id} contactName={contactName} open={smsOpen} onClose={() => setSmsOpen(false)} />
+      <CreateLeadDialog contactId={id} contactName={contactName} open={leadOpen} onOpenChange={setLeadOpen} />
       <SendEmailModal contactId={id} contactName={contactName} open={emailOpen} onClose={() => setEmailOpen(false)} />
       <LogActivityModal contactId={id} open={logOpen} onClose={() => setLogOpen(false)} />
 
