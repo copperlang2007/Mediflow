@@ -204,12 +204,12 @@ SERVICE_URL="$(gcloud run services describe "${SERVICE}" --project="${GCP_PROJEC
 ORIGIN="${APP_ORIGIN:-$SERVICE_URL}"
 log "Public origin (ALLOWED_ORIGIN): ${ORIGIN}"
 
-# ALLOWED_ORIGIN needs the service's own URL, which is only known after the
-# first deploy — a fast metadata-only update, no rebuild.
+# Both CORS and invitation links need the public URL, which is only known
+# after the first deploy. Keep them in the same metadata-only update.
 gcloud run services update "${SERVICE}" \
   --project="${GCP_PROJECT_ID}" \
   --region="${GCP_REGION}" \
-  --update-env-vars="ALLOWED_ORIGIN=${ORIGIN}" \
+  --update-env-vars="ALLOWED_ORIGIN=${ORIGIN},APP_BASE_URL=${ORIGIN}" \
   --quiet
 
 echo ""
