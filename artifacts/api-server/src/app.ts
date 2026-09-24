@@ -60,16 +60,20 @@ function resolveWebStaticDir(): string | undefined {
  * not opened. This is intentionally strict — set ALLOWED_ORIGIN (the app's
  * public origin) explicitly.
  */
-function resolveAllowedOrigin(): string | false {
-  const explicit = process.env.ALLOWED_ORIGIN;
-  if (explicit) return explicit;
-  logger.warn(
-    "CORS: ALLOWED_ORIGIN is not set — cross-origin requests will be denied",
-  );
-  return false;
+function resolveAllowedOrigins(): Set<string> {
+  const origins = (process.env.ALLOWED_ORIGIN ?? "")
+    .split("|")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  if (origins.length === 0) {
+    logger.warn(
+      "CORS: ALLOWED_ORIGIN is not set — cross-origin requests will be denied",
+    );
+  }
+  return new Set(origins);
 }
 
-const allowedOrigin = resolveAllowedOrigin();
+const allowedOrigins = resolveAllowedOrigins();
 
 app.use(
   pinoHttp({
@@ -140,9 +144,9 @@ app.use(metricsMiddleware);
 // those files breaks the app when Cloud Run exposes another service URL.
 const apiCors = cors({
   credentials: true,
-  origin: allowedOrigin
+  origin: allowedOrigins.size > 0
     ? (origin, callback) => {
-        if (!origin || origin === allowedOrigin) {
+        if (!origin || allowedOrigins.has(origin)) {
           callback(null, true);
         } else {
           callback(new Error(`CORS: origin ${origin} not allowed`));
