@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import LeadsTab from "@/pages/crm/LeadsTab";
@@ -47,7 +48,13 @@ function mockApi() {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
     const ok = (body: unknown) =>
-      ({ ok: true, status: 200, headers: new Headers({ "content-type": "application/json" }), json: async () => body }) as Response;
+      ({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        text: async () => JSON.stringify(body),
+        json: async () => body,
+      }) as Response;
 
     if (method === "GET" && url.includes("/api/contacts")) {
       return ok({ data: CONTACTS, total: CONTACTS.length });
@@ -90,6 +97,7 @@ afterEach(() => {
 
 describe("new lead contact selection", () => {
   it("lets the user select a contact by name and submits its internal ID", async () => {
+    const user = userEvent.setup();
     renderTab();
     fireEvent.click(await screen.findByRole("button", { name: /new lead/i }));
     const dialog = await screen.findByRole("dialog");
@@ -97,10 +105,11 @@ describe("new lead contact selection", () => {
     expect(within(dialog).queryByPlaceholderText(/paste contact id/i)).not.toBeInTheDocument();
     const contactSelect = within(dialog).getByRole("combobox", { name: /contact/i });
     await waitFor(() => expect(contactSelect).toHaveTextContent("Select a contact…"));
-    fireEvent.click(contactSelect);
-    fireEvent.click(await screen.findByRole("option", { name: /Ada Agent/ }));
+    contactSelect.focus();
+    await user.keyboard("{ArrowDown}{Enter}");
+    await waitFor(() => expect(contactSelect).toHaveTextContent(/Ada Agent/));
 
-    fireEvent.click(within(dialog).getByRole("button", { name: /create lead/i }));
+    await user.click(within(dialog).getByRole("button", { name: /create lead/i }));
 
     await waitFor(() => {
       const post = fetchMock.mock.calls.find(([url, init]) =>
