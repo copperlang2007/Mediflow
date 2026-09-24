@@ -96,6 +96,7 @@ describe("new lead contact selection", () => {
 
     expect(within(dialog).queryByPlaceholderText(/paste contact id/i)).not.toBeInTheDocument();
     const contactSelect = within(dialog).getByRole("combobox", { name: /contact/i });
+    await waitFor(() => expect(contactSelect).toHaveTextContent("Select a contact…"));
     fireEvent.click(contactSelect);
     fireEvent.click(await screen.findByRole("option", { name: /Ada Agent/ }));
 
