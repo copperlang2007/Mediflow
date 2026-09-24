@@ -203,30 +203,102 @@ function DeploymentConfigRequired() {
 }
 
 function Landing() {
+  const capabilities = [
+    {
+      number: "01",
+      title: "Bring your agency together",
+      description: "Keep your agents, onboarding steps, and everyday work in one place.",
+    },
+    {
+      number: "02",
+      title: "Stay ahead of the details",
+      description: "See licensing, certifications, and compliance work alongside your team.",
+    },
+    {
+      number: "03",
+      title: "Make room to grow",
+      description: "Connect your contacts, tasks, and agency reporting in a shared workspace.",
+    },
+  ];
+
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 px-4">
-      <div className="text-center text-white max-w-lg">
-        <div className="flex justify-center mb-6">
-          <img src={`${basePath}/logo.svg`} alt="MediFlow" className="h-16 w-16" />
-        </div>
-        <h1 className="text-4xl font-bold mb-3 tracking-tight">MediFlow</h1>
-        <p className="text-lg text-blue-200 mb-8">
-          Medicare Sales Agency Platform — Agent lifecycle, CRM, compliance, and automation in one place.
-        </p>
-        <div className="flex flex-col sm:flex-row gap-3 justify-center">
-          <a
-            href={`${basePath}/sign-in`}
-            className="px-6 py-3 rounded-lg bg-white text-blue-900 font-semibold hover:bg-blue-50 transition-colors"
-          >
-            Sign In
-          </a>
-          <a
-            href={`${basePath}/sign-up`}
-            className="px-6 py-3 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 border border-blue-500 transition-colors"
-          >
-            Get Started
-          </a>
-        </div>
+    <div className="relative isolate min-h-[100dvh] overflow-hidden bg-[#091527] text-white">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_82%_18%,rgba(59,130,246,0.24),transparent_34%),radial-gradient(circle_at_5%_72%,rgba(20,184,166,0.12),transparent_33%)]" />
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(255,255,255,.07)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.07)_1px,transparent_1px)] [background-size:72px_72px]" />
+
+      <div className="relative mx-auto flex min-h-[100dvh] max-w-7xl flex-col px-6 sm:px-10 lg:px-16">
+        <header className="flex items-center justify-between border-b border-white/10 py-6">
+          <div className="flex items-center gap-3">
+            <img src={`${basePath}/logo.svg`} alt="" className="h-10 w-10" />
+            <span className="text-xl font-semibold tracking-tight">MediFlow</span>
+          </div>
+          <span className="hidden text-sm text-slate-400 sm:inline">A clearer way to run your agency</span>
+        </header>
+
+        <main className="flex-1">
+          <section className="grid gap-12 py-20 sm:py-24 lg:grid-cols-[1.2fr_.8fr] lg:items-center lg:gap-16 lg:py-32">
+            <div>
+              <p className="mb-6 inline-flex rounded-full border border-blue-300/20 bg-blue-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-blue-200">
+                Built for Medicare sales agencies
+              </p>
+              <h1 className="max-w-3xl text-5xl font-semibold leading-[1.08] tracking-tight sm:text-6xl lg:text-7xl">
+                Your agency, <span className="text-blue-300">moving together.</span>
+              </h1>
+              <p className="mt-7 max-w-xl text-lg leading-8 text-slate-300">
+                MediFlow brings agent onboarding, licensing, compliance, contacts, and daily work into one connected workspace.
+              </p>
+              <a
+                href={`${basePath}/sign-in`}
+                className="mt-9 inline-flex min-h-12 items-center justify-center rounded-xl bg-blue-500 px-8 py-3 text-base font-semibold text-white shadow-lg shadow-blue-950/40 transition-colors hover:bg-blue-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-300"
+              >
+                Sign in
+                <span aria-hidden="true" className="ml-3">→</span>
+              </a>
+              <p className="mt-4 text-sm text-slate-400">For existing MediFlow users</p>
+            </div>
+
+            <div className="relative rounded-[2rem] border border-white/15 bg-white/[0.06] p-6 shadow-2xl shadow-black/30 backdrop-blur sm:p-8">
+              <div className="mb-7 flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-300">One connected workspace</span>
+                <span className="flex gap-1.5" aria-hidden="true">
+                  <span className="h-2 w-2 rounded-full bg-blue-300" />
+                  <span className="h-2 w-2 rounded-full bg-teal-300" />
+                  <span className="h-2 w-2 rounded-full bg-white/30" />
+                </span>
+              </div>
+              <div className="space-y-3">
+                {["Agent onboarding", "Licensing & certifications", "Compliance", "Contacts & tasks"].map((label, index) => (
+                  <div key={label} className="flex items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-4">
+                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold ${index % 2 === 0 ? "bg-blue-400/20 text-blue-200" : "bg-teal-400/20 text-teal-200"}`}>
+                      0{index + 1}
+                    </span>
+                    <span className="font-medium text-slate-100">{label}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-7 border-t border-white/10 pt-6 text-sm leading-6 text-slate-400">
+                Less time switching between tools. More clarity on what needs attention next.
+              </p>
+            </div>
+          </section>
+
+          <section className="border-t border-white/10 pb-20 pt-12">
+            <p className="mb-8 text-xs font-semibold uppercase tracking-[0.22em] text-blue-300">Made for the work behind every sale</p>
+            <div className="grid gap-8 sm:grid-cols-3">
+              {capabilities.map(({ number, title, description }) => (
+                <div key={number}>
+                  <span className="text-sm font-medium text-teal-300">{number}</span>
+                  <h2 className="mt-3 text-xl font-semibold tracking-tight">{title}</h2>
+                  <p className="mt-3 max-w-sm text-sm leading-7 text-slate-400">{description}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        </main>
+
+        <footer className="border-t border-white/10 py-6 text-sm text-slate-500">
+          © {new Date().getFullYear()} MediFlow
+        </footer>
       </div>
     </div>
   );
