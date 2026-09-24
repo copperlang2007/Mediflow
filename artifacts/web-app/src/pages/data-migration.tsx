@@ -36,6 +36,54 @@ type ValidationResponse = { totalRows: number; errorCount: number; validRows: nu
 type ImportJob = { id: string; importType: string; status: string; totalRows: number; processedRows: number; createdCount: number; updatedCount: number; skippedCount: number; errorCount: number; fileName: string | null; createdAt: string; completedAt: string | null };
 type ProgressEvent = { status: string; processed: number; total: number; errorCount: number };
 
+const SKIP_FIELD_VALUE = "__skip_field__";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isUploadResponse(value: unknown): value is UploadResponse {
+  return isRecord(value)
+    && Array.isArray(value.headers) && value.headers.every((header) => typeof header === "string")
+    && Array.isArray(value.sampleRows) && value.sampleRows.every(isRecord)
+    && typeof value.totalRows === "number"
+    && isRecord(value.suggestedMapping)
+    && Array.isArray(value.targetFields)
+    && value.targetFields.every((field) => (
+      isRecord(field)
+      && typeof field.field === "string"
+      && typeof field.label === "string"
+      && (field.required === undefined || typeof field.required === "boolean")
+    ));
+}
+
+function isValidationResponse(value: unknown): value is ValidationResponse {
+  return isRecord(value)
+    && typeof value.totalRows === "number"
+    && typeof value.errorCount === "number"
+    && typeof value.validRows === "number"
+    && Array.isArray(value.errors)
+    && value.errors.every((error) => (
+      isRecord(error)
+      && typeof error.row === "number"
+      && typeof error.field === "string"
+      && typeof error.message === "string"
+    ));
+}
+
+function isConfirmResponse(value: unknown): value is { jobId: string; totalRows: number } {
+  return isRecord(value)
+    && typeof value.jobId === "string"
+    && value.jobId.length > 0
+    && typeof value.totalRows === "number";
+}
+
+function getApiError(value: unknown, fallback: string): string {
+  return isRecord(value) && typeof value.error === "string" && value.error
+    ? value.error
+    : fallback;
+}
+
 // ─── Wizard Step Indicator ─────────────────────────────────────────────────────
 function StepIndicator({ steps, current }: { steps: string[]; current: number }) {
   return (
@@ -94,7 +142,10 @@ function ImportWizard({
       const form = new FormData();
       form.append("file", f);
       const res = await fetch(`${base}${uploadEndpoint}`, { method: "POST", body: form, credentials: "include" });
-      const data = await res.json() as UploadResponse;
+      const data: unknown = await res.json();
+      if (!res.ok || !isUploadResponse(data)) {
+        throw new Error(getApiError(data, "Failed to parse file"));
+      }
       setUploadData(data);
       setMapping(data.suggestedMapping);
       setStep(1);
@@ -113,7 +164,10 @@ function ImportWizard({
       form.append("file", file);
       form.append("mapping", JSON.stringify(mapping));
       const res = await fetch(`${base}${validateEndpoint}`, { method: "POST", body: form, credentials: "include" });
-      const data = await res.json() as ValidationResponse;
+      const data: unknown = await res.json();
+      if (!res.ok || !isValidationResponse(data)) {
+        throw new Error(getApiError(data, "Validation failed"));
+      }
       setValidation(data);
       setStep(2);
     } catch {
@@ -132,7 +186,10 @@ function ImportWizard({
       form.append("mapping", JSON.stringify(mapping));
       for (const [k, v] of Object.entries(extraValues)) form.append(k, v);
       const res = await fetch(`${base}${confirmEndpoint}`, { method: "POST", body: form, credentials: "include" });
-      const data = await res.json() as { jobId: string; totalRows: number };
+      const data: unknown = await res.json();
+      if (!res.ok || !isConfirmResponse(data)) {
+        throw new Error(getApiError(data, "Failed to start import"));
+      }
       setJobId(data.jobId);
       setStep(3);
       pollProgress(data.jobId);
@@ -207,12 +264,18 @@ function ImportWizard({
                   <div key={header} className="flex items-center gap-3">
                     <span className="text-sm font-medium w-40 truncate">{header}</span>
                     <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <Select value={mapping[header] ?? ""} onValueChange={(v) => setMapping((m) => ({ ...m, [header]: v }))}>
+                    <Select
+                      value={mapping[header] || SKIP_FIELD_VALUE}
+                      onValueChange={(v) => setMapping((m) => ({
+                        ...m,
+                        [header]: v === SKIP_FIELD_VALUE ? "" : v,
+                      }))}
+                    >
                       <SelectTrigger className="flex-1">
                         <SelectValue placeholder="— Skip field —" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">— Skip field —</SelectItem>
+                        <SelectItem value={SKIP_FIELD_VALUE}>— Skip field —</SelectItem>
                         {uploadData.targetFields.map((f) => (
                           <SelectItem key={f.field} value={f.field}>{f.label}{f.required ? " *" : ""}</SelectItem>
                         ))}
