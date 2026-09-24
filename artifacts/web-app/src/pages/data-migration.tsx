@@ -193,8 +193,12 @@ function ImportWizard({
       setJobId(data.jobId);
       setStep(3);
       pollProgress(data.jobId);
-    } catch {
-      toast({ title: "Failed to start import", variant: "destructive" });
+    } catch (error) {
+      toast({
+        title: "Failed to start import",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
