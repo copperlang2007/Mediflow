@@ -122,7 +122,7 @@ jobs:
           AI_INTEGRATIONS_OPENAI_BASE_URL: ${{ secrets.AI_INTEGRATIONS_OPENAI_BASE_URL }}
           AI_INTEGRATIONS_MODEL: ${{ vars.AI_INTEGRATIONS_MODEL }}
 
-          APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+          APP_ORIGIN: ${{ vars.GCP_APP_ORIGIN }}
           MIN_INSTANCES: ${{ vars.MIN_INSTANCES }}
           MAX_INSTANCES: ${{ vars.MAX_INSTANCES }}
 
