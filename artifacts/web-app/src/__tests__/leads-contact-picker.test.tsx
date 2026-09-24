@@ -1,0 +1,127 @@
+// @vitest-environment jsdom
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import LeadsTab from "@/pages/crm/LeadsTab";
+
+const CONTACTS = [
+  {
+    id: "contact-ada",
+    orgId: "org-1",
+    assignedAgentId: null,
+    firstName: "Ada",
+    lastName: "Agent",
+    email: "ada@example.test",
+    phone: "555-0100",
+    dob: null,
+    medicareId: null,
+    currentPlanType: null,
+    currentCarrierId: null,
+    planYear: null,
+    county: null,
+    stateCode: "TX",
+    zipCode: "75001",
+    preferredLanguage: null,
+    pcpName: null,
+    pcpNpi: null,
+    healthConditions: null,
+    leadSource: "Referral",
+    status: "lead",
+    optOutSms: false,
+    optOutEmail: false,
+    tags: null,
+    deletedAt: null,
+    createdAt: "2026-09-24T00:00:00.000Z",
+    updatedAt: "2026-09-24T00:00:00.000Z",
+  },
+];
+
+function mockApi() {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+    const ok = (body: unknown) =>
+      ({ ok: true, status: 200, headers: new Headers({ "content-type": "application/json" }), json: async () => body }) as Response;
+
+    if (method === "GET" && url.includes("/api/contacts")) {
+      return ok({ data: CONTACTS, total: CONTACTS.length });
+    }
+    if (method === "GET" && url.includes("/api/leads/stats")) {
+      return ok({ bySource: [], byStatus: [] });
+    }
+    if (method === "GET" && url.includes("/api/leads")) {
+      return ok({ data: [], total: 0 });
+    }
+    if (method === "POST" && url.includes("/api/leads")) {
+      return ok({ id: "lead-1", contactId: "contact-ada", status: "new" });
+    }
+    return ok({});
+  });
+}
+
+function renderTab() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <LeadsTab />
+      </TooltipProvider>
+    </QueryClientProvider>,
+  );
+}
+
+let fetchMock: ReturnType<typeof mockApi>;
+
+beforeEach(() => {
+  fetchMock = mockApi();
+  vi.stubGlobal("fetch", fetchMock);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe("new lead contact selection", () => {
+  it("lets the user select a contact by name and submits its internal ID", async () => {
+    renderTab();
+    fireEvent.click(await screen.findByRole("button", { name: /new lead/i }));
+    const dialog = await screen.findByRole("dialog");
+
+    expect(within(dialog).queryByPlaceholderText(/paste contact id/i)).not.toBeInTheDocument();
+    const contactSelect = within(dialog).getByRole("combobox", { name: /contact/i });
+    fireEvent.click(contactSelect);
+    fireEvent.click(await screen.findByRole("option", { name: /Ada Agent/ }));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: /create lead/i }));
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).includes("/api/leads") && (init as RequestInit | undefined)?.method === "POST");
+      expect(post).toBeDefined();
+      expect(JSON.parse(String((post![1] as RequestInit).body))).toMatchObject({
+        contactId: "contact-ada",
+      });
+    });
+  });
+
+  it("explains the unfamiliar lead fields in accessible help text", async () => {
+    renderTab();
+    fireEvent.click(await screen.findByRole("button", { name: /new lead/i }));
+    const dialog = await screen.findByRole("dialog");
+
+    expect(within(dialog).getByLabelText(/about contact/i)).toHaveAccessibleDescription(
+      "The person this sales opportunity belongs to.",
+    );
+    expect(within(dialog).getByLabelText(/about source/i)).toHaveAccessibleDescription(
+      /where this lead came from/i,
+    );
+    expect(within(dialog).getByLabelText(/about score/i)).toHaveAccessibleDescription(
+      /priority from 0 to 100/i,
+    );
+    expect(within(dialog).getByLabelText(/about status/i)).toHaveAccessibleDescription(
+      /new means not yet contacted/i,
+    );
+  });
+});
