@@ -9,6 +9,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { requireMfa } from "../middlewares/requireMfa";
 
 const UpdateOrgSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -22,6 +23,7 @@ router.use(auditMiddleware("org", undefined, { includeReads: true }));
 router.get(
   "/admin/agencies",
   requireAuth,
+  requireMfa,
   requireRole("super_admin"),
   async (_req: Request, res: Response): Promise<void> => {
     const agencies = await db

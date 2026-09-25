@@ -134,6 +134,10 @@ async function applyViewAsContext(
     res.status(403).json({ error: "Only super admins can view an agency" });
     return false;
   }
+  if (process.env.NODE_ENV !== "test" && process.env.MFA_REQUIRED !== "false" && !authReq.mfaEnrolled) {
+    res.status(403).json({ error: "mfa_required", message: "Multi-factor authentication is required to view another agency." });
+    return false;
+  }
   const [organization] = await db
     .select({ id: organizationsTable.id })
     .from(organizationsTable)
