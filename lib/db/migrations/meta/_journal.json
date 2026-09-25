@@ -302,6 +302,13 @@
       "when": 1788531999999,
       "tag": "0042_audit_log_truncate_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1788532999999,
+      "tag": "0043_import_jobs_csv_contacts",
+      "breakpoints": true
     }
   ]
 }

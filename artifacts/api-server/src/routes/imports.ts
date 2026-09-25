@@ -41,7 +41,14 @@ void db.update(importJobsTable)
   });
 
 function parseCSV(buffer: Buffer): { headers: string[]; rows: Record<string, string>[] } {
-  const records = parse(buffer, { columns: true, skip_empty_lines: true, trim: true, relax_quotes: true }) as Record<string, string>[];
+  const records = parse(buffer, {
+    columns: true,
+    bom: true,
+    skip_empty_lines: true,
+    trim: true,
+    relax_quotes: true,
+    relax_column_count: true,
+  }) as Record<string, string>[];
   const headers = records.length > 0 ? Object.keys(records[0]) : [];
   return { headers, rows: records };
 }
@@ -818,17 +825,28 @@ router.post(
     const { rows } = parseCSV(req.file.buffer);
     const jobId = randomUUID();
 
-    await db.insert(importJobsTable).values({
-      id: jobId, orgId: authReq.orgId, userId: authReq.userId,
-      importType: "csv_contacts", status: "processing", totalRows: rows.length,
-      columnMapping: mapping as Record<string, unknown>,
-      options: { rows, mapping } as Record<string, unknown>,
-      fileName: req.file.originalname,
-    });
+    try {
+      await db.insert(importJobsTable).values({
+        id: jobId, orgId: authReq.orgId, userId: authReq.userId,
+        importType: "csv_contacts", status: "processing", totalRows: rows.length,
+        columnMapping: mapping as Record<string, unknown>,
+        options: { rows, mapping } as Record<string, unknown>,
+        fileName: req.file.originalname,
+      });
 
-    await enqueue(JOB_NAMES.IMPORT_CSV_CONTACTS, { jobId });
+      const queuedId = await enqueue(JOB_NAMES.IMPORT_CSV_CONTACTS, { jobId });
+      if (!queuedId) {
+        await db.update(importJobsTable).set({ status: "failed" }).where(eq(importJobsTable.id, jobId));
+        res.status(503).json({ error: "Import service is temporarily unavailable. Please retry." });
+        return;
+      }
 
-    res.json({ jobId, totalRows: rows.length });
+      res.json({ jobId, totalRows: rows.length });
+    } catch (err) {
+      logger.error({ err, jobId }, "imports: failed to create CSV contact import");
+      captureWorkerError(err, { worker: "imports", route: "contacts/confirm" });
+      res.status(500).json({ error: "Could not create the import. Please retry or contact support." });
+    }
   },
 );
 
