@@ -5,6 +5,7 @@ import { db, organizationsTable } from "@workspace/db";
 import {
   requireAuth,
   requirePermission,
+  requireRole,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
@@ -18,6 +19,17 @@ const router: IRouter = Router();
 
 router.use(auditMiddleware("org", undefined, { includeReads: true }));
 
+router.get(
+  "/admin/agencies",
+  requireAuth,
+  requireRole("super_admin"),
+  async (_req: Request, res: Response): Promise<void> => {
+    const agencies = await db
+      .select({ id: organizationsTable.id, name: organizationsTable.name, slug: organizationsTable.slug })
+      .from(organizationsTable);
+    res.json({ agencies });
+  },
+);
 router.get(
   "/organizations/me",
   requireAuth,

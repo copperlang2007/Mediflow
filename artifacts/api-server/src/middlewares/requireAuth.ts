@@ -1,6 +1,6 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { getAuth } from "@clerk/express";
-import { db, usersTable, orgSettingsTable, sessionActivityTable } from "@workspace/db";
+import { db, usersTable, organizationsTable, orgSettingsTable, sessionActivityTable } from "@workspace/db";
 import { eq, lt } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
 import { isDemoMode, demoUserId } from "../lib/demoMode";
@@ -115,8 +115,43 @@ export type AuthenticatedRequest = Request & {
   orgId: string;
   userRole: Role;
   mfaEnrolled: boolean;
+  realOrgId?: string;
+  viewingOrgId?: string;
+  viewOnly?: boolean;
 };
 
+async function applyViewAsContext(
+  req: Request,
+  res: Response,
+  authReq: AuthenticatedRequest,
+  realOrgId: string,
+): Promise<boolean> {
+  const requestedOrgId = req.get("X-MediFlow-View-Org")?.trim();
+  authReq.realOrgId = realOrgId;
+  authReq.viewOnly = false;
+  if (!requestedOrgId) return true;
+  if (authReq.userRole !== "super_admin") {
+    res.status(403).json({ error: "Only super admins can view an agency" });
+    return false;
+  }
+  const [organization] = await db
+    .select({ id: organizationsTable.id })
+    .from(organizationsTable)
+    .where(eq(organizationsTable.id, requestedOrgId))
+    .limit(1);
+  if (!organization) {
+    res.status(404).json({ error: "Agency not found" });
+    return false;
+  }
+  authReq.orgId = organization.id;
+  authReq.viewingOrgId = organization.id;
+  authReq.viewOnly = true;
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method.toUpperCase())) {
+    res.status(403).json({ error: "View-only mode does not allow changes", code: "VIEW_ONLY_MODE" });
+    return false;
+  }
+  return true;
+}
 export const requireAuth = async (
   req: Request,
   res: Response,
@@ -147,6 +182,7 @@ export const requireAuth = async (
     // gate on this via requireMfa) are reachable in the walkthrough. No real
     // credentials exist in demo mode, so this only affects the seeded org.
     authReq.mfaEnrolled = true;
+    if (!(await applyViewAsContext(req, res, authReq, demoUser.orgId))) return;
     authReq.log = req.log.child({ userId: demoUser.id, orgId: demoUser.orgId, role: demoUser.role, demo: true });
 
     next();
@@ -212,7 +248,8 @@ export const requireAuth = async (
   authReq.orgId = user.orgId;
   authReq.userRole = user.role as Role;
   authReq.mfaEnrolled = mfaEnrolled;
-  authReq.log = req.log.child({ userId: user.id, orgId: user.orgId, role: user.role });
+  if (!(await applyViewAsContext(req, res, authReq, user.orgId))) return;
+  authReq.log = req.log.child({ userId: user.id, orgId: authReq.orgId, realOrgId: user.orgId, role: user.role, viewOnly: authReq.viewOnly });
 
   next();
 };

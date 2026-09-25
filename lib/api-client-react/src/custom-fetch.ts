@@ -78,6 +78,10 @@ function resolveUrl(input: RequestInfo | URL): string {
   return input.url;
 }
 
+function getViewAsOrgId(): string | null {
+  try { return globalThis.localStorage?.getItem("mediflow:view-as-org") ?? null; } catch { return null; }
+}
+
 function mergeHeaders(...sources: Array<HeadersInit | undefined>): Headers {
   const headers = new Headers();
 
@@ -351,6 +355,9 @@ export async function customFetch<T = unknown>(
 
   // Attach bearer token when an auth getter is configured and no
   // Authorization header has been explicitly provided.
+  const viewAsOrgId = getViewAsOrgId();
+  if (viewAsOrgId && !headers.has("x-mediflow-view-org")) headers.set("x-mediflow-view-org", viewAsOrgId);
+
   if (_authTokenGetter && !headers.has("authorization")) {
     const token = await _authTokenGetter();
     if (token) {

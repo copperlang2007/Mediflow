@@ -162,6 +162,44 @@ describe("Auth & RBAC integration", () => {
     expect(res.status).toBe(404);
   });
 
+  it("allows super_admin to list agencies", async () => {
+    const res = await request(app)
+      .get("/api/admin/agencies")
+      .set(withAuth(superAdmin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.agencies).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: orgA.id }),
+      expect.objectContaining({ id: orgB.id }),
+    ]));
+  });
+
+  it("scopes super_admin reads to the selected agency", async () => {
+    const contactInOrgB = await seedContact((await bootTestDb()).db, { orgId: orgB.id });
+    const res = await request(app)
+      .get("/api/contacts")
+      .set(withAuth(superAdmin.id))
+      .set("X-MediFlow-View-Org", orgB.id);
+    expect(res.status).toBe(200);
+    expect(res.body.data.some((contact: { id: string }) => contact.id === contactInOrgB.id)).toBe(true);
+  });
+
+  it("rejects mutations while a super_admin is viewing an agency", async () => {
+    const res = await request(app)
+      .post("/api/contacts")
+      .set(withAuth(superAdmin.id))
+      .set("X-MediFlow-View-Org", orgB.id)
+      .send({ firstName: "Should", lastName: "NotCreate" });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe("VIEW_ONLY_MODE");
+  });
+
+  it("rejects view-as headers from non-super-admin users", async () => {
+    const res = await request(app)
+      .get("/api/contacts")
+      .set(withAuth(agencyAdmin.id))
+      .set("X-MediFlow-View-Org", orgB.id);
+    expect(res.status).toBe(403);
+  });
   it("rejects an inactive user with 401", async () => {
     const handle = await bootTestDb();
     const inactive = await seedUser(handle.db, {

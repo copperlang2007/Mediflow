@@ -10,6 +10,7 @@ import {
 } from "@workspace/api-client-react";
 import type { AiContext } from "@/components/ai-assistant";
 import { PresenceToggle } from "@/components/layout/PresenceToggle";
+import { ViewAsAgencyControl } from "@/components/layout/ViewAsAgencyControl";
 import { cn } from "@/lib/utils";
 
 type Role =
@@ -639,6 +640,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </Button>
 
           <div className="flex-1" />
+
+          <ViewAsAgencyControl enabled={userRole === "super_admin"} />
 
           {/* Role badge */}
           {userRole && (
