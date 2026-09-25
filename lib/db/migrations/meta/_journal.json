@@ -309,6 +309,13 @@
       "when": 1788532999999,
       "tag": "0043_import_jobs_csv_contacts",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1790344529896,
+      "tag": "0044_founder_super_admin",
+      "breakpoints": true
     }
   ]
 }
