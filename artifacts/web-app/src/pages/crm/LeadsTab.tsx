@@ -83,7 +83,7 @@ export default function LeadsTab() {
       toast.success("Lead created");
       setAddOpen(false);
       void qc.invalidateQueries({ queryKey: getGetLeadsQueryKey() });
-    void qc.invalidateQueries({ queryKey: getGetLeadStatsQueryKey() });
+      void qc.invalidateQueries({ queryKey: getGetLeadStatsQueryKey() });
     } catch (error) { toast.error(leadCreateErrorMessage(error)); }
   };
 
@@ -92,7 +92,7 @@ export default function LeadsTab() {
       await convertLead({ id });
       toast.success("Lead converted to prospect");
       void qc.invalidateQueries({ queryKey: getGetLeadsQueryKey() });
-    void qc.invalidateQueries({ queryKey: getGetLeadStatsQueryKey() });
+      void qc.invalidateQueries({ queryKey: getGetLeadStatsQueryKey() });
     } catch { toast.error("Conversion failed"); }
   };
 
