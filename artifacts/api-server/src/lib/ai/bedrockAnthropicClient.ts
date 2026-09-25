@@ -3,7 +3,7 @@
  *
  * WHY THIS EXISTS
  * ---------------
- * MediFlow's four AI call sites were written against the `openai` SDK and all
+ * agencyBRIDGE's four AI call sites were written against the `openai` SDK and all
  * call `chat.completions.create({ model, messages, stream })`. When the
  * provider moved to Amazon Bedrock we kept that SDK and pointed its `baseURL`
  * at Bedrock, on the assumption that Bedrock speaks the OpenAI wire format.
@@ -33,7 +33,7 @@
  * Both AWS and Anthropic document this path: point the standard `Anthropic`
  * client's `base_url` at the `/anthropic` route and pass the Bedrock API key
  * as `api_key`. The SDK sends it as `x-api-key` and adds the required
- * `anthropic-version` header itself. MediFlow has exactly that — a Bedrock API
+ * `anthropic-version` header itself. agencyBRIDGE has exactly that — a Bedrock API
  * key minted in the operator's own AWS account, covered by their AWS BAA.
  *
  * We send the key in BOTH `x-api-key` and `Authorization: Bearer`, because
@@ -77,7 +77,7 @@ import { logger } from "../logger";
 import { recordAiDegradation } from "../metrics";
 
 /**
- * The Chat Completions surface MediFlow actually uses — the union of what the
+ * The Chat Completions surface agencyBRIDGE actually uses — the union of what the
  * four call sites pass. Deliberately narrow: anything absent here is not
  * translated, so an unsupported option cannot be silently dropped.
  */

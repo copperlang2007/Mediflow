@@ -1,7 +1,7 @@
 /**
- * Resolve a carrier reference to a MediFlow carrier id, org-scoped.
+ * Resolve a carrier reference to a agencyBRIDGE carrier id, org-scoped.
  *
- * External callers (GHL / Atlas) know a carrier by NAME, not by MediFlow's
+ * External callers (GHL / Atlas) know a carrier by NAME, not by agencyBRIDGE's
  * opaque per-org `carriers.id`. The queue routes accept either `carrierId`
  * (verified to belong to the org and be active) or `carrierName`
  * (case-insensitive lookup among active carriers).

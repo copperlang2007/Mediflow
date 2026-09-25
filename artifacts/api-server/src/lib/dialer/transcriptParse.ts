@@ -2,9 +2,9 @@
  * In-platform transcript parsing + agent-assist (Option A, Phase 5).
  *
  * On `call.transcript.ready` (spec §6) the dialer pushes the raw transcript to
- * MediFlow and then purges its own copy (§6.1). PHI must stay inside MediFlow's
+ * agencyBRIDGE and then purges its own copy (§6.1). PHI must stay inside agencyBRIDGE's
  * BAA-covered boundary, so the AI parse that turns the transcript into
- * structured agent-assist runs ENTIRELY MediFlow-side and goes through the
+ * structured agent-assist runs ENTIRELY agencyBRIDGE-side and goes through the
  * single AI entry point (`aiProvider.ts` — only BAA-covered providers, Azure
  * OpenAI and Amazon Bedrock, are allowed in production, §8). The dialer never
  * calls an LLM with PHI, and the
@@ -127,7 +127,7 @@ function buildDefaultAiClient(): TranscriptAiClient | null {
   return buildAiClient() as unknown as TranscriptAiClient | null;
 }
 
-const PARSE_SYSTEM_PROMPT = `You are MediFlow's agent-assist analyst for outbound Medicare insurance calls. You receive a single call transcript and return ONLY structured agent-assist JSON — never prose outside the JSON.
+const PARSE_SYSTEM_PROMPT = `You are agencyBRIDGE's agent-assist analyst for outbound Medicare insurance calls. You receive a single call transcript and return ONLY structured agent-assist JSON — never prose outside the JSON.
 
 Goals:
 1. Write a concise, professional summary of what happened on the call (2-4 sentences). Do NOT include the Medicare Beneficiary Identifier (MBI), Social Security numbers, or full payment card numbers in the summary; refer to the beneficiary generically.
@@ -181,13 +181,13 @@ export interface ParseTranscriptOptions {
 }
 
 /**
- * Parse a transcript into structured agent-assist. Runs entirely in MediFlow
+ * Parse a transcript into structured agent-assist. Runs entirely in agencyBRIDGE
  * via the injected (or default, BAA-gated) AI client. Returns null when AI is
  * not configured or the model output can't be validated — callers treat a null
  * as "no agent-assist available" and never block the webhook ack on it.
  *
  * IMPORTANT: this function performs NO outbound call to the dialer. The only
- * network egress is to the MediFlow AI provider via the injected client.
+ * network egress is to the agencyBRIDGE AI provider via the injected client.
  */
 export async function parseTranscript(
   transcriptText: string,

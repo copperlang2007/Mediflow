@@ -168,7 +168,7 @@ export const requireAuth = async (
     .limit(1);
 
   if (!user || !user.isActive) {
-    // Distinguish "signed in to Clerk but has no MediFlow account yet" from
+    // Distinguish "signed in to Clerk but has no agencyBRIDGE account yet" from
     // "deactivated". The first is the normal state immediately after sign-up
     // and the web app answers it by showing the create-your-agency screen;
     // the second must bounce to sign-in. Both stay 401 — the code is what the

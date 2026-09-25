@@ -8,7 +8,7 @@
 
 ## Original intent (unimplemented)
 
-> Full Phase 0 hardening code and architecture for RIE + EGE + MediFlow +
+> Full Phase 0 hardening code and architecture for RIE + EGE + agencyBRIDGE +
 > Bridget system. Includes failover layer, self-healing, audit simulator, and
 > solo-founder weekly ritual updates.
 

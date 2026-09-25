@@ -10,7 +10,7 @@ the real account.
 
 ## Context
 
-MediFlow's four AI call sites — `routes/ai.ts`, `routes/dev/feature-builder.ts`,
+agencyBRIDGE's four AI call sites — `routes/ai.ts`, `routes/dev/feature-builder.ts`,
 `workers/weeklyComplianceReport.ts`, `lib/dialer/transcriptParse.ts` — were all
 written against the `openai` SDK and call
 `chat.completions.create({ model, messages, stream })`.
@@ -137,7 +137,7 @@ down. Now there is.
   dropping: seed a synthetic `{ role: "user", content: "Continue." }` ahead of
   it, which satisfies the requirement while KEEPING the model's prior reply in
   context. That is technically superior and deliberately not done here,
-  because MediFlow's chat transcripts concern Medicare beneficiaries and may
+  because agencyBRIDGE's chat transcripts concern Medicare beneficiaries and may
   become compliance evidence: fabricating a user utterance that the user never
   said, into a record of that kind, is not a decision an adapter should make
   unilaterally. If the dropped-turn warn rate proves material, the cleaner fix
@@ -145,7 +145,7 @@ down. Now there is.
   nothing is lost and nothing is invented. Raised with the operator.
 - **Non-text deltas are dropped, and an all-dropped stream is an error.**
   The adapter renders `text_delta` and nothing else. That is correct for every
-  feature MediFlow ships today, but a future model default or prompt change
+  feature agencyBRIDGE ships today, but a future model default or prompt change
   could produce `thinking_delta` or `input_json_delta` blocks instead. A stream
   made entirely of those would have ended cleanly with zero text, and every
   consumer reads "stream ended" as "answer complete": `/ai/chat` would send
@@ -158,7 +158,7 @@ down. Now there is.
   partially-dropped stream also stays a warning — content did reach the caller,
   so it is degraded, not silent. Raised by the AWS review agent on PR #207.
 - **An adapter is a layer.** It will diverge from both APIs over time, and it
-  translates only the subset MediFlow uses — deliberately, so an unsupported
+  translates only the subset agencyBRIDGE uses — deliberately, so an unsupported
   option cannot be silently dropped, but it means a future feature (tool use,
   vision, thinking) needs adapter work before it can be used.
 - **The endpoint-aware model prefix is inference.** It repairs a bare
@@ -185,7 +185,7 @@ down. Now there is.
 
 Restores the AI event stream rather than creating one. Transcript parses,
 agent-assist dispositions, risk flags, and weekly compliance reports are
-MediFlow's richest proprietary signal — structured judgments about real
+agencyBRIDGE's richest proprietary signal — structured judgments about real
 Medicare calls that no competitor can buy. Under the broken provider path that
 stream produced **zero rows**: every parse failed at the first request and
 `parseTranscript()` degraded to `null` by design, silently. This change is what

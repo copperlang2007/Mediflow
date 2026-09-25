@@ -112,7 +112,7 @@ async function bootstrap(): Promise<void> {
 
   // ESIGN §101(g) guard: in production, the e-sign provider MUST seal
   // completed envelopes with a real org-owned certificate. The ephemeral
-  // dev sentinel cert (CN "Mediflow ESign DEV ONLY") is generated only
+  // dev sentinel cert (CN "agencyBRIDGE ESign DEV ONLY") is generated only
   // for local + CI and is refused here. Mirrors the medicareId.ts PHI key
   // guard pattern.
   assertEsignSigningCredsAreProd();

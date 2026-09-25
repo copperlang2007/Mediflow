@@ -2799,7 +2799,7 @@ export interface VoidEnvelopeResponse {
 export type DialerEventEnvelopeData = { [key: string]: unknown };
 
 /**
- * Dialer → MediFlow event envelope (spec §6). Additional/unknown
+ * Dialer → agencyBRIDGE event envelope (spec §6). Additional/unknown
  * properties are permitted and ignored by consumers (forward-compat,
  * §6.2), hence `additionalProperties: true`.
  */
@@ -2849,7 +2849,7 @@ export interface DialTicketCallee {
 }
 
 /**
- * MediFlow's preclearance DECISION (not raw flags).
+ * agencyBRIDGE's preclearance DECISION (not raw flags).
  */
 export interface DialTicketCompliance {
   precleared: boolean;
@@ -2865,7 +2865,7 @@ export interface DialTicketCompliance {
 }
 
 /**
- * Minimal, time-boxed, pre-cleared Dial Ticket MediFlow provisions to
+ * Minimal, time-boxed, pre-cleared Dial Ticket agencyBRIDGE provisions to
  * the dialer (spec §5.1). The MBI is NEVER included (§3.1).
  */
 export interface DialTicket {
@@ -2873,7 +2873,7 @@ export interface DialTicket {
   dialTicketId: string;
   orgId: string;
   agentId: string;
-  /** Opaque MediFlow contact id (never the MBI). */
+  /** Opaque agencyBRIDGE contact id (never the MBI). */
   contactRef: string;
   callee: DialTicketCallee;
   compliance: DialTicketCompliance;

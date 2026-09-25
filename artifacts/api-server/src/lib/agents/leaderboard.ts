@@ -28,7 +28,7 @@
  *
  * ## NOT here — close rate / conversion
  *
- * MediFlow does NOT yet record per-call outcomes or submitted applications, so
+ * agencyBRIDGE does NOT yet record per-call outcomes or submitted applications, so
  * a true close rate (sales / inbound) is not derivable from existing tables.
  * `leads.status` has a `converted` value, but a converted lead is not the same
  * as a closed *call*, and nothing ties a routed inbound to a downstream sale.

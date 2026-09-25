@@ -1,5 +1,5 @@
 /**
- * Dialer → MediFlow event envelope + type catalogue (spec §6).
+ * Dialer → agencyBRIDGE event envelope + type catalogue (spec §6).
  *
  * Forward-compatibility is a hard requirement (§6.2): consumers MUST ignore
  * unknown fields and unknown event types. We therefore validate only the

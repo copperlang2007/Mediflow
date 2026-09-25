@@ -76,8 +76,8 @@ function generateDevSentinel(): PemCreds {
   cert.validity.notAfter = new Date();
   cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 1);
   const attrs = [
-    { name: "commonName", value: "Mediflow ESign DEV ONLY" },
-    { name: "organizationName", value: "Mediflow (dev sentinel)" },
+    { name: "commonName", value: "agencyBRIDGE ESign DEV ONLY" },
+    { name: "organizationName", value: "agencyBRIDGE (dev sentinel)" },
   ];
   cert.setSubject(attrs);
   cert.setIssuer(attrs); // self-signed
@@ -232,10 +232,10 @@ export async function pkiSignPdf(pdfBytes: Buffer, opts: PkiSignOptions = {}): P
   const creds = loadEsignSigningCreds();
   const withPlaceholder = plainAddPlaceholder({
     pdfBuffer: pdfBytes,
-    reason: "Mediflow e-signature (PKI-sealed)",
+    reason: "agencyBRIDGE e-signature (PKI-sealed)",
     contactInfo: "esign@mediflow.local",
-    name: "Mediflow ESign Provider",
-    location: "Mediflow",
+    name: "agencyBRIDGE ESign Provider",
+    location: "agencyBRIDGE",
     signatureLength: 8192,
   });
   const signer = new PemSigner({ certPem: creds.certPem, keyPem: creds.keyPem });

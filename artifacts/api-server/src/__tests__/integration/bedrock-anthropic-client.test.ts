@@ -1,7 +1,7 @@
 /**
  * The Chat-Completions-to-Anthropic-Messages adapter.
  *
- * This is the layer that decides what MediFlow actually sends to Amazon
+ * This is the layer that decides what agencyBRIDGE actually sends to Amazon
  * Bedrock, so it is tested against the wire shape rather than through a call
  * site. Everything asserted here is a difference between the two APIs that
  * would otherwise surface as a 400 from AWS on the first production request:

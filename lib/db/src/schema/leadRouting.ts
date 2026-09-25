@@ -37,7 +37,7 @@ export const leadRoutingTable = pgTable(
     orgId: text("org_id")
       .notNull()
       .references(() => organizationsTable.id),
-    // External contact identifier (GHL contactId / MediFlow contact id). Null
+    // External contact identifier (GHL contactId / agencyBRIDGE contact id). Null
     // when the caller routed by raw `contactState` without a contact.
     contactId: text("contact_id"),
     carrierId: text("carrier_id").notNull(),

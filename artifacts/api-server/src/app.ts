@@ -179,7 +179,7 @@ const authLimiter = rateLimit({
 });
 app.use("/api/auth", authLimiter);
 
-// Invitation lookup and acceptance are reachable without a MediFlow account —
+// Invitation lookup and acceptance are reachable without a agencyBRIDGE account —
 // that is the point of them — so they sit in the same brute-force bucket as
 // /api/auth rather than the general per-user one. The token itself is 256 bits
 // of randomness and is not guessable, but these two endpoints are the only

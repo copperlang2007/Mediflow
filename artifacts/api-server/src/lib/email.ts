@@ -143,14 +143,14 @@ export async function sendEmail(
 
 const BRAND_HEADER = `
 <div style="background:#1e3a5f;padding:20px 32px;border-radius:8px 8px 0 0">
-  <h1 style="color:#fff;margin:0;font-size:18px;font-weight:700;letter-spacing:-0.3px">MediFlow</h1>
+  <h1 style="color:#fff;margin:0;font-size:18px;font-weight:700;letter-spacing:-0.3px">agencyBRIDGE</h1>
   <p style="color:#93c5fd;margin:2px 0 0;font-size:12px">Medicare Agency Platform</p>
 </div>`.trim();
 
 const BRAND_FOOTER = `
 <div style="background:#f8fafc;padding:16px 32px;border-top:1px solid #e2e8f0;border-radius:0 0 8px 8px">
   <p style="color:#94a3b8;font-size:11px;margin:0;line-height:1.5">
-    This is an automated message from MediFlow. Do not reply to this email.
+    This is an automated message from agencyBRIDGE. Do not reply to this email.
   </p>
 </div>`.trim();
 
@@ -204,7 +204,7 @@ export function welcomeEmailHtml(opts: {
   return wrap(`
 <h2 style="margin:0 0 8px;font-size:20px;color:#0f172a">Welcome to ${opts.agencyName}!</h2>
 <p style="color:#475569;margin:0 0 16px">Hi ${opts.agentName},</p>
-<p style="color:#475569;margin:0 0 20px">Your MediFlow account has been set up. You can now access your agent portal to view your licensing, certifications, and tasks.</p>
+<p style="color:#475569;margin:0 0 20px">Your agencyBRIDGE account has been set up. You can now access your agent portal to view your licensing, certifications, and tasks.</p>
 <a href="${opts.loginUrl}" style="display:inline-block;background:#1d4ed8;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px">Access Your Portal</a>
 <p style="color:#94a3b8;font-size:12px;margin:20px 0 0">If you didn't expect this email, you can safely ignore it.</p>`);
 }
@@ -250,7 +250,7 @@ ${opts.deadlineDate ? `<p style="color:#dc2626;font-weight:600;margin:0 0 16px">
   <li>Log in or create your account</li>
   <li>Complete the Medicare training modules</li>
   <li>Pass the certification test (score ≥ 90%)</li>
-  <li>Upload your certificate to MediFlow</li>
+  <li>Upload your certificate to agencyBRIDGE</li>
 </ol>`);
 }
 
@@ -382,7 +382,7 @@ export function invitationEmailHtml(opts: {
 
   return wrap(`
 <h2 style="margin:0 0 8px;font-size:20px;color:#0f172a">You've been invited to ${agency}</h2>
-<p style="color:#475569;margin:0 0 16px">${inviter} has invited you to join <strong>${agency}</strong> on MediFlow as a <strong>${role}</strong>.</p>
+<p style="color:#475569;margin:0 0 16px">${inviter} has invited you to join <strong>${agency}</strong> on agencyBRIDGE as a <strong>${role}</strong>.</p>
 <p style="color:#475569;margin:0 0 20px">Accepting adds your account to their agency. You'll sign in with this email address.</p>
 <a href="${href}" style="display:inline-block;background:#1d4ed8;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px">Accept Invitation</a>
 <p style="color:#94a3b8;font-size:12px;margin:20px 0 0">This invitation expires in ${days} days. If you weren't expecting it, you can safely ignore this email — nothing happens until you accept.</p>`);

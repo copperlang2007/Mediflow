@@ -177,7 +177,7 @@ const PlanRequestBody = z.object({
   description: z.string().min(1).max(4000),
 });
 
-const PLAN_SYSTEM_PROMPT = `You are a senior engineer working in the Mediflow codebase. Given the request below and the codebase context, produce a FeaturePlan that lists every file that needs to be created or modified, with a one-line preview for each, branch slug, and risks. DO NOT produce file contents yet — only the plan.
+const PLAN_SYSTEM_PROMPT = `You are a senior engineer working in the agencyBRIDGE codebase. Given the request below and the codebase context, produce a FeaturePlan that lists every file that needs to be created or modified, with a one-line preview for each, branch slug, and risks. DO NOT produce file contents yet — only the plan.
 
 Output strict JSON matching the FeaturePlan schema. The branchSlug must be lowercase letters, digits, and hyphens only. Use 'create' for new files and 'modify' for changes to existing files. Cap the file list at 50. Flag any HIPAA/PHI implications in the risks array.`;
 
@@ -294,7 +294,7 @@ const ApplyRequestBody = z.object({
   cwd: z.string().optional(),
 });
 
-const FILE_SYSTEM_PROMPT = `You are generating a single source file for the Mediflow codebase. Return ONLY the full contents of the file — no markdown fences, no explanatory prose. Follow every convention listed in the context block; in particular, mutating Express routes MUST chain requireAuth + requirePermission + auditMiddleware, and SQL migrations MUST be idempotent (CREATE … IF NOT EXISTS).`;
+const FILE_SYSTEM_PROMPT = `You are generating a single source file for the agencyBRIDGE codebase. Return ONLY the full contents of the file — no markdown fences, no explanatory prose. Follow every convention listed in the context block; in particular, mutating Express routes MUST chain requireAuth + requirePermission + auditMiddleware, and SQL migrations MUST be idempotent (CREATE … IF NOT EXISTS).`;
 
 /**
  * Generate a single file's content via the AI client. Returns the

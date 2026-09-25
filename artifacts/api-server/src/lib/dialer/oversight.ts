@@ -3,11 +3,11 @@
  *
  * When the dialer reports a compliance-category disposition
  * (`call.disposition.recorded` with `category=COMPLIANCE`), a hard compliance
- * flag (`call.compliance.flagged`), or MediFlow's own in-platform transcript
+ * flag (`call.compliance.flagged`), or agencyBRIDGE's own in-platform transcript
  * parse surfaces a compliance concern (`call.transcript.ready` → Phase 5
- * agent-assist), MediFlow raises an oversight task in its own tasks system,
+ * agent-assist), agencyBRIDGE raises an oversight task in its own tasks system,
  * assigned to a compliance manager / agency admin, and audits it (§6, §9).
- * MediFlow is the system of record; the task lives here, never in the dialer.
+ * agencyBRIDGE is the system of record; the task lives here, never in the dialer.
  *
  * Idempotency: each task carries a deterministic `retentionReviewKey`
  * (reused as a generic dedup key — it is the only org-scoped partial-unique
@@ -121,9 +121,9 @@ export async function raiseComplianceOversightTask(
     input.trigger === "flag"
       ? "The dialer raised a hard compliance flag on an outbound call."
       : input.trigger === "transcript"
-        ? "MediFlow's in-platform transcript parse surfaced a compliance concern on an outbound call."
+        ? "agencyBRIDGE's in-platform transcript parse surfaced a compliance concern on an outbound call."
         : input.trigger === "scope_missing"
-          ? "MediFlow's in-platform transcript parse found a sales call with NO Scope of Appointment captured on the recording."
+          ? "agencyBRIDGE's in-platform transcript parse found a sales call with NO Scope of Appointment captured on the recording."
           : "The dialer recorded a COMPLIANCE-category disposition on a call.",
     input.detail ? `Detail: ${input.detail}` : null,
     input.dialerCallId ? `Dialer call: ${input.dialerCallId}` : null,

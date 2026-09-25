@@ -1,4 +1,4 @@
-# MediFlow — GCP Cloud Run PRODUCTION image.
+# agencyBRIDGE — GCP Cloud Run PRODUCTION image.
 #
 # Unlike the repo-root Dockerfile (an auth-bypassed demo build), this image
 # builds the web-app with real Clerk auth baked in and never seeds demo data.

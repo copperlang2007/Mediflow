@@ -70,7 +70,7 @@ const MATRIX: PermissionMatrix = {
     // Activating or deactivating a member changes what the agency is billed
     // for. That is an owner decision, not a compliance-manager one — but it
     // is emphatically NOT reserved to `super_admin`, which in this product is
-    // MediFlow staff, not the customer.
+    // agencyBRIDGE staff, not the customer.
     read: ["super_admin", "agency_admin"],
     update: ["super_admin", "agency_admin"],
     admin: ["super_admin", "agency_admin"],

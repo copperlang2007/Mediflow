@@ -119,7 +119,7 @@ export default function ForgotPasswordPage() {
         {/* Header */}
         <div className="px-8 pt-8 pb-6 border-b border-border">
           <div className="flex justify-center mb-4">
-            <img src={`${basePath}/logo.svg`} alt="MediFlow" className="h-10 w-10" />
+            <img src={`${basePath}/logo.svg`} alt="agencyBRIDGE" className="h-10 w-10" />
           </div>
           <h1 className="text-xl font-semibold text-center text-foreground">
             {stageTitle[stage]}

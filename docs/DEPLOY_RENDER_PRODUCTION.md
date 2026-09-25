@@ -1,6 +1,6 @@
-# MediFlow — Production deploy to Render
+# agencyBRIDGE — Production deploy to Render
 
-This deploys MediFlow to Render in **production** mode (real Clerk auth + PHI
+This deploys agencyBRIDGE to Render in **production** mode (real Clerk auth + PHI
 encryption, `NODE_ENV=production`). After a one-time secret setup, every push to
 `claude/product-market-launch-selection-iw23qv` deploys automatically — the
 workflow provisions the database and injects **every** environment variable for
@@ -87,7 +87,7 @@ If you'd rather create the Render service + Postgres once from `render.prod.yaml
 ## Deploy
 
 - **Automatic:** push to `claude/product-market-launch-selection-iw23qv`.
-- **Manual:** Actions tab → *Deploy MediFlow (Render • production)* → **Run workflow**.
+- **Manual:** Actions tab → *Deploy agencyBRIDGE (Render • production)* → **Run workflow**.
 
 The run logs each step and exits non-zero (with the precise missing-secret name)
 if anything is misconfigured, so a red ✗ always tells you exactly what to fix.
@@ -108,7 +108,7 @@ if anything is misconfigured, so a red ✗ always tells you exactly what to fix.
 
 ## Known caveat — object storage
 
-MediFlow's object storage targets **Google Cloud Storage**. `PRIVATE_OBJECT_DIR`
+agencyBRIDGE's object storage targets **Google Cloud Storage**. `PRIVATE_OBJECT_DIR`
 selects the bucket/path, but GCS also needs credentials in the runtime
 environment (e.g. a `GOOGLE_APPLICATION_CREDENTIALS` JSON, or workload identity).
 On Render — which isn't GCP — wire that credential before relying on document

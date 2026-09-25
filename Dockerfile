@@ -1,4 +1,4 @@
-# MediFlow — local/demo Docker image.
+# agencyBRIDGE — local/demo Docker image.
 #
 # Builds the web-app (demo-mode bundle) and api-server, then serves the built
 # static bundle from the api-server process (same layout the Render demo

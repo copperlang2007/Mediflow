@@ -36,7 +36,7 @@ export const leadCallbacksTable = pgTable(
     orgId: text("org_id")
       .notNull()
       .references(() => organizationsTable.id),
-    // External/MediFlow contact id. Null when the inbound was routed by raw
+    // External/agencyBRIDGE contact id. Null when the inbound was routed by raw
     // `contactState` without a contact record.
     contactId: text("contact_id"),
     carrierId: text("carrier_id").notNull(),

@@ -498,7 +498,7 @@ router.get(
  * POST /invitations/accept — join the org named by the token.
  *
  * Requires a signed-in Clerk identity (that id becomes `users.id`) but not a
- * MediFlow account, which is precisely what this creates. The account's email
+ * agencyBRIDGE account, which is precisely what this creates. The account's email
  * comes from the invitation, never from the request: the admin invited a
  * specific address and that is what the seat list must show.
  *
@@ -772,7 +772,7 @@ async function deliver(
 
   const result = await sendEmail({
     to: { email: invite.email },
-    subject: `You've been invited to ${org?.name ?? "a MediFlow agency"}`,
+    subject: `You've been invited to ${org?.name ?? "a agencyBRIDGE agency"}`,
     html: invitationEmailHtml({
       agencyName: org?.name ?? "your agency",
       inviterName: inviter?.fullName ?? "An administrator",

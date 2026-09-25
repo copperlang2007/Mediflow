@@ -156,7 +156,7 @@ router.post(
         res
           .type("text/xml")
           .send(
-            "<Response><Message>MediFlow Medicare Agency. Reply STOP to unsubscribe. For support contact your agent directly.</Message></Response>",
+            "<Response><Message>agencyBRIDGE Medicare Agency. Reply STOP to unsubscribe. For support contact your agent directly.</Message></Response>",
           );
         return;
       }

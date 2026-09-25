@@ -1,7 +1,7 @@
 /**
  * Create your agency — the self-serve onboarding step.
  *
- * Shown once, to a Clerk-authenticated user who has no MediFlow account yet.
+ * Shown once, to a Clerk-authenticated user who has no agencyBRIDGE account yet.
  * Submitting calls `POST /auth/provision`, which creates the organization and
  * makes this user its `agency_admin`. Until this screen existed, an org could
  * only be named by whoever ran the provisioning call by hand — which is what

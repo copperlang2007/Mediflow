@@ -19,7 +19,7 @@ const router: IRouter = Router();
 /**
  * GET /auth/status
  *
- * Reports whether the signed-in Clerk user has a MediFlow account yet. The web
+ * Reports whether the signed-in Clerk user has a agencyBRIDGE account yet. The web
  * app calls this immediately after sign-in to decide between the app shell and
  * the create-your-agency screen. Deliberately NOT behind `requireAuth` — an
  * unprovisioned user is precisely the case this endpoint exists to describe,

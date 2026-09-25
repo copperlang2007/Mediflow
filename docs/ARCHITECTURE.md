@@ -1,7 +1,7 @@
-# MediFlow — Medicare Sales Agency Platform
+# agencyBRIDGE — Medicare Sales Agency Platform
 
 ## Overview
-MediFlow is a production-grade Medicare agency management platform designed to replace disparate systems like Monday.com and GoHighLevel. It aims to support 25-100 agents by providing a comprehensive suite of tools including AI integrations, automations, two-way SMS/email communication, and retention features. The platform is built with a strong emphasis on HIPAA and SOC 2 compliance, ensuring secure and efficient operations for Medicare sales agencies.
+agencyBRIDGE is a production-grade Medicare agency management platform designed to replace disparate systems like Monday.com and GoHighLevel. It aims to support 25-100 agents by providing a comprehensive suite of tools including AI integrations, automations, two-way SMS/email communication, and retention features. The platform is built with a strong emphasis on HIPAA and SOC 2 compliance, ensuring secure and efficient operations for Medicare sales agencies.
 
 ## Conventions
 - Prefer clear and concise explanations.

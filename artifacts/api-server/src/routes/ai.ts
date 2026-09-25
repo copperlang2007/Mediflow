@@ -94,7 +94,7 @@ const aiDraftLimiter = aiRateLimiter(20);
 const aiComplianceReportLimiter = aiRateLimiter(5);
 const aiComplianceReportDownloadLimiter = aiRateLimiter(30);
 
-const MEDIFLOW_SYSTEM_PREAMBLE = `You are MediFlow AI, an intelligent assistant built into the MediFlow Medicare Sales Agency Platform. You help insurance agents, compliance managers, and agency administrators manage agent lifecycle, CRM contacts, compliance, and outreach.
+const MEDIFLOW_SYSTEM_PREAMBLE = `You are agencyBRIDGE AI, an intelligent assistant built into the agencyBRIDGE Medicare Sales Agency Platform. You help insurance agents, compliance managers, and agency administrators manage agent lifecycle, CRM contacts, compliance, and outreach.
 
 You have access to real-time platform data provided in the context below. Always base your answers on this data — never fabricate names, numbers, or details. When asked to draft communications, produce professional, compliant content appropriate for Medicare insurance outreach.
 

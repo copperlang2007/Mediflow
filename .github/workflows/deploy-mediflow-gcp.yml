@@ -1,6 +1,6 @@
-name: Deploy MediFlow (Google Cloud • production)
+name: Deploy agencyBRIDGE (Google Cloud • production)
 
-# Ships MediFlow to Cloud Run in production mode. One-time setup
+# Ships agencyBRIDGE to Cloud Run in production mode. One-time setup
 # (scripts/deploy/gcp-bootstrap.sh + docs/DEPLOY_GCP_PRODUCTION.md) provisions
 # the project, Cloud SQL, the PHI bucket, service accounts, and Workload
 # Identity Federation. After that, every push to this branch builds the

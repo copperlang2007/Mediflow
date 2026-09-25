@@ -1,4 +1,4 @@
-# Integration Handoff — Inbound Lead Queue (GHL ⇄ Atlas ⇄ MediFlow)
+# Integration Handoff — Inbound Lead Queue (GHL ⇄ Atlas ⇄ agencyBRIDGE)
 
 **Audience:** the next Claude (or engineer) session picking this up.
 **Companion doc:** [`inbound-lead-queue.md`](./inbound-lead-queue.md) (design + RTS definition).
@@ -7,7 +7,7 @@
 > resolution, Phase-2 presence, and the Atlas proxy have all landed. This doc
 > is retained for the design rationale; the "remaining work" framing is
 > historical. What's actually left is operational: set `LEAD_QUEUE_WEBHOOK_SECRET`
-> (same value on MediFlow + Atlas), point GHL at the Atlas/MediFlow URL, and
+> (same value on agencyBRIDGE + Atlas), point GHL at the Atlas/agencyBRIDGE URL, and
 > have the web app call `POST /api/queue/presence/heartbeat`. See the
 > "Status / Notes for operators" section of the companion doc.
 
@@ -78,19 +78,19 @@ dialer. Copy that pattern rather than inventing a new one:
 The existing Clerk-authed `route-inbound` stays as-is for in-app/agent-desk
 use (e.g. a "find me an agent" button). The new public one is for GHL/Atlas.
 
-> If you'd rather not expose MediFlow publicly at all, the alternative is to
+> If you'd rather not expose agencyBRIDGE publicly at all, the alternative is to
 > keep Atlas as the **only** public surface and have Atlas hold the HMAC
-> secret + call MediFlow's public endpoint. Same auth mechanism, one more hop.
+> secret + call agencyBRIDGE's public endpoint. Same auth mechanism, one more hop.
 > Decide with the requester; both are documented in `inbound-lead-queue.md`.
 
 ---
 
-## 3. Carrier-id resolution (GHL won't know MediFlow's UUIDs)
+## 3. Carrier-id resolution (GHL won't know agencyBRIDGE's UUIDs)
 
 `carriersTable.id` is an opaque per-org id. GHL knows a carrier as a **name**
-("Aetna") or its own custom-field value, not MediFlow's id. Two options:
+("Aetna") or its own custom-field value, not agencyBRIDGE's id. Two options:
 
-- **Map in the workflow:** hard-code the MediFlow `carrierId` per GHL
+- **Map in the workflow:** hard-code the agencyBRIDGE `carrierId` per GHL
   pipeline/campaign (simplest if a campaign = one carrier).
 - **Resolve server-side (recommended):** let the public endpoint accept
   `carrierName` and look it up: `carriers WHERE org_id = $org AND
@@ -137,10 +137,10 @@ Acceptance: an agent on a live call is never returned by `route-inbound`.
 It is a stub (`backend/app/services/router.py` returns a hard-coded number).
 Decide one of:
 
-- **Retire it:** point GHL's HTTP-Request step directly at MediFlow's public
+- **Retire it:** point GHL's HTTP-Request step directly at agencyBRIDGE's public
   endpoint (§2). Archive the repo. Least moving parts.
 - **Keep as proxy:** replace the stub `route_call` with an HTTP call to
-  MediFlow's public endpoint, signing with the shared HMAC secret. Useful
+  agencyBRIDGE's public endpoint, signing with the shared HMAC secret. Useful
   only if you want a separate public surface / Railway edge.
 
 Its README's GHL wiring block is the template; just swap the URL/body to

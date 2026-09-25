@@ -2,8 +2,8 @@
  * Short-lived RS256 service JWT minting for the dialer control plane
  * (spec §4.1 / §5).
  *
- * MediFlow → dialer control-plane calls authenticate with an asymmetric
- * (RS256) service JWT. MediFlow publishes its JWKS; the dialer verifies the
+ * agencyBRIDGE → dialer control-plane calls authenticate with an asymmetric
+ * (RS256) service JWT. agencyBRIDGE publishes its JWKS; the dialer verifies the
  * token against it (audience `mediflow:dialer:control`, issuer `mediflow`).
  *
  * This module deliberately uses Node's built-in `crypto` (no new runtime
@@ -90,7 +90,7 @@ export type VerifyServiceJwtResult =
 /**
  * Verify a compact RS256 JWT with the matching public key. Used by tests
  * (the mock dialer) and available for any reverse callback path; the real
- * dialer verifies via MediFlow's JWKS (spec §4).
+ * dialer verifies via agencyBRIDGE's JWKS (spec §4).
  */
 export function verifyServiceJwt(args: {
   token: string;
@@ -139,7 +139,7 @@ export function verifyServiceJwt(args: {
 }
 
 /**
- * Resolve MediFlow's service-JWT signing key from the environment.
+ * Resolve agencyBRIDGE's service-JWT signing key from the environment.
  *
  * `DIALER_SERVICE_JWT_PRIVATE_KEY` holds the RS256 private key (PEM). Returns
  * undefined when unset so callers can fail explicitly. The key is injectable

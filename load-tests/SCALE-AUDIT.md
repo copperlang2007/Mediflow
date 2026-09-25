@@ -1,4 +1,4 @@
-# Mediflow scale-risk audit
+# agencyBRIDGE scale-risk audit
 
 Static read-through of the API server (`artifacts/api-server/src`), DB schema
 (`lib/db/src/schema`), and migrations (`lib/db/migrations`). The goal is to

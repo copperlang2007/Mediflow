@@ -4,7 +4,7 @@
  * This is the core the inbound router was always missing. The old
  * `atlas-call-router` service accepted `{contact_state, carrier_id}` and
  * returned a HARD-CODED phone number — it had no agent data and no notion of
- * who is actually allowed to sell. All of that lives here in MediFlow, where
+ * who is actually allowed to sell. All of that lives here in agencyBRIDGE, where
  * the agent / license / certification / carrier tables are the system of
  * record.
  *

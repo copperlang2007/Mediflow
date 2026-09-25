@@ -1,6 +1,6 @@
-name: Deploy MediFlow (Render • production)
+name: Deploy agencyBRIDGE (Render • production)
 
-# Ships MediFlow to Render in production mode. The deploy engine
+# Ships agencyBRIDGE to Render in production mode. The deploy engine
 # (scripts/deploy/render-deploy.mjs) provisions the managed Postgres, injects
 # EVERY environment variable (generating the crypto keys, copying your SaaS
 # credentials from the GitHub Secrets mapped below, wiring DATABASE_URL +

@@ -1,6 +1,6 @@
-# MediFlow
+# agencyBRIDGE
 
-MediFlow is a pnpm monorepo for a Medicare agency management platform. It includes API, web app, mockup sandbox, E2E tests, load tests, and compliance-focused integration tests.
+agencyBRIDGE is a pnpm monorepo for a Medicare agency management platform. It includes API, web app, mockup sandbox, E2E tests, load tests, and compliance-focused integration tests.
 
 ## Stack
 

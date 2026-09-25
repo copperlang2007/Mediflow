@@ -3,7 +3,7 @@
  * (`POST /api/queue/v1/route-inbound`) — the entry point the GoHighLevel /
  * Atlas proxy calls.
  *
- * Why this exists: the proxy and MediFlow must compute the SAME HMAC over the
+ * Why this exists: the proxy and agencyBRIDGE must compute the SAME HMAC over the
  * SAME bytes, or every request is rejected. This script is the canonical
  * oracle for that contract. It mirrors the server's verifier exactly
  * (artifacts/api-server/src/lib/dialer/signature.ts):

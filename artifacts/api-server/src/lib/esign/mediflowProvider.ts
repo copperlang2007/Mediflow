@@ -1,5 +1,5 @@
 /**
- * Mediflow native e-signature provider (Beta).
+ * agencyBRIDGE native e-signature provider (Beta).
  *
  * PHASE 3 HARDENING — status:
  *   Shipped:

@@ -14,7 +14,7 @@
  * Coverage:
  *   - Closed state shows the floating button (Bot icon, "Open AI Assistant"
  *     title attribute).
- *   - Clicking the button opens the panel and renders the "MediFlow AI"
+ *   - Clicking the button opens the panel and renders the "agencyBRIDGE AI"
  *     header.
  *   - With pre-seeded localStorage the panel auto-restores its open state
  *     and chat history (this is the wiring exercised end-to-end here — the
@@ -49,7 +49,7 @@ describe("AiAssistantPanel render", () => {
     expect(launcher).toBeInTheDocument();
 
     // Panel chrome should not be present yet.
-    expect(screen.queryByText("MediFlow AI")).not.toBeInTheDocument();
+    expect(screen.queryByText("agencyBRIDGE AI")).not.toBeInTheDocument();
   });
 
   it("opens the panel when the launcher is clicked and shows the header + empty-state suggestions", async () => {
@@ -59,7 +59,7 @@ describe("AiAssistantPanel render", () => {
     await user.click(screen.getByTitle("Open AI Assistant"));
 
     // Panel header has the product name.
-    expect(screen.getByText("MediFlow AI")).toBeInTheDocument();
+    expect(screen.getByText("agencyBRIDGE AI")).toBeInTheDocument();
     // The empty-state placeholder shows at least one slash command suggestion.
     expect(screen.getByText("/compliance-check")).toBeInTheDocument();
     // The "What the AI knows" disclosure renders the agent-page headline.
@@ -81,7 +81,7 @@ describe("AiAssistantPanel render", () => {
     render(<AiAssistantPanel />);
 
     // Panel should auto-open from the persisted flag, so the header is here…
-    expect(screen.getByText("MediFlow AI")).toBeInTheDocument();
+    expect(screen.getByText("agencyBRIDGE AI")).toBeInTheDocument();
     // …and both message bubbles render their content.
     expect(screen.getByText("hello there")).toBeInTheDocument();
     expect(screen.getByText("hi back")).toBeInTheDocument();
@@ -93,13 +93,13 @@ describe("AiAssistantPanel render", () => {
 
     // Open it.
     await user.click(screen.getByTitle("Open AI Assistant"));
-    expect(screen.getByText("MediFlow AI")).toBeInTheDocument();
+    expect(screen.getByText("agencyBRIDGE AI")).toBeInTheDocument();
 
     // The collapse button is unlabelled (it's just a ChevronDown icon). It
     // sits in the panel header alongside the title — find the panel root by
     // walking up from the title, then pick the last button inside it.
     // The launcher button is outside this subtree.
-    const titleEl = screen.getByText("MediFlow AI");
+    const titleEl = screen.getByText("agencyBRIDGE AI");
     // Title → flex container → header → panel root.
     const panelRoot = titleEl.closest("div.fixed");
     expect(panelRoot).not.toBeNull();
@@ -110,7 +110,7 @@ describe("AiAssistantPanel render", () => {
     await user.click(collapseButton as HTMLElement);
 
     // Header gone; floating launcher still visible.
-    expect(screen.queryByText("MediFlow AI")).not.toBeInTheDocument();
+    expect(screen.queryByText("agencyBRIDGE AI")).not.toBeInTheDocument();
     expect(screen.getByTitle("Open AI Assistant")).toBeInTheDocument();
   });
 });

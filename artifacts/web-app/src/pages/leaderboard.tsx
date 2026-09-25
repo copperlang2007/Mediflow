@@ -10,7 +10,7 @@
  * panel; the API also enforces `agent:read`. Data comes from the hand-rolled
  * `useAgentLeaderboard` hook (GET /api/agents/leaderboard).
  *
- * NOTE: there is intentionally no "close rate" column — MediFlow records no
+ * NOTE: there is intentionally no "close rate" column — agencyBRIDGE records no
  * per-call outcomes yet, so conversion is not derivable (see the read model).
  */
 import { useState } from "react";

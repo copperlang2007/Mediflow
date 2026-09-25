@@ -1,4 +1,4 @@
-# Render Blueprint — MediFlow PRODUCTION deployment.
+# Render Blueprint — agencyBRIDGE PRODUCTION deployment.
 #
 # This is the production counterpart to render.yaml (which is the auth-bypassed
 # DEMO blueprint). It stands up a managed Postgres plus a single web service

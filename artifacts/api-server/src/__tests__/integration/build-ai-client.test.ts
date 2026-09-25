@@ -1,5 +1,5 @@
 /**
- * Provider dispatch — which vendor MediFlow is about to send PHI to.
+ * Provider dispatch — which vendor agencyBRIDGE is about to send PHI to.
  *
  * `buildAiClient()` replaced four hand-copied construction blocks that had
  * already drifted from each other twice. These tests pin the property that

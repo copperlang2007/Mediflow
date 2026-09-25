@@ -33,7 +33,7 @@ if [ -z "${EVIDENCE_ASSUME_SIGNED_IN+x}" ]; then
   fi
 fi
 
-echo "🎬 Mediflow Demo Video Capture Suite"
+echo "🎬 agencyBRIDGE Demo Video Capture Suite"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Base URL: $BASE_URL"
 echo "Headless: $([ "$HEADED" = "1" ] && echo "NO (headed mode)" || echo "YES")"

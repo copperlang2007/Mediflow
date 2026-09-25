@@ -313,7 +313,7 @@ async function buildPdf(data: {
         .fillColor("#888888")
         .font("Helvetica")
         .text(
-          `MediFlow — Confidential   |   Page ${i + 1} of ${pages.count}`,
+          `agencyBRIDGE — Confidential   |   Page ${i + 1} of ${pages.count}`,
           50,
           doc.page.height - 35,
           { align: "center", width: doc.page.width - 100 },

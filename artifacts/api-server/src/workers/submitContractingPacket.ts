@@ -145,7 +145,7 @@ function coverLetterHtml(opts: {
   <li>States: <strong>${htmlEscape(states)}</strong></li>
 </ul>
 ${integrity}
-<p>Thank you,<br/>MediFlow on behalf of the agent's agency</p>
+<p>Thank you,<br/>agencyBRIDGE on behalf of the agent's agency</p>
 `.trim();
 }
 
@@ -172,7 +172,7 @@ function coverLetterText(opts: {
   }
   lines.push("");
   lines.push("Thank you,");
-  lines.push("MediFlow on behalf of the agent's agency");
+  lines.push("agencyBRIDGE on behalf of the agent's agency");
   return lines.join("\n");
 }
 
@@ -262,8 +262,8 @@ async function dispatchInviteRequest(
   ${agentEmail ? `<li>Email: <strong>${htmlEscape(agentEmail)}</strong></li>` : ""}
   <li>States: <strong>${htmlEscape(states.join(", ") || "(none listed)")}</strong></li>
 </ul>
-<p>The agent has opted to complete your contracting paperwork directly rather than via MediFlow's submission service.</p>
-<p>Thank you,<br/>MediFlow on behalf of the agent's agency</p>`.trim();
+<p>The agent has opted to complete your contracting paperwork directly rather than via agencyBRIDGE's submission service.</p>
+<p>Thank you,<br/>agencyBRIDGE on behalf of the agent's agency</p>`.trim();
 
   const text = [
     `Hello ${carrier.name} appointment desk,`,
@@ -274,10 +274,10 @@ async function dispatchInviteRequest(
     agentEmail ? `  Email: ${agentEmail}` : "",
     `  States: ${states.join(", ") || "(none listed)"}`,
     "",
-    "The agent has opted to complete your contracting paperwork directly rather than via MediFlow's submission service.",
+    "The agent has opted to complete your contracting paperwork directly rather than via agencyBRIDGE's submission service.",
     "",
     "Thank you,",
-    "MediFlow on behalf of the agent's agency",
+    "agencyBRIDGE on behalf of the agent's agency",
   ]
     .filter((l) => l !== "")
     .join("\n");

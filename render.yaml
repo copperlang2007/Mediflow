@@ -1,4 +1,4 @@
-# Render Blueprint — MediFlow no-auth DEMO deployment.
+# Render Blueprint — agencyBRIDGE no-auth DEMO deployment.
 #
 # Stands up a single web service (api-server serving the built web-app) plus a
 # managed Postgres, seeded with the INSUREitALL demo data, with authentication

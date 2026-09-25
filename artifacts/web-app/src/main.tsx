@@ -5,7 +5,7 @@ import "./index.css";
 const rootElement = document.getElementById("root");
 
 if (!rootElement) {
-  throw new Error("MediFlow root element was not found");
+  throw new Error("agencyBRIDGE root element was not found");
 }
 
 createRoot(rootElement).render(<App />);

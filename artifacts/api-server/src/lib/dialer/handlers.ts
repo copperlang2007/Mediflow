@@ -41,7 +41,7 @@ export interface DispatchOptions {
   aiClient?: TranscriptAiClient | null;
 }
 
-/** SHA-256 hex of the transcript text MediFlow received (§6.1). */
+/** SHA-256 hex of the transcript text agencyBRIDGE received (§6.1). */
 export function transcriptHash(text: string): string {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
 }
@@ -109,9 +109,9 @@ async function handleTranscriptReady(
     })
     .where(eq(dialTicketsTable.id, env.dialTicketId));
 
-  // Phase 5 (§8): parse the transcript IN-PLATFORM via the MediFlow AI
+  // Phase 5 (§8): parse the transcript IN-PLATFORM via the agencyBRIDGE AI
   // provider for agent-assist. This is the only place PHI meets an LLM, and it
-  // is the BAA-covered MediFlow provider — the dialer never sees the parsed
+  // is the BAA-covered agencyBRIDGE provider — the dialer never sees the parsed
   // result. The parse is best-effort: a failure must not 5xx the webhook (the
   // dialer would needlessly retry, and the hash is already stored so the purge
   // can still be verified). We do NOT retain the raw transcript text beyond the
@@ -296,7 +296,7 @@ async function auditTranscriptParsed(
         dialerCallId: env.dialerCallId ?? null,
         riskFlagCount: parsed.riskFlags.length,
         actionItemCount: parsed.actionItems.length,
-        // The parse ran in MediFlow via the BAA-covered AI provider; the
+        // The parse ran in agencyBRIDGE via the BAA-covered AI provider; the
         // result is never returned to the dialer (Phase 5 exit criterion).
         parsedInPlatform: true,
       },

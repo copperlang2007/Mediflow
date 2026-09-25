@@ -5,7 +5,7 @@
  *   1. Mint a `dialTicketId` (UUID) — the cross-system correlation key (§3).
  *   2. Run a preclearance decision (consent / DNC / calling-hours / agent
  *      eligibility). Phase 2 ships a clean, overridable stub; Phase 4 wires
- *      it to MediFlow's licensing/cert/AHIP + consent/DNC/calling-hours.
+ *      it to agencyBRIDGE's licensing/cert/AHIP + consent/DNC/calling-hours.
  *   3. Sign a short-lived RS256 service JWT (aud `mediflow:dialer:control`,
  *      iss `mediflow`).
  *   4. POST the §5.1 Dial Ticket to the dialer's `POST /dialer/v1/tickets`
@@ -126,7 +126,7 @@ export interface IssuanceConfig {
   /**
    * Override the preclearance decision (tests / custom wiring). When omitted
    * the service runs the REAL Phase-4 preclearance (`runPreclearance`) against
-   * MediFlow's licensing/cert/AHIP + consent/DNC/calling-hours data.
+   * agencyBRIDGE's licensing/cert/AHIP + consent/DNC/calling-hours data.
    */
   preclear?: (input: IssueTicketInput) => Promise<PreclearanceDecision>;
   /** JWT TTL override (default from serviceJwt). */
@@ -240,7 +240,7 @@ export class DialerIssuanceService {
     await this.auditDecision(input, decision, dialTicketId);
 
     // If preclearance denies the call, do not contact the dialer at all —
-    // MediFlow decides, the dialer enforces (§5/§9).
+    // agencyBRIDGE decides, the dialer enforces (§5/§9).
     if (!decision.precleared) {
       return {
         dialTicketId,
