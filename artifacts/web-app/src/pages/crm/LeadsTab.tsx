@@ -61,11 +61,13 @@ export default function LeadsTab() {
   const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState("all");
   const [addOpen, setAddOpen] = useState(false);
+  const [contactSearch, setContactSearch] = useState("");
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [form, setForm] = useState<CreateLeadBody>({ contactId: "", source: null, sourceDetail: null, score: 0, status: "new" });
 
   const { data, isLoading } = useGetLeads({ status: statusFilter === "all" ? undefined : statusFilter, limit: 100 });
   const { data: stats } = useGetLeadStats();
-  const { data: contactsData, isLoading: contactsLoading } = useGetContacts({ limit: 100 });
+  const { data: contactsData, isLoading: contactsLoading } = useGetContacts({ search: contactSearch || undefined, limit: 100 });
   const { mutateAsync: createLead, isPending } = useCreateLead();
   const { mutateAsync: convertLead } = useConvertLead();
   const { mutateAsync: updateLead } = useUpdateLead();
@@ -75,7 +77,7 @@ export default function LeadsTab() {
   const contacts: Contact[] = contactsData?.data ?? [];
 
   const handleCreate = async () => {
-    if (!form.contactId) { toast.error("Contact ID required"); return; }
+    if (!form.contactId) { toast.error("Select a contact"); return; }
     try {
       await createLead({ data: form });
       toast.success("Lead created");
@@ -205,11 +207,24 @@ export default function LeadsTab() {
                 <Label htmlFor="lead-contact">Contact *</Label>
                 <FieldHelp label="contact">The person this sales opportunity belongs to.</FieldHelp>
               </div>
-              <Select value={form.contactId} onValueChange={(value) => setForm((f) => ({ ...f, contactId: value }))}>
+              <Input
+                aria-label="Search contacts"
+                placeholder="Search contacts by name, email, or phone"
+                value={contactSearch}
+                onChange={(e) => setContactSearch(e.target.value)}
+                className="mb-2"
+              />
+              <Select value={form.contactId} onValueChange={(value) => {
+                setForm((f) => ({ ...f, contactId: value }));
+                setSelectedContact(contacts.find((contact) => contact.id === value) ?? null);
+              }}>
                 <SelectTrigger id="lead-contact" aria-label="Contact">
                   <SelectValue placeholder={contactsLoading ? "Loading contacts…" : "Select a contact…"} />
                 </SelectTrigger>
                 <SelectContent>
+                  {selectedContact && !contacts.some((contact) => contact.id === selectedContact.id) && (
+                    <SelectItem value={selectedContact.id}>{selectedContact.firstName} {selectedContact.lastName}</SelectItem>
+                  )}
                   {contacts.map((contact) => (
                     <SelectItem key={contact.id} value={contact.id}>
                       {contact.firstName} {contact.lastName}
