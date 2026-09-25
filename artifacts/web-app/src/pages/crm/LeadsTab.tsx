@@ -6,7 +6,7 @@ import type {
 } from "@workspace/api-client-react";
 import {
   useGetLeads, useGetContacts, useCreateLead, useUpdateLead, useConvertLead, useGetLeadStats,
-  getGetLeadsQueryKey,
+  getGetLeadsQueryKey, getGetLeadStatsQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -83,6 +83,7 @@ export default function LeadsTab() {
       toast.success("Lead created");
       setAddOpen(false);
       void qc.invalidateQueries({ queryKey: getGetLeadsQueryKey() });
+    void qc.invalidateQueries({ queryKey: getGetLeadStatsQueryKey() });
     } catch (error) { toast.error(leadCreateErrorMessage(error)); }
   };
 
@@ -91,12 +92,14 @@ export default function LeadsTab() {
       await convertLead({ id });
       toast.success("Lead converted to prospect");
       void qc.invalidateQueries({ queryKey: getGetLeadsQueryKey() });
+    void qc.invalidateQueries({ queryKey: getGetLeadStatsQueryKey() });
     } catch { toast.error("Conversion failed"); }
   };
 
   const handleUpdateStatus = async (id: string, status: string) => {
     await updateLead({ id, data: { status } satisfies UpdateLeadBody });
     void qc.invalidateQueries({ queryKey: getGetLeadsQueryKey() });
+    void qc.invalidateQueries({ queryKey: getGetLeadStatsQueryKey() });
   };
 
   return (
