@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type {
   PipelineWithStages, PipelineStage,
@@ -6,9 +6,9 @@ import type {
   CreateDealBody, CreatePipelineBody, UpdateDealBody,
 } from "@workspace/api-client-react";
 import {
-  useGetPipelines, useCreatePipeline, useGetDeals, useCreateDeal, useUpdateDeal,
+  useGetPipelines, useCreatePipeline, useGetDeals, useCreateDeal, useUpdateDeal, useGetContacts,
   useGetPipelineAnalytics,
-  getGetPipelinesQueryKey, getGetDealsQueryKey,
+  getGetPipelinesQueryKey, getGetDealsQueryKey, getGetContactsQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +26,9 @@ export default function PipelineTab() {
   const qc = useQueryClient();
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
   const [addDealOpen, setAddDealOpen] = useState(false);
+  const [contactSearch, setContactSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [selectedContactLabel, setSelectedContactLabel] = useState("");
   const [addPipelineOpen, setAddPipelineOpen] = useState(false);
   const [dealForm, setDealForm] = useState<CreateDealBody>({ pipelineId: "", stageId: "", contactId: "", title: "", valueEst: null });
   const [pipelineForm, setPipelineForm] = useState<Pick<CreatePipelineBody, "name" | "description">>({ name: "", description: "" });
@@ -44,12 +47,31 @@ export default function PipelineTab() {
     query: { enabled: !!activePipeline?.id, queryKey: ["pipeline-analytics", activePipeline?.id ?? ""] },
   });
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(contactSearch), 300);
+    return () => window.clearTimeout(timer);
+  }, [contactSearch]);
+
+  const { data: contactsData, isLoading: contactsLoading } = useGetContacts(
+    { search: debouncedSearch || undefined, limit: 100 },
+    { query: { enabled: addDealOpen, queryKey: getGetContactsQueryKey({ search: debouncedSearch || undefined, limit: 100 }) } },
+  );
   const { mutateAsync: createDeal } = useCreateDeal();
   const { mutateAsync: updateDeal } = useUpdateDeal();
   const { mutateAsync: createPipeline, isPending: creatingPipeline } = useCreatePipeline();
 
   const stages: PipelineStage[] = activePipeline?.stages ?? [];
   const deals: GetDeals200Item[] = dealsRaw ?? [];
+
+  const onDealOpenChange = (open: boolean) => {
+    setAddDealOpen(open);
+    if (!open) {
+      setContactSearch("");
+      setDebouncedSearch("");
+      setSelectedContactLabel("");
+      setDealForm({ pipelineId: "", stageId: "", contactId: "", title: "", valueEst: null });
+    }
+  };
 
   const handleCreateDeal = async () => {
     if (!dealForm.contactId || !dealForm.title || !dealForm.stageId || !dealForm.pipelineId) {
@@ -58,7 +80,7 @@ export default function PipelineTab() {
     try {
       await createDeal({ data: dealForm });
       toast.success("Deal created");
-      setAddDealOpen(false);
+      onDealOpenChange(false);
       void qc.invalidateQueries({ queryKey: getGetDealsQueryKey() });
     } catch { toast.error("Failed to create deal"); }
   };
@@ -262,11 +284,42 @@ export default function PipelineTab() {
       )}
 
       {/* Add Deal Dialog */}
-      <Dialog open={addDealOpen} onOpenChange={setAddDealOpen}>
+      <Dialog open={addDealOpen} onOpenChange={onDealOpenChange}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>New Deal</DialogTitle></DialogHeader>
           <div className="space-y-3 py-2">
-            <div className="space-y-1.5"><Label>Contact ID *</Label><Input value={dealForm.contactId} onChange={(e) => setDealForm((f) => ({ ...f, contactId: e.target.value }))} /></div>
+            <div className="space-y-1.5">
+              <Label htmlFor="deal-contact-search">Contact *</Label>
+              <Input
+                id="deal-contact-search"
+                placeholder="Search contacts by name, email, or phone"
+                value={contactSearch}
+                onChange={(e) => setContactSearch(e.target.value)}
+              />
+              {dealForm.contactId && <p className="text-sm">Selected: {selectedContactLabel}</p>}
+              <div className="max-h-36 overflow-y-auto rounded-md border" role="listbox" aria-label="Contacts">
+                {contactsLoading ? <p className="p-2 text-sm text-muted-foreground">Loading contacts…</p>
+                  : (contactsData?.data ?? []).length === 0 ? <p className="p-2 text-sm text-muted-foreground">{contactSearch ? "No matching contacts. Try another search." : "No contacts found. Create a contact in CRM first."}</p>
+                  : (contactsData?.data ?? []).map((contact) => (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={dealForm.contactId === contact.id}
+                      key={contact.id}
+                      className="block w-full px-3 py-2 text-left text-sm hover:bg-muted focus-visible:bg-muted"
+                      onClick={() => {
+                        setDealForm((f) => ({ ...f, contactId: contact.id }));
+                        setSelectedContactLabel([contact.firstName, contact.lastName].filter(Boolean).join(" "));
+                      }}
+                    >
+                      {contact.firstName} {contact.lastName}{contact.email ? " — " + contact.email : ""}
+                    </button>
+                  ))}
+              </div>
+            </div>
+            {(contactsData?.total ?? 0) > (contactsData?.data.length ?? 0) && (
+              <p className="text-xs text-muted-foreground">Showing {contactsData?.data.length} of {contactsData?.total} contacts. Refine your search to find more.</p>
+            )}
             <div className="space-y-1.5"><Label>Deal Title *</Label><Input value={dealForm.title} onChange={(e) => setDealForm((f) => ({ ...f, title: e.target.value }))} /></div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -280,7 +333,7 @@ export default function PipelineTab() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAddDealOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => onDealOpenChange(false)}>Cancel</Button>
             <Button onClick={handleCreateDeal}>Create Deal</Button>
           </DialogFooter>
         </DialogContent>
