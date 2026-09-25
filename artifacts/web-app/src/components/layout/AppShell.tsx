@@ -379,7 +379,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
   const aiContext = useAiContext();
 
-  const { unreadCount } = useSSENotifications();
+  const viewingAgency = Boolean(localStorage.getItem("mediflow:view-as-org"));
+  const { unreadCount } = useSSENotifications(0, !viewingAgency);
   const { data: me } = useGetMe();
   const userRole = (me?.role ?? null) as Role | null;
 
@@ -664,7 +665,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           )}
 
           {/* Notification bell */}
-          <div className="relative">
+          {!viewingAgency && <div className="relative">
             <Button
               variant="ghost"
               size="icon"
@@ -681,7 +682,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {notifOpen && (
               <NotificationPanel onClose={() => setNotifOpen(false)} />
             )}
-          </div>
+          </div>}
         </header>
 
         {/* Page content */}
@@ -691,7 +692,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Floating AI Assistant */}
-      <AiAssistantPanel context={aiContext} />
+      {!viewingAgency && <AiAssistantPanel context={aiContext} />}
     </div>
   );
 }
