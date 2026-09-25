@@ -8,7 +8,7 @@ import type {
 import {
   useGetPipelines, useCreatePipeline, useGetDeals, useCreateDeal, useUpdateDeal, useGetContacts,
   useGetPipelineAnalytics,
-  getGetPipelinesQueryKey, getGetDealsQueryKey,
+  getGetPipelinesQueryKey, getGetDealsQueryKey, getGetContactsQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -54,7 +54,7 @@ export default function PipelineTab() {
 
   const { data: contactsData, isLoading: contactsLoading } = useGetContacts(
     { search: debouncedSearch || undefined, limit: 100 },
-    { query: { enabled: addDealOpen } },
+    { query: { enabled: addDealOpen, queryKey: getGetContactsQueryKey({ search: debouncedSearch || undefined, limit: 100 }) } },
   );
   const { mutateAsync: createDeal } = useCreateDeal();
   const { mutateAsync: updateDeal } = useUpdateDeal();
