@@ -182,6 +182,22 @@ describe("Auth & RBAC integration", () => {
     expect(res.status).toBe(200);
     expect(res.body.data.some((contact: { id: string }) => contact.id === contactInOrgB.id)).toBe(true);
     expect(res.body.data.some((contact: { id: string }) => contact.id === contactInOrgA.id)).toBe(false);
+    const { auditLogTable } = await import("@workspace/db");
+    const { eq } = await import("drizzle-orm");
+    await vi.waitFor(async () => {
+      const rows = await (await bootTestDb()).db.select().from(auditLogTable).where(eq(auditLogTable.orgId, orgB.id));
+      expect(rows).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          userId: superAdmin.id,
+          action: "read",
+          changes: expect.objectContaining({
+            viewOnly: true,
+            realOrgId: orgA.id,
+            viewingOrgId: orgB.id,
+          }),
+        }),
+      ]));
+    });
   });
 
   it("rejects all HTTP mutations while a super_admin is viewing an agency", async () => {

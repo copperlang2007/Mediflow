@@ -22,6 +22,7 @@ import { requireAuth, requirePermission, type AuthenticatedRequest } from "./mid
 import { isDemoMode } from "./lib/demoMode";
 import { addSseSubscriber, removeSseSubscriber } from "./lib/sseManager";
 import { metricsMiddleware } from "./middlewares/metricsMiddleware";
+import { auditMiddleware } from "./middlewares/auditMiddleware";
 import {
   metricsRegistry,
   refreshQueueGaugesIfPossible,
@@ -440,6 +441,8 @@ app.get(
   },
 );
 
+// Record cross-agency read attempts, including routes without their own read audit.
+app.use("/api", auditMiddleware("org", "read", { includeReads: true, viewOnlyReads: true }));
 app.use("/api", router);
 
 // Global typed error handler — must be registered last, after all routes.
