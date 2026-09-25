@@ -19,9 +19,11 @@ it("tags direct API mutations and reads with the selected agency, but leaves ide
   await fetch("/api/contacts", { method: "POST", headers: { "Content-Type": "application/json" } });
   await fetch("/api/contacts");
   await fetch("/api/users/me");
+  await fetch("/mediflow/api/contacts", { method: "PATCH" });
 
   expect(new Headers(transport.mock.calls[0][1].headers).get("X-MediFlow-View-Org")).toBe("org-b");
   expect(new Headers(transport.mock.calls[0][1].headers).get("Content-Type")).toBe("application/json");
   expect(new Headers(transport.mock.calls[1][1].headers).get("X-MediFlow-View-Org")).toBe("org-b");
   expect(transport.mock.calls[2][1]).toBeUndefined();
+  expect(new Headers(transport.mock.calls[3][1].headers).get("X-MediFlow-View-Org")).toBe("org-b");
 });

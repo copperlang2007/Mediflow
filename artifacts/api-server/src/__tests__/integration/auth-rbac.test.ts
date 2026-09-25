@@ -181,18 +181,25 @@ describe("Auth & RBAC integration", () => {
       .set("X-MediFlow-View-Org", orgB.id);
     expect(res.status).toBe(200);
     expect(res.body.data.some((contact: { id: string }) => contact.id === contactInOrgB.id)).toBe(true);
+    expect(res.body.data.some((contact: { id: string }) => contact.id === contactInOrgA.id)).toBe(false);
   });
 
-  it("rejects mutations while a super_admin is viewing an agency", async () => {
-    const res = await request(app)
-      .post("/api/contacts")
-      .set(withAuth(superAdmin.id))
-      .set("X-MediFlow-View-Org", orgB.id)
-      .send({ firstName: "Should", lastName: "NotCreate" });
-    expect(res.status).toBe(403);
-    expect(res.body.code).toBe("VIEW_ONLY_MODE");
+  it("rejects all HTTP mutations while a super_admin is viewing an agency", async () => {
+    const mutations = [
+      { method: "post", path: "/api/contacts", body: { firstName: "Should", lastName: "NotCreate" } },
+      { method: "patch", path: `/api/contacts/${contactInOrgA.id}`, body: { firstName: "ShouldNotEdit" } },
+      { method: "put", path: "/api/org-settings", body: { ahipReminderEnabled: false } },
+      { method: "delete", path: `/api/contacts/${contactInOrgA.id}`, body: undefined },
+    ] as const;
+    for (const { method, path, body } of mutations) {
+      const call = request(app)[method](path)
+        .set(withAuth(superAdmin.id))
+        .set("X-MediFlow-View-Org", orgB.id);
+      const res = await (body ? call.send(body) : call);
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe("VIEW_ONLY_MODE");
+    }
   });
-
   it("rejects view-as headers from non-super-admin users", async () => {
     const res = await request(app)
       .get("/api/contacts")
