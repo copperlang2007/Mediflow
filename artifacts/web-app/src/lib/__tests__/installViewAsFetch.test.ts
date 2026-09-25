@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 it("tags direct API mutations and reads with the selected agency, but leaves identity requests alone", async () => {
-  const transport = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  const transport = vi.fn().mockResolvedValue({ status: 204 });
   globalThis.fetch = transport;
   localStorage.setItem("mediflow:view-as-org", "org-b");
   installViewAsFetch();

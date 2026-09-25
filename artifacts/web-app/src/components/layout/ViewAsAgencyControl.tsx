@@ -8,7 +8,7 @@ const VIEW_AS_KEY = "mediflow:view-as-org";
 
 export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
   const [agencies, setAgencies] = useState<Agency[]>([]);
-  const [activeOrgId, setActiveOrgId] = useState<string | null>(() => {
+  const [activeOrgId] = useState<string | null>(() => {
     try { return globalThis.localStorage?.getItem(VIEW_AS_KEY) ?? null; } catch { return null; }
   });
 
