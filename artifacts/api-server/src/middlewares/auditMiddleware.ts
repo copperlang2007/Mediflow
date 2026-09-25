@@ -29,14 +29,14 @@ function methodToAction(method: string): Action {
 export function auditMiddleware(
   resource: ResourceResolver,
   action?: ActionResolver,
-  options: { includeReads?: boolean; getResourceId?: (req: Request) => string | null } = {},
+  options: { includeReads?: boolean; viewOnlyReads?: boolean; getResourceId?: (req: Request) => string | null } = {},
 ) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const { includeReads = false, getResourceId } = options;
+    const { includeReads = false, viewOnlyReads = false, getResourceId } = options;
     const httpMethod = req.method.toUpperCase();
     const isRead = httpMethod === "GET" || httpMethod === "HEAD";
 
-    if (isRead && !includeReads) {
+    if ((isRead && !includeReads) || (viewOnlyReads && (!isRead || !req.get("X-MediFlow-View-Org")))) {
       next();
       return;
     }
@@ -45,6 +45,7 @@ export function auditMiddleware(
 
     res.on("finish", () => {
       const authReq = req as AuthenticatedRequest;
+      if (viewOnlyReads && !authReq.viewOnly) return;
       const userId = authReq.userId ?? null;
       const orgId = authReq.orgId ?? null;
 
@@ -62,6 +63,7 @@ export function auditMiddleware(
         path: req.path,
         durationMs,
         statusCode: res.statusCode,
+        ...(authReq.viewOnly ? { viewOnly: true, realOrgId: authReq.realOrgId, viewingOrgId: authReq.viewingOrgId } : {}),
       };
 
       db.insert(auditLogTable)

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
 import {
@@ -10,6 +10,7 @@ import {
 } from "@workspace/api-client-react";
 import type { AiContext } from "@/components/ai-assistant";
 import { PresenceToggle } from "@/components/layout/PresenceToggle";
+import { ViewAsAgencyControl } from "@/components/layout/ViewAsAgencyControl";
 import { cn } from "@/lib/utils";
 
 type Role =
@@ -378,9 +379,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
   const aiContext = useAiContext();
 
-  const { unreadCount } = useSSENotifications();
+  const viewingAgency = Boolean(localStorage.getItem("mediflow:view-as-org"));
+  const { unreadCount } = useSSENotifications(0, !viewingAgency);
   const { data: me } = useGetMe();
   const userRole = (me?.role ?? null) as Role | null;
+
+  useEffect(() => {
+    if (userRole && userRole !== "super_admin" && localStorage.getItem("mediflow:view-as-org")) {
+      localStorage.removeItem("mediflow:view-as-org");
+      window.location.reload();
+    }
+  }, [userRole]);
 
   // Overdue tasks badge for the Tasks nav item. Refresh once a minute so the
   // count rolls over as items pass their due date without a hard refresh.
@@ -575,7 +584,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
-                onClick={() => signOut({ redirectUrl: basePath || "/" })}
+                onClick={() => { localStorage.removeItem("mediflow:view-as-org"); void signOut({ redirectUrl: basePath || "/" }); }}
               >
                 <LogOut className="h-4 w-4 mr-2" />
                 Sign Out
@@ -640,6 +649,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
           <div className="flex-1" />
 
+          <ViewAsAgencyControl enabled={userRole === "super_admin"} />
+
           {/* Role badge */}
           {userRole && (
             <Badge
@@ -654,7 +665,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           )}
 
           {/* Notification bell */}
-          <div className="relative">
+          {!viewingAgency && <div className="relative">
             <Button
               variant="ghost"
               size="icon"
@@ -671,7 +682,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {notifOpen && (
               <NotificationPanel onClose={() => setNotifOpen(false)} />
             )}
-          </div>
+          </div>}
         </header>
 
         {/* Page content */}
@@ -681,7 +692,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Floating AI Assistant */}
-      <AiAssistantPanel context={aiContext} />
+      {!viewingAgency && <AiAssistantPanel context={aiContext} />}
     </div>
   );
 }

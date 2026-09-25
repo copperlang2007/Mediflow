@@ -31,6 +31,7 @@ const SSE_PATH = `${import.meta.env.BASE_URL?.replace(/\/$/, "")}/api/notificati
 
 export function useSSENotifications(
   initialCount = 0,
+  enabled = true,
 ): UseSSENotificationsReturn {
   const { getToken, isSignedIn } = useAuth();
   const [unreadCount, setUnreadCount] = useState(initialCount);
@@ -41,7 +42,7 @@ export function useSSENotifications(
   const unmountedRef = useRef(false);
 
   const connect = useCallback(async () => {
-    if (unmountedRef.current || !isSignedIn) return;
+    if (unmountedRef.current || !isSignedIn || !enabled) return;
 
     // SSE can't set headers directly — we rely on Clerk's session cookie
     // which is automatically sent with same-origin requests.
@@ -83,11 +84,11 @@ export function useSSENotifications(
         if (!unmountedRef.current) connect();
       }, delay);
     };
-  }, [isSignedIn]);
+  }, [isSignedIn, enabled]);
 
   useEffect(() => {
     unmountedRef.current = false;
-    if (isSignedIn) connect();
+    if (isSignedIn && enabled) connect();
 
     return () => {
       unmountedRef.current = true;
@@ -95,7 +96,7 @@ export function useSSENotifications(
       esRef.current?.close();
       esRef.current = null;
     };
-  }, [isSignedIn, connect]);
+  }, [isSignedIn, enabled, connect]);
 
   return { unreadCount, setUnreadCount, connected };
 }
