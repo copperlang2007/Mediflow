@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
 import {
@@ -383,6 +383,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { data: me } = useGetMe();
   const userRole = (me?.role ?? null) as Role | null;
 
+  useEffect(() => {
+    if (userRole && userRole !== "super_admin" && localStorage.getItem("mediflow:view-as-org")) {
+      localStorage.removeItem("mediflow:view-as-org");
+      window.location.reload();
+    }
+  }, [userRole]);
+
   // Overdue tasks badge for the Tasks nav item. Refresh once a minute so the
   // count rolls over as items pass their due date without a hard refresh.
   const { data: dashboardStats } = useGetDashboardStats({
@@ -576,7 +583,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
-                onClick={() => signOut({ redirectUrl: basePath || "/" })}
+                onClick={() => { localStorage.removeItem("mediflow:view-as-org"); void signOut({ redirectUrl: basePath || "/" }); }}
               >
                 <LogOut className="h-4 w-4 mr-2" />
                 Sign Out

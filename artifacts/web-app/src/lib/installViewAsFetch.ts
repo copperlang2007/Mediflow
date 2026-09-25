@@ -8,7 +8,7 @@ export function installViewAsFetch(): void {
 
     const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(rawUrl, globalThis.location.href);
-    if (url.origin !== globalThis.location.origin || !url.pathname.startsWith("/api/")) {
+    if (url.origin !== globalThis.location.origin || !url.pathname.startsWith("/api/") || url.pathname.endsWith("/api/users/me")) {
       return originalFetch(input, init);
     }
 
