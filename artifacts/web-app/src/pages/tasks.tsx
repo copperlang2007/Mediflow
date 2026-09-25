@@ -8,6 +8,7 @@ import {
   useUpdateTaskTemplate,
   useDeleteTaskTemplate,
   getGetTaskTemplatesQueryKey,
+  getGetTasksQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -283,7 +284,7 @@ function CreateTaskFromTemplateDialog({
         },
       });
       toast.success("Task created from template");
-      void qc.invalidateQueries({ queryKey: ["getTasks"] });
+      void qc.invalidateQueries({ queryKey: getGetTasksQueryKey() });
       onClose();
       setSelectedTemplateId("");
       setDueDate("");
@@ -377,7 +378,7 @@ function TasksView() {
     try {
       await createTask({ data: { title: form.title, description: form.description || undefined, dueDate: form.dueDate || undefined, priority: form.priority as "low" | "medium" | "high" | "urgent" } });
       toast.success("Task created");
-      void qc.invalidateQueries({ queryKey: ["getTasks"] });
+      void qc.invalidateQueries({ queryKey: getGetTasksQueryKey() });
       setAddOpen(false);
       setForm({ title: "", description: "", dueDate: "", priority: "medium" });
     } catch {
@@ -472,11 +473,12 @@ function TasksView() {
                         ? "bg-green-500 border-green-500"
                         : "border-muted-foreground/30 hover:border-primary",
                     )}
+                    aria-label={task.status === "completed" ? "Reopen " + task.title : "Complete " + task.title}
                     onClick={async () => {
                       const newStatus = task.status === "completed" ? "open" : "completed";
                       try {
                         await updateTask({ id: task.id, data: { status: newStatus } });
-                        void qc.invalidateQueries({ queryKey: ["getTasks"] });
+                        void qc.invalidateQueries({ queryKey: getGetTasksQueryKey() });
                       } catch {
                         toast.error("Failed to update");
                       }
