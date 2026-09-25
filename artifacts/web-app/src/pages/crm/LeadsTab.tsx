@@ -236,7 +236,7 @@ export default function LeadsTab() {
                   ))}
                 </SelectContent>
               </Select>
-              {!contactsLoading && contacts.length === 0 && (
+              {!contactsLoading && contacts.length === 0 && !contactSearch && (
                 <p className="text-sm text-muted-foreground">
                   No contacts yet. Create a contact before creating a lead.
                 </p>
@@ -275,7 +275,7 @@ export default function LeadsTab() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={isPending || contactsLoading || contacts.length === 0 || !form.contactId}>
+            <Button onClick={handleCreate} disabled={isPending || !form.contactId}>
               {isPending ? "Creating…" : "Create Lead"}
             </Button>
           </DialogFooter>

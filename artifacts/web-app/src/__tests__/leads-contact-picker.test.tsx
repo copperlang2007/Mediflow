@@ -57,7 +57,8 @@ function mockApi() {
       }) as Response;
 
     if (method === "GET" && url.includes("/api/contacts")) {
-      return ok({ data: CONTACTS, total: CONTACTS.length });
+      const matches = url.includes("zzzzz") ? [] : CONTACTS;
+      return ok({ data: matches, total: matches.length });
     }
     if (method === "GET" && url.includes("/api/leads/stats")) {
       return ok({ bySource: [], byStatus: [] });
@@ -121,6 +122,27 @@ describe("new lead contact selection", () => {
     });
   });
 
+  it("keeps the selected contact actionable when a later search has no matches", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    fireEvent.click(await screen.findByRole("button", { name: /new lead/i }));
+    const dialog = await screen.findByRole("dialog");
+    const contactSelect = within(dialog).getByRole("combobox", { name: /contact/i });
+    await waitFor(() => expect(contactSelect).toHaveTextContent(/select a contact/i));
+    contactSelect.focus();
+    await user.keyboard("{ArrowDown}{Enter}");
+    await waitFor(() => expect(contactSelect).toHaveTextContent(/Ada Agent/));
+
+    await user.type(within(dialog).getByRole("textbox", { name: /search contacts/i }), "zzzzz");
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("zzzzz"))).toBe(true));
+    expect(within(dialog).queryByText(/no contacts yet/i)).not.toBeInTheDocument();
+    const createButton = within(dialog).getByRole("button", { name: /create lead/i });
+    expect(createButton).toBeEnabled();
+    await user.click(createButton);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).includes("/api/leads") && (init as RequestInit | undefined)?.method === "POST",
+    )).toBe(true));
+  });
   it("explains the unfamiliar lead fields in accessible help text", async () => {
     renderTab();
     fireEvent.click(await screen.findByRole("button", { name: /new lead/i }));
