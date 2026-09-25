@@ -1,6 +1,6 @@
-# Mediflow load tests
+# agencyBRIDGE load tests
 
-[k6](https://k6.io) load-test scripts for the Mediflow Medicare CRM API. k6 is
+[k6](https://k6.io) load-test scripts for the agencyBRIDGE Medicare CRM API. k6 is
 the standard scriptable, CI-friendly load tester; scripts are plain JS and need
 no build step.
 

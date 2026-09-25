@@ -34,7 +34,7 @@ import { logger } from "../logger";
 export interface CertificateEmailOptions {
   /**
    * Override the document display name used in the subject line. Falls back
-   * to `"Mediflow document"` when not provided.
+   * to `"agencyBRIDGE document"` when not provided.
    */
   documentName?: string;
 }
@@ -108,7 +108,7 @@ export async function sendCertificateOfCompletion(
   integritySha256: string,
   opts: CertificateEmailOptions = {},
 ): Promise<{ attempts: number; sent: number }> {
-  const documentName = opts.documentName ?? "Mediflow document";
+  const documentName = opts.documentName ?? "agencyBRIDGE document";
   const subject = `Signed: ${documentName}`;
   const filename = `signed-${envelope.id}.pdf`;
   const signers = (envelope.signers as EnvelopeSigner[]) ?? [];

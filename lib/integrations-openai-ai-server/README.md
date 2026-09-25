@@ -1,6 +1,6 @@
 # @workspace/integrations-openai-ai-server
 
-Server-side AI client for the Mediflow platform. Supports two providers:
+Server-side AI client for the agencyBRIDGE platform. Supports two providers:
 
 - **OpenAI direct** (`api.openai.com`) — convenient for dev/staging.
 - **Azure OpenAI** — the HIPAA-eligible production path.

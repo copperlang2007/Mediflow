@@ -10,7 +10,7 @@
  *      using the per-tenant shared secret resolved from `orgId` (§4.2).
  *   2. Idempotent on `eventId` — duplicate / retried / out-of-order deliveries
  *      are deduped via the `dialer_events` PK (§6.2).
- *   3. Land every event in the MediFlow audit log (§9).
+ *   3. Land every event in the agencyBRIDGE audit log (§9).
  *   4. Dispatch to a per-type handler; unknown types + unknown fields are
  *      ignored, not errored (§6.2).
  *

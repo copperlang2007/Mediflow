@@ -2,7 +2,7 @@
  * Phase 1.5 — Power-of-Attorney PDF template.
  *
  * Generates a SINGLE run-wide POA PDF that the agent signs ONCE via the
- * native Mediflow e-sign flow. Authorizing party (the agent) grants the
+ * native agencyBRIDGE e-sign flow. Authorizing party (the agent) grants the
  * grantee (default "INSUREitALL") limited authority to submit Medicare
  * insurance carrier contracting + appointment applications on the agent's
  * behalf for the duration specified (default 90 days; `POA_DAYS_TO_EXPIRE`
@@ -380,7 +380,7 @@ export async function generatePoaPdf(input: PoaInput): Promise<Buffer> {
     pdf,
     cursor,
     "The Agent executes this Power of Attorney electronically via the " +
-      "Mediflow E-Sign service. The signature, audit trail, and " +
+      "agencyBRIDGE E-Sign service. The signature, audit trail, and " +
       "certificate of completion appended to this document together " +
       "constitute the Agent's binding execution under the federal ESIGN " +
       "Act (15 U.S.C. §7001 et seq.) and applicable state UETA statutes.",

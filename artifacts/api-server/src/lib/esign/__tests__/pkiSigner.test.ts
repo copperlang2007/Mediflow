@@ -191,8 +191,8 @@ describe("pkiSigner production boot guard", () => {
       cert.validity.notBefore.getFullYear() + 1,
     );
     const attrs = [
-      { name: "commonName", value: "Mediflow ESign DEV ONLY" },
-      { name: "organizationName", value: "Mediflow (dev sentinel)" },
+      { name: "commonName", value: "agencyBRIDGE ESign DEV ONLY" },
+      { name: "organizationName", value: "agencyBRIDGE (dev sentinel)" },
     ];
     cert.setSubject(attrs);
     cert.setIssuer(attrs);
@@ -215,7 +215,7 @@ describe("pkiSigner production boot guard", () => {
     cert.validity.notBefore = new Date();
     cert.validity.notAfter = new Date();
     cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 1);
-    const attrs = [{ name: "commonName", value: "Mediflow Production CA" }];
+    const attrs = [{ name: "commonName", value: "agencyBRIDGE Production CA" }];
     cert.setSubject(attrs);
     cert.setIssuer(attrs);
     cert.sign(keys.privateKey, forge.md.sha256.create());

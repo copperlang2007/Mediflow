@@ -19614,11 +19614,11 @@ export const getPostDialerV1EventsUrl = () => {
 };
 
 /**
- * Receives Dialer → MediFlow lifecycle events (spec §6). Authenticated
+ * Receives Dialer → agencyBRIDGE lifecycle events (spec §6). Authenticated
  * by the `X-MB-Signature` HMAC (not a Clerk session). Idempotent on
  * `eventId`; duplicate / out-of-order deliveries are deduped. Unknown
  * event `type` values and unknown fields are ignored (forward-compat,
- * §6.2). Every event lands in the MediFlow audit log.
+ * §6.2). Every event lands in the agencyBRIDGE audit log.
  * @summary Inbound masterBRIDGE dialer lifecycle event (HMAC-signed webhook)
  */
 export const postDialerV1Events = async (

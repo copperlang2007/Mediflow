@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // @ts-check
 /**
- * MediFlow → Render PRODUCTION deploy engine.
+ * agencyBRIDGE → Render PRODUCTION deploy engine.
  *
  * Run by .github/workflows/deploy-mediflow-render.yml. Does everything needed to
- * ship a production MediFlow to Render so the operator never touches the Render
+ * ship a production agencyBRIDGE to Render so the operator never touches the Render
  * dashboard:
  *
  *   1. Validates that the required third-party secrets are present (fails fast
@@ -39,7 +39,7 @@
  *   RENDER_BRANCH              Default: GITHUB_REF_NAME or current branch
  *   APP_ORIGIN                 Override ALLOWED_ORIGIN (else the service URL).
  *   DEPLOY_WAIT_TIMEOUT_MS     Default: 1_800_000 (30 min)
- *   plus every MediFlow secret/config var (see REQUIRED_SECRETS / OPTIONAL_SECRETS).
+ *   plus every agencyBRIDGE secret/config var (see REQUIRED_SECRETS / OPTIONAL_SECRETS).
  */
 
 import { randomBytes } from "node:crypto";
@@ -473,7 +473,7 @@ async function main() {
   log(`Deploy ${deployId} started. Waiting for it to go live…`);
   await waitForDeploy(serviceId, deployId);
 
-  console.log("\n✅ MediFlow production deploy is LIVE.");
+  console.log("\n✅ agencyBRIDGE production deploy is LIVE.");
   console.log(`   Service: ${serviceId}`);
   console.log(`   URL:     ${origin}`);
 }

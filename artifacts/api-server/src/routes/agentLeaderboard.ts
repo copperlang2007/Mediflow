@@ -8,7 +8,7 @@
  *   GET /api/agents/leaderboard?sinceHours=168  — ranked activity scorecard
  *
  * Gated on `agent:read` (same oversight tier as the readiness board). Does NOT
- * expose a close rate / conversion metric — MediFlow records no per-call
+ * expose a close rate / conversion metric — agencyBRIDGE records no per-call
  * outcomes yet, so that is not derivable (see the read model's module doc).
  */
 import { Router, type IRouter, type Request, type Response } from "express";

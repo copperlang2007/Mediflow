@@ -5765,11 +5765,11 @@ export const GetEsignSignedPdfParams = zod.object({
 export const GetEsignSignedPdfResponse = zod.unknown();
 
 /**
- * Receives Dialer → MediFlow lifecycle events (spec §6). Authenticated
+ * Receives Dialer → agencyBRIDGE lifecycle events (spec §6). Authenticated
  * by the `X-MB-Signature` HMAC (not a Clerk session). Idempotent on
  * `eventId`; duplicate / out-of-order deliveries are deduped. Unknown
  * event `type` values and unknown fields are ignored (forward-compat,
- * §6.2). Every event lands in the MediFlow audit log.
+ * §6.2). Every event lands in the agencyBRIDGE audit log.
  * @summary Inbound masterBRIDGE dialer lifecycle event (HMAC-signed webhook)
  */
 export const PostDialerV1EventsHeader = zod.object({
@@ -5800,7 +5800,7 @@ export const PostDialerV1EventsBody = zod
     data: zod.record(zod.string(), zod.unknown()).optional(),
   })
   .describe(
-    "Dialer → MediFlow event envelope (spec §6). Additional\/unknown\nproperties are permitted and ignored by consumers (forward-compat,\n§6.2), hence `additionalProperties: true`.\n",
+    "Dialer → agencyBRIDGE event envelope (spec §6). Additional\/unknown\nproperties are permitted and ignored by consumers (forward-compat,\n§6.2), hence `additionalProperties: true`.\n",
   );
 
 export const PostDialerV1EventsResponse = zod.object({

@@ -148,7 +148,7 @@ export function buildComplianceReportPdf(
         .fillColor(MUTED)
         .font("Helvetica")
         .text(
-          `MediFlow Compliance Intelligence Report — Confidential   |   Page ${i + 1} of ${range.count}`,
+          `agencyBRIDGE Compliance Intelligence Report — Confidential   |   Page ${i + 1} of ${range.count}`,
           50,
           doc.page.height - 35,
           { align: "center", width: doc.page.width - 100 },

@@ -1,8 +1,8 @@
 /**
  * Real preclearance (Option A, Phase 4 — spec §2, §9).
  *
- * MediFlow is the single source of truth: every outbound dial is pre-cleared
- * HERE, against MediFlow's own data, before a ticket is ever offered to the
+ * agencyBRIDGE is the single source of truth: every outbound dial is pre-cleared
+ * HERE, against agencyBRIDGE's own data, before a ticket is ever offered to the
  * dialer. The dialer's `lib/compliance.ts` is only a downstream guardrail
  * (§9) — the DECISION lives in this module.
  *
@@ -16,7 +16,7 @@
  *      Supplemental / "other" lines do not require AHIP.
  *   2. Consent ledger + DNC (§9):
  *        - the contact must exist, not be soft-deleted, and not be in the
- *          `do_not_contact` status (which is MediFlow's consent-withdrawn /
+ *          `do_not_contact` status (which is agencyBRIDGE's consent-withdrawn /
  *          DNC state);
  *        - no voice/sms `opt_outs` row for the callee phone (DNC list).
  *   3. Calling hours (§9), DST-correct for the callee timezone (derived from
@@ -315,7 +315,7 @@ async function checkConsentAndDnc(
     return;
   }
 
-  // `do_not_contact` is MediFlow's consent-withdrawn / DNC state.
+  // `do_not_contact` is agencyBRIDGE's consent-withdrawn / DNC state.
   if (contact.status === "do_not_contact") {
     failures.push({
       code: "DNC",
@@ -355,7 +355,7 @@ export interface RealPreclearOptions {
 }
 
 /**
- * Build a real `PreclearanceDecision` from MediFlow's own data. Wired in as
+ * Build a real `PreclearanceDecision` from agencyBRIDGE's own data. Wired in as
  * the default preclearance for `DialerIssuanceService` (issuance.ts), and the
  * `config.preclear` override is preserved for tests.
  */

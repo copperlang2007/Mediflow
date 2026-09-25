@@ -1,13 +1,13 @@
 /**
  * masterBRIDGE webhook signature verification (spec §4.2).
  *
- * Every dialer → MediFlow webhook carries:
+ * Every dialer → agencyBRIDGE webhook carries:
  *
  *     X-MB-Signature: t=<unixSeconds>,v1=<hex-hmac>
  *
  * where the HMAC is HMAC-SHA256 over the string `${t}.${rawBody}` keyed with
  * a per-tenant shared secret. The timestamp is bound to ±5 min to defeat
- * replay. This deliberately mirrors MediFlow's existing Twilio signature
+ * replay. This deliberately mirrors agencyBRIDGE's existing Twilio signature
  * handling (constant-time compare, fail-closed when unconfigured) — see
  * `lib/sms.ts#validateTwilioWebhookSignature`.
  *
@@ -126,7 +126,7 @@ export function verifyWebhookSignature(args: {
  * (org id upper-cased, non-alphanumerics → `_`) takes precedence over the
  * shared default `DIALER_WEBHOOK_SECRET`.
  *
- * TODO(Phase 4): resolve from MediFlow's per-tenant secret store instead of
+ * TODO(Phase 4): resolve from agencyBRIDGE's per-tenant secret store instead of
  * the environment.
  */
 export function resolveWebhookSecret(orgId?: string): string | undefined {

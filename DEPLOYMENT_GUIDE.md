@@ -1,1 +1,1 @@
-Deployment instructions for Bridget widget and MediFlow dashboard
+Deployment instructions for Bridget widget and agencyBRIDGE dashboard

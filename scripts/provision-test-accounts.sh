@@ -127,7 +127,7 @@ echo "User Pool ID: $USER_POOL_ID"
 echo "Region: $REGION"
 echo ""
 
-# Mediflow accounts (8 roles)
+# agencyBRIDGE accounts (8 roles)
 declare -a MEDIFLOW_ACCOUNTS=(
   "agent.demo@mediflow.local:Agent"
   "supervisor.demo@mediflow.local:Supervisor"
@@ -211,18 +211,18 @@ create_user() {
 # the whole batch has been attempted.
 FAILED_ACCOUNTS=()
 
-# Mediflow authenticates via Clerk, NOT Cognito (see PROVISION_TEST_ACCOUNTS.md).
+# agencyBRIDGE authenticates via Clerk, NOT Cognito (see PROVISION_TEST_ACCOUNTS.md).
 # Creating these users in a Cognito pool either pollutes an IntelBRIDGE pool or
 # creates accounts the Clerk-backed app can't log into — so the loop is opt-in.
 if [[ "${INCLUDE_MEDIFLOW_COGNITO:-0}" == "1" ]]; then
-  echo "📋 Mediflow Test Accounts (Cognito — nonstandard, INCLUDE_MEDIFLOW_COGNITO=1):"
+  echo "📋 agencyBRIDGE Test Accounts (Cognito — nonstandard, INCLUDE_MEDIFLOW_COGNITO=1):"
   for account in "${MEDIFLOW_ACCOUNTS[@]}"; do
     email="${account%%:*}"
     role="${account##*:}"
-    create_user "$email" "$role" "Mediflow" || FAILED_ACCOUNTS+=("$email")
+    create_user "$email" "$role" "agencyBRIDGE" || FAILED_ACCOUNTS+=("$email")
   done
 else
-  echo "📋 Mediflow accounts skipped: Mediflow uses Clerk — create them in the Clerk Dashboard."
+  echo "📋 agencyBRIDGE accounts skipped: agencyBRIDGE uses Clerk — create them in the Clerk Dashboard."
   echo "   (Set INCLUDE_MEDIFLOW_COGNITO=1 to force Cognito creation anyway.)"
 fi
 

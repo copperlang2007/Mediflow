@@ -5,7 +5,7 @@
 
 ## Context
 
-MediFlow is multi-tenant and stores PHI-adjacent data — Medicare IDs
+agencyBRIDGE is multi-tenant and stores PHI-adjacent data — Medicare IDs
 (encrypted, with an HMAC blind index), dates of birth, health conditions,
 complaint records.
 

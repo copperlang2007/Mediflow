@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# MediFlow → Google Cloud Run PRODUCTION deploy engine.
+# agencyBRIDGE → Google Cloud Run PRODUCTION deploy engine.
 #
 # Run by .github/workflows/deploy-mediflow-gcp.yml AFTER
 # scripts/deploy/gcp-bootstrap.sh has been run once (creates the project
 # resources, service accounts, and secret placeholders this script fills in
 # and deploys against).
 #
-# Does NOT touch the AI provider or object storage integration — MediFlow
+# Does NOT touch the AI provider or object storage integration — agencyBRIDGE
 # keeps using AWS Bedrock (BAA-covered) for AI and this script only wires
 # Cloud Run's own service account so Application Default Credentials resolve
 # for the existing GCS-backed object storage, same code path as today.
@@ -215,6 +215,6 @@ gcloud run services update "${SERVICE}" \
   --quiet
 
 echo ""
-echo "✅ MediFlow production deploy is LIVE."
+echo "✅ agencyBRIDGE production deploy is LIVE."
 echo "   Service: ${SERVICE}"
 echo "   URL:     ${ORIGIN}"

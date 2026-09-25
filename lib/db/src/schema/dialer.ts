@@ -1,10 +1,10 @@
 /**
  * masterBRIDGE dialer integration (Option A, Phase 2).
  *
- * MediFlow is the system of record; the dialer is a stateless execution
+ * agencyBRIDGE is the system of record; the dialer is a stateless execution
  * service. These tables exist only to support the API/event boundary:
  *
- *  - `dialTicketsTable` — every dial request MediFlow issues. The
+ *  - `dialTicketsTable` — every dial request agencyBRIDGE issues. The
  *    `dialTicketId` (UUID) is the correlation key across both systems
  *    (spec §3). It also carries the transcript-purge-confirmation state
  *    (§6.1). NB: the MBI is NEVER stored here — it never crosses the
@@ -27,13 +27,13 @@ import { organizationsTable } from "./core";
 export const dialTicketsTable = pgTable(
   "dial_tickets",
   {
-    // UUID minted by MediFlow — the cross-system correlation key.
+    // UUID minted by agencyBRIDGE — the cross-system correlation key.
     id: text("id").primaryKey(),
     orgId: text("org_id")
       .notNull()
       .references(() => organizationsTable.id),
     agentId: text("agent_id"),
-    // Opaque MediFlow contact reference — never a foreign key into the
+    // Opaque agencyBRIDGE contact reference — never a foreign key into the
     // dialer's world, and never the MBI.
     contactRef: text("contact_ref"),
     campaignId: text("campaign_id"),
@@ -52,7 +52,7 @@ export const dialTicketsTable = pgTable(
     // Phase 6 (§5.4): set when the terminal outcome was applied by the
     // reconciliation job (a missed webhook recovered via GET /calls/{id})
     // rather than by the inbound webhook. NULL when the webhook delivered the
-    // outcome normally. Lets MediFlow distinguish recovered calls and audit
+    // outcome normally. Lets agencyBRIDGE distinguish recovered calls and audit
     // the missed-webhook recovery rate.
     reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
     // Transcript purge bookkeeping (§6.1).
@@ -62,10 +62,10 @@ export const dialTicketsTable = pgTable(
       withTimezone: true,
     }),
     // Phase 5 (§5, §8): structured agent-assist output produced in-platform by
-    // the MediFlow AI provider (Azure OpenAI in prod — the only BAA-covered
+    // the agencyBRIDGE AI provider (Azure OpenAI in prod — the only BAA-covered
     // path) on `call.transcript.ready`. This is the PARSED result, not the raw
     // transcript: it carries a summary, suggested disposition, risk flags and
-    // action items — never the MBI. Parsing happens entirely MediFlow-side; the
+    // action items — never the MBI. Parsing happens entirely agencyBRIDGE-side; the
     // result is never sent back to the dialer.
     transcriptParsed: jsonb("transcript_parsed"),
     transcriptParsedAt: timestamp("transcript_parsed_at", {

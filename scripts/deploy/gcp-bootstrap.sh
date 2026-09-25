@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MediFlow → Google Cloud PRODUCTION bootstrap.
+# agencyBRIDGE → Google Cloud PRODUCTION bootstrap.
 #
 # One-time, idempotent setup. Run this yourself from a machine (or Cloud
 # Shell) authenticated with `gcloud auth login` against an account that can
@@ -128,7 +128,7 @@ if ! gcloud artifacts repositories describe "${AR_REPO}" --location="${REGION}" 
   log "Creating Artifact Registry repo ${AR_REPO}…"
   gcloud artifacts repositories create "${AR_REPO}" \
     --repository-format=docker --location="${REGION}" \
-    --description="MediFlow production images"
+    --description="agencyBRIDGE production images"
 else
   log "Artifact Registry repo ${AR_REPO} already exists."
 fi
@@ -257,11 +257,11 @@ DEPLOY_SA_EMAIL="${DEPLOY_SA}@${PROJECT_ID}.iam.gserviceaccount.com"
 
 if ! gcloud iam service-accounts describe "${RUN_SA_EMAIL}" >/dev/null 2>&1; then
   log "Creating runtime service account ${RUN_SA_EMAIL}…"
-  gcloud iam service-accounts create "${RUN_SA}" --display-name="MediFlow Cloud Run runtime"
+  gcloud iam service-accounts create "${RUN_SA}" --display-name="agencyBRIDGE Cloud Run runtime"
 fi
 if ! gcloud iam service-accounts describe "${DEPLOY_SA_EMAIL}" >/dev/null 2>&1; then
   log "Creating deploy service account ${DEPLOY_SA_EMAIL}…"
-  gcloud iam service-accounts create "${DEPLOY_SA}" --display-name="MediFlow GitHub Actions deployer"
+  gcloud iam service-accounts create "${DEPLOY_SA}" --display-name="agencyBRIDGE GitHub Actions deployer"
 fi
 
 log "Granting runtime SA least-privilege roles…"
@@ -334,5 +334,5 @@ AI_INTEGRATIONS_BEDROCK_BASE_URL, and any optional ones you use; the legacy
 AI_INTEGRATIONS_OPENAI_BASE_URL name is still accepted as a fallback).
 
 Then push to ${GITHUB_BRANCH} or run the
-"Deploy MediFlow (Google Cloud • production)" workflow manually.
+"Deploy agencyBRIDGE (Google Cloud • production)" workflow manually.
 EOF

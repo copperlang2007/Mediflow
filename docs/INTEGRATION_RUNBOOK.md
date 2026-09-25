@@ -1,4 +1,4 @@
-# Integration runbook — complete the GHL ⇄ Atlas ⇄ MediFlow inbound routing
+# Integration runbook — complete the GHL ⇄ Atlas ⇄ agencyBRIDGE inbound routing
 
 A self-contained, autonomous-executor-friendly checklist to finish wiring the
 inbound lead queue end to end. Each step has an explicit command and a pass/fail
@@ -12,18 +12,18 @@ Background: `docs/inbound-lead-queue.md` (the queue + signature contract) and
 
 ```bash
 # --- EDIT THESE ---
-export MEDIFLOW_API_BASE="https://<your-mediflow-api-host>"   # deployed MediFlow API base URL
-export ORG_ID="<agency_org_id>"                                # MediFlow organization id
+export MEDIFLOW_API_BASE="https://<your-mediflow-api-host>"   # deployed agencyBRIDGE API base URL
+export ORG_ID="<agency_org_id>"                                # agencyBRIDGE organization id
 export TEST_CARRIER_NAME="Acme Health"                         # a carrier that exists for ORG_ID
 export TEST_STATE="FL"                                         # a 2-letter state with a ready-to-sell agent
 export MEDIFLOW_REPO="$HOME/Mediflow"                          # local clone of copperlang2007/mediflow
 export ATLAS_REPO="$HOME/atlas-call-routing"                   # local clone of copperlang2007/atlas-call-routing
 export MEDIFLOW_API_DIR="$MEDIFLOW_REPO/artifacts/api-server"  # Vercel-linked API project dir (only used for the Vercel CLI path in Phase 2)
-# Per-tenant env var name MediFlow expects (orgId upper-cased, non-alphanumerics -> _):
+# Per-tenant env var name agencyBRIDGE expects (orgId upper-cased, non-alphanumerics -> _):
 export SECRET_ENV_NAME="LEAD_QUEUE_WEBHOOK_SECRET_$(printf '%s' "$ORG_ID" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')"
 ```
 
-> MediFlow resolves the secret as `LEAD_QUEUE_WEBHOOK_SECRET_<ORGID>` first, then
+> agencyBRIDGE resolves the secret as `LEAD_QUEUE_WEBHOOK_SECRET_<ORGID>` first, then
 > falls back to the global `LEAD_QUEUE_WEBHOOK_SECRET`. The per-org name is
 > preferred. For a single global secret, set `SECRET_ENV_NAME=LEAD_QUEUE_WEBHOOK_SECRET`.
 
@@ -36,7 +36,7 @@ cd "$MEDIFLOW_REPO" && git pull --ff-only origin main
 ls scripts/src/sign-lead-queue-request.ts   # must exist
 ```
 
-Access needed: deploy-platform credentials for **both** the MediFlow API and the
+Access needed: deploy-platform credentials for **both** the agencyBRIDGE API and the
 Atlas proxy (to set env vars), and edit access to the GoHighLevel workflow.
 **Stop and ask the human** if any are missing.
 
@@ -56,12 +56,12 @@ Gate: `LQ_SECRET` is 64 hex chars. Both sides must use this exact value.
 
 ## Phase 2 — Provision the secret on BOTH deployments
 
-The same `LQ_SECRET` goes on the MediFlow API (as `$SECRET_ENV_NAME`) and on the
+The same `LQ_SECRET` goes on the agencyBRIDGE API (as `$SECRET_ENV_NAME`) and on the
 Atlas proxy (whatever var the proxy reads — confirm in Phase 5).
 
-MediFlow API — pick the platform it is deployed on:
+agencyBRIDGE API — pick the platform it is deployed on:
 
-- **[MANUAL] Render:** Dashboard → MediFlow API service → Environment → add
+- **[MANUAL] Render:** Dashboard → agencyBRIDGE API service → Environment → add
   `Key=$SECRET_ENV_NAME`, `Value=$LQ_SECRET` → Save (triggers redeploy).
 - **Vercel CLI:**
   ```bash
@@ -90,7 +90,7 @@ should run on a process host (Railway / Render / Fly), **not** Vercel serverless
 
 Gate: a new commit no longer produces a failed `Vercel – mediflow-api-server` check.
 
-## Phase 4 — Verify the MediFlow contract end (no Atlas needed yet)
+## Phase 4 — Verify the agencyBRIDGE contract end (no Atlas needed yet)
 
 ```bash
 cd "$MEDIFLOW_REPO"
@@ -159,11 +159,11 @@ In the GHL workflow that handles inbound leads, replace the old Atlas HTTP step:
 
 ## Phase 7 — End-to-end live test + acceptance
 
-1. Mark a test agent **Available** (MediFlow web app sidebar toggle) who is
+1. Mark a test agent **Available** (agencyBRIDGE web app sidebar toggle) who is
    ready-to-sell for `$TEST_CARRIER_NAME` in `$TEST_STATE`.
 2. Trigger the GHL workflow with a test contact in that state.
 3. Confirm the call connects to that agent.
-4. In MediFlow, open **/admin/queue** (Live Queue) and confirm a new **routed**
+4. In agencyBRIDGE, open **/admin/queue** (Live Queue) and confirm a new **routed**
    decision row for that carrier×state/agent.
 5. Re-fire the same contact within ~60s → confirm it routes to the **same**
    agent (idempotency) and does not double-book.
@@ -174,7 +174,7 @@ visible in Live Queue, retry is idempotent.
 ## Rollback
 
 - Revert the GHL HTTP step to its previous target.
-- Unset `$SECRET_ENV_NAME` on the MediFlow API to fail closed (rejects all proxy
+- Unset `$SECRET_ENV_NAME` on the agencyBRIDGE API to fail closed (rejects all proxy
   calls) if you need to halt routing.
 
 ## Stop-and-ask conditions (do not guess)
@@ -183,4 +183,4 @@ visible in Live Queue, retry is idempotent.
   workflow.
 - Parity `v1` mismatch persists after aligning the proxy body (escalate the exact
   `t` / body / secret-name used).
-- The MediFlow API base URL or `ORG_ID` is unknown / ambiguous.
+- The agencyBRIDGE API base URL or `ORG_ID` is unknown / ambiguous.

@@ -355,7 +355,7 @@ export function AiAssistantPanel({ context }: { context?: AiContext }) {
           <div className="flex items-center justify-between px-4 py-3 bg-primary text-primary-foreground shrink-0">
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4" />
-              <span className="font-semibold text-sm">MediFlow AI</span>
+              <span className="font-semibold text-sm">agencyBRIDGE AI</span>
               {context?.label && (
                 <Badge variant="secondary" className="text-[10px] bg-primary-foreground/20 text-primary-foreground border-0 ml-1">
                   {context.label}

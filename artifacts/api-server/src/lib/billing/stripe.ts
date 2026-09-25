@@ -44,7 +44,7 @@ export function getStripe(): Stripe | null {
     typescript: true,
     maxNetworkRetries: 2,
     timeout: 15_000,
-    appInfo: { name: "MediFlow", url: "https://mediflow.app" },
+    appInfo: { name: "agencyBRIDGE", url: "https://mediflow.app" },
   });
 
   return cached;

@@ -379,7 +379,7 @@ export class DocuSignESignProvider implements ESignProvider {
     // Mirrors what the native provider's coordinate-based positioning
     // produces visually.
     const envelopeDefinition = {
-      emailSubject: "Please sign your Mediflow document",
+      emailSubject: "Please sign your agencyBRIDGE document",
       documents: [
         {
           documentBase64: pdfBytes.toString("base64"),

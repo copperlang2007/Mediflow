@@ -3,7 +3,7 @@
  * trail that justifies each signature.
  *
  * Replaces the originally-planned Dropbox Sign / DocuSign integration with
- * a Mediflow-owned signing flow. Beta scope (no PKI, no KBA, no LTV
+ * a agencyBRIDGE-owned signing flow. Beta scope (no PKI, no KBA, no LTV
  * timestamps); see the matching SQL migration 0020 and the provider in
  * artifacts/api-server/src/lib/esign/mediflowProvider.ts for the runtime
  * narrative.

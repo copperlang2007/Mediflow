@@ -1,4 +1,4 @@
-# Deploying the MediFlow API on Railway (production)
+# Deploying the agencyBRIDGE API on Railway (production)
 
 The `api-server` is a **long-running process**, not a serverless function: it
 runs pg-boss cron jobs in-process (`startWorkers()` — license/cert/AHIP expiry,
@@ -77,7 +77,7 @@ Two behaviours on a `DEMO_MODE=true` service will surprise an operator:
    Conditional (set the ones your deployment uses):
    - Dialer integration: `DIALER_WEBHOOK_SECRET` + the masterBRIDGE service-JWT /
      JWKS settings the dialer client reads.
-   - AI transcript parsing: the MediFlow AI provider key(s).
+   - AI transcript parsing: the agencyBRIDGE AI provider key(s).
    - Observability / storage: `SENTRY_DSN`, GCS storage credentials, etc.
    - `NIXPACKS_NODE_VERSION=24` if Nixpacks doesn't pick Node 24 from the root
      `package.json` `engines` (the repo targets Node 24.x).

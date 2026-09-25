@@ -181,10 +181,10 @@ function DeploymentConfigRequired() {
     <div className="flex min-h-[100dvh] items-center justify-center bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 px-4">
       <div className="max-w-xl rounded-2xl border border-white/10 bg-white/10 p-8 text-center text-white shadow-2xl backdrop-blur">
         <div className="flex justify-center mb-6">
-          <img src={`${basePath}/logo.svg`} alt="MediFlow" className="h-16 w-16" />
+          <img src={`${basePath}/logo.svg`} alt="agencyBRIDGE" className="h-16 w-16" />
         </div>
         <p className="mb-3 text-sm font-semibold uppercase tracking-[0.24em] text-blue-200">Early access deployment</p>
-        <h1 className="mb-4 text-4xl font-bold tracking-tight">MediFlow is deployed</h1>
+        <h1 className="mb-4 text-4xl font-bold tracking-tight">agencyBRIDGE is deployed</h1>
         <p className="mb-6 text-base leading-7 text-blue-100">
           The web shell is rendering. Add <code className="rounded bg-black/30 px-2 py-1 text-blue-50">VITE_CLERK_PUBLISHABLE_KEY</code>
           {" "}in the deployment environment to enable the authenticated walkthrough.
@@ -230,7 +230,7 @@ function Landing() {
         <header className="flex items-center justify-between border-b border-white/10 py-6">
           <div className="flex items-center gap-3">
             <img src={`${basePath}/logo.svg`} alt="" className="h-10 w-10" />
-            <span className="text-xl font-semibold tracking-tight">MediFlow</span>
+            <span className="text-xl font-semibold tracking-tight">agencyBRIDGE</span>
           </div>
           <span className="hidden text-sm text-slate-400 sm:inline">A clearer way to run your agency</span>
         </header>
@@ -245,7 +245,7 @@ function Landing() {
                 Your agency, <span className="text-blue-300">moving together.</span>
               </h1>
               <p className="mt-7 max-w-xl text-lg leading-8 text-slate-300">
-                MediFlow brings agent onboarding, licensing, compliance, contacts, and daily work into one connected workspace.
+                agencyBRIDGE brings agent onboarding, licensing, compliance, contacts, and daily work into one connected workspace.
               </p>
               <a
                 href={`${basePath}/sign-in`}
@@ -254,7 +254,7 @@ function Landing() {
                 Sign in
                 <span aria-hidden="true" className="ml-3">→</span>
               </a>
-              <p className="mt-4 text-sm text-slate-400">For existing MediFlow users</p>
+              <p className="mt-4 text-sm text-slate-400">For existing agencyBRIDGE users</p>
             </div>
 
             <div className="relative rounded-[2rem] border border-white/15 bg-white/[0.06] p-6 shadow-2xl shadow-black/30 backdrop-blur sm:p-8">
@@ -297,7 +297,7 @@ function Landing() {
         </main>
 
         <footer className="border-t border-white/10 py-6 text-sm text-slate-500">
-          © {new Date().getFullYear()} MediFlow
+          © {new Date().getFullYear()} agencyBRIDGE
         </footer>
       </div>
     </div>
@@ -335,7 +335,7 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
 /**
  * Provisioning gate.
  *
- * Sits between Clerk sign-in and the app shell. A Clerk user with no MediFlow
+ * Sits between Clerk sign-in and the app shell. A Clerk user with no agencyBRIDGE
  * account is sent to the create-your-agency screen instead of being silently
  * provisioned into an auto-named org — that screen is what makes sign-up
  * genuinely self-serve.
@@ -419,7 +419,7 @@ function ClerkProviderWithRoutes() {
         signIn: {
           start: {
             title: "Welcome back",
-            subtitle: "Sign in to MediFlow to continue",
+            subtitle: "Sign in to agencyBRIDGE to continue",
           },
         },
         signUp: {
@@ -441,7 +441,7 @@ function ClerkProviderWithRoutes() {
               <Route path="/sign-in/*?" component={SignInPage} />
               <Route path="/sign-up/*?" component={SignUpPage} />
               {/*
-                Deliberately OUTSIDE ProtectedLayout. An invitee has no MediFlow
+                Deliberately OUTSIDE ProtectedLayout. An invitee has no agencyBRIDGE
                 account yet, so the provisioning gate would send them to the
                 create-your-agency screen — and they would found a second, empty
                 org instead of joining the one that invited them.

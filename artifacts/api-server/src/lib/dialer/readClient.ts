@@ -1,7 +1,7 @@
 /**
  * Control-plane READ client — `GET /dialer/v1/calls/{dialerCallId}` (spec §5.4).
  *
- * Read-only status fetch MediFlow uses to reconcile a dial ticket when the
+ * Read-only status fetch agencyBRIDGE uses to reconcile a dial ticket when the
  * terminal lifecycle webhook (`call.completed` / `call.failed`) was missed
  * (§6.2: consumers must tolerate dropped/duplicate delivery). The Phase-6
  * reconciliation job (`workers/dialerReconcile.ts`) is the only caller today.
@@ -33,7 +33,7 @@ export interface DialerCallState {
   /**
    * Dialer-side lifecycle status. The dialer's own vocabulary
    * (QUEUED | INITIATED | RINGING | IN_PROGRESS | COMPLETED | FAILED | …);
-   * `mapDialerStatusToOutcome` reduces it to a MediFlow terminal outcome.
+   * `mapDialerStatusToOutcome` reduces it to a agencyBRIDGE terminal outcome.
    */
   status?: string;
   /** Terminal-call detail (mirrors `call.completed` data). */
@@ -62,7 +62,7 @@ export type FetchCallStateResult =
   | { ok: false; status: number; reason: "not_found" | "error" };
 
 /**
- * The reduced terminal outcome MediFlow applies to a ticket. `null` means the
+ * The reduced terminal outcome agencyBRIDGE applies to a ticket. `null` means the
  * call is NOT terminal yet (still ringing / in progress) — the reconciler
  * leaves the ticket alone and tries again on the next sweep.
  */
@@ -82,7 +82,7 @@ const TERMINAL_FAILED = new Set([
 ]);
 
 /**
- * Reduce the dialer's lifecycle status to a MediFlow terminal outcome. Anything
+ * Reduce the dialer's lifecycle status to a agencyBRIDGE terminal outcome. Anything
  * not recognised as terminal (or unknown) is treated as non-terminal so the
  * reconciler never prematurely closes a still-active call.
  */

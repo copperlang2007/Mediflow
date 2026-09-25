@@ -1,10 +1,10 @@
 # Provisioning Test Accounts for Demo Video Capture
 
-This guide walks you through creating the 16 test accounts needed to capture demo videos for IntelBRIDGE and Mediflow.
+This guide walks you through creating the 16 test accounts needed to capture demo videos for IntelBRIDGE and agencyBRIDGE.
 
 > **Important — which IdP does each product use?**
 > - **IntelBRIDGE** authenticates via **AWS Cognito** — the script below applies.
-> - **Mediflow** authenticates via **Clerk**, not Cognito. Create Mediflow test
+> - **agencyBRIDGE** authenticates via **Clerk**, not Cognito. Create agencyBRIDGE test
 >   accounts in the Clerk Dashboard (Users -> Create user) or via the Clerk
 >   Backend API, using the same emails listed below and the password you choose.
 >   The Cognito script sections apply to IntelBRIDGE pools only.
@@ -22,7 +22,7 @@ This guide walks you through creating the 16 test accounts needed to capture dem
 Log in to **AWS Console** → **Cognito** → **User Pools**
 
 Find the user pools for your preview deployments:
-- **Mediflow preview**: Copy the User Pool ID
+- **agencyBRIDGE preview**: Copy the User Pool ID
 - **IntelBRIDGE preview**: Copy the User Pool ID
 
 ### 2. Run the Provisioning Script
@@ -30,8 +30,8 @@ Find the user pools for your preview deployments:
 From the repo root:
 
 ```bash
-# For Mediflow
-# Mediflow uses Clerk — see the note above; this script is for IntelBRIDGE
+# For agencyBRIDGE
+# agencyBRIDGE uses Clerk — see the note above; this script is for IntelBRIDGE
 
 # For IntelBRIDGE
 ./scripts/provision-test-accounts.sh <INTELBRIDGE_USER_POOL_ID> 'YourStrongPassword123!'
@@ -67,7 +67,7 @@ If your app uses custom attributes or role assignment logic, configure that now.
 ### 5. Run Demo Video Capture
 
 ```bash
-cd Mediflow
+cd agencyBRIDGE
 source .env.evidence
 ./scripts/capture_demo_videos.sh
 
@@ -81,7 +81,7 @@ Videos will be saved to `./evidence/{journey}-{timestamp}/`
 
 ## Test Account Details
 
-### Mediflow (8 roles)
+### agencyBRIDGE (8 roles)
 
 | Email | Role | Purpose |
 |-------|------|---------|
@@ -188,4 +188,4 @@ For issues provisioning accounts, check:
 - User Pool ID (verify in AWS Console)
 - AWS region (must match preview app region)
 
-For demo video capture issues, see `Mediflow/DEMO_VIDEO_QUICKSTART.md` or `IntelBRIDGE/journeys/README.md`.
+For demo video capture issues, see `agencyBRIDGE/DEMO_VIDEO_QUICKSTART.md` or `IntelBRIDGE/journeys/README.md`.

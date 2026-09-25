@@ -14,7 +14,7 @@ sections, and there is no spec.
 
 ## What exists in this repository
 
-MediFlow contains a working voice AI stack (`voiceChat`, TTS, STT, and
+agencyBRIDGE contains a working voice AI stack (`voiceChat`, TTS, STT, and
 AudioWorklet playback) and an OpenAI/Azure integration with a production guard
 that refuses to boot against a non-HIPAA provider. That code is real and
 reviewable. It is *not* the "AI workforce" product this filename implies, and

@@ -1,6 +1,6 @@
-# MediFlow — Production deploy to Google Cloud Run
+# agencyBRIDGE — Production deploy to Google Cloud Run
 
-This deploys MediFlow to **Cloud Run** in production mode (real Clerk auth +
+This deploys agencyBRIDGE to **Cloud Run** in production mode (real Clerk auth +
 PHI encryption, `NODE_ENV=production`) on Cloud SQL for PostgreSQL. After a
 one-time setup, every push to `claude/google-cloud-deployment-ml41c2` builds
 the production image and deploys it — no GCP console clicking, no long-lived
@@ -14,7 +14,7 @@ service-account key stored in GitHub.
 
 ## Why Cloud Run + Cloud SQL
 
-MediFlow's object storage (`artifacts/api-server/src/lib/objectStorage.ts`)
+agencyBRIDGE's object storage (`artifacts/api-server/src/lib/objectStorage.ts`)
 already targets **Google Cloud Storage** via Application Default Credentials
 — it was written for GCP. On Render, that means shipping a long-lived
 `GOOGLE_APPLICATION_CREDENTIALS` JSON key as a secret (the Render doc's
@@ -94,7 +94,7 @@ repository **Variables** instead.
 ## Deploy
 
 - **Automatic:** push to `claude/google-cloud-deployment-ml41c2`.
-- **Manual:** Actions tab → *Deploy MediFlow (Google Cloud • production)* → **Run workflow**.
+- **Manual:** Actions tab → *Deploy agencyBRIDGE (Google Cloud • production)* → **Run workflow**.
 
 The run is green-but-skipped (with a notice listing what's missing) until
 every required secret above is set — a red ✗ never happens during

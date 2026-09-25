@@ -549,7 +549,7 @@ export default function DataMigrationPage() {
           <TabsContent value="monday">
             <ImportWizard
               title="Import Agents from Monday.com"
-              description="Upload your Monday.com board export CSV. MediFlow will auto-detect common column names and import agents with their license states and tasks."
+              description="Upload your Monday.com board export CSV. agencyBRIDGE will auto-detect common column names and import agents with their license states and tasks."
               uploadEndpoint="/api/imports/monday/upload"
               validateEndpoint="/api/imports/monday/validate"
               confirmEndpoint="/api/imports/monday/confirm"
@@ -559,7 +559,7 @@ export default function DataMigrationPage() {
           <TabsContent value="ghl">
             <ImportWizard
               title="Import Contacts from GoHighLevel"
-              description="Upload your GoHighLevel contacts export CSV. MediFlow supports duplicate detection and can merge, skip, or create contacts on collision."
+              description="Upload your GoHighLevel contacts export CSV. agencyBRIDGE supports duplicate detection and can merge, skip, or create contacts on collision."
               uploadEndpoint="/api/imports/ghl/upload"
               validateEndpoint="/api/imports/ghl/validate"
               confirmEndpoint="/api/imports/ghl/confirm"
@@ -580,7 +580,7 @@ export default function DataMigrationPage() {
           <TabsContent value="csv">
             <ImportWizard
               title="Import Contacts from CSV"
-              description="Upload any CSV with contact data. Map your columns to MediFlow fields. All contacts will be imported as leads."
+              description="Upload any CSV with contact data. Map your columns to agencyBRIDGE fields. All contacts will be imported as leads."
               uploadEndpoint="/api/imports/contacts/upload"
               validateEndpoint="/api/imports/contacts/validate"
               confirmEndpoint="/api/imports/contacts/confirm"

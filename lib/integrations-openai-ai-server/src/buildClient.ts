@@ -3,7 +3,7 @@
  * client, and the audio client. See `./client.ts` for the rationale on
  * why we dispatch by `AI_INTEGRATIONS_PROVIDER`.
  *
- * HIPAA guard: MediFlow sends PHI to the LLM provider. Only BAA-covered
+ * HIPAA guard: agencyBRIDGE sends PHI to the LLM provider. Only BAA-covered
  * providers may receive it: `azure` (Microsoft BAA) and `bedrock` (AWS BAA,
  * via Bedrock's Anthropic Messages endpoint). In production
  * (`NODE_ENV === "production"`) this builder hard-fails unless the provider

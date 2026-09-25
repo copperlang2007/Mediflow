@@ -453,13 +453,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       >
         <img
           src={`${basePath}/logo.svg`}
-          alt="MediFlow"
+          alt="agencyBRIDGE"
           className="h-8 w-8 shrink-0"
         />
         {!collapsed && (
           <div className="min-w-0">
             <p className="font-bold text-sidebar-foreground text-sm truncate">
-              MediFlow
+              agencyBRIDGE
             </p>
             <p className="text-xs text-sidebar-foreground/50 truncate">Agency Platform</p>
           </div>

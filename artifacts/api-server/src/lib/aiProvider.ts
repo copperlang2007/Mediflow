@@ -1,7 +1,7 @@
 /**
  * AI provider resolution + HIPAA guard.
  *
- * MediFlow's AI features send full contact Medicare profiles (PHI) to an
+ * agencyBRIDGE's AI features send full contact Medicare profiles (PHI) to an
  * LLM provider in the system prompt. The provider is selected by the
  * `AI_INTEGRATIONS_PROVIDER` env var:
  *
@@ -152,7 +152,7 @@ export function resolveAiBaseUrl(
  * value is an AWS Bedrock bearer token minted in the operator's own AWS
  * account and covered by their AWS BAA. It is NOT an OpenAI credential and
  * never reaches api.openai.com. Calling it AI_INTEGRATIONS_OPENAI_API_KEY
- * told every operator the opposite — that MediFlow wanted an OpenAI account —
+ * told every operator the opposite — that agencyBRIDGE wanted an OpenAI account —
  * which is both false and, in a PHI system, alarming on its face.
  *
  *   - bedrock       → AI_INTEGRATIONS_BEDROCK_API_KEY

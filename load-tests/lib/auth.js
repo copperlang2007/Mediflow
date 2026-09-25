@@ -1,6 +1,6 @@
 // Auth helpers for k6 scripts.
 //
-// The Mediflow API authenticates every `/api/*` route with Clerk
+// The agencyBRIDGE API authenticates every `/api/*` route with Clerk
 // (artifacts/api-server/src/app.ts mounts `clerkMiddleware`, and
 // `requireAuth` calls `getAuth(req)`). Clerk verifies a session JWT that
 // normally rides in either:
@@ -26,7 +26,7 @@ export function hasToken() {
 export function requireToken() {
   if (!hasToken()) {
     throw new Error(
-      'API_TOKEN is not set. The Mediflow API requires a Clerk session JWT. ' +
+      'API_TOKEN is not set. The agencyBRIDGE API requires a Clerk session JWT. ' +
         'Mint one (see load-tests/README.md) and pass it with ' +
         '`-e API_TOKEN=<jwt>`.',
     );

@@ -159,7 +159,7 @@ describe("SignPage", () => {
     const badge = screen.getByTestId("beta-badge");
     expect(badge).toBeInTheDocument();
     expect(badge.textContent).toMatch(/beta/i);
-    expect(screen.getByText(/Mediflow E-Sign/i)).toBeInTheDocument();
+    expect(screen.getByText(/agencyBRIDGE E-Sign/i)).toBeInTheDocument();
   });
 
   it("disables 'Sign and complete' until prerequisites are met", async () => {

@@ -1,5 +1,5 @@
 /**
- * Mediflow E-Sign (Beta) signing window.
+ * agencyBRIDGE E-Sign (Beta) signing window.
  *
  * Renders the unsigned carrier-contracting PDF, captures explicit consent
  * + a signature, then POSTs to `/esign/envelopes/:id/sign`.
@@ -653,7 +653,7 @@ function FullScreenShell({ children }: { children: React.ReactNode }) {
         <div className="max-w-3xl mx-auto flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-primary" />
-            <span className="font-semibold">Mediflow E-Sign</span>
+            <span className="font-semibold">agencyBRIDGE E-Sign</span>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Badge

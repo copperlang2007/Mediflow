@@ -1,4 +1,4 @@
-# Live local Docker instance of MediFlow — demo-mode build (mirrors the
+# Live local Docker instance of agencyBRIDGE — demo-mode build (mirrors the
 # no-auth Render demo blueprint in render.yaml), so no Clerk/PHI credentials
 # are required to boot. Not for production use.
 #

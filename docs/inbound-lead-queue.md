@@ -1,6 +1,6 @@
 # Inbound Lead Queue — smart routing by "ready to sell" carrier × state
 
-## Why this lives in MediFlow (and not in `atlas-call-router`)
+## Why this lives in agencyBRIDGE (and not in `atlas-call-router`)
 
 The `atlas-call-router` repo was evaluated as a foundation for the inbound
 lead queue. It is a ~40-line FastAPI scaffold whose "router" returns a
@@ -18,7 +18,7 @@ GHL integration (`{contact_state, carrier_id} -> {target_phone}`) and the
 Railway deploy skeleton.
 
 Every piece of data needed to answer _"is this agent ready to sell this
-carrier in this state, right now?"_ already lives in MediFlow:
+carrier in this state, right now?"_ already lives in agencyBRIDGE:
 
 | Question                             | Source of truth (Postgres) |
 | ------------------------------------ | -------------------------- |
@@ -31,9 +31,9 @@ carrier in this state, right now?"_ already lives in MediFlow:
 Replicating those tables into Atlas and keeping them in sync would create a
 stale-data hazard on the single most compliance-sensitive decision in the
 business (letting an unlicensed/uncertified agent take a call). So the queue
-is built **in MediFlow**, where the data is authoritative, and Atlas is
+is built **in agencyBRIDGE**, where the data is authoritative, and Atlas is
 reduced to (optionally) a thin proxy — or retired entirely, with GoHighLevel
-pointed straight at the MediFlow endpoint below.
+pointed straight at the agencyBRIDGE endpoint below.
 
 ## "Ready to sell" (RTS) definition
 
@@ -154,11 +154,11 @@ events — the telephony system of record — backed by a Postgres presence row
 with a heartbeat TTL. No Redis.** Rationale:
 
 - The dialer already streams authoritative, signed call-lifecycle events into
-  MediFlow (`call.initiated`/`in_progress`/`completed`/`failed`, see
+  agencyBRIDGE (`call.initiated`/`in_progress`/`completed`/`failed`, see
   `lib/dialer/handlers.ts`). It _knows_ when an agent is on a call — far more
   accurate than a browser "I'm available" toggle that goes stale the moment a
   call connects. This is the most accurate real-time signal available.
-- MediFlow is uniformly Postgres-backed (pg-boss jobs, SSE fan-out); there is
+- agencyBRIDGE is uniformly Postgres-backed (pg-boss jobs, SSE fan-out); there is
   no Redis in the stack. Introducing one for presence would add an operational
   dependency for data that fits a single small table.
 
@@ -210,7 +210,7 @@ just not presence-aware.
 - **Secrets:** the public route is authenticated by `LEAD_QUEUE_WEBHOOK_SECRET`
   (or per-org `LEAD_QUEUE_WEBHOOK_SECRET_<ORGID>`). Set the same secret on the
   Atlas side. Fail-closed: an unset secret rejects all calls.
-- **Verifying the signature contract:** the proxy and MediFlow must HMAC the
+- **Verifying the signature contract:** the proxy and agencyBRIDGE must HMAC the
   same bytes or every call is rejected. Use the reference signer to check
   parity and smoke-test the live endpoint — it mirrors the server verifier
   (`lib/dialer/signature.ts`) exactly:

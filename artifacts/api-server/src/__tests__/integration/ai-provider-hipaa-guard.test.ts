@@ -1,7 +1,7 @@
 /**
  * Unit test: HIPAA provider guard (`lib/aiProvider.ts`).
  *
- * MediFlow streams full contact Medicare profiles (PHI) to the LLM
+ * agencyBRIDGE streams full contact Medicare profiles (PHI) to the LLM
  * provider in the system prompt. Only BAA-covered providers may receive
  * PHI: `azure` (Microsoft BAA) and `bedrock` (AWS BAA). The standard
  * `api.openai.com` API has no HIPAA BAA and must never receive PHI. In

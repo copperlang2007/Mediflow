@@ -118,7 +118,7 @@ const CARRIER_ERROR: Record<
 export async function resolveAndRouteInbound(
   p: RouteInboundParams,
 ): Promise<RouteInboundOutcome> {
-  // 1. Carrier → MediFlow carrier id (org-scoped).
+  // 1. Carrier → agencyBRIDGE carrier id (org-scoped).
   const carrier = await resolveCarrier({
     orgId: p.orgId,
     carrierId: p.carrierId,

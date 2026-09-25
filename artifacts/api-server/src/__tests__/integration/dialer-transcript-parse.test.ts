@@ -3,7 +3,7 @@
  * call.transcript.ready, §8 AI consolidation, §10 Phase 5 row).
  *
  * Exit criterion under test: a `call.transcript.ready` event is parsed
- * IN-PLATFORM via the MediFlow AI provider and the structured result is
+ * IN-PLATFORM via the agencyBRIDGE AI provider and the structured result is
  * persisted on the dial ticket — and no PHI is ever sent to the dialer's LLM
  * path. We assert:
  *
@@ -171,7 +171,7 @@ describe("Phase 5 — in-platform transcript parsing (§6, §8)", () => {
     expect(JSON.stringify(changes)).not.toContain("Some call transcript");
   });
 
-  it("does NOT contact the dialer (no outbound fetch) during parsing — PHI stays MediFlow-side", async () => {
+  it("does NOT contact the dialer (no outbound fetch) during parsing — PHI stays agencyBRIDGE-side", async () => {
     const org = await seedOrg(db, { id: `org-${randomUUID().slice(0, 8)}` });
     const ticketId = await seedTicket(org.id);
     const { client } = mockAiClient();

@@ -61,7 +61,7 @@ Stand up production on:
 - **GKE (Kubernetes).** Rejected: the app is one stateless container behind
   one health check with no need for custom scheduling, sidecars, or
   multi-container pods. Kubernetes would add operational surface (cluster
-  upgrades, node pools, RBAC) with no corresponding capability MediFlow uses.
+  upgrades, node pools, RBAC) with no corresponding capability agencyBRIDGE uses.
 - **Compute Engine (VMs).** Rejected: reintroduces OS patching and instance
   lifecycle management that Cloud Run's managed runtime removes for free,
   for an app with no requirement (GPU, custom kernel, long-lived TCP state)
