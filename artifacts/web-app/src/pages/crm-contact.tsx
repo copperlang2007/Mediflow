@@ -797,7 +797,7 @@ export default function ContactDetailPage() {
   const [editForm, setEditForm] = useState<UpdateContactBody>({});
 
   const { data: contactRaw, isLoading } = useGetContact(id);
-  const { mutateAsync: updateContact } = useUpdateContact();
+  const { mutateAsync: updateContact, isPending: isSaving } = useUpdateContact();
 
   if (isLoading) {
     return (
@@ -827,6 +827,10 @@ export default function ContactDetailPage() {
       lastName: c.lastName,
       email: c.email,
       phone: c.phone,
+      dob: c.dob?.slice(0, 10) ?? null,
+      preferredLanguage: c.preferredLanguage,
+      pcpName: c.pcpName,
+      pcpNpi: c.pcpNpi,
       medicareId: c.medicareId,
       currentPlanType: c.currentPlanType,
       planYear: c.planYear,
@@ -840,12 +844,23 @@ export default function ContactDetailPage() {
   };
 
   const saveEdit = async () => {
+    if (isSaving) return;
+    if (!editForm.firstName?.trim() || !editForm.lastName?.trim()) {
+      toast.error("First and last name are required");
+      return;
+    }
     try {
-      await updateContact({ id, data: editForm });
+      // Submit only changes, so role-masked identifiers are never written back.
+      const data = Object.fromEntries(
+        Object.entries(editForm).filter(([key, value]) =>
+          value !== c[key as keyof Contact],
+        ),
+      ) as UpdateContactBody;
+      if (Object.keys(data).length > 0) await updateContact({ id, data });
       toast.success("Contact updated");
       setEditOpen(false);
       void qc.invalidateQueries({ queryKey: getGetContactQueryKey(id) });
-    } catch { toast.error("Failed to update contact"); }
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Failed to update contact"); }
   };
 
   return (
@@ -867,7 +882,7 @@ export default function ContactDetailPage() {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1 text-sm text-muted-foreground mt-2">
               {c.phone && <span>📞 {c.phone}</span>}
-              {c.email && <span className="flex items-center gap-1"><Mail className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{c.email}</span></span>}
+              {c.email && <span className="flex items-center gap-1"><Mail className="h-3.5 w-3.5 shrink-0" /><span className="break-all">{c.email}</span></span>}
               {c.medicareId && <span className="flex items-center gap-1"><Shield className="h-3.5 w-3.5" />ID: {c.medicareId}</span>}
               {c.dob && <span className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />DOB: {format(new Date(c.dob), "MMM d, yyyy")}</span>}
               {c.currentPlanType && <span className="flex items-center gap-1"><Heart className="h-3.5 w-3.5" />{PLAN_TYPE_LABELS[c.currentPlanType] ?? c.currentPlanType}{c.planYear ? ` (${c.planYear})` : ""}</span>}
@@ -895,6 +910,41 @@ export default function ContactDetailPage() {
           </div>
         )}
       </div>
+
+
+      <Card>
+        <CardContent className="p-6">
+          <h2 className="text-lg font-semibold mb-4">Contact details</h2>
+          <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {([
+              ["First name", c.firstName],
+              ["Last name", c.lastName],
+              ["Email", c.email],
+              ["Phone", c.phone],
+              ["Date of birth", c.dob?.slice(0, 10)],
+              ["Medicare ID", c.medicareId],
+              ["Plan type", c.currentPlanType ? PLAN_TYPE_LABELS[c.currentPlanType] ?? c.currentPlanType : null],
+              ["Plan year", c.planYear],
+              ["County", c.county],
+              ["State", c.stateCode],
+              ["ZIP code", c.zipCode],
+              ["Preferred language", c.preferredLanguage],
+              ["Primary care provider", c.pcpName],
+              ["Provider NPI", c.pcpNpi],
+              ["Health conditions", c.healthConditions?.join(", ")],
+              ["Lead source", c.leadSource],
+              ["Tags", c.tags?.join(", ")],
+              ["SMS preference", c.optOutSms ? "Opted out" : "Not opted out"],
+              ["Email preference", c.optOutEmail ? "Opted out" : "Not opted out"],
+            ] as Array<[string, string | number | null | undefined]>).map(([label, value]) => (
+              <div key={label} className="min-w-0">
+                <dt className="text-sm text-muted-foreground">{label}</dt>
+                <dd className="mt-1 text-sm break-words whitespace-pre-wrap">{value === null || value === undefined || value === "" ? "Not provided" : value}</dd>
+              </div>
+            ))}
+          </dl>
+        </CardContent>
+      </Card>
 
       {/* Tabs */}
       <Tabs defaultValue="timeline" className="space-y-4">
@@ -926,7 +976,11 @@ export default function ContactDetailPage() {
             {([
               { key: "firstName", label: "First Name" },
               { key: "lastName", label: "Last Name" },
-              { key: "email", label: "Email" },
+              { key: "email", label: "Email", type: "email" },
+              { key: "dob", label: "Date of Birth", type: "date" },
+              { key: "preferredLanguage", label: "Preferred Language" },
+              { key: "pcpName", label: "Primary Care Provider" },
+              { key: "pcpNpi", label: "Provider NPI" },
               { key: "phone", label: "Phone" },
               { key: "medicareId", label: "Medicare ID" },
               { key: "planYear", label: "Plan Year", type: "number" },
@@ -936,21 +990,32 @@ export default function ContactDetailPage() {
               { key: "leadSource", label: "Lead Source" },
             ] as Array<{ key: keyof UpdateContactBody; label: string; type?: string; maxLength?: number }>).map(({ key, label, type, maxLength }) => (
               <div key={key} className="space-y-1.5">
-                <Label>{label}</Label>
+                <Label htmlFor={`contact-edit-${key}`}>{label}</Label>
                 <Input
+                  id={`contact-edit-${key}`}
                   type={type ?? "text"}
                   maxLength={maxLength}
                   value={String(editForm[key] ?? "")}
-                  onChange={(e) => setEditForm((f) => ({ ...f, [key]: e.target.value || null }))}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setEditForm((f) => ({
+                      ...f,
+                      [key]: key === "planYear"
+                        ? (value === "" ? null : Number(value))
+                        : key === "firstName" || key === "lastName"
+                          ? value
+                          : value || null,
+                    }));
+                  }}
                 />
               </div>
             ))}
             <div className="space-y-1.5">
               <Label>Plan Type</Label>
-              <Select value={String(editForm.currentPlanType ?? "")} onValueChange={(v) => setEditForm((f) => ({ ...f, currentPlanType: v || null }))}>
+              <Select value={String(editForm.currentPlanType ?? "__none__")} onValueChange={(v) => setEditForm((f) => ({ ...f, currentPlanType: v === "__none__" ? null : v }))}>
                 <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="__none__">None</SelectItem>
                   {Object.entries(PLAN_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -972,7 +1037,7 @@ export default function ContactDetailPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-            <Button onClick={saveEdit}>Save Changes</Button>
+            <Button onClick={saveEdit} disabled={isSaving}>{isSaving ? "Saving…" : "Save Changes"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
