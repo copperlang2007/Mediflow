@@ -752,7 +752,8 @@ export async function upsertContact(
 ): Promise<{ contactId: string; created: boolean; matchedOn: string | null; warnings: { field: string; message: string }[] }> {
   // Serialize match-then-insert per org: without it, two deliveries for the
   // same new person can both see "no match" and each create a contact.
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`contact-upsert:${orgId}`}))`);
+  // 64-bit key (hashtextextended) so unrelated orgs never collide on the lock.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`contact-upsert:${orgId}`}, 0))`);
   const matcher = await loadMatcher(orgId, [c], tx);
   const hit = matcher.find(c);
   if (hit) {

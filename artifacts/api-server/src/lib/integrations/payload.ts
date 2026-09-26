@@ -80,7 +80,10 @@ function flattenInto(out: Record<string, string>, obj: Record<string, Json>, pre
  *  - `event-first` (for call/event metadata): top-level and `data` fields
  *    win, so the event's own `id`/`type` is never shadowed by `contact.id`.
  */
-export function flattenPayload(payload: Json, order: "person-first" | "event-first" = "person-first"): Record<string, string> {
+export function flattenPayload(
+  payload: Json,
+  order: "person-first" | "event-first" | "event-only" = "person-first",
+): Record<string, string> {
   const out: Record<string, string> = {};
   if (!isObject(payload)) return out;
   const roots: Record<string, Json>[] = [payload];
@@ -94,7 +97,11 @@ export function flattenPayload(payload: Json, order: "person-first" | "event-fir
     }
   };
   const tops = () => { for (const root of roots) flattenInto(out, root); };
-  if (order === "event-first") { tops(); containers(); } else { containers(); tops(); }
+  // `event-only` never flattens person blocks unprefixed, so an event without
+  // its own id can't borrow `contact.id` (it would appear only as `contact_id`).
+  if (order === "event-only") tops();
+  else if (order === "event-first") { tops(); containers(); }
+  else { containers(); tops(); }
   return out;
 }
 
