@@ -472,9 +472,12 @@ export async function loadMatcher(orgId: string, rows: InterpretedContact[], exe
   return matcher;
 }
 
-export async function loadAgentsByEmail(orgId: string, exec: Executor = db): Promise<Map<string, string>> {
+/** All the org's agents by email, or — with `email` — just that one (single-row lookup). */
+export async function loadAgentsByEmail(orgId: string, exec: Executor = db, email?: string): Promise<Map<string, string>> {
   const agents = await exec.select({ id: agentsTable.id, email: agentsTable.email }).from(agentsTable)
-    .where(eq(agentsTable.orgId, orgId));
+    .where(email
+      ? and(eq(agentsTable.orgId, orgId), sql`lower(${agentsTable.email}) = ${email.toLowerCase()}`)
+      : eq(agentsTable.orgId, orgId));
   return new Map(agents.filter((a) => a.email).map((a) => [a.email.toLowerCase(), a.id]));
 }
 

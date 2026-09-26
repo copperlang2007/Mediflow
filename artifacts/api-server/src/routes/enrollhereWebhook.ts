@@ -38,7 +38,7 @@ import {
   integrationEventsTable,
 } from "@workspace/db";
 import { verifyWebhookSignature } from "../lib/dialer/signature";
-import { canonicalJson, flattenPayload, interpretPayloadContact, payloadKeyPaths, pick } from "../lib/integrations/payload";
+import { canonicalJson, flattenPayload, interpretPayloadContact, normalizeKey, payloadKeyPaths, pick } from "../lib/integrations/payload";
 import { loadAgentsByEmail, upsertContact } from "../lib/contactImport";
 import { normalizePhone } from "../lib/csvImport";
 import { logger } from "../lib/logger";
@@ -77,7 +77,13 @@ export function authenticate(req: RawBodyRequest, orgId: string): AuthResult {
 
   const signature = header("x-mb-signature");
   if (signature) {
-    const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
+    // The HMAC is over the exact bytes received; re-serializing the parsed
+    // body would never match, so a missing raw body is a server fault.
+    const rawBody = req.rawBody;
+    if (!rawBody) {
+      logger.error({ orgId }, "EnrollHere webhook: raw body not captured; cannot verify signature");
+      return { ok: false, status: 401, reason: "unverifiable" };
+    }
     const verdict = verifyWebhookSignature({ secret, header: signature, rawBody });
     if (verdict.ok) return { ok: true };
     return { ok: false, status: verdict.reason === "stale" ? 403 : 401, reason: verdict.reason };
@@ -96,7 +102,21 @@ const DIRECTION_KEYS = ["direction", "call_direction", "call_type"];
 const DURATION_KEYS = ["duration_seconds", "duration", "call_duration", "talk_time", "billsec", "call_length"];
 const DISPOSITION_KEYS = ["disposition", "call_disposition", "outcome", "call_result", "result", "call_status", "status"];
 const RECORDING_KEYS = ["recording_url", "recording", "recording_link", "call_recording_url"];
-const STARTED_KEYS = ["started_at", "start_time", "call_start", "call_started_at", "timestamp", "created_at", "date"];
+// A bare "date" is deliberately absent: vendors use it for submission or appointment dates.
+const STARTED_KEYS = ["started_at", "start_time", "call_start", "call_started_at", "timestamp", "created_at"];
+
+/**
+ * Per-delivery transport fields that change on a retry of the SAME event.
+ * They are left out of the id-less fallback hash so a retry still dedupes.
+ */
+const VOLATILE_KEYS = new Set([
+  "timestamp", "sent_at", "delivered_at", "delivery_id", "webhook_id", "attempt",
+  "attempt_number", "retry", "retry_count", "nonce", "received_at", "now", "request_id",
+]);
+
+function stableForHash(body: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(body).filter(([k]) => !VOLATILE_KEYS.has(normalizeKey(k))));
+}
 const CALLER_PHONE_KEYS = ["caller_id", "caller_number", "from_number", "from", "ani", "customer_phone"];
 const AGENT_EMAIL_KEYS = ["agent_email", "user_email", "rep_email", "assigned_agent_email", "agent_email_address"];
 
@@ -122,7 +142,9 @@ router.post(
     const orgId = String(req.params.orgId ?? "");
     // JSON only: without this, a delivery missing its Content-Type would reach
     // the handler unparsed (and a form-encoded one would be accepted).
-    if (!req.is("application/json") && !req.is("application/*+json")) {
+    // Exactly application/json: that is the only type the JSON parser (and its
+    // raw-body capture for HMAC) runs for.
+    if (!req.is("application/json")) {
       res.status(415).json({ error: "Expected Content-Type: application/json" });
       return;
     }
@@ -151,7 +173,7 @@ router.post(
     const eventFlat = flattenPayload(req.body, "event-only");
     const keys = payloadKeyPaths(req.body);
     const externalId = pick(eventFlat, CALL_ID_KEYS)
-      ?? `sha256:${crypto.createHash("sha256").update(canonicalJson(req.body)).digest("hex")}`;
+      ?? `sha256:${crypto.createHash("sha256").update(canonicalJson(stableForHash(req.body))).digest("hex")}`;
     const eventType = pick(eventFlat, EVENT_KEYS);
 
     // The caller's number often arrives as call metadata rather than a contact field.
@@ -190,7 +212,9 @@ router.post(
         }).onConflictDoNothing().returning({ id: integrationEventsTable.id });
         if (!claimed) return { duplicate: true as const };
 
-        const agentsByEmail = contact.assignedAgentEmail ? await loadAgentsByEmail(orgId, tx) : new Map<string, string>();
+        const agentsByEmail = contact.assignedAgentEmail
+          ? await loadAgentsByEmail(orgId, tx, contact.assignedAgentEmail)
+          : new Map<string, string>();
         const agentId = contact.assignedAgentEmail ? agentsByEmail.get(contact.assignedAgentEmail) ?? null : null;
         if (!contact.leadSource) contact.leadSource = "EnrollHere";
 
