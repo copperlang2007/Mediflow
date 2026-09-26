@@ -182,7 +182,7 @@ router.post(
         const agentId = contact.assignedAgentEmail ? agentsByEmail.get(contact.assignedAgentEmail) ?? null : null;
         if (!contact.leadSource) contact.leadSource = "EnrollHere";
 
-        const { contactId, created, matchedOn } = await upsertContact(tx, orgId, contact, agentId);
+        const { contactId, created, matchedOn, warnings: mergeWarnings } = await upsertContact(tx, orgId, contact, agentId);
 
         const direction = pick(flat, DIRECTION_KEYS)?.toLowerCase() ?? null;
         const durationSeconds = parseDurationSeconds(pick(flat, DURATION_KEYS));
@@ -219,7 +219,7 @@ router.post(
         });
         await tx.update(integrationEventsTable).set({ contactId, activityId })
           .where(eq(integrationEventsTable.id, eventRowId));
-        return { duplicate: false as const, contactId, created, matchedOn, activityId };
+        return { duplicate: false as const, contactId, created, matchedOn, activityId, mergeWarnings };
       });
 
       if (result.duplicate) {
@@ -233,7 +233,7 @@ router.post(
         contactId: result.contactId,
         contactCreated: result.created,
         activityId: result.activityId,
-        warnings: interpreted.issues.map((i) => i.message),
+        warnings: [...interpreted.issues.map((i) => i.message), ...result.mergeWarnings.map((w) => w.message)],
       });
     } catch (err) {
       logger.error({ err, orgId }, "EnrollHere webhook: failed to process event");

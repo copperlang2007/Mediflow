@@ -4,7 +4,7 @@
  * Uses multer for multipart file upload + streaming CSV parse.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, inArray, or, desc } from "drizzle-orm";
+import { eq, and, inArray, or, desc, sql } from "drizzle-orm";
 import {
   db,
   agentsTable,
@@ -43,9 +43,11 @@ export { processCsvContactImport };
 const router: IRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-// On startup: mark any jobs that were still "processing" as "failed" (orphaned by prior crash/restart)
+// On startup: mark any jobs that were still "processing" as "failed" (orphaned
+// by prior crash/restart), dropping their queued rows — those hold plaintext
+// PHI (names, DOBs, addresses) and a failed job never reads them again.
 void db.update(importJobsTable)
-  .set({ status: "failed" })
+  .set({ status: "failed", options: sql`${importJobsTable.options} - 'rows'` })
   .where(eq(importJobsTable.status, "processing"))
   .catch((err) => {
     logger.error({ err }, "imports: failed to mark orphaned import jobs as failed on startup");
@@ -833,7 +835,9 @@ router.post(
         id: jobId, orgId: authReq.orgId, userId: authReq.userId,
         importType: "csv_contacts", status: "processing", totalRows: rows.length,
         columnMapping: mapping as Record<string, unknown>,
-        options: { rows, mapping, duplicateAction } as Record<string, unknown>,
+        // parseIssues seeds the worker's report (rows that never reach it).
+        // Their messages never contain cell values, so they are not PHI.
+        options: { rows, mapping, duplicateAction, parseIssues: parsed.issues } as Record<string, unknown>,
         // Rows that could not be parsed never reach the worker; record them now.
         errors: parsed.issues.map((i) => ({ row: i.row, field: i.field, message: i.message })),
         errorCount: parsed.issues.filter((i) => i.severity === "error").length,
@@ -842,7 +846,7 @@ router.post(
 
       const queuedId = await enqueue(JOB_NAMES.IMPORT_CSV_CONTACTS, { jobId });
       if (!queuedId) {
-        await db.update(importJobsTable).set({ status: "failed" }).where(eq(importJobsTable.id, jobId));
+        await db.update(importJobsTable).set({ status: "failed", options: sql`${importJobsTable.options} - 'rows'` }).where(eq(importJobsTable.id, jobId));
         res.status(503).json({ error: "Import service is temporarily unavailable. Please retry." });
         return;
       }

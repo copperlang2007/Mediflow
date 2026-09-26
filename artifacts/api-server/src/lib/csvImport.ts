@@ -293,7 +293,9 @@ export function parseFlexibleDate(raw: string, twoDigitYear: "past" | "2000s" = 
     if (match[3]!.length === 2) {
       const now = new Date().getUTCFullYear();
       y += 2000;
-      if (twoDigitYear === "past" && y > now) y -= 100;
+      // A birth date in a two-digit year that would make the person a minor
+      // is a 1900s date (5/5/25 → 1925 for a Medicare beneficiary, not 2025).
+      if (twoDigitYear === "past" && y > now - 18) y -= 100;
     }
   } else if ((match = s.match(/^\d{5}$/))) {
     // Excel serial date (days since 1899-12-30), plausible range 1900–2100.
