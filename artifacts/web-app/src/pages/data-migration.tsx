@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useGetMe } from "@workspace/api-client-react";
 import { apiFetch } from "@/lib/api";
@@ -31,9 +31,18 @@ import {
 } from "lucide-react";
 
 type TargetField = { field: string; label: string; required?: boolean };
-type UploadResponse = { headers: string[]; sampleRows: Record<string, string>[]; totalRows: number; suggestedMapping: Record<string, string>; targetFields: TargetField[] };
-type ValidationResponse = { totalRows: number; errorCount: number; validRows: number; errors: { row: number; field: string; message: string }[] };
-type ImportJob = { id: string; importType: string; status: string; totalRows: number; processedRows: number; createdCount: number; updatedCount: number; skippedCount: number; errorCount: number; fileName: string | null; createdAt: string; completedAt: string | null };
+type RowIssue = { row: number; field: string; message: string; severity?: "error" | "warning" };
+type UploadResponse = { headers: string[]; sampleRows: Record<string, string>[]; totalRows: number; suggestedMapping: Record<string, string>; targetFields: TargetField[]; parseIssues?: RowIssue[] };
+type ValidationResponse = {
+  totalRows: number;
+  errorCount: number;
+  validRows: number;
+  errors: RowIssue[];
+  warningCount?: number;
+  duplicateCount?: number;
+  enrollmentCount?: number;
+};
+type ImportJob = { id: string; importType: string; status: string; totalRows: number; processedRows: number; createdCount: number; updatedCount: number; skippedCount: number; errorCount: number; warningCount?: number; fileName: string | null; createdAt: string; completedAt: string | null };
 type ProgressEvent = { status: string; processed: number; total: number; errorCount: number };
 
 const SKIP_FIELD_VALUE = "__skip_field__";
@@ -117,7 +126,7 @@ function ImportWizard({
   validateEndpoint: string;
   confirmEndpoint: string;
   steps?: string[];
-  extraConfirmFields?: { label: string; key: string; options: { value: string; label: string }[] }[];
+  extraConfirmFields?: { label: string; key: string; defaultValue?: string; options: { value: string; label: string }[] }[];
 }) {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -130,7 +139,13 @@ function ImportWizard({
   const [validation, setValidation] = useState<ValidationResponse | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
-  const [extraValues, setExtraValues] = useState<Record<string, string>>({});
+  const initialExtraValues = useMemo(
+    () => Object.fromEntries(
+      (extraConfirmFields ?? []).filter((f) => f.defaultValue).map((f) => [f.key, f.defaultValue!]),
+    ),
+    [extraConfirmFields],
+  );
+  const [extraValues, setExtraValues] = useState<Record<string, string>>(initialExtraValues);
   const [loading, setLoading] = useState(false);
 
   const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
@@ -149,8 +164,12 @@ function ImportWizard({
       setUploadData(data);
       setMapping(data.suggestedMapping);
       setStep(1);
-    } catch {
-      toast({ title: "Failed to parse file", variant: "destructive" });
+    } catch (error) {
+      toast({
+        title: "Couldn't read this file",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -163,6 +182,7 @@ function ImportWizard({
       const form = new FormData();
       form.append("file", file);
       form.append("mapping", JSON.stringify(mapping));
+      for (const [k, v] of Object.entries(extraValues)) form.append(k, v);
       const res = await fetch(`${base}${validateEndpoint}`, { method: "POST", body: form, credentials: "include" });
       const data: unknown = await res.json();
       if (!res.ok || !isValidationResponse(data)) {
@@ -170,8 +190,12 @@ function ImportWizard({
       }
       setValidation(data);
       setStep(2);
-    } catch {
-      toast({ title: "Validation failed", variant: "destructive" });
+    } catch (error) {
+      toast({
+        title: "Validation failed",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -219,7 +243,7 @@ function ImportWizard({
     evtSource.onerror = () => evtSource.close();
   };
 
-  const reset = () => { setStep(0); setFile(null); setUploadData(null); setMapping({}); setValidation(null); setJobId(null); setProgress(null); };
+  const reset = () => { setStep(0); setFile(null); setUploadData(null); setMapping({}); setValidation(null); setJobId(null); setProgress(null); setExtraValues(initialExtraValues); };
 
   return (
     <div>
@@ -246,7 +270,7 @@ function ImportWizard({
               )}
               <p className="font-medium">Drop your CSV file here or click to browse</p>
               <p className="text-sm text-muted-foreground mt-1">Supports CSV files up to 50MB</p>
-              <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); }} />
+              <input ref={fileInputRef} type="file" accept=".csv,.txt,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); }} />
             </div>
           </CardContent>
         </Card>
@@ -263,6 +287,17 @@ function ImportWizard({
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {uploadData.parseIssues && uploadData.parseIssues.length > 0 && (
+                <div className="mb-4 rounded-lg border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-900">
+                  <p className="font-medium flex items-center gap-1.5">
+                    <AlertTriangle className="h-4 w-4" />
+                    {uploadData.parseIssues.length} row{uploadData.parseIssues.length === 1 ? "" : "s"} had formatting problems
+                  </p>
+                  <p className="mt-1 text-yellow-800">
+                    The rest of the file is fine. You'll see exactly which rows and why on the next step.
+                  </p>
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {uploadData.headers.map((header) => (
                   <div key={header} className="flex items-center gap-3">
@@ -333,7 +368,7 @@ function ImportWizard({
       {/* Step 2: Validate */}
       {step === 2 && validation && (
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
+          <div className={`grid gap-4 ${validation.warningCount !== undefined ? "grid-cols-2 md:grid-cols-4" : "grid-cols-3"}`}>
             <Card>
               <CardContent className="p-4">
                 <p className="text-sm text-muted-foreground">Total Rows</p>
@@ -352,27 +387,49 @@ function ImportWizard({
                 <p className={`text-2xl font-bold ${validation.errorCount > 0 ? "text-red-500" : "text-green-600"}`}>{validation.errorCount.toLocaleString()}</p>
               </CardContent>
             </Card>
+            {validation.warningCount !== undefined && (
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground">Warnings</p>
+                  <p className="text-2xl font-bold text-yellow-600">{validation.warningCount.toLocaleString()}</p>
+                </CardContent>
+              </Card>
+            )}
           </div>
+
+          {(validation.duplicateCount !== undefined || validation.enrollmentCount !== undefined) && (
+            <p className="text-sm text-muted-foreground">
+              {validation.enrollmentCount !== undefined && <>{validation.enrollmentCount.toLocaleString()} rows include plan coverage. </>}
+              {validation.duplicateCount !== undefined && <>{validation.duplicateCount.toLocaleString()} rows match people already in agencyBRIDGE.</>}
+            </p>
+          )}
 
           {validation.errors.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                  Validation Errors (first {validation.errors.length})
+                  Row Issues (showing {Math.min(validation.errors.length, 200)})
                 </CardTitle>
-                <CardDescription>These rows will be skipped. Valid rows will still be imported.</CardDescription>
+                <CardDescription>
+                  Rows marked <strong>Error</strong> will be skipped. Rows marked <strong>Warning</strong> will still import — just check the note. Everything else imports normally.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="max-h-64 overflow-y-auto">
                   <Table>
                     <TableHeader>
-                      <TableRow><TableHead>Row</TableHead><TableHead>Field</TableHead><TableHead>Issue</TableHead></TableRow>
+                      <TableRow><TableHead>Row</TableHead><TableHead>Type</TableHead><TableHead>Field</TableHead><TableHead>Issue</TableHead></TableRow>
                     </TableHeader>
                     <TableBody>
-                      {validation.errors.slice(0, 50).map((e, i) => (
+                      {validation.errors.slice(0, 200).map((e, i) => (
                         <TableRow key={i}>
-                          <TableCell className="text-xs">{e.row}</TableCell>
+                          <TableCell className="text-xs">{e.row > 0 ? e.row : "—"}</TableCell>
+                          <TableCell>
+                            {e.severity === "warning"
+                              ? <Badge variant="secondary" className="text-xs bg-yellow-100 text-yellow-800">Warning</Badge>
+                              : <Badge variant="destructive" className="text-xs">Error</Badge>}
+                          </TableCell>
                           <TableCell><Badge variant="secondary" className="text-xs">{e.field}</Badge></TableCell>
                           <TableCell className="text-xs text-muted-foreground">{e.message}</TableCell>
                         </TableRow>
@@ -488,9 +545,12 @@ function ImportHistoryTab() {
                       ? <span className="text-red-500">{job.errorCount.toLocaleString()}</span>
                       : <span className="text-muted-foreground">0</span>
                     }
+                    {(job.warningCount ?? 0) > 0 && (
+                      <span className="block text-xs text-yellow-700">{job.warningCount!.toLocaleString()} warning{job.warningCount === 1 ? "" : "s"}</span>
+                    )}
                   </TableCell>
                   <TableCell>
-                    {job.errorCount > 0 && (
+                    {(job.errorCount > 0 || (job.warningCount ?? 0) > 0) && (
                       <Button variant="ghost" size="sm" className="h-7 text-xs" asChild>
                         <a href={`${base}/api/imports/${job.id}/errors.csv`} download>
                           <Download className="h-3.5 w-3.5 mr-1" /> Errors
@@ -580,10 +640,22 @@ export default function DataMigrationPage() {
           <TabsContent value="csv">
             <ImportWizard
               title="Import Contacts from CSV"
-              description="Upload any CSV with contact data. Map your columns to agencyBRIDGE fields. All contacts will be imported as leads."
+              description="Upload any CSV of clients — including Medicare ID, carrier, plan, and effective date. Rows with plan details also create an enrollment. Medicare IDs are encrypted before they are stored."
               uploadEndpoint="/api/imports/contacts/upload"
               validateEndpoint="/api/imports/contacts/validate"
               confirmEndpoint="/api/imports/contacts/confirm"
+              extraConfirmFields={[
+                {
+                  label: "If the person already exists:",
+                  key: "duplicateAction",
+                  defaultValue: "merge",
+                  options: [
+                    { value: "merge", label: "Fill in blanks + add coverage" },
+                    { value: "skip", label: "Skip the row" },
+                    { value: "create_new", label: "Create a separate contact" },
+                  ],
+                },
+              ]}
             />
           </TabsContent>
 

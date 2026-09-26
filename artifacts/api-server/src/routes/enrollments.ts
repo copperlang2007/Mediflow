@@ -171,7 +171,7 @@ function isUniqueViolation(err: unknown): boolean {
  * not a second source of truth: `enrollments` is authoritative, and this
  * function is deleted in the release that drops the columns.
  */
-async function syncContactCoverageProjection(
+export async function syncContactCoverageProjection(
   contactId: string,
   orgId: string,
   tx?: DbTransaction,
