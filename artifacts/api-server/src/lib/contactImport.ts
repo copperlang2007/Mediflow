@@ -156,6 +156,8 @@ export interface InterpretedRow {
   issues: CsvIssue[];
 }
 
+const UNIT_IN_CITY = /^(?:(?:apt|apartment|suite|ste|unit|bldg|building|fl|floor|lot|rm|room|space|spc|trlr)\.?\s*#?\s*(?:\d|[a-z](?![a-z.]))|#\s*\d)/i;
+
 export function interpretContactRow(
   raw: Record<string, string>,
   mapping: Record<string, string>,
@@ -266,7 +268,10 @@ export function interpretContactRow(
   // A city never starts with a unit designator, so this is a shift on its own,
   // even when every other shifted value happens to validate.
   const cityRaw = get("city");
-  if (opts.detectShift !== false && cityRaw && /^(apt|apartment|suite|ste|unit|bldg|building|fl|floor|lot|rm|room|space|spc|trlr|#)\b|^#/i.test(cityRaw)) {
+  // The designator must be followed by a unit number ("Suite 100", "Apt 5",
+  // "Unit 3B", "#42", "Apt B") — so real towns like "Ste. Genevieve", "Ste.
+  // Marie" or "Unit, WV" are not mistaken for a unit.
+  if (opts.detectShift !== false && cityRaw && UNIT_IN_CITY.test(cityRaw)) {
     issues.push({
       row: rowNumber,
       field: "row",
