@@ -25,7 +25,7 @@ vi.mock("@clerk/express", clerkF);
 vi.mock("../../lib/jobs", jobsF);
 
 import { and, eq } from "drizzle-orm";
-import { activitiesTable, contactsTable, integrationEventsTable } from "@workspace/db/schema";
+import { activitiesTable, agentsTable, contactsTable, integrationEventsTable } from "@workspace/db/schema";
 import { computeSignature } from "../../lib/dialer/signature";
 import { bootTestDb, shutdownTestDb } from "../helpers/testApp";
 import { seedOrg, seedAgent, seedContact, type TestDb } from "../helpers/testDb";
@@ -46,6 +46,7 @@ beforeAll(async () => {
   request = ((await import("supertest")) as any).default;
   org = await seedOrg(tdb, { id: "eh-org" });
   agent = await seedAgent(tdb, { orgId: org.id, email: "closer@agency.example" });
+  await tdb.update(agentsTable).set({ userId: "user-closer" }).where(eq(agentsTable.id, agent.id));
   await seedContact(tdb, { orgId: org.id, firstName: "Ruth", lastName: "Known", email: "ruth@example.com" });
 });
 
@@ -126,7 +127,8 @@ describe("EnrollHere webhook processing", () => {
     expect(c!.medicareIdEncrypted).not.toBeNull();
 
     const [a] = await tdb.select().from(activitiesTable).where(eq(activitiesTable.id, res.body.activityId));
-    expect(a).toMatchObject({ type: "call_log", contactId: c!.id, agentId: agent.id, body: "EnrollHere inbound call 4m 5s — Enrolled" });
+    // createdBy = the agent's login, so agent-performance call counts include it.
+    expect(a).toMatchObject({ type: "call_log", contactId: c!.id, agentId: agent.id, createdBy: "user-closer", body: "EnrollHere inbound call 4m 5s — Enrolled" });
     expect(a!.metadata).toMatchObject({ durationSeconds: 245, recordingUrl: "https://recordings.example/abc.mp3", externalId: "call-100" });
   });
 
