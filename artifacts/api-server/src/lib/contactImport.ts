@@ -613,7 +613,14 @@ export async function processCsvContactImport(
         rowWarnings.push({ row: r.row, field: "assignedAgentEmail", message: "No agent in agencyBRIDGE has that email — left unassigned" });
       }
       const hit = duplicateAction === "create_new" ? null : matcher.find(c);
-      if (hit && duplicateAction === "skip") { skipped++; continue; }
+      if (hit && duplicateAction === "skip") {
+        // Nothing is written for a skipped row, but the agent-column warning is
+        // still true and tells the admin their mapping is off.
+        errorList.push(...rowWarnings);
+        warnings += rowWarnings.length;
+        skipped++;
+        continue;
+      }
 
       const contactId = await db.transaction(async (tx) => {
         const carrierId = r.enrollment?.carrierName
