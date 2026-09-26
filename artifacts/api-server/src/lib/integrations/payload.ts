@@ -103,11 +103,15 @@ export function flattenPayload(
   if (!isObject(payload)) return out;
   const roots: Record<string, Json>[] = [payload];
   if (isObject(payload.data)) roots.push(payload.data);
+  const personNest = (key: string) => ADDRESS_BLOCK.test(key) || AGENT_BLOCK.test(key);
   const containers = () => {
     for (const root of roots) {
       for (const name of PERSON_CONTAINERS) {
         const c = Object.entries(root).find(([k]) => normalizeKey(k) === name)?.[1];
-        if (isObject(c)) flattenInto(out, c);
+        // Inside the person block too, only address/agent sub-blocks: an
+        // emergency_contact / spouse / guarantor block would otherwise surface
+        // as e.g. `emergency_contact_phone` and be read as the person's phone.
+        if (isObject(c)) flattenInto(out, c, "", 0, personNest);
       }
     }
   };
@@ -115,7 +119,6 @@ export function flattenPayload(
   // address or an agent block. Anything else (e.g. a `caller` call-leg block
   // with a support-line phone) could otherwise surface as `caller_phone` and be
   // taken for the person's phone, depending only on JSON key order.
-  const personNest = (key: string) => ADDRESS_BLOCK.test(key) || AGENT_BLOCK.test(key);
   const tops = () => {
     for (const root of roots) flattenInto(out, root, "", 0, order === "event-only" ? () => true : personNest);
   };
