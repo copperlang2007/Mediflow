@@ -1,0 +1,117 @@
+/**
+ * Minimal GoHighLevel (LeadConnector) API v2 client — contacts search only.
+ *
+ * Auth: a sub-account **Private Integration** token, sent as a Bearer token
+ * with the mandatory `Version: 2021-07-28` header (GHL OpenAPI spec,
+ * apps/contacts.json). Scope needed: `contacts.readonly`.
+ *
+ * Endpoint: `POST /contacts/search` — the documented replacement for the
+ * deprecated `GET /contacts/`, and the only one that can filter on
+ * `dateUpdated`, which is what makes an incremental pull possible. Pages are
+ * requested sorted by `dateUpdated` ascending; paging continues with the
+ * `searchAfter` tuple GHL returns on each contact (falling back to `page`
+ * numbers if a response omits it).
+ *
+ * The token is never logged or included in thrown errors.
+ */
+import { logger } from "../../logger";
+
+export const GHL_API_BASE = "https://services.leadconnectorhq.com";
+export const GHL_API_VERSION = "2021-07-28";
+export const GHL_PAGE_LIMIT = 100;
+
+export interface GhlContact {
+  id: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  contactName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  dateOfBirth?: string | null;
+  address1?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  source?: string | null;
+  tags?: string[] | null;
+  dnd?: boolean | null;
+  dateAdded?: string | null;
+  dateUpdated?: string | null;
+  searchAfter?: (string | number)[] | null;
+}
+
+export interface SearchPage {
+  contacts: GhlContact[];
+  total: number | null;
+}
+
+export class GhlApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "GhlApiError";
+  }
+}
+
+export interface SearchParams {
+  token: string;
+  locationId: string;
+  /** Only contacts updated at or after this instant. */
+  updatedSince: Date | null;
+  searchAfter?: (string | number)[] | null;
+  page?: number;
+  pageLimit?: number;
+}
+
+type FetchLike = typeof fetch;
+
+const MAX_ATTEMPTS = 4;
+
+export async function searchContacts(params: SearchParams, fetchImpl: FetchLike = fetch): Promise<SearchPage> {
+  const body: Record<string, unknown> = {
+    locationId: params.locationId,
+    pageLimit: params.pageLimit ?? GHL_PAGE_LIMIT,
+    sort: [{ field: "dateUpdated", direction: "asc" }],
+  };
+  if (params.updatedSince) {
+    body.filters = [{ field: "dateUpdated", operator: "range", value: { gte: params.updatedSince.toISOString() } }];
+  }
+  if (params.searchAfter?.length) body.searchAfter = params.searchAfter;
+  else body.page = params.page ?? 1;
+
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetchImpl(`${GHL_API_BASE}/contacts/search`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.token}`,
+        Version: GHL_API_VERSION,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    // Rate limit (GHL: burst 100 req / 10 s per location) or transient 5xx.
+    if ((res.status === 429 || res.status >= 500) && attempt < MAX_ATTEMPTS) {
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000 * 2 ** attempt;
+      logger.warn({ status: res.status, attempt, waitMs }, "GHL search: retrying");
+      await new Promise((r) => setTimeout(r, Math.min(waitMs, 30_000)));
+      continue;
+    }
+
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      const hint = res.status === 401 || res.status === 403
+        ? " — check the Private Integration token and that it has the contacts.readonly scope for this location"
+        : "";
+      throw new GhlApiError(`GHL contacts search failed: HTTP ${res.status}${hint}. ${detail.slice(0, 300)}`, res.status);
+    }
+
+    const json = (await res.json()) as { contacts?: GhlContact[]; total?: number; count?: number };
+    return {
+      contacts: Array.isArray(json.contacts) ? json.contacts : [],
+      total: typeof json.total === "number" ? json.total : typeof json.count === "number" ? json.count : null,
+    };
+  }
+}

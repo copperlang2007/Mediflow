@@ -10,6 +10,7 @@
  *    export-anomaly-check        daily 02:15 UTC
  *    dialer-reconcile            every 15 min (missed-webhook recovery, §5.4)
  *    lead-callback-sweep         every 5 min (callback SLA queue re-attempt)
+ *    ghl-sync                    every 15 min (GoHighLevel contact feed; also ad-hoc backfill)
  *
  *  Ad-hoc (enqueue via `enqueue(JOB_NAMES.X, data)`):
  *    task-auto-assign            on agent creation / status change
@@ -103,6 +104,9 @@ export const JOB_NAMES = {
   // Oct 1 cutoff) create one "set the annual review appointment" to-do per
   // current MA member, assigned to their agent, due Sept 30. Idempotent.
   AEP_RENEWAL_REVIEW: "aep-renewal-review",
+  // GoHighLevel contact feed: every 15 min for each configured org, and
+  // ad-hoc from the admin "sync now / full backfill" endpoint.
+  GHL_SYNC: "ghl-sync",
   // Import workers (ad-hoc, enqueued from import routes)
   IMPORT_MONDAY: "import-monday",
   IMPORT_GHL: "import-ghl",
@@ -406,6 +410,9 @@ export async function startWorkers(): Promise<void> {
   // MA member's review appointment can be set in time. Singleton; the pass is
   // idempotent (deduped per (season-year, contact)), so a re-run is a no-op.
   await boss.schedule(JOB_NAMES.AEP_RENEWAL_REVIEW, "0 6 1 9 *", {}, { tz: "UTC" });
+  // GoHighLevel contact feed — every 15 minutes, offset from the dialer
+  // reconcile. A no-op when no org is configured. Incremental and idempotent.
+  await boss.schedule(JOB_NAMES.GHL_SYNC, "7,22,37,52 * * * *", {}, { tz: "UTC" });
 
   // ---- Workers ----
 
@@ -679,6 +686,17 @@ export async function startWorkers(): Promise<void> {
     JOB_NAMES.AEP_RENEWAL_REVIEW,
     { batchSize: 1, localConcurrency: 1 },
     aepRenewalReviewHandler,
+  );
+
+  const ghlSyncHandler: WorkHandler<{ orgId?: string; full?: boolean }> = async (jobs) => {
+    const { ghlSyncWorker } = await import("../workers/ghlSync");
+    for (const job of jobs) await ghlSyncWorker(job.data);
+  };
+  // One at a time: runs for the same org are also serialized by a DB lease.
+  await boss.work<{ orgId?: string; full?: boolean }>(
+    JOB_NAMES.GHL_SYNC,
+    { batchSize: 1, localConcurrency: 1 },
+    ghlSyncHandler,
   );
 
   logger.info("All background workers registered");

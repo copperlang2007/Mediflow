@@ -487,6 +487,85 @@ function Label({ children, className }: { children: React.ReactNode; className?:
   return <label className={className}>{children}</label>;
 }
 
+// ─── GoHighLevel live sync ─────────────────────────────────────────────────────
+type GhlStatus = {
+  configured: boolean;
+  locationId: string | null;
+  running: boolean;
+  backfillCompletedAt: string | null;
+  lastRunAt: string | null;
+  lastStatus: string | null;
+  lastError: string | null;
+  lastRun: { created: number; updated: number; skipped: number } | null;
+};
+
+function GhlLiveSyncCard() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const { data: status, isLoading } = useQuery({
+    queryKey: ["integrations", "ghl", "status"],
+    queryFn: () => apiFetch<GhlStatus>("/api/integrations/ghl/status"),
+    refetchInterval: 15_000,
+  });
+  const [busy, setBusy] = useState(false);
+
+  const trigger = async (full: boolean) => {
+    setBusy(true);
+    try {
+      await apiFetch("/api/integrations/ghl/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ full }),
+      });
+      toast({ title: full ? "Full re-sync started" : "Sync started", description: "New and changed GoHighLevel contacts will appear shortly." });
+      void qc.invalidateQueries({ queryKey: ["integrations", "ghl", "status"] });
+    } catch (error) {
+      toast({ title: "Couldn't start sync", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (isLoading || !status) return <Skeleton className="h-28 rounded-xl mb-6" />;
+
+  return (
+    <Card className="mb-6">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <RefreshCcw className={`h-4 w-4 text-blue-600 ${status.running ? "animate-spin" : ""}`} />
+          GoHighLevel live sync
+          {status.configured
+            ? <Badge className="bg-green-100 text-green-800 text-xs">Connected</Badge>
+            : <Badge variant="secondary" className="text-xs">Not connected</Badge>}
+        </CardTitle>
+        <CardDescription>
+          {status.configured
+            ? "New and updated GoHighLevel contacts are pulled in automatically every 15 minutes. Existing agencyBRIDGE data is never overwritten — only blank fields are filled."
+            : "Ask your administrator to add your GoHighLevel Private Integration token and location id to turn on automatic syncing. You can still import a CSV export below."}
+        </CardDescription>
+      </CardHeader>
+      {status.configured && (
+        <CardContent className="space-y-3">
+          <div className="text-sm text-muted-foreground">
+            {status.running ? "Syncing now…"
+              : status.lastRunAt ? <>Last sync {new Date(status.lastRunAt).toLocaleString()}
+                  {status.lastRun && <> · {status.lastRun.created} added, {status.lastRun.updated} updated, {status.lastRun.skipped} skipped (no name)</>}</>
+              : "Not synced yet."}
+            {!status.backfillCompletedAt && status.lastRunAt && !status.running && <> · first full pull still in progress</>}
+          </div>
+          {status.lastStatus === "error" && status.lastError && (
+            <p className="text-sm text-red-600 flex items-start gap-1.5"><AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />{status.lastError}</p>
+          )}
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => trigger(false)} disabled={busy || status.running}>Sync now</Button>
+            <Button size="sm" variant="outline" onClick={() => trigger(true)} disabled={busy || status.running}>Re-sync everything</Button>
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
 // ─── Import History ────────────────────────────────────────────────────────────
 function ImportHistoryTab() {
   const { data: jobs, isLoading } = useQuery({
@@ -611,6 +690,7 @@ export default function DataMigrationPage() {
           </TabsContent>
 
           <TabsContent value="ghl">
+            <GhlLiveSyncCard />
             <ImportWizard
               title="Import Contacts from GoHighLevel"
               description="Upload your GoHighLevel contacts export CSV. agencyBRIDGE supports duplicate detection and can merge, skip, or create contacts on collision."

@@ -141,6 +141,7 @@ declare -A OPTIONAL_SECRET_MAP=(
   [SENTRY_DSN]=mediflow-sentry-dsn
   [PUBLIC_OBJECT_SEARCH_PATHS]=mediflow-public-object-search-paths
   [ENROLLHERE_WEBHOOK_SECRET]=mediflow-enrollhere-webhook-secret
+  [GHL_PRIVATE_INTEGRATION_TOKEN]=mediflow-ghl-private-integration-token
 )
 sync_secret mediflow-esign-cert-pem "${ESIGN_SIGNING_CERT_PEM:-}"
 sync_secret mediflow-esign-key-pem "${ESIGN_SIGNING_KEY_PEM:-}"
@@ -158,6 +159,11 @@ done
 OPTIONAL_ENV_FLAG=""
 [ -n "${EMAIL_FROM_ADDRESS:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS},"
 [ -n "${CONTRACTING_EMAIL_FROM:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}CONTRACTING_EMAIL_FROM=${CONTRACTING_EMAIL_FROM},"
+# GoHighLevel feed: which org(s) to sync and the GHL sub-account. Not secret —
+# the token itself goes through Secret Manager above. Comma-separated org ids
+# are joined with ";" here because "," separates --set-env-vars entries.
+[ -n "${GHL_SYNC_ORG_IDS:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}GHL_SYNC_ORG_IDS=${GHL_SYNC_ORG_IDS//,/;},"
+[ -n "${GHL_LOCATION_ID:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}GHL_LOCATION_ID=${GHL_LOCATION_ID},"
 
 REQUIRED_SECRETS_FLAG="DATABASE_URL=mediflow-database-url:latest,\
 PHI_ENCRYPTION_KEY=mediflow-phi-encryption-key:latest,\
