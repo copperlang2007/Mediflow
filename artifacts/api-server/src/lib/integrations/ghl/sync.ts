@@ -412,7 +412,12 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
           (!!contact.phone && !!gone.match.phone && contact.phone !== gone.match.phone)
         );
         if (!conflicts) {
-          if (isStrongMatch(gone.reason, contact.dob, gone.match.dob)) {
+          // Permanent only when two independent facts agree: the Medicare ID,
+          // or a birth date AND an email/phone. Name + birth date alone (Sr/Jr,
+          // twins, coincidence) is held like a weak match.
+          const sameContact = (!!contact.email && !!gone.match.email && contact.email.toLowerCase() === gone.match.email.toLowerCase())
+            || (!!contact.phone && !!gone.match.phone && contact.phone === gone.match.phone);
+          if (gone.reason === "Medicare ID" || (isStrongMatch(gone.reason, contact.dob, gone.match.dob) && sameContact)) {
             // Clearly the deleted person: link permanently so they stay deleted.
             await tx.insert(externalContactLinksTable).values({
               id: randomUUID(), orgId, source: GHL_SOURCE, externalId: gc.id, contactId: gone.match.id, externalUpdatedAt,

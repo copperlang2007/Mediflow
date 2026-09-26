@@ -472,6 +472,17 @@ describe("GHL feed", () => {
     expect(links).toHaveLength(0);
   });
 
+  it("holds rather than tombstones on a name + birth-date match to a deleted contact with no email/phone", async () => {
+    const org15 = await seedOrg(tdb, { id: "ghl-org-15" });
+    const cfg15 = ({ orgId: org15.id, token: TOKEN, locationId: `loc-${org15.id}` });
+    const dob = new Date("1950-03-07T00:00:00.000Z");
+    const deleted = await seedContact(tdb, { orgId: org15.id, firstName: "John", lastName: "Smith", email: null, dob });
+    await tdb.update(contactsTable).set({ deletedAt: new Date() }).where(eq(contactsTable.id, deleted.id));
+    const r = await sync.runGhlSync(cfg15, { fetchImpl: fakeGhl([ghlContact(13400, { firstName: "John", lastName: "Smith", email: "john2@example.com", dateOfBirth: "1950-03-07T00:00:00.000Z" })]).impl });
+    expect(r).toMatchObject({ created: 0, skipped: 1 });
+    expect(await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.orgId, org15.id))).toHaveLength(0);
+  });
+
   it("does not apply GHL DND to a household relative matched only by shared phone + name", async () => {
     const org13 = await seedOrg(tdb, { id: "ghl-org-13" });
     const cfg13 = ({ orgId: org13.id, token: TOKEN, locationId: `loc-${org13.id}` });
