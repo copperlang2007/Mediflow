@@ -191,9 +191,19 @@ const RETRY_OVERRIDES: Partial<
  * Builds the `createQueue()` options for a job: its retry policy plus the
  * shared dead-letter queue so exhausted-retry failures are captured.
  */
+/**
+ * Per-queue job expiry. pg-boss re-dispatches a job still running past its
+ * expiry (default 15 min). A GHL backfill run may legitimately hold its
+ * 30-minute DB lease, so its queue expires after 40.
+ */
+const EXPIRY_OVERRIDES: Partial<Record<JobName, number>> = {
+  [JOB_NAMES.GHL_SYNC]: 40 * 60,
+};
+
 function queueOptions(name: JobName): Omit<Queue, "name"> {
   return {
     ...(RETRY_OVERRIDES[name] ?? DEFAULT_RETRY),
+    ...(EXPIRY_OVERRIDES[name] ? { expireInSeconds: EXPIRY_OVERRIDES[name] } : {}),
     deadLetter: DEAD_LETTER_QUEUE,
   };
 }

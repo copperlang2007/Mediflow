@@ -4,7 +4,9 @@ CREATE TABLE IF NOT EXISTS external_contact_links (
   org_id text NOT NULL REFERENCES organizations(id),
   source text NOT NULL,
   external_id text NOT NULL,
-  contact_id text NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+  -- SET NULL, not CASCADE: a hard-deleted contact leaves a tombstone link so
+  -- the feed never recreates it.
+  contact_id text REFERENCES contacts(id) ON DELETE SET NULL,
   external_updated_at timestamp with time zone,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT external_contact_links_org_source_external_key UNIQUE (org_id, source, external_id)

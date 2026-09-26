@@ -1,5 +1,11 @@
 # GoHighLevel → agencyBRIDGE contact feed
 
+> **Step 0 — compliance prerequisite (required).** The feed copies PHI (names,
+> DOB, address, phone, email) out of GoHighLevel. Before adding an agency to
+> `GHL_SYNC_ORG_IDS`, confirm a signed Business Associate Agreement (BAA) with
+> HighLevel/LeadConnector covers that sub-account and that the sub-account is
+> on a HIPAA-eligible plan. Record both in the rollout ticket.
+
 Pulls contacts from a GoHighLevel sub-account into agencyBRIDGE: a one-time
 **backfill** of everything, then a **scheduled pull** every 15 minutes of
 contacts created or changed since the last run.
@@ -26,10 +32,13 @@ GitHub Secrets / the hosting provider as below.
 
 Several agencies: list their org ids in `GHL_SYNC_ORG_IDS`; the app reads
 per-org overrides `GHL_PRIVATE_INTEGRATION_TOKEN_<ORGID>` / `GHL_LOCATION_ID_<ORGID>`.
-**The deploy workflow only passes the single (global) token and location**, so
-for more than one agency those per-org values must currently be set directly on
-the Cloud Run service (token via Secret Manager) — the workflow does not
-propagate them yet.
+**The deploy workflow only passes the single (global) token and location, and
+Cloud Run's `--set-env-vars` / `--set-secrets` REPLACE the service environment on
+every deploy** — so per-org values set by hand on the service would be wiped by
+the next deploy. Supporting a second agency therefore requires extending
+`scripts/deploy/gcp-deploy.sh` (and the workflow) to pass the `_<ORGID>` values.
+Until then, the sync refuses to run two orgs against one GHL location rather
+than mixing their contacts.
 
 **GCP:** re-run `scripts/deploy/gcp-bootstrap.sh` once so the
 `mediflow-ghl-private-integration-token` Secret Manager placeholder exists. The
@@ -56,6 +65,9 @@ safe, nothing is deleted or overwritten).
   Exception: GHL *Do Not Disturb* turns agencyBRIDGE SMS/email opt-out **on** (never off).
 - Contacts without a first and last name in GHL (phone-only leads) are skipped
   and counted as "skipped".
+- A contact deleted in agencyBRIDGE is never brought back by the feed — whether
+  it was already linked, only matches a soft-deleted contact, or was hard-deleted
+  (its link is kept as a tombstone).
 
 ## Troubleshooting
 

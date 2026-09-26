@@ -68,6 +68,17 @@ type FetchLike = typeof fetch;
 
 const MAX_ATTEMPTS = 4;
 
+/** `Retry-After` is either delta-seconds or an HTTP-date (RFC 9110 §10.2.3). */
+export function parseRetryAfterMs(header: string | null, now: number = Date.now()): number | null {
+  if (!header) return null;
+  const secs = Number(header);
+  if (Number.isFinite(secs) && secs >= 0) return secs * 1000;
+  const at = Date.parse(header);
+  return Number.isFinite(at) ? Math.max(0, at - now) : null;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, Math.min(ms, 30_000)));
+
 export async function searchContacts(params: SearchParams, fetchImpl: FetchLike = fetch): Promise<SearchPage> {
   const body: Record<string, unknown> = {
     locationId: params.locationId,
@@ -81,24 +92,36 @@ export async function searchContacts(params: SearchParams, fetchImpl: FetchLike 
   else body.page = params.page ?? 1;
 
   for (let attempt = 1; ; attempt++) {
-    const res = await fetchImpl(`${GHL_API_BASE}/contacts/search`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${params.token}`,
-        Version: GHL_API_VERSION,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30_000),
-    });
+    let res: Response;
+    try {
+      res = await fetchImpl(`${GHL_API_BASE}/contacts/search`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.token}`,
+          Version: GHL_API_VERSION,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (err) {
+      // Network failure or our own timeout (TLS reset, DNS blip, AbortError):
+      // retry like a 5xx rather than abandoning the run.
+      if (attempt < MAX_ATTEMPTS) {
+        const waitMs = 1000 * 2 ** attempt;
+        logger.warn({ attempt, waitMs, error: err instanceof Error ? err.name : "unknown" }, "GHL search: network error, retrying");
+        await sleep(waitMs);
+        continue;
+      }
+      throw err;
+    }
 
     // Rate limit (GHL: burst 100 req / 10 s per location) or transient 5xx.
     if ((res.status === 429 || res.status >= 500) && attempt < MAX_ATTEMPTS) {
-      const retryAfter = Number(res.headers.get("retry-after"));
-      const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000 * 2 ** attempt;
+      const waitMs = parseRetryAfterMs(res.headers.get("retry-after")) ?? 1000 * 2 ** attempt;
       logger.warn({ status: res.status, attempt, waitMs }, "GHL search: retrying");
-      await new Promise((r) => setTimeout(r, Math.min(waitMs, 30_000)));
+      await sleep(waitMs);
       continue;
     }
 

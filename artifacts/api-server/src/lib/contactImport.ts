@@ -20,7 +20,7 @@
  * "merge" only fills blanks on the existing contact. An import never
  * overwrites data an agent already entered by hand.
  */
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -436,7 +436,13 @@ type Executor = typeof db | Tx;
 const LOOKUP_CHUNK = 500;
 
 /** Load the org's contacts that could match any row in `rows`. */
-export async function loadMatcher(orgId: string, rows: InterpretedContact[], exec: Executor = db): Promise<ContactMatcher> {
+export async function loadMatcher(
+  orgId: string,
+  rows: InterpretedContact[],
+  exec: Executor = db,
+  /** `deleted: true` matches against soft-deleted contacts instead of live ones. */
+  opts: { deleted?: boolean } = {},
+): Promise<ContactMatcher> {
   const matcher = new ContactMatcher();
   const hashes = rows.flatMap((r) => (r.mbi ? mbiHashesFor(r.mbi) : []));
   const emails = [...new Set(rows.map((r) => r.email?.toLowerCase()).filter((e): e is string => !!e))];
@@ -455,7 +461,7 @@ export async function loadMatcher(orgId: string, rows: InterpretedContact[], exe
   const found = new Map<string, { id: string; firstName: string; lastName: string; dob: Date | null; email: string | null; phone: string | null; medicareIdHash: Buffer | Uint8Array | null }>();
   const run = async (cond: ReturnType<typeof inArray>) => {
     const res = await exec.select(selectCols).from(contactsTable)
-      .where(and(eq(contactsTable.orgId, orgId), isNull(contactsTable.deletedAt), cond));
+      .where(and(eq(contactsTable.orgId, orgId), opts.deleted ? isNotNull(contactsTable.deletedAt) : isNull(contactsTable.deletedAt), cond));
     for (const r of res) found.set(r.id, r);
   };
   for (let i = 0; i < hashes.length; i += LOOKUP_CHUNK) await run(inArray(contactsTable.medicareIdHash, hashes.slice(i, i + LOOKUP_CHUNK)));

@@ -26,7 +26,7 @@
 import { and, eq, isNull, lt, or, sql, TransactionRollbackError } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db, contactsTable, externalContactLinksTable, ghlSyncStateTable } from "@workspace/db";
-import { fillBlanks, upsertContact, type Tx } from "../../contactImport";
+import { fillBlanks, loadMatcher, upsertContact, type Tx } from "../../contactImport";
 import { interpretPayloadContact } from "../payload";
 import { searchContacts, GHL_PAGE_LIMIT, type GhlContact } from "./client";
 import { logger } from "../../logger";
@@ -303,7 +303,9 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
   let contactId: string;
   let created = false;
   if (link) {
-    // A contact deleted in agencyBRIDGE stays deleted: never refill or re-flag it.
+    // A contact deleted in agencyBRIDGE stays deleted: never refill, re-flag or
+    // recreate it. A hard delete leaves the link as a tombstone (contactId null).
+    if (!link.contactId) return "skipped";
     const [target] = await tx.select({ deletedAt: contactsTable.deletedAt }).from(contactsTable)
       .where(and(eq(contactsTable.id, link.contactId), eq(contactsTable.orgId, orgId))).limit(1);
     if (!target || target.deletedAt) return "skipped";
@@ -312,6 +314,19 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
     await tx.update(externalContactLinksTable).set({ externalUpdatedAt })
       .where(eq(externalContactLinksTable.id, link.id));
   } else {
+    // Not linked yet. If the only person this matches is one the agency has
+    // soft-deleted, record a tombstone link and stop: syncing must not bring a
+    // deleted person back as a new live contact.
+    const live = (await loadMatcher(orgId, [contact], tx)).find(contact);
+    if (!live) {
+      const gone = (await loadMatcher(orgId, [contact], tx, { deleted: true })).find(contact);
+      if (gone) {
+        await tx.insert(externalContactLinksTable).values({
+          id: randomUUID(), orgId, source: GHL_SOURCE, externalId: gc.id, contactId: gone.match.id, externalUpdatedAt,
+        }).onConflictDoNothing();
+        return "skipped";
+      }
+    }
     // Run the dedupe merge in a savepoint: if it lands on a contact already
     // linked to a DIFFERENT GHL contact (duplicates inside GHL), undo the merge
     // and skip, rather than permanently fusing two GHL records into one person.

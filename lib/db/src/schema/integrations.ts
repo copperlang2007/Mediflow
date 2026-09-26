@@ -52,9 +52,11 @@ export const externalContactLinksTable = pgTable(
       .references(() => organizationsTable.id),
     source: text("source").notNull(),
     externalId: text("external_id").notNull(),
-    contactId: text("contact_id")
-      .notNull()
-      .references(() => contactsTable.id, { onDelete: "cascade" }),
+    /**
+     * Null once the contact is hard-deleted: the link stays as a tombstone so
+     * the feed never recreates a person the agency deleted.
+     */
+    contactId: text("contact_id").references(() => contactsTable.id, { onDelete: "set null" }),
     externalUpdatedAt: timestamp("external_updated_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

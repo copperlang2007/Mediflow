@@ -230,10 +230,10 @@ describe("GHL feed", () => {
 
   it("never updates or re-flags a contact deleted in agencyBRIDGE", async () => {
     const [link] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, "ghl-10"));
-    await tdb.update(contactsTable).set({ deletedAt: new Date(), city: null, optOutSms: false, optOutEmail: false }).where(eq(contactsTable.id, link!.contactId));
+    await tdb.update(contactsTable).set({ deletedAt: new Date(), city: null, optOutSms: false, optOutEmail: false }).where(eq(contactsTable.id, link!.contactId!));
     const r = await sync.runGhlSync(cfg(), { fetchImpl: fakeGhl([{ ...ghlContact(10), city: "Somewhere-New", dnd: true, dateUpdated: "2026-04-01T00:00:00.000Z" }]).impl });
     expect(r.skipped).toBe(1);
-    const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, link!.contactId));
+    const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, link!.contactId!));
     expect(c).toMatchObject({ city: null, optOutSms: false, optOutEmail: false });
     expect(c!.deletedAt).not.toBeNull();
   });
@@ -318,6 +318,27 @@ describe("GHL feed", () => {
     }
   });
 
+  it("does not recreate a person the agency soft-deleted, even when their GHL record was never linked", async () => {
+    const gone = await seedContact(tdb, { orgId: org.id, firstName: "Gone", lastName: "Person", email: "gone@example.com" });
+    await tdb.update(contactsTable).set({ deletedAt: new Date() }).where(eq(contactsTable.id, gone.id));
+    const r = await sync.runGhlSync(cfg(), { fetchImpl: fakeGhl([ghlContact(13000, { firstName: "Gone", lastName: "Person", email: "gone@example.com", dateUpdated: "2026-12-01T00:00:00.000Z" })]).impl });
+    expect(r).toMatchObject({ created: 0, skipped: 1 });
+    expect((await orgContacts()).filter((c) => c.lastName === "Person" && !c.deletedAt)).toHaveLength(0);
+    const [link] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, "ghl-13000"));
+    expect(link!.contactId).toBe(gone.id); // tombstone: later syncs stay skipped
+  });
+
+  it("does not recreate a hard-deleted contact (link survives as a tombstone)", async () => {
+    const [link] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, "ghl-11"));
+    await tdb.delete(contactsTable).where(eq(contactsTable.id, link!.contactId!));
+    const before = (await orgContacts()).length;
+    const r = await sync.runGhlSync(cfg(), { fetchImpl: fakeGhl([{ ...ghlContact(11), dateUpdated: "2026-12-02T00:00:00.000Z" }]).impl });
+    expect(r.skipped).toBe(1);
+    expect((await orgContacts()).length).toBe(before);
+    const [after] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, "ghl-11"));
+    expect(after!.contactId).toBeNull();
+  });
+
   it("gets past a bulk edit where more contacts share one timestamp than fit in a run", async () => {
     const org3 = await seedOrg(tdb, { id: "ghl-org-3" });
     process.env.GHL_SYNC_ORG_IDS = `${org.id},${org3.id}`;
@@ -399,6 +420,30 @@ describe("GHL multi-agency config safety", () => {
     } finally {
       for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
       Object.assign(process.env, saved);
+    }
+  });
+});
+
+describe("GHL client resilience", () => {
+  it("retries thrown network errors and honours an HTTP-date Retry-After", async () => {
+    const { searchContacts, parseRetryAfterMs } = await import("../../lib/integrations/ghl/client");
+    expect(parseRetryAfterMs("5")).toBe(5000);
+    expect(parseRetryAfterMs("Wed, 21 Oct 2026 07:28:10 GMT", Date.parse("Wed, 21 Oct 2026 07:28:00 GMT"))).toBe(10_000);
+    expect(parseRetryAfterMs("soon")).toBeNull();
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const flaky = (async () => {
+        calls++;
+        if (calls === 1) throw new TypeError("fetch failed: TLS reset");
+        return new Response(JSON.stringify({ contacts: [] }), { status: 200 });
+      }) as unknown as typeof fetch;
+      const p = searchContacts({ token: TOKEN, locationId: LOCATION, updatedSince: null }, flaky);
+      await vi.runAllTimersAsync();
+      await expect(p).resolves.toMatchObject({ contacts: [] });
+      expect(calls).toBe(2);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });
