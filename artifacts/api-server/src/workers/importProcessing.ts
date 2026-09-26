@@ -26,6 +26,13 @@ export async function importMondayWorker(payload: ImportJobPayload): Promise<voi
     return;
   }
 
+  // A redelivered job that already finished or was failed by startup cleanup
+  // must not re-run its inserts (Monday/GHL imports aren't idempotent).
+  if (job.status === "completed" || job.status === "failed") {
+    logger.warn({ jobId: payload.jobId, status: job.status }, "import-monday: job is not processing; skipped");
+    return;
+  }
+
   const opts = job.options as { rows?: Record<string, string>[]; mapping?: Record<string, string> } | null;
   if (!opts?.rows?.length) {
     logger.warn({ jobId: payload.jobId }, "import-monday: no rows in job options");
@@ -47,6 +54,13 @@ export async function importGhlWorker(payload: ImportJobPayload): Promise<void> 
 
   if (!job) {
     logger.warn({ jobId: payload.jobId }, "import-ghl: job not found");
+    return;
+  }
+
+  // A redelivered job that already finished or was failed by startup cleanup
+  // must not re-run its inserts (Monday/GHL imports aren't idempotent).
+  if (job.status === "completed" || job.status === "failed") {
+    logger.warn({ jobId: payload.jobId, status: job.status }, "import-ghl: job is not processing; skipped");
     return;
   }
 

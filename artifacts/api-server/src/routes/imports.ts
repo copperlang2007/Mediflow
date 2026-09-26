@@ -281,11 +281,13 @@ router.post(
 );
 
 async function persistProgress(jobId: string, processedRows: number, errorCount: number, errorList: unknown[]) {
-  await db.update(importJobsTable).set({
+  const alive = await db.update(importJobsTable).set({
     processedRows,
     errorCount,
     errors: errorList as Record<string, unknown>[],
-  }).where(and(eq(importJobsTable.id, jobId), eq(importJobsTable.status, "processing")));
+  }).where(and(eq(importJobsTable.id, jobId), eq(importJobsTable.status, "processing")))
+    .returning({ id: importJobsTable.id });
+  if (alive.length === 0) logger.warn({ jobId }, "imports: job is no longer processing; progress not recorded");
 }
 
 export async function processMondayImport(jobId: string, orgId: string, rows: Record<string, string>[], mapping: Record<string, string>) {
@@ -363,14 +365,16 @@ export async function processMondayImport(jobId: string, orgId: string, rows: Re
     }
   }
 
-  await db.update(importJobsTable).set({
+  const done = await db.update(importJobsTable).set({
     status: "completed",
     processedRows: rows.length,
     createdCount: created,
     errorCount: errors,
     errors: errorList as Record<string, unknown>[],
     completedAt: new Date(),
-  }).where(and(eq(importJobsTable.id, jobId), eq(importJobsTable.status, "processing")));
+  }).where(and(eq(importJobsTable.id, jobId), eq(importJobsTable.status, "processing")))
+    .returning({ id: importJobsTable.id });
+  if (done.length === 0) logger.warn({ jobId }, "imports: job was failed by cleanup before it finished; left as failed");
 }
 
 async function importMondayAgentRelations(get: (f: string) => string, orgId: string, agentId: string) {
@@ -737,11 +741,13 @@ export async function processGhlImport(jobId: string, orgId: string, rows: Recor
     }
   }
 
-  await db.update(importJobsTable).set({
+  const done = await db.update(importJobsTable).set({
     status: "completed", processedRows: rows.length, createdCount: created,
     updatedCount: updated, skippedCount: skipped, errorCount: errors,
     errors: errorList as Record<string, unknown>[], completedAt: new Date(),
-  }).where(and(eq(importJobsTable.id, jobId), eq(importJobsTable.status, "processing")));
+  }).where(and(eq(importJobsTable.id, jobId), eq(importJobsTable.status, "processing")))
+    .returning({ id: importJobsTable.id });
+  if (done.length === 0) logger.warn({ jobId }, "imports: job was failed by cleanup before it finished; left as failed");
 }
 
 async function createGhlDeal(orgId: string, contactId: string, pipelineStageRaw: string, allStages: { id: string; name: string; pipelineId: string }[]) {
