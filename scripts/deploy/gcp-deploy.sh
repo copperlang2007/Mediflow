@@ -164,6 +164,11 @@ OPTIONAL_ENV_FLAG=""
 # are joined with ";" here because "," separates --set-env-vars entries.
 [ -n "${GHL_SYNC_ORG_IDS:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}GHL_SYNC_ORG_IDS=${GHL_SYNC_ORG_IDS//,/;},"
 [ -n "${GHL_LOCATION_ID:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}GHL_LOCATION_ID=${GHL_LOCATION_ID},"
+# "," separates --set-env-vars entries; a value containing one would split into
+# malformed entries. Fail loudly instead of deploying a garbled environment.
+for v in EMAIL_FROM_ADDRESS CONTRACTING_EMAIL_FROM GHL_LOCATION_ID; do
+  case "${!v:-}" in *,*) echo "FATAL: ${v} must not contain a comma" >&2; exit 1 ;; esac
+done
 
 REQUIRED_SECRETS_FLAG="DATABASE_URL=mediflow-database-url:latest,\
 PHI_ENCRYPTION_KEY=mediflow-phi-encryption-key:latest,\

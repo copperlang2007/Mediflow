@@ -42,7 +42,7 @@ const TOKEN = "pit-test-token-123";
 const LOCATION = "loc-abc";
 
 /** Fake GHL: serves `store` sorted by dateUpdated, honoring the gte filter and paging. */
-function fakeGhl(store: GhlContact[], pageLimitOverride?: number) {
+function fakeGhl(store: GhlContact[], pageLimitOverride?: number, omitSearchAfter = false) {
   const calls: { headers: Record<string, string>; body: Record<string, any> }[] = [];
   const impl = (async (_url: string, init: RequestInit) => {
     const body = JSON.parse(String(init.body));
@@ -59,7 +59,8 @@ function fakeGhl(store: GhlContact[], pageLimitOverride?: number) {
     } else {
       start = ((body.page ?? 1) - 1) * limit;
     }
-    const contacts = sorted.slice(start, start + limit).map((c) => ({ ...c, searchAfter: [Date.parse(c.dateUpdated!), c.id] }));
+    const contacts = sorted.slice(start, start + limit)
+      .map((c) => (omitSearchAfter ? { ...c } : { ...c, searchAfter: [Date.parse(c.dateUpdated!), c.id] }));
     return new Response(JSON.stringify({ contacts, total: sorted.length }), { status: 200 });
   }) as unknown as typeof fetch;
   return { impl, calls };
@@ -227,6 +228,36 @@ describe("GHL feed", () => {
     await tdb.update(ghlSyncStateTable).set({ leaseToken: null, runningSince: null }).where(eq(ghlSyncStateTable.orgId, org.id));
   });
 
+  it("never updates or re-flags a contact deleted in agencyBRIDGE", async () => {
+    const [link] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, "ghl-10"));
+    await tdb.update(contactsTable).set({ deletedAt: new Date(), city: null, optOutSms: false, optOutEmail: false }).where(eq(contactsTable.id, link!.contactId));
+    const r = await sync.runGhlSync(cfg(), { fetchImpl: fakeGhl([{ ...ghlContact(10), city: "Somewhere-New", dnd: true, dateUpdated: "2026-04-01T00:00:00.000Z" }]).impl });
+    expect(r.skipped).toBe(1);
+    const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, link!.contactId));
+    expect(c).toMatchObject({ city: null, optOutSms: false, optOutEmail: false });
+    expect(c!.deletedAt).not.toBeNull();
+  });
+
+  it("without a searchAfter from GHL, continues by page number instead of restarting at page 1", async () => {
+    const org4 = await seedOrg(tdb, { id: "ghl-org-4" });
+    process.env.GHL_SYNC_ORG_IDS = `${org.id},${org4.id}`;
+    try {
+      const cfg4 = sync.ghlConfigFor(org4.id)!;
+      const ghl = fakeGhl(Array.from({ length: 450 }, (_, k) => ghlContact(7000 + k, { dateUpdated: "2026-08-15T12:00:00.000Z" })), undefined, true);
+      const statuses: string[] = [];
+      for (let run = 0; run < 3; run++) statuses.push((await sync.runGhlSync(cfg4, { fetchImpl: ghl.impl, maxPages: 2 })).status);
+      expect(statuses).toEqual(["more_pending", "more_pending", "ok"]);
+      expect(ghl.calls.map((c) => c.body.page)).toEqual([1, 2, 3, 4, 5]);
+      const links = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.orgId, org4.id));
+      expect(links).toHaveLength(450);
+      const [state] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org4.id));
+      expect(state!.cursorSearchAfter).toBeNull();
+      expect(state!.cursorUpdatedAt!.toISOString()).toBe("2026-08-15T12:00:00.000Z");
+    } finally {
+      process.env.GHL_SYNC_ORG_IDS = org.id;
+    }
+  });
+
   it("gets past a bulk edit where more contacts share one timestamp than fit in a run", async () => {
     const org3 = await seedOrg(tdb, { id: "ghl-org-3" });
     process.env.GHL_SYNC_ORG_IDS = `${org.id},${org3.id}`;
@@ -251,7 +282,8 @@ describe("GHL admin endpoints", () => {
   it("reports status without exposing the token", async () => {
     const res = await request(app).get("/api/integrations/ghl/status").set(withAuth(admin.id));
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ configured: true, locationId: LOCATION, lastStatus: "error" });
+    expect(res.body).toMatchObject({ configured: true, locationId: LOCATION, running: false });
+    expect(res.body.lastRunAt).not.toBeNull();
     expect(JSON.stringify(res.body)).not.toContain(TOKEN);
   });
 
