@@ -105,6 +105,20 @@ export const jobDeadLetterTotal = new Counter({
   registers: [metricsRegistry],
 });
 
+// ---- GoHighLevel feed -------------------------------------------------------
+
+/**
+ * GHL sync runs by outcome. Alert on a sustained error rate, e.g.
+ * `increase(ghl_sync_runs_total{status="error"}[1h]) >= 3` — the feed
+ * otherwise only surfaces failures in the admin status panel and Sentry.
+ */
+export const ghlSyncRunsTotal = new Counter({
+  name: "ghl_sync_runs_total",
+  help: "GoHighLevel contact feed runs, labelled by outcome",
+  labelNames: ["status"] as const,
+  registers: [metricsRegistry],
+});
+
 // ---- AI provider degradation ----------------------------------------------
 
 /**

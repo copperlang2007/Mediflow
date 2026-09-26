@@ -23,13 +23,14 @@
  *   GHL_PRIVATE_INTEGRATION_TOKEN[_<ORGID>]  sub-account Private Integration token (secret)
  *   GHL_LOCATION_ID[_<ORGID>]                GHL sub-account (location) id
  */
-import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, isNull, lt, or, sql, TransactionRollbackError } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db, contactsTable, externalContactLinksTable, ghlSyncStateTable } from "@workspace/db";
 import { fillBlanks, upsertContact, type Tx } from "../../contactImport";
 import { interpretPayloadContact } from "../payload";
 import { searchContacts, GHL_PAGE_LIMIT, type GhlContact } from "./client";
 import { logger } from "../../logger";
+import { ghlSyncRunsTotal } from "../../metrics";
 
 export const GHL_SOURCE = "gohighlevel";
 /** A run holding the lease longer than this is presumed dead and can be taken over. */
@@ -158,9 +159,11 @@ export async function runGhlSync(
       //  - with GHL's searchAfter tuple: advance the timestamp and keep the tuple;
       //  - without it: keep this run's filter and remember the next page number,
       //    so a continuation doesn't restart at page 1 of the same window.
-      if (searchAfter && cursor) {
-        await writeState({ cursorUpdatedAt: cursor, cursorSearchAfter: searchAfter, runningSince: new Date() });
-      } else if (!searchAfter) {
+      if (searchAfter) {
+        // Keep the tuple even when no contact on the page had a usable
+        // dateUpdated, so such a page is never re-read forever.
+        await writeState({ ...(cursor ? { cursorUpdatedAt: cursor } : {}), cursorSearchAfter: searchAfter, runningSince: new Date() });
+      } else {
         await writeState({ cursorUpdatedAt: updatedSince, cursorSearchAfter: { page: startPage + pages }, runningSince: new Date() });
       }
       if (page.contacts.length < GHL_PAGE_LIMIT) break;
@@ -181,9 +184,11 @@ export async function runGhlSync(
     });
 
     logger.info({ orgId, pages, ...totals, morePending }, "GHL sync: run finished");
+    ghlSyncRunsTotal.inc({ status: morePending ? "more_pending" : "ok" });
     return { status: morePending ? "more_pending" : "ok", ...totals, pages };
   } catch (err) {
     if (err instanceof LeaseLostError) {
+      ghlSyncRunsTotal.inc({ status: "lease_lost" });
       logger.warn({ orgId }, "GHL sync: lease was taken over by a newer run; stopping without writing state");
       return { status: "already_running", ...totals, pages };
     }
@@ -197,6 +202,7 @@ export async function runGhlSync(
       lastRunUpdated: totals.updated,
       lastRunSkipped: totals.skipped,
     }).where(mine);
+    ghlSyncRunsTotal.inc({ status: "error" });
     throw err;
   }
 }
@@ -249,7 +255,29 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
     await tx.update(externalContactLinksTable).set({ externalUpdatedAt })
       .where(eq(externalContactLinksTable.id, link.id));
   } else {
-    const result = await upsertContact(tx, orgId, contact, null);
+    // Run the dedupe merge in a savepoint: if it lands on a contact already
+    // linked to a DIFFERENT GHL contact (duplicates inside GHL), undo the merge
+    // and skip, rather than permanently fusing two GHL records into one person.
+    const result = await tx.transaction(async (sp) => {
+      const r = await upsertContact(sp, orgId, contact, null);
+      if (!r.created) {
+        const [other] = await sp.select({ externalId: externalContactLinksTable.externalId }).from(externalContactLinksTable)
+          .where(and(
+            eq(externalContactLinksTable.orgId, orgId),
+            eq(externalContactLinksTable.source, GHL_SOURCE),
+            eq(externalContactLinksTable.contactId, r.contactId),
+          )).limit(1);
+        if (other && other.externalId !== gc.id) {
+          logger.warn({ orgId, contactId: r.contactId }, "GHL sync: a second GHL contact matched an already-linked contact; skipped");
+          sp.rollback();
+        }
+      }
+      return r;
+    }).catch((err: unknown) => {
+      if (err instanceof TransactionRollbackError) return null;
+      throw err;
+    });
+    if (!result) return "skipped";
     contactId = result.contactId;
     created = result.created;
     await tx.insert(externalContactLinksTable).values({

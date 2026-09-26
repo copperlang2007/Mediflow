@@ -258,6 +258,36 @@ describe("GHL feed", () => {
     }
   });
 
+  it("does not fuse a second GHL contact onto a contact already linked to another GHL id", async () => {
+    // ghl-1 is already linked to First1 (email one@example.com). A different
+    // GHL record for the same person must not be merged into it too.
+    const before = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.orgId, org.id));
+    const r = await sync.runGhlSync(cfg(), { fetchImpl: fakeGhl([{ ...ghlContact(1), id: "ghl-dup-of-1", email: "one@example.com", city: "Elsewhere", dateUpdated: "2026-05-01T00:00:00.000Z" }]).impl });
+    expect(r.skipped).toBe(1);
+    const after = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.orgId, org.id));
+    expect(after).toHaveLength(before.length);
+    expect((await orgContacts()).find((c) => c.firstName === "First1")!.city).toBe("Dallas"); // merge rolled back
+  });
+
+  it("keeps GHL's paging tuple when a page has no usable dateUpdated", async () => {
+    const org5 = await seedOrg(tdb, { id: "ghl-org-5" });
+    process.env.GHL_SYNC_ORG_IDS = `${org.id},${org5.id}`;
+    try {
+      const cfg5 = sync.ghlConfigFor(org5.id)!;
+      const undated = Array.from({ length: 3 }, (_, k) => ({ ...ghlContact(9000 + k), dateUpdated: null }));
+      const impl = (async (_u: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body));
+        const contacts = body.searchAfter ? [] : undated.map((c) => ({ ...c, searchAfter: [0, c.id] }));
+        return new Response(JSON.stringify({ contacts }), { status: 200 });
+      }) as unknown as typeof fetch;
+      await sync.runGhlSync(cfg5, { fetchImpl: impl });
+      const [state] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org5.id));
+      expect(state!.cursorSearchAfter).toEqual([0, "ghl-9002"]);
+    } finally {
+      process.env.GHL_SYNC_ORG_IDS = org.id;
+    }
+  });
+
   it("gets past a bulk edit where more contacts share one timestamp than fit in a run", async () => {
     const org3 = await seedOrg(tdb, { id: "ghl-org-3" });
     process.env.GHL_SYNC_ORG_IDS = `${org.id},${org3.id}`;
