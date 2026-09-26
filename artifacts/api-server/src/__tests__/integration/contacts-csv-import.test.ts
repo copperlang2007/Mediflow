@@ -344,6 +344,10 @@ describe("review round 3", () => {
     expect(r.issues).toContainEqual(expect.objectContaining({ field: "row", severity: "error", message: expect.stringMatching(/^State looks like/) }));
     // A normal row in the same file is untouched.
     expect(interpretContactRow(parsed.rows[0]!, mapping, 2).contact).not.toBeNull();
+    // An informal abbreviation is a bad state, not a shifted row.
+    const fla = interpretContactRow({ First: "F", Last: "La", Address: "1 Palm", State: "Fla", ZIP: "32801" }, mapping, 9);
+    expect(fla.contact).not.toBeNull();
+    expect(fla.issues).toContainEqual(expect.objectContaining({ field: "stateCode", severity: "warning" }));
   });
 
   it("matches an existing carrier whose name contains an 's' (DB-side whitespace normalization)", async () => {
