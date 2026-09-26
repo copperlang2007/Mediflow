@@ -81,7 +81,7 @@ describe("EnrollHere webhook auth", () => {
     const prev = process.env.ENROLLHERE_WEBHOOK_SECRET;
     delete process.env.ENROLLHERE_WEBHOOK_SECRET;
     try {
-      expect((await withHeaderSecret(body)).status).toBe(401);
+      expect((await withHeaderSecret(body)).status).toBe(503);
     } finally {
       process.env.ENROLLHERE_WEBHOOK_SECRET = prev;
     }
@@ -264,6 +264,22 @@ describe("EnrollHere webhook processing", () => {
     const res = await request(app).post(url()).set("X-Webhook-Secret", SECRET).set("Content-Type", "application/vnd.enrollhere+json")
       .send(JSON.stringify({ call_id: "vnd-1", first_name: "V", last_name: "Nd" }));
     expect(res.status).toBe(415);
+  });
+
+  it("never stores the agent's email (user_email / rep_email) as the contact's", async () => {
+    const res = await withHeaderSecret({ call_id: "ue-1", first_name: "Bob", last_name: "Beneficiary", phone: "5125550100", user_email: "closer@agency.example" });
+    const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, res.body.contactId));
+    expect(c).toMatchObject({ email: null, assignedAgentId: agent.id });
+    const res2 = await withHeaderSecret({ call_id: "re-1", first_name: "Rae", last_name: "Beneficiary", rep_email: "closer@agency.example", rep_phone: "5125559999" });
+    const [c2] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, res2.body.contactId));
+    expect(c2).toMatchObject({ email: null, phone: null, assignedAgentId: agent.id });
+  });
+
+  it("ignores a 'caller' block's phone regardless of JSON key order", async () => {
+    const raw = '{"caller":{"phone":"18005550000","name":"Support Line"},"first_name":"Top","last_name":"Levelbug","phone":"5125550555","call_id":"ord-1"}';
+    const res = await request(app).post(url()).set("X-Webhook-Secret", SECRET).set("Content-Type", "application/json").send(raw);
+    const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, res.body.contactId));
+    expect(c!.phone).toBe("+15125550555");
   });
 });
 
