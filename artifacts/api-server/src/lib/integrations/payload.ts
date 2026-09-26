@@ -65,7 +65,11 @@ function flattenInto(
   /** At the top level, which nested objects may be descended into (default: all). */
   nestAllowed: (key: string) => boolean = () => true,
 ): void {
-  const inAddress = /(^|_)(address|mailing_address|home_address|residential_address)$/.test(prefix);
+  // An address block's parts become the contact's own city/state/ZIP — but not
+  // when the block belongs to the agent (contact.agent.address): those keep
+  // their agent_ prefix and are dropped with the other agent fields.
+  const inAddress = /(^|_)(address|mailing_address|home_address|residential_address)$/.test(prefix)
+    && !/(^|_)(agent|assigned_agent|writing_agent|user|rep|owner)_/.test(prefix);
   for (const [rawKey, value] of Object.entries(obj)) {
     const key = normalizeKey(rawKey);
     const full = prefix ? `${prefix}_${key}` : key;
