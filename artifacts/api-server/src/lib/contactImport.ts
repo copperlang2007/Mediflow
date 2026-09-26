@@ -96,6 +96,14 @@ export function suggestContactField(header: string): string {
   if (h.includes("phone") || h === "mobile" || h === "cell") return "phone";
   if (h === "dob" || h.includes("birth")) return "dob";
   if (h.includes("medicare") || h === "mbi" || h === "hicn" || h === "medicare_id") return "medicareId";
+  // "Address City" / "address_zip" are parts of an address, not the street line.
+  if (h.startsWith("address_") || h.startsWith("mailing_")) {
+    const part = h.replace(/^(mailing_)?(address_)?/, "");
+    if (part === "city" || part === "town") return "city";
+    if (part === "state" || part === "state_code" || part === "st") return "stateCode";
+    if (part === "county") return "county";
+    if (part.includes("zip") || part.includes("postal")) return "zipCode";
+  }
   if (h.startsWith("address") || h.startsWith("street") || h === "addr" || h === "addr1") return h.endsWith("2") ? "" : "address1";
   if (h === "city" || h === "town") return "city";
   if (h === "county") return "county";
@@ -715,6 +723,9 @@ export async function upsertContact(
   c: InterpretedContact,
   agentId: string | null,
 ): Promise<{ contactId: string; created: boolean; matchedOn: string | null; warnings: { field: string; message: string }[] }> {
+  // Serialize match-then-insert per org: without it, two deliveries for the
+  // same new person can both see "no match" and each create a contact.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`contact-upsert:${orgId}`}))`);
   const matcher = await loadMatcher(orgId, [c], tx);
   const hit = matcher.find(c);
   if (hit) {
