@@ -42,7 +42,7 @@ type ValidationResponse = {
   duplicateCount?: number;
   enrollmentCount?: number;
 };
-type ImportJob = { id: string; importType: string; status: string; totalRows: number; processedRows: number; createdCount: number; updatedCount: number; skippedCount: number; errorCount: number; fileName: string | null; createdAt: string; completedAt: string | null };
+type ImportJob = { id: string; importType: string; status: string; totalRows: number; processedRows: number; createdCount: number; updatedCount: number; skippedCount: number; errorCount: number; warningCount?: number; fileName: string | null; createdAt: string; completedAt: string | null };
 type ProgressEvent = { status: string; processed: number; total: number; errorCount: number };
 
 const SKIP_FIELD_VALUE = "__skip_field__";
@@ -624,9 +624,12 @@ function ImportHistoryTab() {
                       ? <span className="text-red-500">{job.errorCount.toLocaleString()}</span>
                       : <span className="text-muted-foreground">0</span>
                     }
+                    {(job.warningCount ?? 0) > 0 && (
+                      <span className="block text-xs text-yellow-700">{job.warningCount!.toLocaleString()} warning{job.warningCount === 1 ? "" : "s"}</span>
+                    )}
                   </TableCell>
                   <TableCell>
-                    {job.errorCount > 0 && (
+                    {(job.errorCount > 0 || (job.warningCount ?? 0) > 0) && (
                       <Button variant="ghost" size="sm" className="h-7 text-xs" asChild>
                         <a href={`${base}/api/imports/${job.id}/errors.csv`} download>
                           <Download className="h-3.5 w-3.5 mr-1" /> Errors
