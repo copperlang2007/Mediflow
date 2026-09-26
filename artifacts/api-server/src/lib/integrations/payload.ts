@@ -37,6 +37,9 @@ function scalar(v: Json): string | null {
   return null;
 }
 
+const ADDRESS_BLOCK = /^(address|mailing_address|home_address|residential_address)$/;
+const AGENT_BLOCK = /^(agent|assigned_agent|writing_agent|user|rep|owner)$/;
+
 /** Leaves of an `address` block that name a specific contact field. */
 const ADDRESS_PARTS: Record<string, string> = {
   street: "address1", street1: "address1", street_1: "address1", line1: "address1", line_1: "address1",
@@ -53,7 +56,14 @@ const ADDRESS_PARTS: Record<string, string> = {
  * their plain field name ONLY (`address.city` → `city`, `address.street` →
  * `address1`): a prefixed `address_city` would be read as a street address.
  */
-function flattenInto(out: Record<string, string>, obj: Record<string, Json>, prefix = "", depth = 0): void {
+function flattenInto(
+  out: Record<string, string>,
+  obj: Record<string, Json>,
+  prefix = "",
+  depth = 0,
+  /** At the top level, which nested objects may be descended into (default: all). */
+  nestAllowed: (key: string) => boolean = () => true,
+): void {
   const inAddress = /(^|_)(address|mailing_address|home_address|residential_address)$/.test(prefix);
   for (const [rawKey, value] of Object.entries(obj)) {
     const key = normalizeKey(rawKey);
@@ -66,7 +76,7 @@ function flattenInto(out: Record<string, string>, obj: Record<string, Json>, pre
       } else if (!(full in out)) {
         out[full] = s;
       }
-    } else if (isObject(value) && depth < 2) {
+    } else if (isObject(value) && depth < 2 && (depth > 0 || nestAllowed(key))) {
       flattenInto(out, value, full, depth + 1);
     }
   }
@@ -96,7 +106,14 @@ export function flattenPayload(
       }
     }
   };
-  const tops = () => { for (const root of roots) flattenInto(out, root); };
+  // For person fields, top-level nested objects are only read if they are an
+  // address or an agent block. Anything else (e.g. a `caller` call-leg block
+  // with a support-line phone) could otherwise surface as `caller_phone` and be
+  // taken for the person's phone, depending only on JSON key order.
+  const personNest = (key: string) => ADDRESS_BLOCK.test(key) || AGENT_BLOCK.test(key);
+  const tops = () => {
+    for (const root of roots) flattenInto(out, root, "", 0, order === "event-only" ? () => true : personNest);
+  };
   // `event-only` never flattens person blocks unprefixed, so an event without
   // its own id can't borrow `contact.id` (it would appear only as `contact_id`).
   if (order === "event-only") tops();

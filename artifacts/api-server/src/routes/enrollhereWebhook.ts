@@ -56,7 +56,7 @@ export function resolveEnrollHereSecret(orgId: string): string | undefined {
   return process.env[key]?.trim() || process.env.ENROLLHERE_WEBHOOK_SECRET?.trim() || undefined;
 }
 
-type AuthResult = { ok: true } | { ok: false; status: 401 | 403; reason: string };
+type AuthResult = { ok: true } | { ok: false; status: 401 | 403 | 503; reason: string };
 
 function constantTimeEqual(a: string, b: string): boolean {
   const ha = crypto.createHash("sha256").update(a).digest();
@@ -68,7 +68,9 @@ export function authenticate(req: RawBodyRequest, orgId: string): AuthResult {
   const secret = resolveEnrollHereSecret(orgId);
   if (!secret) {
     logger.error({ orgId }, "EnrollHere webhook: no secret configured — rejecting");
-    return { ok: false, status: 401, reason: "unconfigured" };
+    // 503, like the Stripe receiver: a server-side setup gap, so the sender
+    // retries once the secret is configured instead of dropping the event.
+    return { ok: false, status: 503, reason: "unconfigured" };
   }
   const header = (name: string) => {
     const v = req.headers[name];
@@ -185,6 +187,14 @@ router.post(
     }
     const agentEmail = pick(flat, AGENT_EMAIL_KEYS);
     if (agentEmail && !flat.assigned_agent_email) flat.assigned_agent_email = agentEmail;
+    // Agent/user/rep fields describe the agent, not the beneficiary. Remove
+    // them so e.g. `user_email` / `rep_phone` can't be read as the contact's
+    // own email or phone (the header recognizer maps anything with "email").
+    for (const key of Object.keys(flat)) {
+      if (key !== "assigned_agent_email" && (AGENT_EMAIL_KEYS.includes(key) || /^(agent|user|rep|owner|writing_agent)_/.test(key))) {
+        delete flat[key];
+      }
+    }
 
     const interpreted = interpretPayloadContact(flat);
     const contact = interpreted.contact;

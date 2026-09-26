@@ -24,6 +24,9 @@ The shared secret is `ENROLLHERE_WEBHOOK_SECRET` (or a per-agency
 1. **Signed (preferred):** `X-MB-Signature: t=<unix seconds>,v1=<hex>` where
    `v1 = HMAC-SHA256(secret, "<t>.<raw body>")`. Rejected if older than 5 minutes.
 2. **Static header:** `X-Webhook-Secret: <secret>` or `Authorization: Bearer <secret>`.
+   This has **no replay window** (a captured request stays valid until the
+   secret changes), so prefer option 1 whenever the sender can sign; if the
+   static header is used, rotate the secret periodically.
 
 Secrets in the URL/query string are deliberately not accepted (they end up in logs).
 With no secret configured, every request is rejected.
@@ -54,6 +57,7 @@ fields are filled on an existing contact. Medicare IDs are stored encrypted.
 | 200 `{ duplicate: false, contactId, contactCreated, activityId }` | Logged |
 | 200 `{ duplicate: true }` | Same call id already received — nothing done |
 | 401 / 403 | Bad, missing, or stale credential |
+| 503 | Webhook secret not configured on our side yet — retry later |
 | 404 | Unknown org id |
 | 422 `{ fieldsReceived }` | No contact name in the payload — lists the field names that did arrive |
 | 500 | Temporary failure — safe to retry |
