@@ -853,6 +853,12 @@ router.post(
 
       res.json({ jobId, totalRows: rows.length });
     } catch (err) {
+      // If the job row was written before the failure, don't leave its queued
+      // rows (plaintext PHI) behind.
+      await db.update(importJobsTable)
+        .set({ status: "failed", options: sql`${importJobsTable.options} - 'rows'` })
+        .where(eq(importJobsTable.id, jobId))
+        .catch(() => undefined);
       logger.error({ err, jobId }, "imports: failed to create CSV contact import");
       captureWorkerError(err, { worker: "imports", route: "contacts/confirm" });
       res.status(500).json({ error: "Could not create the import. Please retry or contact support." });

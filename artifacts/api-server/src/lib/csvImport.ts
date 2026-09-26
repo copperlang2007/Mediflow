@@ -293,9 +293,16 @@ export function parseFlexibleDate(raw: string, twoDigitYear: "past" | "2000s" = 
     if (match[3]!.length === 2) {
       const now = new Date().getUTCFullYear();
       y += 2000;
-      // A birth date in a two-digit year that would make the person a minor
-      // is a 1900s date (5/5/25 → 1925 for a Medicare beneficiary, not 2025).
-      if (twoDigitYear === "past" && y > now - 18) y -= 100;
+      if (twoDigitYear === "past") {
+        // Pick the century that gives a plausible adult age (18–110):
+        // 5/5/25 → 1925, 3/7/50 → 1950, 5/5/05 → 2005. When neither century
+        // does (5/5/10 → 16 or 116 years old), don't guess: return null so
+        // the caller asks for a four-digit year. Under-65 beneficiaries
+        // (SSDI, ESRD, ALS) exist, so "always 19xx" would be wrong too.
+        const plausible = (year: number) => now - year >= 18 && now - year <= 110;
+        if (plausible(y)) { /* keep 20xx */ } else if (plausible(y - 100)) y -= 100;
+        else return null;
+      }
     }
   } else if ((match = s.match(/^\d{5}$/))) {
     // Excel serial date (days since 1899-12-30), plausible range 1900–2100.

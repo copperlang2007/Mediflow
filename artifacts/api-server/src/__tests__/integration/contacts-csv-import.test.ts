@@ -348,3 +348,31 @@ describe("review round 3", () => {
     expect(enr!.carrierId).toBe("carrier-bcbs");
   });
 });
+
+describe("review round 4", () => {
+  it("imports a row with two unrelated typos (bad email + bad DOB) with those fields blanked", async () => {
+    const { interpretContactRow } = await import("../../lib/contactImport");
+    const r = interpretContactRow({ F: "Bob", L: "Jones", E: "bob@acme", D: "unknown" }, { F: "firstName", L: "lastName", E: "email", D: "dob" }, 2);
+    expect(r.contact).toMatchObject({ firstName: "Bob", email: null, dob: null });
+    expect(r.issues.every((i) => i.severity === "warning")).toBe(true);
+  });
+
+  it("still skips the classic shift (State gets the city, ZIP gets the state)", async () => {
+    const { interpretContactRow } = await import("../../lib/contactImport");
+    const r = interpretContactRow({ F: "J", L: "R", A: "9 Pine St", C: "Apt2", S: "Austin", Z: "TX" }, { F: "firstName", L: "lastName", A: "address1", C: "city", S: "stateCode", Z: "zipCode" }, 2);
+    expect(r.contact).toBeNull();
+  });
+
+  it("matches carrier names that differ only by a non-breaking space or case of accented letters", async () => {
+    await tdb.insert(carriersTable).values({ id: "carrier-nbsp", orgId: org.id, name: "Mutual\u00A0of Omaha" });
+    const file = "First Name,Last Name,DOB,Carrier,Plan Type,Effective Date\nNbsp,Case,3/3/1947,MUTUAL OF OMAHA,supp,1/1/2026\n";
+    const up = await request(app).post("/api/imports/contacts/upload").set(withAuth(admin.id)).attach("file", Buffer.from(file), "m.csv");
+    const res = await request(app).post("/api/imports/contacts/confirm").set(withAuth(admin.id))
+      .attach("file", Buffer.from(file), "m.csv").field("mapping", JSON.stringify(up.body.suggestedMapping));
+    await worker({ jobId: res.body.jobId });
+    const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.lastName, "Case"));
+    const [enr] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.contactId, c!.id));
+    expect(enr!.carrierId).toBe("carrier-nbsp");
+  });
+});
+
