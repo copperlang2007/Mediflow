@@ -10,6 +10,7 @@
  *    export-anomaly-check        daily 02:15 UTC
  *    dialer-reconcile            every 15 min (missed-webhook recovery, §5.4)
  *    lead-callback-sweep         every 5 min (callback SLA queue re-attempt)
+ *    ghl-sync                    every 15 min (GoHighLevel contact feed; also ad-hoc backfill)
  *    import-rows-sweep           hourly (drop queued import rows / PHI of finished or dead jobs)
  *    integration-events-prune    daily 03:10 UTC (webhook idempotency ledger > 90 days)
  *
@@ -105,6 +106,9 @@ export const JOB_NAMES = {
   // Oct 1 cutoff) create one "set the annual review appointment" to-do per
   // current MA member, assigned to their agent, due Sept 30. Idempotent.
   AEP_RENEWAL_REVIEW: "aep-renewal-review",
+  // GoHighLevel contact feed: every 15 min for each configured org, and
+  // ad-hoc from the admin "sync now / full backfill" endpoint.
+  GHL_SYNC: "ghl-sync",
   // Import workers (ad-hoc, enqueued from import routes)
   IMPORT_MONDAY: "import-monday",
   IMPORT_GHL: "import-ghl",
@@ -187,9 +191,19 @@ const RETRY_OVERRIDES: Partial<
  * Builds the `createQueue()` options for a job: its retry policy plus the
  * shared dead-letter queue so exhausted-retry failures are captured.
  */
+/**
+ * Per-queue job expiry. pg-boss re-dispatches a job still running past its
+ * expiry (default 15 min). A GHL backfill run may legitimately hold its
+ * 30-minute DB lease, so its queue expires after 40.
+ */
+const EXPIRY_OVERRIDES: Partial<Record<JobName, number>> = {
+  [JOB_NAMES.GHL_SYNC]: 40 * 60,
+};
+
 function queueOptions(name: JobName): Omit<Queue, "name"> {
   return {
     ...(RETRY_OVERRIDES[name] ?? DEFAULT_RETRY),
+    ...(EXPIRY_OVERRIDES[name] ? { expireInSeconds: EXPIRY_OVERRIDES[name] } : {}),
     deadLetter: DEAD_LETTER_QUEUE,
   };
 }
@@ -412,6 +426,9 @@ export async function startWorkers(): Promise<void> {
   // MA member's review appointment can be set in time. Singleton; the pass is
   // idempotent (deduped per (season-year, contact)), so a re-run is a no-op.
   await boss.schedule(JOB_NAMES.AEP_RENEWAL_REVIEW, "0 6 1 9 *", {}, { tz: "UTC" });
+  // GoHighLevel contact feed — every 15 minutes, offset from the dialer
+  // reconcile. A no-op when no org is configured. Incremental and idempotent.
+  await boss.schedule(JOB_NAMES.GHL_SYNC, "7,22,37,52 * * * *", {}, { tz: "UTC" });
   // Import-row PHI sweep — hourly at :17. Idempotent.
   await boss.schedule(JOB_NAMES.IMPORT_ROWS_SWEEP, "17 * * * *", {}, { tz: "UTC" });
   // Webhook idempotency ledger prune — daily 03:10 UTC. Idempotent.
@@ -689,6 +706,17 @@ export async function startWorkers(): Promise<void> {
     JOB_NAMES.AEP_RENEWAL_REVIEW,
     { batchSize: 1, localConcurrency: 1 },
     aepRenewalReviewHandler,
+  );
+
+  const ghlSyncHandler: WorkHandler<{ orgId?: string; full?: boolean }> = async (jobs) => {
+    const { ghlSyncWorker } = await import("../workers/ghlSync");
+    for (const job of jobs) await ghlSyncWorker(job.data);
+  };
+  // One at a time: runs for the same org are also serialized by a DB lease.
+  await boss.work<{ orgId?: string; full?: boolean }>(
+    JOB_NAMES.GHL_SYNC,
+    { batchSize: 1, localConcurrency: 1 },
+    ghlSyncHandler,
   );
 
   const importRowsSweepHandler: WorkHandler<Record<string, never>> = async () => {
