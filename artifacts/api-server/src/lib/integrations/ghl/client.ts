@@ -77,7 +77,10 @@ export function parseRetryAfterMs(header: string | null, now: number = Date.now(
   return Number.isFinite(at) ? Math.max(0, at - now) : null;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, Math.min(ms, 30_000)));
+/** Longer server-requested waits end the run instead of blocking the worker. */
+const MAX_HONORED_RETRY_AFTER_MS = 60_000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, Math.min(ms, MAX_HONORED_RETRY_AFTER_MS)));
 
 export async function searchContacts(params: SearchParams, fetchImpl: FetchLike = fetch): Promise<SearchPage> {
   const body: Record<string, unknown> = {
@@ -119,7 +122,18 @@ export async function searchContacts(params: SearchParams, fetchImpl: FetchLike 
 
     // Rate limit (GHL: burst 100 req / 10 s per location) or transient 5xx.
     if ((res.status === 429 || res.status >= 500) && attempt < MAX_ATTEMPTS) {
-      const waitMs = parseRetryAfterMs(res.headers.get("retry-after")) ?? 1000 * 2 ** attempt;
+      const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
+      if (retryAfterMs !== null && retryAfterMs > MAX_HONORED_RETRY_AFTER_MS) {
+        // A long cooldown (e.g. the daily quota): retrying sooner just burns
+        // attempts and can extend the ban. End this run; the next scheduled
+        // run resumes from the saved cursor.
+        await res.body?.cancel().catch(() => undefined);
+        throw new GhlApiError(
+          `GHL rate limit: HTTP ${res.status}, retry after ${Math.ceil(retryAfterMs / 1000)}s — the next scheduled sync will resume where this one stopped`,
+          res.status,
+        );
+      }
+      const waitMs = retryAfterMs ?? 1000 * 2 ** attempt;
       logger.warn({ status: res.status, attempt, waitMs }, "GHL search: retrying");
       await sleep(waitMs);
       continue;

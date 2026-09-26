@@ -258,6 +258,29 @@ describe("GHL feed", () => {
     }
   });
 
+  it("skips a contact that fails to save instead of stalling the feed, and tolerates non-string tags", async () => {
+    const org7 = await seedOrg(tdb, { id: "ghl-org-7" });
+    process.env.GHL_SYNC_ORG_IDS = `${org.id},${org7.id}`;
+    try {
+      const cfg7 = ({ orgId: org7.id, token: TOKEN, locationId: `loc-${org7.id}` });
+      const ghl = fakeGhl([
+        ghlContact(8001, { tags: [42 as unknown as string, " vip ", null as unknown as string] }),
+        // Postgres rejects NUL in text: this contact cannot be written.
+        ghlContact(8002, { firstName: "Bad\u0000Name" }),
+        ghlContact(8003),
+      ]);
+      const res = await sync.runGhlSync(cfg7, { fetchImpl: ghl.impl });
+      expect(res).toMatchObject({ status: "ok", created: 2, failed: 1 });
+      const contacts = await tdb.select().from(contactsTable).where(eq(contactsTable.orgId, org7.id));
+      expect(contacts.map((c) => c.firstName).sort()).toEqual(["First8001", "First8003"]);
+      expect(contacts.find((c) => c.firstName === "First8001")!.tags).toEqual(["vip"]);
+      const [state] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org7.id));
+      expect(state!.cursorUpdatedAt!.toISOString()).toBe(ghlContact(8003).dateUpdated);
+    } finally {
+      process.env.GHL_SYNC_ORG_IDS = org.id;
+    }
+  });
+
   it("does not fuse a second GHL contact onto a contact already linked to another GHL id", async () => {
     // ghl-1 is already linked to First1 (email one@example.com). A different
     // GHL record for the same person must not be merged into it too.
@@ -446,5 +469,16 @@ describe("GHL client resilience", () => {
       vi.useRealTimers();
     }
   });
-});
 
+  it("ends the run on a long Retry-After instead of burning retries", async () => {
+    const { searchContacts } = await import("../../lib/integrations/ghl/client");
+    let calls = 0;
+    const limited = (async () => {
+      calls++;
+      return new Response("slow down", { status: 429, headers: { "Retry-After": "3600" } });
+    }) as unknown as typeof fetch;
+    await expect(searchContacts({ token: TOKEN, locationId: LOCATION, updatedSince: null }, limited))
+      .rejects.toThrow(/retry after 3600s/);
+    expect(calls).toBe(1);
+  });
+});

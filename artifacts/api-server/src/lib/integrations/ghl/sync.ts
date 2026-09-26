@@ -35,6 +35,8 @@ import { ghlSyncRunsTotal } from "../../metrics";
 export const GHL_SOURCE = "gohighlevel";
 /** A run holding the lease longer than this is presumed dead and can be taken over. */
 const LEASE_MINUTES = 30;
+/** Consecutive per-contact save failures before a run gives up (likely a DB problem, not bad data). */
+const MAX_CONSECUTIVE_CONTACT_FAILURES = 5;
 /** Per-run page cap (100 contacts/page). A larger backfill continues in the next job. */
 export const DEFAULT_MAX_PAGES = 50;
 
@@ -126,6 +128,8 @@ export interface GhlSyncResult {
   created: number;
   updated: number;
   skipped: number;
+  /** Contacts that failed to save and were skipped (also counted in `skipped`). */
+  failed: number;
   pages: number;
 }
 
@@ -150,7 +154,7 @@ export async function runGhlSync(
       or(isNull(ghlSyncStateTable.runningSince), lt(ghlSyncStateTable.runningSince, leaseCutoff)),
     ))
     .returning();
-  if (!lease) return { status: "already_running", created: 0, updated: 0, skipped: 0, pages: 0 };
+  if (!lease) return { status: "already_running", created: 0, updated: 0, skipped: 0, failed: 0, pages: 0 };
 
   const mine = and(eq(ghlSyncStateTable.orgId, orgId), eq(ghlSyncStateTable.leaseToken, token));
   /** Write state only while we still hold the lease; throws if it was taken over. */
@@ -177,7 +181,8 @@ export async function runGhlSync(
   }
 
   const updatedSince = cursorUpdatedAt;
-  const totals = { created: 0, updated: 0, skipped: 0 };
+  const totals = { created: 0, updated: 0, skipped: 0, failed: 0 };
+  let consecutiveFailures = 0;
   let pages = 0;
   let morePending = false;
   let runMax: Date | null = null;
@@ -195,7 +200,24 @@ export async function runGhlSync(
       pages++;
       let cursor: Date | null = null;
       for (const gc of page.contacts) {
-        const outcome = await db.transaction((tx) => syncOneContact(tx, orgId, gc));
+        let outcome: "created" | "updated" | "skipped";
+        try {
+          outcome = await db.transaction((tx) => syncOneContact(tx, orgId, gc));
+          consecutiveFailures = 0;
+        } catch (err) {
+          // One malformed contact must not pin the cursor and stall every
+          // later run. Skip it (it is re-read whenever GHL updates it again).
+          // A streak of failures is more likely the database than the data:
+          // stop rather than advance the cursor past contacts never written.
+          if (err instanceof LeaseLostError || ++consecutiveFailures >= MAX_CONSECUTIVE_CONTACT_FAILURES) throw err;
+          const code = (err as { code?: unknown })?.code;
+          logger.warn(
+            { orgId, ghlContactId: gc.id, error: err instanceof Error ? err.name : "unknown", code: typeof code === "string" ? code : undefined },
+            "GHL sync: skipped a contact that failed to save",
+          );
+          outcome = "skipped";
+          totals.failed++;
+        }
         totals[outcome]++;
         const updated = gc.dateUpdated ? new Date(gc.dateUpdated) : null;
         if (updated && !Number.isNaN(updated.getTime()) && (!cursor || updated > cursor)) cursor = updated;
@@ -289,7 +311,7 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
   const contact = interpreted.contact;
   // GHL allows phone-only leads; a contact here needs a first and last name.
   if (!contact || !gc.id) return "skipped";
-  contact.tags = [...new Set([...contact.tags, ...(gc.tags ?? []).map((t) => t.trim()).filter(Boolean)])];
+  contact.tags = [...new Set([...contact.tags, ...(Array.isArray(gc.tags) ? gc.tags : []).filter((t): t is string => typeof t === "string").map((t) => t.trim()).filter(Boolean)])];
   contact.leadSource ??= "GoHighLevel";
   if (gc.dnd) contact.optOut = true;
   const externalUpdatedAt = gc.dateUpdated ? new Date(gc.dateUpdated) : null;
