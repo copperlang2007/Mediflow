@@ -11,7 +11,7 @@
  * retry, which avoids stacking pg-boss retries on top of the schedule.
  */
 import { enqueue, JOB_NAMES } from "../lib/jobs";
-import { ghlConfigFor, ghlConfigs, runGhlSync } from "../lib/integrations/ghl/sync";
+import { ghlConfigFor, ghlConfigs, requestFullResync, runGhlSync } from "../lib/integrations/ghl/sync";
 import { logger } from "../lib/logger";
 import { captureWorkerError } from "../lib/sentry";
 
@@ -19,6 +19,10 @@ export interface GhlSyncPayload {
   orgId?: string;
   full?: boolean;
 }
+
+/** At most one Sentry event per org per hour for a failure that repeats every tick. */
+const CAPTURE_COOLDOWN_MS = 60 * 60 * 1000;
+const lastCapturedAt = new Map<string, number>();
 
 export async function ghlSyncWorker(payload: GhlSyncPayload = {}): Promise<void> {
   const configs = payload.orgId ? [ghlConfigFor(payload.orgId)].filter((c) => c !== null) : ghlConfigs();
@@ -31,16 +35,23 @@ export async function ghlSyncWorker(payload: GhlSyncPayload = {}): Promise<void>
   await Promise.all(configs.map(async (cfg) => {
     try {
       const result = await runGhlSync(cfg, { full: payload.full });
+      lastCapturedAt.delete(cfg.orgId);
       if (result.status === "more_pending") {
         await enqueue(JOB_NAMES.GHL_SYNC, { orgId: cfg.orgId });
       } else if (result.status === "already_running" && payload.full) {
-        // A requested full re-sync must not be dropped because a run was in
-        // progress: try again once that run has had time to finish.
-        await enqueue(JOB_NAMES.GHL_SYNC, { orgId: cfg.orgId, full: true }, { startAfter: 120 });
+        // Don't drop the request, and don't queue another job per attempt:
+        // flag it, and the active run starts the re-sync when it finishes.
+        await requestFullResync(cfg);
       }
     } catch (err) {
       logger.error({ err, orgId: cfg.orgId }, "GHL sync: run failed");
-      captureWorkerError(err, { worker: "ghl-sync", orgId: cfg.orgId });
+      // The error is already on the admin status panel; a bad token would
+      // otherwise send a Sentry event every 15 minutes.
+      const last = lastCapturedAt.get(cfg.orgId) ?? 0;
+      if (Date.now() - last > CAPTURE_COOLDOWN_MS) {
+        captureWorkerError(err, { worker: "ghl-sync", orgId: cfg.orgId });
+        lastCapturedAt.set(cfg.orgId, Date.now());
+      }
     }
   }));
 }

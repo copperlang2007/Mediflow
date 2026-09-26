@@ -159,8 +159,10 @@ export async function runGhlSync(
   const mine = and(eq(ghlSyncStateTable.orgId, orgId), eq(ghlSyncStateTable.leaseToken, token));
   /** Write state only while we still hold the lease; throws if it was taken over. */
   const writeState = async (patch: Partial<typeof ghlSyncStateTable.$inferInsert>) => {
-    const done = await db.update(ghlSyncStateTable).set(patch).where(mine).returning({ orgId: ghlSyncStateTable.orgId });
+    const done = await db.update(ghlSyncStateTable).set(patch).where(mine)
+      .returning({ fullResyncRequestedAt: ghlSyncStateTable.fullResyncRequestedAt });
     if (done.length === 0) throw new LeaseLostError();
+    return done[0]!;
   };
 
   // A full re-sync or a different sub-account starts from the top — reset only
@@ -173,12 +175,12 @@ export async function runGhlSync(
   let searchAfter = Array.isArray(stored) ? stored : null;
   let startPage = stored && !Array.isArray(stored) && Number.isInteger(stored.page) ? stored.page : 1;
   let backfillCompletedAt = lease.backfillCompletedAt;
-  if (opts.full || lease.locationId !== locationId) {
+  if (opts.full || lease.fullResyncRequestedAt || lease.locationId !== locationId) {
     cursorUpdatedAt = null;
     searchAfter = null;
     startPage = 1;
     backfillCompletedAt = null;
-    await writeState({ locationId, cursorUpdatedAt: null, cursorSearchAfter: null, backfillCompletedAt: null });
+    await writeState({ locationId, cursorUpdatedAt: null, cursorSearchAfter: null, backfillCompletedAt: null, fullResyncRequestedAt: null });
   }
 
   let since = cursorUpdatedAt;
@@ -251,7 +253,7 @@ export async function runGhlSync(
       if (page.contacts.length < GHL_PAGE_LIMIT) break;
     }
 
-    await writeState({
+    const final = await writeState({
       // Window finished without a tuple: next run starts from the newest contact
       // seen, and any page-number position is cleared (it must never outlive
       // its window, or later runs would ask for pages past the end forever).
@@ -269,7 +271,9 @@ export async function runGhlSync(
 
     logger.info({ orgId, pages, ...totals, morePending }, "GHL sync: run finished");
     ghlSyncRunsTotal.inc({ status: morePending ? "more_pending" : "ok" });
-    return { status: morePending ? "more_pending" : "ok", ...totals, pages };
+    // A full re-sync was requested while this run held the lease: report more
+    // work so the worker starts the re-sync now rather than at the next tick.
+    return { status: morePending || final.fullResyncRequestedAt ? "more_pending" : "ok", ...totals, pages };
   } catch (err) {
     if (err instanceof LeaseLostError) {
       ghlSyncRunsTotal.inc({ status: "lease_lost" });
@@ -289,6 +293,16 @@ export async function runGhlSync(
     ghlSyncRunsTotal.inc({ status: "error" });
     throw err;
   }
+}
+
+/**
+ * Ask for a full re-sync. Repeated requests collapse into one: the next run to
+ * start honours the flag and clears it. Safe while a run is in progress.
+ */
+export async function requestFullResync(cfg: GhlConfig): Promise<void> {
+  const now = new Date();
+  await db.insert(ghlSyncStateTable).values({ orgId: cfg.orgId, locationId: cfg.locationId, fullResyncRequestedAt: now })
+    .onConflictDoUpdate({ target: ghlSyncStateTable.orgId, set: { fullResyncRequestedAt: now } });
 }
 
 class LeaseLostError extends Error {
@@ -338,8 +352,11 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
     if (!target || target.deletedAt) return "skipped";
     contactId = link.contactId;
     await fillBlanks(tx, orgId, contactId, contact, null);
-    await tx.update(externalContactLinksTable).set({ externalUpdatedAt })
-      .where(eq(externalContactLinksTable.id, link.id));
+    // An undated response must not erase the timestamp we already have.
+    if (externalUpdatedAt) {
+      await tx.update(externalContactLinksTable).set({ externalUpdatedAt })
+        .where(eq(externalContactLinksTable.id, link.id));
+    }
   } else {
     // Not linked yet. If the only person this matches is one the agency has
     // soft-deleted, record a tombstone link and stop: syncing must not bring a

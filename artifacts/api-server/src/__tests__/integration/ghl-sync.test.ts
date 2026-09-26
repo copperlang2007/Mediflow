@@ -228,6 +228,55 @@ describe("GHL feed", () => {
     await tdb.update(ghlSyncStateTable).set({ leaseToken: null, runningSince: null }).where(eq(ghlSyncStateTable.orgId, org.id));
   });
 
+  it("full re-sync requests made during a run collapse into one re-sync, started when the run ends", async () => {
+    const org9 = await seedOrg(tdb, { id: "ghl-org-9" });
+    process.env.GHL_SYNC_ORG_IDS = `${org.id},${org9.id}`;
+    process.env.GHL_LOCATION_ID_GHL_ORG_9 = "loc-org-9";
+    try {
+      const { ghlSyncWorker } = await import("../../workers/ghlSync");
+      const cfg9 = sync.ghlConfigFor(org9.id)!;
+      const store9 = [ghlContact(9101), ghlContact(9102)];
+      expect((await sync.runGhlSync(cfg9, { fetchImpl: fakeGhl(store9).impl })).status).toBe("ok");
+
+      // Another run holds the lease; the admin clicks "Re-sync everything" three times.
+      await tdb.update(ghlSyncStateTable).set({ runningSince: new Date(), leaseToken: "busy" }).where(eq(ghlSyncStateTable.orgId, org9.id));
+      clearEnqueuedJobs();
+      for (let k = 0; k < 3; k++) await ghlSyncWorker({ orgId: org9.id, full: true });
+      expect(getEnqueuedJobs().filter((j) => (j.data as { orgId?: string }).orgId === org9.id)).toEqual([]);
+      const [flagged] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org9.id));
+      expect(flagged!.fullResyncRequestedAt).not.toBeNull();
+      expect(flagged!.cursorUpdatedAt).not.toBeNull(); // not reset under the active run
+
+      // The next run to start does the re-sync from the top, once.
+      await tdb.update(ghlSyncStateTable).set({ runningSince: null, leaseToken: null }).where(eq(ghlSyncStateTable.orgId, org9.id));
+      const ghl = fakeGhl(store9);
+      expect((await sync.runGhlSync(cfg9, { fetchImpl: ghl.impl })).status).toBe("ok");
+      expect(ghl.calls[0]!.body.filters).toBeUndefined();
+      const [done] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org9.id));
+      expect(done!.fullResyncRequestedAt).toBeNull();
+
+      // A request that lands while a run is mid-flight makes that run report
+      // more work, so the worker starts the re-sync straight away.
+      const flagMidRun = (async (u: string, init: RequestInit) => {
+        await sync.requestFullResync(cfg9);
+        return fakeGhl(store9).impl(u, init);
+      }) as unknown as typeof fetch;
+      expect((await sync.runGhlSync(cfg9, { fetchImpl: flagMidRun })).status).toBe("more_pending");
+    } finally {
+      process.env.GHL_SYNC_ORG_IDS = org.id;
+      delete process.env.GHL_LOCATION_ID_GHL_ORG_9;
+    }
+  });
+
+  it("does not erase a link's GHL timestamp when a later response has none", async () => {
+    const [before] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, "ghl-1"));
+    expect(before!.externalUpdatedAt).not.toBeNull();
+    const undated = (async () => new Response(JSON.stringify({ contacts: [{ ...ghlContact(1), dateUpdated: null }] }), { status: 200 })) as unknown as typeof fetch;
+    await sync.runGhlSync(cfg(), { fetchImpl: undated });
+    const [after] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, "ghl-1"));
+    expect(after!.externalUpdatedAt).toEqual(before!.externalUpdatedAt);
+  });
+
   it("never updates or re-flags a contact deleted in agencyBRIDGE", async () => {
     const [link] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, "ghl-10"));
     await tdb.update(contactsTable).set({ deletedAt: new Date(), city: null, optOutSms: false, optOutEmail: false }).where(eq(contactsTable.id, link!.contactId!));
@@ -424,6 +473,20 @@ describe("GHL admin endpoints", () => {
     const res = await request(app).post("/api/integrations/ghl/sync").set(withAuth(admin.id)).send({ full: true });
     expect(res.status).toBe(202);
     expect(getEnqueuedJobs()).toContainEqual({ name: "ghl-sync", data: { orgId: org.id, full: true } });
+    expect(res.body).toMatchObject({ queued: true, full: true, alreadyRunning: false });
+    const [state] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org.id));
+    expect(state!.fullResyncRequestedAt).not.toBeNull();
+    await tdb.update(ghlSyncStateTable).set({ fullResyncRequestedAt: null }).where(eq(ghlSyncStateTable.orgId, org.id));
+  });
+
+  it("tells the admin when a sync is already running", async () => {
+    await tdb.update(ghlSyncStateTable).set({ runningSince: new Date(), leaseToken: "busy" }).where(eq(ghlSyncStateTable.orgId, org.id));
+    try {
+      const res = await request(app).post("/api/integrations/ghl/sync").set(withAuth(admin.id)).send({});
+      expect(res.body).toMatchObject({ queued: true, full: false, alreadyRunning: true });
+    } finally {
+      await tdb.update(ghlSyncStateTable).set({ runningSince: null, leaseToken: null }).where(eq(ghlSyncStateTable.orgId, org.id));
+    }
   });
 
   it("refuses when the agency isn't configured", async () => {

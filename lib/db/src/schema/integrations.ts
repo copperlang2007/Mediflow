@@ -90,6 +90,8 @@ export const ghlSyncStateTable = pgTable("ghl_sync_state", {
   lastRunUpdated: integer("last_run_updated").notNull().default(0),
   lastRunSkipped: integer("last_run_skipped").notNull().default(0),
   backfillCompletedAt: timestamp("backfill_completed_at", { withTimezone: true }),
+  /** A pending "re-sync everything" request; the next run to start honours and clears it. */
+  fullResyncRequestedAt: timestamp("full_resync_requested_at", { withTimezone: true }),
 });
 
 export type GhlSyncState = typeof ghlSyncStateTable.$inferSelect;

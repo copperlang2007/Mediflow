@@ -12,7 +12,7 @@ import { eq } from "drizzle-orm";
 import { db, ghlSyncStateTable } from "@workspace/db";
 import { requireAuth, requireRole, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
-import { ghlConfigFor } from "../lib/integrations/ghl/sync";
+import { ghlConfigFor, requestFullResync } from "../lib/integrations/ghl/sync";
 
 const router: IRouter = Router();
 
@@ -46,19 +46,26 @@ router.post(
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
     const { orgId } = req as AuthenticatedRequest;
-    if (!ghlConfigFor(orgId)) {
+    const cfg = ghlConfigFor(orgId);
+    if (!cfg) {
       res.status(400).json({
         error: "GoHighLevel isn't connected for this agency yet. An administrator needs to add the Private Integration token and location id.",
       });
       return;
     }
     const full = req.body?.full === true;
+    // Recorded first, so the request survives even if the job can't be queued
+    // right now (the next scheduled run honours it).
+    if (full) await requestFullResync(cfg);
+    const [state] = await db.select({ runningSince: ghlSyncStateTable.runningSince })
+      .from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, orgId)).limit(1);
+    const alreadyRunning = !!state?.runningSince;
     const jobId = await enqueue(JOB_NAMES.GHL_SYNC, { orgId, full });
-    if (!jobId) {
+    if (!jobId && !full) {
       res.status(503).json({ error: "Sync service is temporarily unavailable. Please retry." });
       return;
     }
-    res.status(202).json({ queued: true, full });
+    res.status(202).json({ queued: true, full, alreadyRunning });
   },
 );
 

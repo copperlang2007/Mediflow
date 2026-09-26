@@ -515,12 +515,21 @@ function GhlLiveSyncCard() {
   const trigger = async (full: boolean) => {
     setBusy(true);
     try {
-      await apiFetch("/api/integrations/ghl/sync", {
+      const res = await apiFetch<{ alreadyRunning?: boolean }>("/api/integrations/ghl/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ full }),
       });
-      toast({ title: full ? "Full re-sync started" : "Sync started", description: "New and changed GoHighLevel contacts will appear shortly." });
+      if (res?.alreadyRunning) {
+        toast({
+          title: full ? "Full re-sync scheduled" : "A sync is already running",
+          description: full
+            ? "It will start as soon as the sync in progress finishes."
+            : "It is picking up new and changed contacts now; anything after it will be picked up within 15 minutes.",
+        });
+      } else {
+        toast({ title: full ? "Full re-sync started" : "Sync started", description: "New and changed GoHighLevel contacts will appear shortly." });
+      }
       void qc.invalidateQueries({ queryKey: ["integrations", "ghl", "status"] });
     } catch (error) {
       toast({ title: "Couldn't start sync", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
