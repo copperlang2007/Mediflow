@@ -194,6 +194,17 @@ describe("EnrollHere webhook processing", () => {
     expect(again.body).toEqual({ ok: true, duplicate: true });
   });
 
+  it("dedupes an id-less redelivery whose delivery metadata is nested", async () => {
+    const body = (attempt: number, ts: string) => ({
+      data: { contact: { first_name: "Nes", last_name: "Ted", phone: "5125550877" }, timestamp: ts, attempt },
+      delivery: { id: `d-${attempt}`, attempt },
+    });
+    const first = await withHeaderSecret(body(1, "2026-09-26T10:00:00Z"));
+    const again = await withHeaderSecret(body(2, "2026-09-26T10:05:00Z"));
+    expect(first.body.duplicate).toBe(false);
+    expect(again.body).toEqual({ ok: true, duplicate: true });
+  });
+
   it("creates one contact when two deliveries for a new person arrive together", async () => {
     const person = { first_name: "Sim", last_name: "Ultaneous", phone: "5125550999" };
     const [r1, r2] = await Promise.all([
