@@ -8,7 +8,7 @@
  * Job names: import-monday | import-ghl | import-csv-contacts
  */
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, importJobsTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 
@@ -29,7 +29,7 @@ export async function importMondayWorker(payload: ImportJobPayload): Promise<voi
   const opts = job.options as { rows?: Record<string, string>[]; mapping?: Record<string, string> } | null;
   if (!opts?.rows?.length) {
     logger.warn({ jobId: payload.jobId }, "import-monday: no rows in job options");
-    await db.update(importJobsTable).set({ status: "failed" }).where(eq(importJobsTable.id, payload.jobId));
+    await db.update(importJobsTable).set({ status: "failed", options: sql`${importJobsTable.options} - 'rows'` }).where(eq(importJobsTable.id, payload.jobId));
     return;
   }
 
@@ -58,7 +58,7 @@ export async function importGhlWorker(payload: ImportJobPayload): Promise<void> 
 
   if (!opts?.rows?.length) {
     logger.warn({ jobId: payload.jobId }, "import-ghl: no rows in job options");
-    await db.update(importJobsTable).set({ status: "failed" }).where(eq(importJobsTable.id, payload.jobId));
+    await db.update(importJobsTable).set({ status: "failed", options: sql`${importJobsTable.options} - 'rows'` }).where(eq(importJobsTable.id, payload.jobId));
     return;
   }
 
@@ -88,7 +88,7 @@ export async function importCsvContactsWorker(payload: ImportJobPayload): Promis
   } | null;
   if (!opts?.rows?.length) {
     logger.warn({ jobId: payload.jobId }, "import-csv-contacts: no rows in job options");
-    await db.update(importJobsTable).set({ status: "failed" }).where(eq(importJobsTable.id, payload.jobId));
+    await db.update(importJobsTable).set({ status: "failed", options: sql`${importJobsTable.options} - 'rows'` }).where(eq(importJobsTable.id, payload.jobId));
     return;
   }
 

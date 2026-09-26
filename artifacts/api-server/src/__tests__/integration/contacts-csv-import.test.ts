@@ -36,6 +36,7 @@ import {
   importJobsTable,
 } from "@workspace/db/schema";
 import { decryptMedicareId } from "@workspace/db/encryption/medicareId";
+import { parseCsvTolerant } from "../../lib/csvImport";
 import { bootTestDb, shutdownTestDb, withAuth } from "../helpers/testApp";
 import { seedOrg, seedUser, seedAgent, seedContact, type TestDb } from "../helpers/testDb";
 import type { Express } from "express";
@@ -223,5 +224,87 @@ describe("generic CSV contact import", () => {
     expect(names(after)).toEqual(names(before));
     const enrollments = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.orgId, org.id));
     expect(enrollments).toHaveLength(2);
+  });
+});
+
+describe("interpretContactRow (review findings)", () => {
+  const load = () => import("../../lib/contactImport");
+  const HEADER = ["First", "Last", "Address", "City", "State", "ZIP", "AgentEmail", "EffectiveDate"];
+  const mapping = { First: "firstName", Last: "lastName", Address: "address1", City: "city", State: "stateCode", ZIP: "zipCode", AgentEmail: "assignedAgentEmail", EffectiveDate: "effectiveDate" };
+
+  it("skips a row whose columns are shifted even when its value count matches the header", async () => {
+    const { interpretContactRow } = await load();
+    const parsed = parseCsvTolerant(Buffer.from(`${HEADER.join(",")}\nJohn,Roe,9 Pine St, Apt 2,Austin,TX,78701,\n`));
+    expect(parsed.issues).toEqual([]); // indistinguishable by counting alone
+    const r = interpretContactRow(parsed.rows[0]!, mapping, 2);
+    expect(r.contact).toBeNull();
+    expect(r.issues).toContainEqual(expect.objectContaining({ field: "row", severity: "error", message: expect.stringMatching(/shifted/) }));
+  });
+
+  it("never echoes cell values (PHI) into row messages", async () => {
+    const { interpretContactRow } = await load();
+    const r = interpretContactRow(
+      { f: "Jane", l: "Doe", e: "beneficiary.jane.doe@example", d: "1955-13-99", s: "Zzzland", a: "Alice Smith", z: "7870" },
+      { f: "firstName", l: "lastName", e: "email", d: "dob", s: "stateCode", a: "assignedAgentEmail", z: "zipCode" },
+      2,
+    );
+    const text = JSON.stringify(r.issues);
+    for (const v of ["beneficiary.jane.doe@example", "1955-13-99", "Zzzland", "Alice Smith"]) expect(text).not.toContain(v);
+  });
+
+  it("restores ZIP leading zeros Excel dropped", async () => {
+    const { interpretContactRow } = await load();
+    const r = interpretContactRow({ f: "A", l: "B", z: "2134" }, { f: "firstName", l: "lastName", z: "zipCode" }, 2);
+    expect(r.contact!.zipCode).toBe("02134");
+  });
+
+  it("does not merge people who only share a phone and first name", async () => {
+    const { ContactMatcher } = await load();
+    const m = new ContactMatcher();
+    m.add({ id: "sr", firstName: "John", lastName: "Smith", dob: "1940-01-01", email: null, phone: "+15551234567" });
+    m.add({ id: "fac", firstName: "Mary", lastName: "Jones", dob: null, email: null, phone: "+15550000000" });
+    const base = { email: null, address1: null, city: null, county: null, stateCode: null, zipCode: null, leadSource: null, tags: [], optOut: false, mbi: null, assignedAgentEmail: null };
+    // Jr: same name + phone, different DOB → different person.
+    expect(m.find({ ...base, firstName: "John", lastName: "Smith", dob: "1965-01-01", phone: "+15551234567" })).toBeNull();
+    // Care facility phone: same first name, different last name → different person.
+    expect(m.find({ ...base, firstName: "Mary", lastName: "Brown", dob: null, phone: "+15550000000" })).toBeNull();
+    // Same person.
+    expect(m.find({ ...base, firstName: "john", lastName: "smith", dob: "1940-01-01", phone: "+15551234567" })?.match.id).toBe("sr");
+  });
+});
+
+describe("worker robustness (review findings)", () => {
+  it("a retried job produces the same error report, not a growing one", async () => {
+    const { processCsvContactImport } = await import("../../lib/contactImport");
+    const upload = await post("/api/imports/contacts/upload");
+    const mapping = upload.body.suggestedMapping;
+    const res = await post("/api/imports/contacts/confirm", { mapping: JSON.stringify(mapping), duplicateAction: "skip" });
+    const jobId = res.body.jobId as string;
+    const [queued] = await tdb.select().from(importJobsTable).where(eq(importJobsTable.id, jobId));
+    const opts = queued!.options as { rows: Record<string, string>[]; mapping: Record<string, string> };
+
+    await processCsvContactImport(jobId, org.id, opts.rows, opts.mapping, "skip");
+    const [first] = await tdb.select().from(importJobsTable).where(eq(importJobsTable.id, jobId));
+    // Simulate a crash-and-retry: the job is re-run from its original queued payload.
+    await tdb.update(importJobsTable).set({ status: "processing", options: queued!.options }).where(eq(importJobsTable.id, jobId));
+    await processCsvContactImport(jobId, org.id, opts.rows, opts.mapping, "skip");
+    const [second] = await tdb.select().from(importJobsTable).where(eq(importJobsTable.id, jobId));
+
+    expect(second!.errors).toEqual(first!.errors);
+    expect(second!.errorCount).toBe(first!.errorCount);
+  });
+
+  it("warns instead of silently dropping an imported Medicare ID that conflicts with the one on file", async () => {
+    await seedContact(tdb, { orgId: org.id, firstName: "Iris", lastName: "Conflict", email: "iris@example.com", medicareId: "1EG4TE5MK73" });
+    const file = "First Name,Last Name,Email,Medicare Number\nIris,Conflict,iris@example.com,2AC3CD4EF56\n";
+    const up = await request(app).post("/api/imports/contacts/upload").set(withAuth(admin.id)).attach("file", Buffer.from(file), "c.csv");
+    const res = await request(app).post("/api/imports/contacts/confirm").set(withAuth(admin.id))
+      .attach("file", Buffer.from(file), "c.csv").field("mapping", JSON.stringify(up.body.suggestedMapping));
+    await worker({ jobId: res.body.jobId });
+    const [job] = await tdb.select().from(importJobsTable).where(eq(importJobsTable.id, res.body.jobId));
+    expect(job!.updatedCount).toBe(1);
+    expect(job!.errors).toContainEqual(expect.objectContaining({ field: "medicareId", message: expect.stringMatching(/differs/) }));
+    const [iris] = await tdb.select().from(contactsTable).where(eq(contactsTable.email, "iris@example.com"));
+    expect(decryptMedicareId(iris!.medicareIdEncrypted!)).toBe("1EG4TE5MK73");
   });
 });
