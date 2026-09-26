@@ -210,8 +210,11 @@ export async function runGhlSync(
           // later run. Skip it (it is re-read whenever GHL updates it again).
           // A streak of failures is more likely the database than the data:
           // stop rather than advance the cursor past contacts never written.
-          if (err instanceof LeaseLostError || ++consecutiveFailures >= MAX_CONSECUTIVE_CONTACT_FAILURES) throw err;
-          const code = (err as { code?: unknown })?.code;
+          // Postgres data (22xxx) and constraint (23xxx) errors are about this
+          // contact's values, so they never count toward the streak.
+          const code = (err as { code?: unknown; cause?: { code?: unknown } })?.code ?? (err as { cause?: { code?: unknown } })?.cause?.code;
+          const dataError = typeof code === "string" && /^2[23]/.test(code);
+          if (err instanceof LeaseLostError || (!dataError && ++consecutiveFailures >= MAX_CONSECUTIVE_CONTACT_FAILURES)) throw err;
           logger.warn(
             { orgId, ghlContactId: gc.id, error: err instanceof Error ? err.name : "unknown", code: typeof code === "string" ? code : undefined },
             "GHL sync: skipped a contact that failed to save",
@@ -257,7 +260,16 @@ export async function runGhlSync(
       // Window finished without a tuple: next run starts from the newest contact
       // seen, and any page-number position is cleared (it must never outlive
       // its window, or later runs would ask for pages past the end forever).
-      ...(!morePending && !searchAfter ? { cursorUpdatedAt: runMax && (!since || runMax > since) ? runMax : since, cursorSearchAfter: null } : {}),
+      // The tuple is cleared too when there's a timestamp to resume from: a
+      // contact later updated at exactly the cursor timestamp but sorting
+      // before the tuple's id would otherwise be skipped. Re-reading contacts
+      // at that one timestamp is idempotent. With no timestamp at all, keep the
+      // tuple so undated contacts aren't re-read from the start forever.
+      ...(!morePending
+        ? (runMax || since
+          ? { cursorUpdatedAt: runMax && (!since || runMax > since) ? runMax : since, cursorSearchAfter: null }
+          : searchAfter ? {} : { cursorSearchAfter: null })
+        : {}),
       runningSince: null,
       leaseToken: null,
       lastRunAt: new Date(),
@@ -266,6 +278,7 @@ export async function runGhlSync(
       lastRunCreated: totals.created,
       lastRunUpdated: totals.updated,
       lastRunSkipped: totals.skipped,
+      lastRunFailed: totals.failed,
       ...(!morePending && !backfillCompletedAt ? { backfillCompletedAt: new Date() } : {}),
     });
 
@@ -285,10 +298,11 @@ export async function runGhlSync(
       leaseToken: null,
       lastRunAt: new Date(),
       lastStatus: "error",
-      lastError: err instanceof Error ? err.message.slice(0, 500) : "Unknown error",
+      lastError: safeErrorMessage(err),
       lastRunCreated: totals.created,
       lastRunUpdated: totals.updated,
       lastRunSkipped: totals.skipped,
+      lastRunFailed: totals.failed,
     }).where(mine);
     ghlSyncRunsTotal.inc({ status: "error" });
     throw err;
@@ -303,6 +317,20 @@ export async function requestFullResync(cfg: GhlConfig): Promise<void> {
   const now = new Date();
   await db.insert(ghlSyncStateTable).values({ orgId: cfg.orgId, locationId: cfg.locationId, fullResyncRequestedAt: now })
     .onConflictDoUpdate({ target: ghlSyncStateTable.orgId, set: { fullResyncRequestedAt: now } });
+}
+
+/**
+ * Error text for the admin status panel. Database errors carry the failed
+ * statement's parameters (contact names, emails, phones) after "params:";
+ * those never leave the server.
+ */
+export function safeErrorMessage(err: unknown): string {
+  if (!(err instanceof Error)) return "Unknown error";
+  const code = (err as { code?: unknown; cause?: { code?: unknown } }).code ?? (err as { cause?: { code?: unknown } }).cause?.code;
+  if (/failed query|params:/i.test(err.message) || typeof code === "string" && /^[0-9A-Z]{5}$/.test(code)) {
+    return `Database error while saving contacts${typeof code === "string" ? ` (code ${code})` : ""}`;
+  }
+  return err.message.split(/\r?\nparams:/, 1)[0]!.slice(0, 500);
 }
 
 class LeaseLostError extends Error {
@@ -364,7 +392,13 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
     const live = (await loadMatcher(orgId, [contact], tx)).find(contact);
     if (!live) {
       const gone = (await loadMatcher(orgId, [contact], tx, { deleted: true })).find(contact);
-      if (gone) {
+      // A name + date-of-birth match is weak: if the email or phone on both
+      // sides disagree, it's a different person who happens to share them.
+      const conflicts = gone?.reason === "name + date of birth" && (
+        (!!contact.email && !!gone.match.email && contact.email.toLowerCase() !== gone.match.email.toLowerCase()) ||
+        (!!contact.phone && !!gone.match.phone && contact.phone !== gone.match.phone)
+      );
+      if (gone && !conflicts) {
         await tx.insert(externalContactLinksTable).values({
           id: randomUUID(), orgId, source: GHL_SOURCE, externalId: gc.id, contactId: gone.match.id, externalUpdatedAt,
         }).onConflictDoNothing();

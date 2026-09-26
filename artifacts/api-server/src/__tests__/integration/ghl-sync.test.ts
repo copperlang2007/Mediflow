@@ -359,6 +359,36 @@ describe("GHL feed", () => {
     }
   });
 
+  it("keeps going past many contacts with bad data, reports them as failed, and clears GHL's tuple when the window ends", async () => {
+    const org10 = await seedOrg(tdb, { id: "ghl-org-10" });
+    process.env.GHL_SYNC_ORG_IDS = `${org.id},${org10.id}`;
+    try {
+      const cfg10 = ({ orgId: org10.id, token: TOKEN, locationId: `loc-${org10.id}` });
+      const bad = Array.from({ length: 7 }, (_, k) => ghlContact(9300 + k, { firstName: "Bad\u0000" + k }));
+      const res = await sync.runGhlSync(cfg10, { fetchImpl: fakeGhl([...bad, ghlContact(9399)]).impl });
+      expect(res).toMatchObject({ status: "ok", created: 1, failed: 7 });
+      const [state] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org10.id));
+      expect(state).toMatchObject({ lastRunFailed: 7, cursorSearchAfter: null });
+    } finally {
+      process.env.GHL_SYNC_ORG_IDS = org.id;
+    }
+  });
+
+  it("a weak name + birth-date match to a deleted contact doesn't block a different person", async () => {
+    const org11 = await seedOrg(tdb, { id: "ghl-org-11" });
+    const cfg11 = ({ orgId: org11.id, token: TOKEN, locationId: `loc-${org11.id}` });
+    const dob = new Date("1950-03-07T00:00:00.000Z");
+    const deleted = await seedContact(tdb, { orgId: org11.id, firstName: "John", lastName: "Smithers", email: "old-john@example.com", dob });
+    await tdb.update(contactsTable).set({ deletedAt: new Date() }).where(eq(contactsTable.id, deleted.id));
+    const r = await sync.runGhlSync(cfg11, { fetchImpl: fakeGhl([ghlContact(9401, {
+      firstName: "John", lastName: "Smithers", email: "new-john@example.com", dateOfBirth: "1950-03-07T00:00:00.000Z",
+    })]).impl });
+    expect(r.created).toBe(1);
+    const live = (await tdb.select().from(contactsTable).where(eq(contactsTable.orgId, org11.id))).filter((c) => !c.deletedAt);
+    expect(live).toHaveLength(1);
+    expect(live[0]!.email).toBe("new-john@example.com");
+  });
+
   it("does not fuse a second GHL contact onto a contact already linked to another GHL id", async () => {
     // ghl-1 is already linked to First1 (email one@example.com). A different
     // GHL record for the same person must not be merged into it too.
@@ -560,6 +590,21 @@ describe("GHL client resilience", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("ends the run at exactly a 60s Retry-After too", async () => {
+    const { searchContacts } = await import("../../lib/integrations/ghl/client");
+    let calls = 0;
+    const limited = (async () => { calls++; return new Response("", { status: 429, headers: { "Retry-After": "60" } }); }) as unknown as typeof fetch;
+    await expect(searchContacts({ token: TOKEN, locationId: LOCATION, updatedSince: null }, limited)).rejects.toThrow(/retry after 60s/);
+    expect(calls).toBe(1);
+  });
+
+  it("never puts database parameters (contact PHI) into the admin-visible error", () => {
+    const err = Object.assign(new Error('Failed query: update "external_contact_links" set "x"=$1\nparams: bob.smith@example.com,+15125550999'), {});
+    const msg = sync.safeErrorMessage(err);
+    expect(msg).not.toMatch(/bob|5125550999/);
+    expect(sync.safeErrorMessage(new Error("GHL contacts search failed: HTTP 401"))).toBe("GHL contacts search failed: HTTP 401");
   });
 
   it("ends the run on a long Retry-After instead of burning retries", async () => {

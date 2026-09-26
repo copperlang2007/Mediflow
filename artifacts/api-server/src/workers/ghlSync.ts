@@ -10,6 +10,8 @@
  * recorded on the org's sync state and do NOT throw: the next tick is the
  * retry, which avoids stacking pg-boss retries on top of the schedule.
  */
+import { eq } from "drizzle-orm";
+import { db, ghlSyncStateTable } from "@workspace/db";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { ghlConfigFor, ghlConfigs, requestFullResync, runGhlSync } from "../lib/integrations/ghl/sync";
 import { logger } from "../lib/logger";
@@ -37,7 +39,15 @@ export async function ghlSyncWorker(payload: GhlSyncPayload = {}): Promise<void>
       const result = await runGhlSync(cfg, { full: payload.full });
       lastCapturedAt.delete(cfg.orgId);
       if (result.status === "more_pending") {
-        await enqueue(JOB_NAMES.GHL_SYNC, { orgId: cfg.orgId });
+        const id = await enqueue(JOB_NAMES.GHL_SYNC, { orgId: cfg.orgId });
+        if (!id) {
+          // Not lost — the next scheduled run resumes from the cursor — but a
+          // big backfill would crawl one run per 15 minutes; make it visible.
+          logger.error({ orgId: cfg.orgId }, "GHL sync: could not queue the continuation; the next scheduled run will resume");
+          await db.update(ghlSyncStateTable)
+            .set({ lastError: "Could not queue the next batch right away; the next scheduled sync (within 15 minutes) will continue." })
+            .where(eq(ghlSyncStateTable.orgId, cfg.orgId));
+        }
       } else if (result.status === "already_running" && payload.full) {
         // Don't drop the request, and don't queue another job per attempt:
         // flag it, and the active run starts the re-sync when it finishes.

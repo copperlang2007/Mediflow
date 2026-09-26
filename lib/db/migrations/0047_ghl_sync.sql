@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS ghl_sync_state (
   last_run_created integer NOT NULL DEFAULT 0,
   last_run_updated integer NOT NULL DEFAULT 0,
   last_run_skipped integer NOT NULL DEFAULT 0,
+  -- Contacts that failed to save (also counted in last_run_skipped).
+  last_run_failed integer NOT NULL DEFAULT 0,
   backfill_completed_at timestamp with time zone,
   -- An admin asked to re-sync everything; honoured by the next run to start
   -- (and cleared by it), so repeated requests during a run collapse into one.

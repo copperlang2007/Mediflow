@@ -499,7 +499,7 @@ type GhlStatus = {
   lastRunAt: string | null;
   lastStatus: string | null;
   lastError: string | null;
-  lastRun: { created: number; updated: number; skipped: number } | null;
+  lastRun: { created: number; updated: number; skipped: number; failed?: number } | null;
 };
 
 function GhlLiveSyncCard() {
@@ -561,7 +561,7 @@ function GhlLiveSyncCard() {
           <div className="text-sm text-muted-foreground">
             {status.running ? "Syncing now…"
               : status.lastRunAt ? <>Last sync {new Date(status.lastRunAt).toLocaleString()}
-                  {status.lastRun && <> · {status.lastRun.created} added, {status.lastRun.updated} updated, {status.lastRun.skipped} skipped (no name)</>}</>
+                  {status.lastRun && <> · {status.lastRun.created} added, {status.lastRun.updated} updated, {status.lastRun.skipped} skipped{status.lastRun.failed ? ` (${status.lastRun.failed} couldn't be saved)` : ""}</>}</>
               : "Not synced yet."}
             {!status.backfillCompletedAt && status.lastRunAt && !status.running && <> · first full pull still in progress</>}
           </div>

@@ -34,7 +34,7 @@ router.get(
       lastStatus: state?.lastStatus ?? null,
       lastError: state?.lastError ?? null,
       lastRun: state
-        ? { created: state.lastRunCreated, updated: state.lastRunUpdated, skipped: state.lastRunSkipped }
+        ? { created: state.lastRunCreated, updated: state.lastRunUpdated, skipped: state.lastRunSkipped, failed: state.lastRunFailed }
         : null,
     });
   },

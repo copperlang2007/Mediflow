@@ -89,6 +89,8 @@ export const ghlSyncStateTable = pgTable("ghl_sync_state", {
   lastRunCreated: integer("last_run_created").notNull().default(0),
   lastRunUpdated: integer("last_run_updated").notNull().default(0),
   lastRunSkipped: integer("last_run_skipped").notNull().default(0),
+  /** Contacts that failed to save (also counted in lastRunSkipped). */
+  lastRunFailed: integer("last_run_failed").notNull().default(0),
   backfillCompletedAt: timestamp("backfill_completed_at", { withTimezone: true }),
   /** A pending "re-sync everything" request; the next run to start honours and clears it. */
   fullResyncRequestedAt: timestamp("full_resync_requested_at", { withTimezone: true }),
