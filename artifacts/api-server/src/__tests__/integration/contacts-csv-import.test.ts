@@ -308,3 +308,19 @@ describe("worker robustness (review findings)", () => {
     expect(decryptMedicareId(iris!.medicareIdEncrypted!)).toBe("1EG4TE5MK73");
   });
 });
+
+describe("carrier-less enrollments", () => {
+  it("re-importing a plan row with no carrier updates, not duplicates, the enrollment (NULLS NOT DISTINCT)", async () => {
+    const file = "First Name,Last Name,DOB,Plan Type,Effective Date\nNora,Nocarrier,1/2/1948,PDP,1/1/2026\n";
+    for (let i = 0; i < 2; i++) {
+      const up = await request(app).post("/api/imports/contacts/upload").set(withAuth(admin.id)).attach("file", Buffer.from(file), "n.csv");
+      const res = await request(app).post("/api/imports/contacts/confirm").set(withAuth(admin.id))
+        .attach("file", Buffer.from(file), "n.csv").field("mapping", JSON.stringify(up.body.suggestedMapping));
+      await worker({ jobId: res.body.jobId });
+    }
+    const [nora] = await tdb.select().from(contactsTable).where(eq(contactsTable.lastName, "Nocarrier"));
+    const rows = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.contactId, nora!.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.carrierId).toBeNull();
+  });
+});

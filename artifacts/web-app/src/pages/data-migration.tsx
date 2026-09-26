@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useGetMe } from "@workspace/api-client-react";
 import { apiFetch } from "@/lib/api";
@@ -139,8 +139,11 @@ function ImportWizard({
   const [validation, setValidation] = useState<ValidationResponse | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
-  const initialExtraValues = Object.fromEntries(
-    (extraConfirmFields ?? []).filter((f) => f.defaultValue).map((f) => [f.key, f.defaultValue!]),
+  const initialExtraValues = useMemo(
+    () => Object.fromEntries(
+      (extraConfirmFields ?? []).filter((f) => f.defaultValue).map((f) => [f.key, f.defaultValue!]),
+    ),
+    [extraConfirmFields],
   );
   const [extraValues, setExtraValues] = useState<Record<string, string>>(initialExtraValues);
   const [loading, setLoading] = useState(false);
