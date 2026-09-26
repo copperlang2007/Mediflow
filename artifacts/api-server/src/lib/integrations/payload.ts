@@ -160,9 +160,19 @@ export function pick(flat: Record<string, string>, keys: string[]): string | nul
 export function interpretPayloadContact(flat: Record<string, string>): InterpretedRow {
   const mapping: Record<string, string> = {};
   const taken = new Set<string>();
-  for (const key of Object.keys(flat)) {
-    const field = suggestContactField(key);
-    if (field && !taken.has(field)) {
+  // Several keys can mean the same field (phone / mobile / cell). Pick the
+  // same one regardless of JSON key order: a key named exactly like the field
+  // first, then one with a non-blank value, then the shortest, then A-Z.
+  const candidates = Object.keys(flat)
+    .map((key) => ({ key, field: suggestContactField(key) }))
+    .filter((c): c is { key: string; field: string } => !!c.field)
+    .sort((a, b) =>
+      Number(b.key === b.field) - Number(a.key === a.field) ||
+      Number(!!flat[b.key]?.trim()) - Number(!!flat[a.key]?.trim()) ||
+      a.key.length - b.key.length ||
+      a.key.localeCompare(b.key));
+  for (const { key, field } of candidates) {
+    if (!taken.has(field)) {
       mapping[key] = field;
       taken.add(field);
     }
