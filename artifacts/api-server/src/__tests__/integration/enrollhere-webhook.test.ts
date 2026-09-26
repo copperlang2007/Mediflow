@@ -230,6 +230,25 @@ describe("EnrollHere webhook processing", () => {
     expect((await withHeaderSecret(body("2026-09-26T10:03:00Z"))).body).toEqual({ ok: true, duplicate: true });
   });
 
+  it("never takes a relative's or a call leg's number/email for the contact", async () => {
+    await withHeaderSecret({ call_id: "kin-1", contact: {
+      first_name: "Kin", last_name: "Safe",
+      emergency_contact: { name: "Next Of Kin", phone: "5559998877" },
+      spouse: { email: "spouse@example.com" },
+    } });
+    await withHeaderSecret({ call_id: "leg-1", first_name: "Vic", last_name: "Beneficiary", caller: { number: "18005550000", name: "Support Line" } });
+    await withHeaderSecret({ call_id: "out-1", direction: "outbound", from: "5125550999", first_name: "Out", last_name: "Bound" });
+    const rows = await tdb.select().from(contactsTable).where(eq(contactsTable.orgId, org.id));
+    expect(rows.find((r) => r.lastName === "Safe")).toMatchObject({ phone: null, email: null });
+    expect(rows.find((r) => r.lastName === "Beneficiary")!.phone).toBeNull();
+    expect(rows.find((r) => r.lastName === "Bound")!.phone).toBeNull();
+  });
+
+  it("authenticates before revealing the content-type rule", async () => {
+    const res = await request(app).post(url()).set("Content-Type", "text/plain").send("hello");
+    expect(res.status).toBe(401);
+  });
+
   it("does not treat a top-level entity id as the call id", async () => {
     const a = await withHeaderSecret({ id: "entity-abc", event: "call.started", first_name: "Ent", last_name: "Ity", phone: "5125550444" });
     const b = await withHeaderSecret({ id: "entity-abc", event: "call.completed", first_name: "Ent", last_name: "Ity", phone: "5125550444" });

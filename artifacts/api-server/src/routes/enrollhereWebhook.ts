@@ -124,6 +124,19 @@ const VOLATILE_KEYS = new Set([
   "delivery",
 ]);
 
+/** Scalar fields at the top of the body (and of `data`), by normalized key. */
+function topLevelScalars(body: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const root of [body, body.data]) {
+    if (!root || typeof root !== "object" || Array.isArray(root)) continue;
+    for (const [k, v] of Object.entries(root as Record<string, unknown>)) {
+      const key = normalizeKey(k);
+      if ((typeof v === "string" || typeof v === "number") && !(key in out)) out[key] = String(v);
+    }
+  }
+  return out;
+}
+
 /** The body with delivery metadata removed at every depth (it changes on retry). */
 function stableForHash(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stableForHash);
@@ -157,18 +170,20 @@ router.post(
   "/api/integrations/enrollhere/v1/:orgId/events",
   async (req: RawBodyRequest, res: Response): Promise<void> => {
     const orgId = String(req.params.orgId ?? "");
+    // Authenticate first, so an unauthenticated caller learns nothing (not
+    // even that this route exists) from the content-type check below.
+    const auth = authenticate(req, orgId);
+    if (!auth.ok) {
+      logger.warn({ orgId, reason: auth.reason }, "EnrollHere webhook: rejected");
+      res.status(auth.status).json({ error: `Unauthorized (${auth.reason})` });
+      return;
+    }
     // JSON only: without this, a delivery missing its Content-Type would reach
     // the handler unparsed (and a form-encoded one would be accepted).
     // Exactly application/json: that is the only type the JSON parser (and its
     // raw-body capture for HMAC) runs for.
     if (!req.is("application/json")) {
       res.status(415).json({ error: "Expected Content-Type: application/json" });
-      return;
-    }
-    const auth = authenticate(req, orgId);
-    if (!auth.ok) {
-      logger.warn({ orgId, reason: auth.reason }, "EnrollHere webhook: rejected");
-      res.status(auth.status).json({ error: `Unauthorized (${auth.reason})` });
       return;
     }
 
@@ -196,10 +211,14 @@ router.post(
     // The caller's number often arrives as call metadata rather than a contact field.
     // Fall back to the caller ID when the payload's own phone is missing or
     // isn't a number ("Unknown", "Restricted", a display name).
-    if (!normalizePhone(flat.phone ?? "") && !normalizePhone(flat.phone_number ?? "")) {
+    // Only for inbound calls (on an outbound call "from" is the agency's line),
+    // and only from the event's own top-level fields, never a nested call-leg
+    // block such as caller: { number } for a support line.
+    const callDirection = pick(eventFlat, DIRECTION_KEYS)?.toLowerCase() ?? "";
+    if (!/out/.test(callDirection) && !normalizePhone(flat.phone ?? "") && !normalizePhone(flat.phone_number ?? "")) {
       // Only a value that is actually a phone number (caller_id is often a
       // display name such as "JOHN DOE").
-      const caller = normalizePhone(pick(eventFlat, CALLER_PHONE_KEYS) ?? "");
+      const caller = normalizePhone(pick(topLevelScalars(req.body), CALLER_PHONE_KEYS) ?? "");
       if (caller?.startsWith("+")) {
         flat.phone = caller;
         delete flat.phone_number;
