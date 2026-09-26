@@ -92,6 +92,8 @@ services:
         sync: false
       - key: LEAD_QUEUE_WEBHOOK_SECRET
         sync: false
+      - key: ENROLLHERE_WEBHOOK_SECRET
+        sync: false
 
       # ---- Third-party credentials: injected from GitHub Secrets ----
       - key: CLERK_SECRET_KEY

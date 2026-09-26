@@ -17,6 +17,7 @@ import webhooksRouter from "./routes/webhooks";
 import stripeWebhookRouter from "./routes/stripeWebhook";
 import dialerEventsRouter from "./routes/dialerEvents";
 import queuePublicRouter from "./routes/queuePublic";
+import enrollhereWebhookRouter from "./routes/enrollhereWebhook";
 import { logger } from "./lib/logger";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "./middlewares/requireAuth";
 import { isDemoMode } from "./lib/demoMode";
@@ -326,6 +327,11 @@ app.use(dialerEventsRouter);
 // receiver: external callers authenticate with an X-MB-Signature HMAC, not a
 // Clerk session. See routes/queuePublic.ts.
 app.use(queuePublicRouter);
+
+// EnrollHere inbound call/contact webhook. Same posture: mounted above the
+// Clerk-guarded `/api` router, trust from a per-tenant shared secret or
+// X-MB-Signature HMAC. See routes/enrollhereWebhook.ts.
+app.use(enrollhereWebhookRouter);
 
 /**
  * GET /version — release identity for monitoring probes.

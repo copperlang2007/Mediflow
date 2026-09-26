@@ -138,6 +138,7 @@ jobs:
           ESIGN_SIGNING_CERT_PEM: ${{ secrets.ESIGN_SIGNING_CERT_PEM }}
           ESIGN_SIGNING_KEY_PEM: ${{ secrets.ESIGN_SIGNING_KEY_PEM }}
           PUBLIC_OBJECT_SEARCH_PATHS: ${{ secrets.PUBLIC_OBJECT_SEARCH_PATHS }}
+          ENROLLHERE_WEBHOOK_SECRET: ${{ secrets.ENROLLHERE_WEBHOOK_SECRET }}
 
           GITHUB_SHA: ${{ github.sha }}
 

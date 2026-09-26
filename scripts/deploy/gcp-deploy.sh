@@ -140,6 +140,7 @@ declare -A OPTIONAL_SECRET_MAP=(
   [RESEND_API_KEY]=mediflow-resend-api-key
   [SENTRY_DSN]=mediflow-sentry-dsn
   [PUBLIC_OBJECT_SEARCH_PATHS]=mediflow-public-object-search-paths
+  [ENROLLHERE_WEBHOOK_SECRET]=mediflow-enrollhere-webhook-secret
 )
 sync_secret mediflow-esign-cert-pem "${ESIGN_SIGNING_CERT_PEM:-}"
 sync_secret mediflow-esign-key-pem "${ESIGN_SIGNING_KEY_PEM:-}"
