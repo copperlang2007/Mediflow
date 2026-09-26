@@ -106,7 +106,8 @@ const DURATION_KEYS = ["duration_seconds", "duration", "call_duration", "talk_ti
 const DISPOSITION_KEYS = ["disposition", "call_disposition", "outcome", "call_result", "result", "call_status", "status"];
 const RECORDING_KEYS = ["recording_url", "recording", "recording_link", "call_recording_url"];
 // A bare "date" is deliberately absent: vendors use it for submission or appointment dates.
-const STARTED_KEYS = ["started_at", "start_time", "call_start", "call_started_at", "timestamp", "created_at"];
+// Not "timestamp": that is a delivery field (see VOLATILE_KEYS) and changes on retry.
+const STARTED_KEYS = ["started_at", "start_time", "call_start", "call_started_at", "created_at"];
 
 /**
  * Per-delivery transport fields that change on a retry of the SAME event.
@@ -180,11 +181,16 @@ router.post(
     const eventType = pick(eventFlat, EVENT_KEYS);
 
     // The caller's number often arrives as call metadata rather than a contact field.
-    if (!flat.phone && !flat.phone_number) {
+    // Fall back to the caller ID when the payload's own phone is missing or
+    // isn't a number ("Unknown", "Restricted", a display name).
+    if (!normalizePhone(flat.phone ?? "") && !normalizePhone(flat.phone_number ?? "")) {
       // Only a value that is actually a phone number (caller_id is often a
       // display name such as "JOHN DOE").
       const caller = normalizePhone(pick(eventFlat, CALLER_PHONE_KEYS) ?? "");
-      if (caller?.startsWith("+")) flat.phone = caller;
+      if (caller?.startsWith("+")) {
+        flat.phone = caller;
+        delete flat.phone_number;
+      }
     }
     const agentEmail = pick(flat, AGENT_EMAIL_KEYS);
     if (agentEmail && !flat.assigned_agent_email) flat.assigned_agent_email = agentEmail;
