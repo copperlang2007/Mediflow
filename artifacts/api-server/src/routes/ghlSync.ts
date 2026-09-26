@@ -12,7 +12,7 @@ import { eq } from "drizzle-orm";
 import { db, ghlSyncStateTable } from "@workspace/db";
 import { requireAuth, requireRole, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
-import { ghlConfigFor, requestFullResync } from "../lib/integrations/ghl/sync";
+import { LEASE_MINUTES, ghlConfigFor, requestFullResync } from "../lib/integrations/ghl/sync";
 
 const router: IRouter = Router();
 
@@ -59,7 +59,8 @@ router.post(
     if (full) await requestFullResync(cfg);
     const [state] = await db.select({ runningSince: ghlSyncStateTable.runningSince })
       .from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, orgId)).limit(1);
-    const alreadyRunning = !!state?.runningSince;
+    // A lease older than LEASE_MINUTES belongs to a crashed run and will be reclaimed.
+    const alreadyRunning = !!state?.runningSince && state.runningSince.getTime() > Date.now() - LEASE_MINUTES * 60_000;
     const jobId = await enqueue(JOB_NAMES.GHL_SYNC, { orgId, full });
     if (!jobId && !full) {
       res.status(503).json({ error: "Sync service is temporarily unavailable. Please retry." });

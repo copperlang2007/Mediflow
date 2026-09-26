@@ -34,7 +34,7 @@ import { ghlSyncRunsTotal } from "../../metrics";
 
 export const GHL_SOURCE = "gohighlevel";
 /** A run holding the lease longer than this is presumed dead and can be taken over. */
-const LEASE_MINUTES = 30;
+export const LEASE_MINUTES = 30;
 /** Consecutive per-contact save failures before a run gives up (likely a DB problem, not bad data). */
 const MAX_CONSECUTIVE_CONTACT_FAILURES = 5;
 /** Per-run page cap (100 contacts/page). A larger backfill continues in the next job. */

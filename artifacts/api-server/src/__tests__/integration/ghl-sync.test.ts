@@ -548,6 +548,10 @@ describe("GHL admin endpoints", () => {
     try {
       const res = await request(app).post("/api/integrations/ghl/sync").set(withAuth(admin.id)).send({});
       expect(res.body).toMatchObject({ queued: true, full: false, alreadyRunning: true });
+      // A lease left by a crashed run (older than the lease window) doesn't count.
+      await tdb.update(ghlSyncStateTable).set({ runningSince: new Date(Date.now() - 45 * 60_000) }).where(eq(ghlSyncStateTable.orgId, org.id));
+      const stale = await request(app).post("/api/integrations/ghl/sync").set(withAuth(admin.id)).send({});
+      expect(stale.body).toMatchObject({ alreadyRunning: false });
     } finally {
       await tdb.update(ghlSyncStateTable).set({ runningSince: null, leaseToken: null }).where(eq(ghlSyncStateTable.orgId, org.id));
     }
