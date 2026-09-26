@@ -220,6 +220,15 @@ describe("EnrollHere webhook processing", () => {
     expect((a!.metadata as { startedAt?: unknown }).startedAt).toBeNull();
   });
 
+  it("picks the same phone whatever the JSON key order", async () => {
+    await withHeaderSecret({ call_id: "order-1", first_name: "Order", last_name: "One", cell: "5125550202", phone: "5125550101" });
+    await withHeaderSecret({ call_id: "order-2", phone: "5125550303", cell: "5125550404", first_name: "Order", last_name: "Two" });
+    const rows = await tdb.select().from(contactsTable).where(and(eq(contactsTable.orgId, org.id), eq(contactsTable.firstName, "Order")));
+    const by = (last: string) => rows.find((r) => r.lastName === last)!.phone;
+    expect(by("One")).toBe("+15125550101");
+    expect(by("Two")).toBe("+15125550303");
+  });
+
   it("never stores a caller-ID display name as a phone number", async () => {
     const res = await withHeaderSecret({ call_id: "cid-1", first_name: "NoPhone", last_name: "Real", caller_id: "JOHN DOE" });
     const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, res.body.contactId));

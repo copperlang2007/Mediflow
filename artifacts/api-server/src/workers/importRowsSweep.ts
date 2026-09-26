@@ -8,24 +8,33 @@
  * process start. This bounds that window to hours instead of "until restart".
  *
  *   - finished jobs (completed / failed) still holding rows → rows dropped
- *   - jobs `processing` with no worker progress for STALE_MINUTES (heartbeat,
- *     or creation time if the worker never started) → marked failed, rows dropped
+ *   - CSV contact jobs `processing` with no worker progress for STALE_MINUTES
+ *     → marked failed, rows dropped. A job that has never written a heartbeat
+ *     (queued, or started by code from before heartbeats existed) gets the
+ *     older, generous LEGACY_STALE_HOURS instead. Other import types (Monday,
+ *     GHL) don't heartbeat and aren't touched here.
  *
  * A worker that is still alive keeps its heartbeat fresh, so a long import is
  * never failed out from under it; and its writes only apply while the job is
  * still `processing`, so a job failed here can't flip back to `completed`.
  */
-import { and, eq, lt, ne, sql, type SQL } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { db, importJobsTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 
 export const STALE_MINUTES = 30;
+export const LEGACY_STALE_HOURS = 6;
 
-/** `processing` jobs whose worker has shown no progress since `cutoff`. */
+/** CSV contact jobs whose worker has shown no progress since `cutoff`. */
 export function staleProcessingJobs(cutoff: Date): SQL | undefined {
+  const legacyCutoff = new Date(cutoff.getTime() + STALE_MINUTES * 60_000 - LEGACY_STALE_HOURS * 3_600_000);
   return and(
     eq(importJobsTable.status, "processing"),
-    lt(sql`coalesce(${importJobsTable.heartbeatAt}, ${importJobsTable.createdAt})`, cutoff),
+    eq(importJobsTable.importType, "csv_contacts"),
+    or(
+      and(isNotNull(importJobsTable.heartbeatAt), lt(importJobsTable.heartbeatAt, cutoff)),
+      and(isNull(importJobsTable.heartbeatAt), lt(importJobsTable.createdAt, legacyCutoff)),
+    ),
   );
 }
 

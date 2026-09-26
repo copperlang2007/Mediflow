@@ -4,7 +4,7 @@
  * Uses multer for multipart file upload + streaming CSV parse.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, inArray, or, desc, sql } from "drizzle-orm";
+import { eq, and, inArray, ne, or, desc, sql } from "drizzle-orm";
 import {
   db,
   agentsTable,
@@ -50,7 +50,12 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 
 // during a rolling deploy another instance may still be running an import.
 void db.update(importJobsTable)
   .set({ status: "failed", options: sql`${importJobsTable.options} - 'rows'` })
-  .where(staleProcessingJobs(new Date(Date.now() - STALE_MINUTES * 60_000)))
+  .where(or(
+    staleProcessingJobs(new Date(Date.now() - STALE_MINUTES * 60_000)),
+    // Monday / GHL import workers don't record a heartbeat yet: they keep the
+    // previous behavior of being failed at startup.
+    and(eq(importJobsTable.status, "processing"), ne(importJobsTable.importType, "csv_contacts")),
+  ))
   .catch((err) => {
     logger.error({ err }, "imports: failed to mark orphaned import jobs as failed on startup");
     captureWorkerError(err, { worker: "imports", phase: "startup-cleanup" });
