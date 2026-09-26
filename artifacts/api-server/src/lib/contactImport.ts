@@ -160,15 +160,20 @@ export function interpretContactRow(
   raw: Record<string, string>,
   mapping: Record<string, string>,
   rowNumber: number,
+  /** Column-shift detection is a CSV concern; JSON payloads have no columns. */
+  opts: { detectShift?: boolean } = { detectShift: true },
 ): InterpretedRow {
   // Messages name the field but never echo the value: they persist to
   // import_jobs.errors and the downloadable errors CSV, and values here are PHI.
   const issues: CsvIssue[] = [];
   const warn = (field: string, message: string) => issues.push({ row: rowNumber, field, message, severity: "warning" });
-  // Format anomalies per row. Two or more in one row almost always means the
-  // columns are shifted (an unquoted comma in an address), which the parser
-  // cannot detect when the row still has exactly as many values as the header.
-  let anomalies = 0;
+  // An unquoted comma in the street address pushes every later column one to
+  // the right, so the address block fails together: State gets the city and
+  // ZIP gets the state. That pair (or a unit designator in City) is the shift
+  // signature. Unrelated typos (bad email + bad DOB) are not a shift — those
+  // fields are just left blank with a warning.
+  let stateInvalid = false;
+  let zipInvalid = false;
   const get = (field: string): string => {
     const col = Object.keys(mapping).find((k) => mapping[k] === field);
     return col ? (raw[col] ?? "").trim() : "";
@@ -203,7 +208,6 @@ export function interpretContactRow(
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     warn("email", "Email is not a valid address — left blank");
     email = null;
-    anomalies++;
   }
 
   const phone = normalizePhone(get("phone"));
@@ -213,12 +217,10 @@ export function interpretContactRow(
   if (dobRaw) {
     dob = parseFlexibleDate(dobRaw, "past");
     if (!dob) {
-      warn("dob", "Date of birth not recognized — use MM/DD/YYYY. Left blank");
-      anomalies++;
+      warn("dob", "Date of birth not recognized — use MM/DD/YYYY (four-digit year). Left blank");
     } else if (dob > new Date().toISOString().slice(0, 10)) {
       warn("dob", "Date of birth is in the future — left blank");
       dob = null;
-      anomalies++;
     }
   }
 
@@ -228,7 +230,7 @@ export function interpretContactRow(
     stateCode = normalizeStateCode(stateRaw);
     if (!stateCode) {
       warn("stateCode", "State is not a US state — left blank");
-      anomalies++;
+      stateInvalid = true;
     }
   }
 
@@ -239,7 +241,7 @@ export function interpretContactRow(
     if (!/^\d{5}(-?\d{4})?$/.test(zipCode)) {
       warn("zipCode", "ZIP code is not a 5- or 9-digit ZIP — left blank");
       zipCode = null;
-      anomalies++;
+      zipInvalid = true;
     }
   }
 
@@ -258,14 +260,13 @@ export function interpretContactRow(
   if (assignedAgentEmail && !assignedAgentEmail.includes("@")) {
     warn("assignedAgentEmail", "Assigned agent must be an email address — left unassigned");
     assignedAgentEmail = null;
-    anomalies++;
   }
 
   // "12 Main St, Suite 100" with an unquoted comma puts "Suite 100" in City.
   // A city never starts with a unit designator, so this is a shift on its own,
   // even when every other shifted value happens to validate.
   const cityRaw = get("city");
-  if (cityRaw && /^(apt|apartment|suite|ste|unit|bldg|building|fl|floor|lot|rm|room|space|spc|trlr|#)\b|^#/i.test(cityRaw)) {
+  if (opts.detectShift !== false && cityRaw && /^(apt|apartment|suite|ste|unit|bldg|building|fl|floor|lot|rm|room|space|spc|trlr|#)\b|^#/i.test(cityRaw)) {
     issues.push({
       row: rowNumber,
       field: "row",
@@ -275,12 +276,12 @@ export function interpretContactRow(
     return { row: rowNumber, contact: null, enrollment: null, issues };
   }
 
-  if (anomalies >= 2) {
+  if (opts.detectShift !== false && stateInvalid && zipInvalid) {
     issues.push({
       row: rowNumber,
       field: "row",
       severity: "error",
-      message: "Several values are in the wrong format for their columns — the row looks shifted (often an unquoted comma in an address). Row skipped; fix it and re-import.",
+      message: "State and ZIP are both invalid — the row looks shifted (often an unquoted comma in the street address). Row skipped; fix it and re-import.",
     });
     return { row: rowNumber, contact: null, enrollment: null, issues };
   }
@@ -476,8 +477,9 @@ export async function loadCarriersByName(orgId: string): Promise<Map<string, str
   return new Map(carriers.map((c) => [carrierKey(c.name), c.id]));
 }
 
+/** NFKC folds lookalikes (e.g. NBSP → space); JS \s and toLowerCase are Unicode-aware. */
 function carrierKey(name: string): string {
-  return name.trim().toLowerCase().replace(/\s+/g, " ");
+  return name.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 // ─── Validate (preview) ──────────────────────────────────────────────────────
@@ -801,7 +803,7 @@ export async function fillBlanks(
  *
  * No unique index backs this: existing orgs may already hold same-named
  * carriers, and adding one would make the migration fail on their data. The
- * DB re-check below covers carriers added since the cache was loaded; the CSV
+ * re-check below covers carriers added since the cache was loaded; the CSV
  * worker runs one job at a time, so there is no concurrent writer to race.
  */
 async function resolveCarrier(
@@ -814,9 +816,12 @@ async function resolveCarrier(
   const key = carrierKey(name);
   const cached = cache.get(key);
   if (cached) return cached;
-  const [existing] = await tx.select({ id: carriersTable.id }).from(carriersTable)
-    .where(and(eq(carriersTable.orgId, orgId), sql`lower(regexp_replace(trim(${carriersTable.name}), '[[:space:]]+', ' ', 'g')) = ${key}`))
-    .limit(1);
+  // Compare in JS with the same normalization as the cache. SQL lower() and
+  // POSIX classes are locale/ASCII-bound and disagree with JS on NBSP and
+  // accented letters. An org's carrier list is small.
+  const rows = await tx.select({ id: carriersTable.id, name: carriersTable.name }).from(carriersTable)
+    .where(eq(carriersTable.orgId, orgId));
+  const existing = rows.find((r) => carrierKey(r.name) === key);
   const id = existing?.id ?? randomUUID();
   if (!existing) {
     await tx.insert(carriersTable).values({ id, orgId, name: name.trim().replace(/\s+/g, " ") });

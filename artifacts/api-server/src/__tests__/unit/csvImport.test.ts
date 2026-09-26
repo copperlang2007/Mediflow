@@ -88,9 +88,11 @@ describe("field normalizers", () => {
     expect(parseFlexibleDate("03-07-1950")).toBe("1950-03-07");
     expect(parseFlexibleDate("1/1/26")).toBe("2026-01-01");
     expect(parseFlexibleDate("3/7/50", "past")).toBe("1950-03-07");
-    // A two-digit birth year that would make the person a minor is a 1900s year.
+    // Two-digit birth years resolve to the century giving a plausible adult age.
     expect(parseFlexibleDate("5/5/25", "past")).toBe("1925-05-05");
     expect(parseFlexibleDate("5/5/24", "past")).toBe("1924-05-05");
+    expect(parseFlexibleDate("5/5/05", "past")).toBe("2005-05-05"); // 21 — e.g. an SSDI beneficiary
+    expect(parseFlexibleDate("5/5/10", "past")).toBeNull(); // 16 or 116: ambiguous, ask for 4 digits
     expect(parseFlexibleDate("46023")).toBe("2026-01-01"); // Excel serial
     expect(parseFlexibleDate("2/30/1950")).toBeNull();
     expect(parseFlexibleDate("next tuesday")).toBeNull();
