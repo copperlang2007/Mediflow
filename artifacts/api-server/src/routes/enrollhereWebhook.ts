@@ -120,6 +120,12 @@ router.post(
   "/api/integrations/enrollhere/v1/:orgId/events",
   async (req: RawBodyRequest, res: Response): Promise<void> => {
     const orgId = String(req.params.orgId ?? "");
+    // JSON only: without this, a delivery missing its Content-Type would reach
+    // the handler unparsed (and a form-encoded one would be accepted).
+    if (!req.is("application/json") && !req.is("application/*+json")) {
+      res.status(415).json({ error: "Expected Content-Type: application/json" });
+      return;
+    }
     const auth = authenticate(req, orgId);
     if (!auth.ok) {
       logger.warn({ orgId, reason: auth.reason }, "EnrollHere webhook: rejected");
@@ -162,11 +168,9 @@ router.post(
     // invisible in the CRM. Reject clearly (422, not retried) and name the
     // fields we did receive so the mapping can be fixed.
     if (!contact) {
-      logger.warn({ orgId, keys }, "EnrollHere webhook: payload has no contact name");
-      res.status(422).json({
-        error: "Payload has no contact first/last name",
-        fieldsReceived: keys,
-      });
+      const reason = interpreted.issues.find((i) => i.severity === "error")?.message ?? "Contact could not be read";
+      logger.warn({ orgId, keys }, "EnrollHere webhook: payload has no usable contact");
+      res.status(422).json({ error: reason, fieldsReceived: keys });
       return;
     }
 

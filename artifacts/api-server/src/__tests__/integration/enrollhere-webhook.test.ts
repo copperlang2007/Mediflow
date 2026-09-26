@@ -70,7 +70,7 @@ describe("EnrollHere webhook auth", () => {
   const body = { call_id: "auth-1", first_name: "A", last_name: "B" };
 
   it("rejects a missing, wrong, or stale credential", async () => {
-    expect((await request(app).post(url()).send(body)).status).toBe(401);
+    expect((await request(app).post(url()).set("Content-Type", "application/json").send(JSON.stringify(body))).status).toBe(401);
     expect((await withHeaderSecret(body, "nope")).status).toBe(401);
     expect((await signed(body, "nope")).status).toBe(401);
     expect((await signed(body, SECRET, Math.floor(Date.now() / 1000) - 3600)).status).toBe(403);
@@ -219,5 +219,33 @@ describe("EnrollHere webhook processing", () => {
     const res = await withHeaderSecret({ call_id: "cid-2", first_name: "Top", last_name: "Level", phone: "5125550555", caller: { name: "Support Line", phone: "18005550000" } });
     const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, res.body.contactId));
     expect(c!.phone).toBe("+15125550555");
+  });
+
+  it("rejects non-JSON deliveries with 415", async () => {
+    const noCt = await request(app).post(url()).set("X-Webhook-Secret", SECRET).unset("Content-Type")
+      .send(Buffer.from('{"call_id":"ct-1","first_name":"No","last_name":"Ct"}'));
+    expect(noCt.status).toBe(415);
+    const form = await request(app).post(url()).set("X-Webhook-Secret", SECRET).type("form").send("first_name=Kate&last_name=Test");
+    expect(form.status).toBe(415);
+  });
+
+  it("does not apply the CSV shift heuristic to JSON payloads", async () => {
+    const res = await withHeaderSecret({ call_id: "shift-1", first_name: "Valid", last_name: "Person", state: "Austin", zip: "TX", date_of_birth: "totally-bogus" });
+    expect(res.status).toBe(200);
+    const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, res.body.contactId));
+    expect(c).toMatchObject({ stateCode: null, zipCode: null, dob: null });
+  });
+});
+
+describe("header recognition for compound address columns (CSV and webhook)", () => {
+  it("maps address_* / mailing_* parts to their own fields and keeps street variants on address1", async () => {
+    const { suggestContactField } = await import("../../lib/contactImport");
+    const cases: Record<string, string> = {
+      address_city: "city", address_state: "stateCode", address_zip: "zipCode", address_county: "county",
+      "Mailing ZIP": "zipCode", "Mailing City": "city", "Mailing State": "stateCode",
+      address: "address1", address1: "address1", "Address Line 1": "address1", street: "address1", "Street Address": "address1",
+      "Address Line 2": "",
+    };
+    for (const [header, field] of Object.entries(cases)) expect([header, suggestContactField(header)]).toEqual([header, field]);
   });
 });

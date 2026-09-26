@@ -143,5 +143,5 @@ export function interpretPayloadContact(flat: Record<string, string>): Interpret
       taken.add(field);
     }
   }
-  return interpretContactRow(flat, mapping, 0);
+  return interpretContactRow(flat, mapping, 0, { detectShift: false });
 }
