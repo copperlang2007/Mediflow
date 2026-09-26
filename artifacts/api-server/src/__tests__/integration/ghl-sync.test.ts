@@ -238,7 +238,7 @@ describe("GHL feed", () => {
     expect(c!.deletedAt).not.toBeNull();
   });
 
-  it("without a searchAfter from GHL, continues by page number instead of restarting at page 1", async () => {
+  it("without a searchAfter from GHL, pages by number only within one shared timestamp", async () => {
     const org4 = await seedOrg(tdb, { id: "ghl-org-4" });
     process.env.GHL_SYNC_ORG_IDS = `${org.id},${org4.id}`;
     try {
@@ -247,7 +247,13 @@ describe("GHL feed", () => {
       const statuses: string[] = [];
       for (let run = 0; run < 3; run++) statuses.push((await sync.runGhlSync(cfg4, { fetchImpl: ghl.impl, maxPages: 2 })).status);
       expect(statuses).toEqual(["more_pending", "more_pending", "ok"]);
-      expect(ghl.calls.map((c) => c.body.page)).toEqual([1, 2, 3, 4, 5]);
+      // Page 1 moves the filter up to the shared timestamp (and re-reads it
+      // once); from there the only way forward is by page number.
+      expect(ghl.calls.map((c) => [c.body.filters?.[0]?.value?.gte ?? null, c.body.page])).toEqual([
+        [null, 1],
+        ["2026-08-15T12:00:00.000Z", 1], ["2026-08-15T12:00:00.000Z", 2],
+        ["2026-08-15T12:00:00.000Z", 3], ["2026-08-15T12:00:00.000Z", 4], ["2026-08-15T12:00:00.000Z", 5],
+      ]);
       const links = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.orgId, org4.id));
       expect(links).toHaveLength(450);
       const [state] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org4.id));
@@ -276,6 +282,29 @@ describe("GHL feed", () => {
       expect(contacts.find((c) => c.firstName === "First8001")!.tags).toEqual(["vip"]);
       const [state] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org7.id));
       expect(state!.cursorUpdatedAt!.toISOString()).toBe(ghlContact(8003).dateUpdated);
+    } finally {
+      process.env.GHL_SYNC_ORG_IDS = org.id;
+    }
+  });
+
+  it("without a searchAfter, a contact edited in GHL between runs does not shift a page and skip another", async () => {
+    const org8 = await seedOrg(tdb, { id: "ghl-org-8" });
+    process.env.GHL_SYNC_ORG_IDS = `${org.id},${org8.id}`;
+    try {
+      const cfg8 = ({ orgId: org8.id, token: TOKEN, locationId: `loc-${org8.id}` });
+      const store = Array.from({ length: 250 }, (_, k) => ghlContact(9000 + k));
+      const ghl = fakeGhl(store, undefined, true);
+      expect((await sync.runGhlSync(cfg8, { fetchImpl: ghl.impl, maxPages: 1 })).status).toBe("more_pending");
+      // An early contact is edited: it moves to the end, and a fixed-filter
+      // page 2 would now start one contact later than before.
+      store[5] = { ...store[5]!, email: "edited@example.com", dateUpdated: "2026-12-31T00:00:00.000Z" };
+      let status = "";
+      for (let run = 0; run < 10 && status !== "ok"; run++) status = (await sync.runGhlSync(cfg8, { fetchImpl: ghl.impl, maxPages: 1 })).status;
+      expect(status).toBe("ok");
+      const links = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.orgId, org8.id));
+      expect(new Set(links.map((l) => l.externalId)).size).toBe(250);
+      const edited = (await tdb.select().from(contactsTable).where(eq(contactsTable.orgId, org8.id))).find((c) => c.firstName === "First9005")!;
+      expect(edited.email).toBe("edited@example.com");
     } finally {
       process.env.GHL_SYNC_ORG_IDS = org.id;
     }

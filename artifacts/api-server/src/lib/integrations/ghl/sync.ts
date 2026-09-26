@@ -166,7 +166,8 @@ export async function runGhlSync(
   // A full re-sync or a different sub-account starts from the top — reset only
   // now that we hold the lease, so it can't clobber a run already in progress.
   // The stored position is either GHL's searchAfter tuple, or — when GHL sent
-  // none — the next page number under the same `updatedSince` filter.
+  // none — a timestamp plus, only while paging through contacts that all share
+  // that exact timestamp, a page number.
   let cursorUpdatedAt = lease.cursorUpdatedAt;
   const stored = lease.cursorSearchAfter as (string | number)[] | { page: number } | null;
   let searchAfter = Array.isArray(stored) ? stored : null;
@@ -180,21 +181,19 @@ export async function runGhlSync(
     await writeState({ locationId, cursorUpdatedAt: null, cursorSearchAfter: null, backfillCompletedAt: null });
   }
 
-  const updatedSince = cursorUpdatedAt;
+  let since = cursorUpdatedAt;
+  let pageNo = startPage;
   const totals = { created: 0, updated: 0, skipped: 0, failed: 0 };
   let consecutiveFailures = 0;
   let pages = 0;
   let morePending = false;
   let runMax: Date | null = null;
-  // Page-number continuation is only valid when this window has been paged
-  // by number from its start; once GHL has given a tuple, page N means nothing.
-  let usedTuple = searchAfter !== null;
 
   try {
     for (;;) {
       if (pages >= maxPages) { morePending = true; break; }
       const page = await searchContacts(
-        { token: cfg.token, locationId, updatedSince, searchAfter, page: startPage + pages, pageLimit: GHL_PAGE_LIMIT },
+        { token: cfg.token, locationId, updatedSince: since, searchAfter, page: pageNo, pageLimit: GHL_PAGE_LIMIT },
         opts.fetchImpl,
       );
       pages++;
@@ -224,24 +223,30 @@ export async function runGhlSync(
       }
       if (cursor && (!runMax || cursor > runMax)) runMax = cursor;
       searchAfter = page.searchAfter;
-      if (searchAfter) usedTuple = true;
       // Persist the exact position after the page is written: a crash re-reads
-      // the page rather than skipping it, and the next run resumes strictly
-      // after the last contact — even when thousands share one dateUpdated.
-      //  - with GHL's searchAfter tuple: advance the timestamp and keep the tuple;
-      //  - without it: keep this run's filter and remember the next page number,
-      //    so a continuation doesn't restart at page 1 of the same window.
+      // the page rather than skipping it.
       if (searchAfter) {
-        // Keep the tuple even when no contact on the page had a usable
-        // dateUpdated, so such a page is never re-read forever.
+        // GHL's tuple: advance the timestamp and keep the tuple. Kept even when
+        // no contact on the page had a usable dateUpdated, so such a page is
+        // never re-read forever.
         await writeState({ ...(cursor ? { cursorUpdatedAt: cursor } : {}), cursorSearchAfter: searchAfter, runningSince: new Date() });
-      } else if (usedTuple) {
-        // GHL stopped sending a tuple mid-window: resume from the newest
-        // contact written (re-reading is idempotent) rather than a page number
-        // that no longer corresponds to anything.
-        await writeState({ cursorUpdatedAt: runMax ?? updatedSince, cursorSearchAfter: null, runningSince: new Date() });
       } else {
-        await writeState({ cursorUpdatedAt: updatedSince, cursorSearchAfter: { page: startPage + pages }, runningSince: new Date() });
+        // No tuple: move the filter up to the newest contact written and ask
+        // for page 1 again. Page numbers under a fixed filter are unsafe —
+        // editing an earlier contact in GHL moves it to the end and shifts
+        // every later page, silently skipping one. With the filter advanced,
+        // only contacts at or after it are paged, and the only way to leave
+        // that set is to be edited, which re-lists the contact later.
+        // Contacts at exactly the new timestamp are re-read (idempotent).
+        // Page numbers remain only for a page that is entirely one timestamp
+        // (a bulk edit), where the filter can't move.
+        if (runMax && (!since || runMax > since)) {
+          since = runMax;
+          pageNo = 1;
+        } else {
+          pageNo++;
+        }
+        await writeState({ cursorUpdatedAt: since, cursorSearchAfter: pageNo > 1 ? { page: pageNo } : null, runningSince: new Date() });
       }
       if (page.contacts.length < GHL_PAGE_LIMIT) break;
     }
@@ -250,7 +255,7 @@ export async function runGhlSync(
       // Window finished without a tuple: next run starts from the newest contact
       // seen, and any page-number position is cleared (it must never outlive
       // its window, or later runs would ask for pages past the end forever).
-      ...(!morePending && !searchAfter ? { cursorUpdatedAt: runMax ?? updatedSince, cursorSearchAfter: null } : {}),
+      ...(!morePending && !searchAfter ? { cursorUpdatedAt: runMax && (!since || runMax > since) ? runMax : since, cursorSearchAfter: null } : {}),
       runningSince: null,
       leaseToken: null,
       lastRunAt: new Date(),
