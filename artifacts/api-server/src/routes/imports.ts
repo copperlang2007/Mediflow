@@ -26,7 +26,19 @@ import { logger } from "../lib/logger";
 import { captureWorkerError } from "../lib/sentry";
 import { randomUUID } from "crypto";
 import multer from "multer";
-import { parse } from "csv-parse/sync";
+import { parseCsvTolerant, CsvFileError, type TolerantCsvResult } from "../lib/csvImport";
+import {
+  CONTACT_TARGET_FIELDS,
+  ROW_NUMBER_KEY,
+  parseDuplicateAction,
+  prepareRowsForQueue,
+  previewContactImport,
+  processCsvContactImport,
+  suggestContactField,
+} from "../lib/contactImport";
+
+// The background worker imports this from here (see workers/importProcessing.ts).
+export { processCsvContactImport };
 
 const router: IRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -40,17 +52,45 @@ void db.update(importJobsTable)
     captureWorkerError(err, { worker: "imports", phase: "startup-cleanup" });
   });
 
-function parseCSV(buffer: Buffer): { headers: string[]; rows: Record<string, string>[] } {
-  const records = parse(buffer, {
-    columns: true,
-    bom: true,
-    skip_empty_lines: true,
-    trim: true,
-    relax_quotes: true,
-    relax_column_count: true,
-  }) as Record<string, string>[];
-  const headers = records.length > 0 ? Object.keys(records[0]) : [];
-  return { headers, rows: records };
+function parseCSV(buffer: Buffer): TolerantCsvResult {
+  return parseCsvTolerant(buffer);
+}
+
+/**
+ * Parse the uploaded file, or answer 400 with a message the admin can act on.
+ * Row-level problems never land here: they come back in `issues` so one bad
+ * row no longer fails the whole file.
+ */
+function parseUpload(req: Request, res: Response, route: string): TolerantCsvResult | null {
+  if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return null; }
+  try {
+    return parseCSV(req.file.buffer);
+  } catch (err) {
+    if (err instanceof CsvFileError) { res.status(400).json({ error: err.message }); return null; }
+    logger.error({ err }, "imports: failed to parse CSV upload");
+    captureWorkerError(err, { worker: "imports", route });
+    res.status(400).json({ error: "Failed to parse CSV. Please ensure the file is a valid CSV export." });
+    return null;
+  }
+}
+
+function parseMapping(req: Request): Record<string, string> {
+  if (!req.body.mapping) return {};
+  try {
+    const m = JSON.parse(req.body.mapping as string) as unknown;
+    return m && typeof m === "object" ? (m as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Row-level parse problems, in the shape the validate endpoints return. */
+function parseIssueErrors(parsed: TolerantCsvResult) {
+  return parsed.issues.map((i) => ({ row: i.row, field: i.field, message: i.message, severity: i.severity }));
+}
+
+function withRowNumbers(parsed: TolerantCsvResult): Record<string, string>[] {
+  return parsed.rows.map((r, i) => ({ ...r, [ROW_NUMBER_KEY]: String(parsed.rowNumbers[i]) }));
 }
 
 const US_STATES = new Set(["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"]);
@@ -64,11 +104,10 @@ router.post(
   requireRole("super_admin", "agency_admin"),
   upload.single("file"),
   async (req: Request, res: Response): Promise<void> => {
-    const authReq = req as AuthenticatedRequest;
-    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
-
-    try {
-      const { headers, rows } = parseCSV(req.file.buffer);
+    const parsed = parseUpload(req, res, "monday/upload");
+    if (!parsed) return;
+    {
+      const { headers, rows } = parsed;
       const sample = rows.slice(0, 5);
 
       // Suggested Monday.com → platform field mapping
@@ -110,11 +149,8 @@ router.post(
           { field: "notes", label: "Notes / Description" },
           { field: "fullName", label: "Full Name (will be split)" },
         ],
+        parseIssues: parseIssueErrors(parsed),
       });
-    } catch (err) {
-      logger.error({ err }, "imports: failed to parse Monday CSV upload");
-      captureWorkerError(err, { worker: "imports", route: "monday/upload" });
-      res.status(400).json({ error: "Failed to parse CSV. Please ensure the file is valid CSV format." });
     }
   },
 );
@@ -127,11 +163,12 @@ router.post(
   upload.single("file"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
-    const mapping = req.body.mapping ? JSON.parse(req.body.mapping as string) as Record<string, string> : {};
+    const parsed = parseUpload(req, res, "monday/validate");
+    if (!parsed) return;
+    const mapping = parseMapping(req);
 
-    const { rows } = parseCSV(req.file.buffer);
-    const validationErrors: { row: number; field: string; message: string; value?: string }[] = [];
+    const { rows, rowNumbers } = parsed;
+    const validationErrors: { row: number; field: string; message: string; value?: string; severity?: string }[] = parseIssueErrors(parsed);
 
     // Pre-compute column lookups
     const firstNameCol = Object.keys(mapping).find((k) => mapping[k] === "firstName");
@@ -165,16 +202,17 @@ router.post(
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
+      const rowNo = rowNumbers[i]!;
 
       const firstName = firstNameCol ? row[firstNameCol]?.trim() : fullNameCol ? row[fullNameCol]?.split(" ")[0] : "";
       const lastName = lastNameCol ? row[lastNameCol]?.trim() : fullNameCol ? row[fullNameCol]?.split(" ").slice(1).join(" ") : "";
 
-      if (!firstName) validationErrors.push({ row: i + 2, field: "firstName", message: "First name is required" });
-      if (!lastName) validationErrors.push({ row: i + 2, field: "lastName", message: "Last name is required" });
+      if (!firstName) validationErrors.push({ row: rowNo, field: "firstName", message: "First name is required" });
+      if (!lastName) validationErrors.push({ row: rowNo, field: "lastName", message: "Last name is required" });
 
       if (stateCol && row[stateCol]) {
         const state = row[stateCol].toUpperCase().trim();
-        if (!US_STATES.has(state)) validationErrors.push({ row: i + 2, field: "licenseState", message: `Invalid state code: ${state}`, value: state });
+        if (!US_STATES.has(state)) validationErrors.push({ row: rowNo, field: "licenseState", message: `Invalid state code: ${state}`, value: state });
       }
 
       // NPN duplicate validation
@@ -182,9 +220,9 @@ router.post(
         const npn = row[npnCol]?.trim();
         if (npn) {
           if (csvNpnDuplicates.has(npn)) {
-            validationErrors.push({ row: i + 2, field: "npn", message: `Duplicate NPN within file: ${npn}`, value: npn });
+            validationErrors.push({ row: rowNo, field: "npn", message: `Duplicate NPN within file: ${npn}`, value: npn });
           } else if (dbNpnSet.has(npn)) {
-            validationErrors.push({ row: i + 2, field: "npn", message: `NPN already exists in system: ${npn}`, value: npn });
+            validationErrors.push({ row: rowNo, field: "npn", message: `NPN already exists in system: ${npn}`, value: npn });
           }
         }
       }
@@ -193,7 +231,7 @@ router.post(
     res.json({
       totalRows: rows.length,
       errorCount: validationErrors.length,
-      validRows: rows.length - new Set(validationErrors.map((e) => e.row)).size,
+      validRows: rows.length - new Set(validationErrors.filter((e) => !e.severity).map((e) => e.row)).size,
       errors: validationErrors.slice(0, 200),
       duplicateNpns: csvNpnDuplicates.size + dbNpnSet.size,
     });
@@ -208,10 +246,11 @@ router.post(
   upload.single("file"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
-    const mapping = req.body.mapping ? JSON.parse(req.body.mapping as string) as Record<string, string> : {};
+    const parsed = parseUpload(req, res, "monday/confirm");
+    if (!parsed) return;
+    const mapping = parseMapping(req);
 
-    const { rows } = parseCSV(req.file.buffer);
+    const rows = withRowNumbers(parsed);
     const jobId = randomUUID();
 
     await db.insert(importJobsTable).values({
@@ -223,7 +262,7 @@ router.post(
       totalRows: rows.length,
       columnMapping: mapping as Record<string, unknown>,
       options: { rows, mapping } as Record<string, unknown>,
-      fileName: req.file.originalname,
+      fileName: req.file!.originalname,
     });
 
     await enqueue(JOB_NAMES.IMPORT_MONDAY, { jobId });
@@ -246,6 +285,7 @@ export async function processMondayImport(jobId: string, orgId: string, rows: Re
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
+    const rowNo = Number(row[ROW_NUMBER_KEY]) || i + 2;
     try {
       const get = (field: string) => {
         const col = Object.keys(mapping).find((k) => mapping[k] === field);
@@ -256,7 +296,7 @@ export async function processMondayImport(jobId: string, orgId: string, rows: Re
       let lastName = get("lastName");
       const fullName = get("fullName");
       if (!firstName && fullName) { firstName = fullName.split(" ")[0] ?? ""; lastName = fullName.split(" ").slice(1).join(" "); }
-      if (!firstName || !lastName) { errors++; errorList.push({ row: i + 2, message: "Missing name" }); continue; }
+      if (!firstName || !lastName) { errors++; errorList.push({ row: rowNo, message: "Missing name" }); continue; }
 
       const email = get("email") || null;
       const phone = get("phone") || null;
@@ -302,9 +342,9 @@ export async function processMondayImport(jobId: string, orgId: string, rows: Re
       created++;
     } catch (err) {
       errors++;
-      errorList.push({ row: i + 2, message: "Failed to create agent record" });
-      logger.error({ err, jobId, row: i + 2 }, "imports: failed to create Monday agent record");
-      captureWorkerError(err, { worker: "imports", route: "monday/confirm", jobId, row: i + 2 });
+      errorList.push({ row: rowNo, message: "Failed to create agent record" });
+      logger.error({ err, jobId, row: rowNo }, "imports: failed to create Monday agent record");
+      captureWorkerError(err, { worker: "imports", route: "monday/confirm", jobId, row: rowNo });
     }
 
     // Persist progress to DB every 50 rows (restart-safe)
@@ -437,9 +477,10 @@ router.post(
   requireRole("super_admin", "agency_admin"),
   upload.single("file"),
   async (req: Request, res: Response): Promise<void> => {
-    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
-    try {
-      const { headers, rows } = parseCSV(req.file.buffer);
+    const parsed = parseUpload(req, res, "ghl/upload");
+    if (!parsed) return;
+    {
+      const { headers, rows } = parsed;
       const sample = rows.slice(0, 5);
 
       const suggestedMapping: Record<string, string> = {};
@@ -479,11 +520,8 @@ router.post(
           { field: "pipelineStage", label: "Pipeline Stage Name" },
           { field: "assignedAgentEmail", label: "Assigned Agent (email)" },
         ],
+        parseIssues: parseIssueErrors(parsed),
       });
-    } catch (err) {
-      logger.error({ err }, "imports: failed to parse GHL CSV upload");
-      captureWorkerError(err, { worker: "imports", route: "ghl/upload" });
-      res.status(400).json({ error: "Failed to parse CSV" });
     }
   },
 );
@@ -495,11 +533,12 @@ router.post(
   upload.single("file"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
-    const mapping = req.body.mapping ? JSON.parse(req.body.mapping as string) as Record<string, string> : {};
+    const parsed = parseUpload(req, res, "ghl/validate");
+    if (!parsed) return;
+    const mapping = parseMapping(req);
 
-    const { rows } = parseCSV(req.file.buffer);
-    const errors: { row: number; field: string; message: string }[] = [];
+    const { rows, rowNumbers } = parsed;
+    const errors: { row: number; field: string; message: string; severity?: string }[] = parseIssueErrors(parsed);
 
     // Check for duplicate phone/email within existing contacts
     const emails = rows.map((r) => {
@@ -526,22 +565,23 @@ router.post(
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
+      const rowNo = rowNumbers[i]!;
       const firstNameCol = Object.keys(mapping).find((k) => mapping[k] === "firstName");
       const lastNameCol = Object.keys(mapping).find((k) => mapping[k] === "lastName");
-      if (firstNameCol && !row[firstNameCol]?.trim()) errors.push({ row: i + 2, field: "firstName", message: "First name required" });
-      if (lastNameCol && !row[lastNameCol]?.trim()) errors.push({ row: i + 2, field: "lastName", message: "Last name required" });
+      if (firstNameCol && !row[firstNameCol]?.trim()) errors.push({ row: rowNo, field: "firstName", message: "First name required" });
+      if (lastNameCol && !row[lastNameCol]?.trim()) errors.push({ row: rowNo, field: "lastName", message: "Last name required" });
 
       const emailCol = Object.keys(mapping).find((k) => mapping[k] === "email");
       const phoneCol = Object.keys(mapping).find((k) => mapping[k] === "phone");
       if (emailCol && row[emailCol] && existingEmailSet.has(row[emailCol].trim())) {
-        errors.push({ row: i + 2, field: "email", message: `Duplicate email: ${row[emailCol].trim()}` });
+        errors.push({ row: rowNo, field: "email", message: `Duplicate email: ${row[emailCol].trim()}` });
       }
       if (phoneCol && row[phoneCol] && existingPhoneSet.has(row[phoneCol].trim())) {
-        errors.push({ row: i + 2, field: "phone", message: `Duplicate phone: ${row[phoneCol].trim()}` });
+        errors.push({ row: rowNo, field: "phone", message: `Duplicate phone: ${row[phoneCol].trim()}` });
       }
     }
 
-    res.json({ totalRows: rows.length, errorCount: errors.length, validRows: rows.length - new Set(errors.map((e) => e.row)).size, errors: errors.slice(0, 200), duplicateEmails: existingEmailSet.size, duplicatePhones: existingPhoneSet.size });
+    res.json({ totalRows: rows.length, errorCount: errors.length, validRows: rows.length - new Set(errors.filter((e) => !e.severity).map((e) => e.row)).size, errors: errors.slice(0, 200), duplicateEmails: existingEmailSet.size, duplicatePhones: existingPhoneSet.size });
   },
 );
 
@@ -552,11 +592,12 @@ router.post(
   upload.single("file"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
-    const mapping = req.body.mapping ? JSON.parse(req.body.mapping as string) as Record<string, string> : {};
+    const parsed = parseUpload(req, res, "ghl/confirm");
+    if (!parsed) return;
+    const mapping = parseMapping(req);
     const duplicateAction = (req.body.duplicateAction as string) || "skip"; // skip|merge|create
 
-    const { rows } = parseCSV(req.file.buffer);
+    const rows = withRowNumbers(parsed);
     const jobId = randomUUID();
 
     await db.insert(importJobsTable).values({
@@ -564,7 +605,7 @@ router.post(
       importType: "gohighlevel", status: "processing", totalRows: rows.length,
       columnMapping: mapping as Record<string, unknown>,
       options: { rows, mapping, duplicateAction } as Record<string, unknown>,
-      fileName: req.file.originalname,
+      fileName: req.file!.originalname,
     });
 
     await enqueue(JOB_NAMES.IMPORT_GHL, { jobId });
@@ -587,6 +628,7 @@ export async function processGhlImport(jobId: string, orgId: string, rows: Recor
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
+    const rowNo = Number(row[ROW_NUMBER_KEY]) || i + 2;
     try {
       const get = (field: string) => {
         const col = Object.keys(mapping).find((k) => mapping[k] === field);
@@ -595,7 +637,7 @@ export async function processGhlImport(jobId: string, orgId: string, rows: Recor
 
       const firstName = get("firstName");
       const lastName = get("lastName");
-      if (!firstName || !lastName) { errors++; errorList.push({ row: i + 2, message: "Missing name" }); continue; }
+      if (!firstName || !lastName) { errors++; errorList.push({ row: rowNo, message: "Missing name" }); continue; }
 
       const email = get("email") || null;
       const phone = get("phone") || null;
@@ -675,9 +717,9 @@ export async function processGhlImport(jobId: string, orgId: string, rows: Recor
       created++;
     } catch (err) {
       errors++;
-      errorList.push({ row: i + 2, message: "Failed to create contact" });
-      logger.error({ err, jobId, row: i + 2 }, "imports: failed to create GHL contact");
-      captureWorkerError(err, { worker: "imports", route: "ghl/confirm", jobId, row: i + 2 });
+      errorList.push({ row: rowNo, message: "Failed to create contact" });
+      logger.error({ err, jobId, row: rowNo }, "imports: failed to create GHL contact");
+      captureWorkerError(err, { worker: "imports", route: "ghl/confirm", jobId, row: rowNo });
     }
 
     if (i % 50 === 0) {
@@ -708,62 +750,8 @@ async function createGhlDeal(orgId: string, contactId: string, pipelineStageRaw:
 }
 
 // ─── Generic CSV Contact Importer ─────────────────────────────────────────────
-
-// ─── Generic CSV Contact Validate ─────────────────────────────────────────────
-// Step 2: validate mapping + detect duplicates (returns same shape as monday/ghl validate)
-router.post(
-  "/imports/contacts/validate",
-  requireAuth,
-  requireRole("super_admin", "agency_admin"),
-  upload.single("file"),
-  async (req: Request, res: Response): Promise<void> => {
-    const authReq = req as AuthenticatedRequest;
-    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
-    const mapping = req.body.mapping ? JSON.parse(req.body.mapping as string) as Record<string, string> : {};
-    const { rows } = parseCSV(req.file.buffer);
-    const errors: { row: number; field: string; message: string }[] = [];
-
-    const getCol = (field: string) => Object.keys(mapping).find((k) => mapping[k] === field);
-    const firstNameCol = getCol("firstName");
-    const lastNameCol = getCol("lastName");
-    const fullNameCol = getCol("fullName");
-    const emailCol = getCol("email");
-    const phoneCol = getCol("phone");
-
-    const emails = emailCol ? rows.map((r) => r[emailCol]?.trim()).filter(Boolean) as string[] : [];
-    const phones = phoneCol ? rows.map((r) => r[phoneCol]?.trim()).filter(Boolean) as string[] : [];
-
-    const [existingEmails, existingPhones] = await Promise.all([
-      emails.length > 0 ? db.select({ email: contactsTable.email }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.email, emails))) : Promise.resolve([]),
-      phones.length > 0 ? db.select({ phone: contactsTable.phone }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.phone, phones))) : Promise.resolve([]),
-    ]);
-    const existingEmailSet = new Set(existingEmails.map((e) => e.email).filter(Boolean));
-    const existingPhoneSet = new Set(existingPhones.map((p) => p.phone).filter(Boolean));
-
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const fn = firstNameCol ? row[firstNameCol]?.trim() : fullNameCol ? row[fullNameCol]?.split(" ")[0] : "";
-      const ln = lastNameCol ? row[lastNameCol]?.trim() : fullNameCol ? row[fullNameCol]?.split(" ").slice(1).join(" ") : "";
-      if (!fn) errors.push({ row: i + 2, field: "firstName", message: "First name required" });
-      if (!ln) errors.push({ row: i + 2, field: "lastName", message: "Last name required" });
-      if (emailCol && row[emailCol] && existingEmailSet.has(row[emailCol].trim())) {
-        errors.push({ row: i + 2, field: "email", message: `Duplicate email: ${row[emailCol].trim()}` });
-      }
-      if (phoneCol && row[phoneCol] && existingPhoneSet.has(row[phoneCol].trim())) {
-        errors.push({ row: i + 2, field: "phone", message: `Duplicate phone: ${row[phoneCol].trim()}` });
-      }
-    }
-
-    res.json({
-      totalRows: rows.length,
-      validRows: rows.length - new Set(errors.map((e) => e.row)).size,
-      errorCount: errors.length,
-      errors: errors.slice(0, 200),
-      duplicateEmails: existingEmailSet.size,
-      duplicatePhones: existingPhoneSet.size,
-    });
-  },
-);
+// Contacts + Medicare coverage. Row interpretation, dedupe and the write path
+// live in lib/contactImport.ts so validate and the worker share one rule set.
 
 router.post(
   "/imports/contacts/upload",
@@ -771,44 +759,57 @@ router.post(
   requireRole("super_admin", "agency_admin"),
   upload.single("file"),
   async (req: Request, res: Response): Promise<void> => {
-    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
-    try {
-      const { headers, rows } = parseCSV(req.file.buffer);
-      const suggestedMapping: Record<string, string> = {};
-      for (const h of headers) {
-        const hl = h.toLowerCase().replace(/[\s_-]+/g, "_");
-        if (hl === "first_name" || hl === "firstname") suggestedMapping[h] = "firstName";
-        else if (hl === "last_name" || hl === "lastname") suggestedMapping[h] = "lastName";
-        else if (hl === "name" || hl === "full_name") suggestedMapping[h] = "fullName";
-        else if (hl.includes("email")) suggestedMapping[h] = "email";
-        else if (hl.includes("phone") || hl === "mobile") suggestedMapping[h] = "phone";
-        else if (hl === "state" || hl === "state_code") suggestedMapping[h] = "stateCode";
-        else if (hl.includes("zip")) suggestedMapping[h] = "zipCode";
-        else if (hl.includes("source")) suggestedMapping[h] = "leadSource";
-        else if (hl.includes("opt_out") || hl.includes("optout")) suggestedMapping[h] = "optOut";
-        else if (hl.includes("tag")) suggestedMapping[h] = "tags";
-        else suggestedMapping[h] = "";
-      }
-      res.json({
-        headers, sampleRows: rows.slice(0, 5), totalRows: rows.length, suggestedMapping,
-        targetFields: [
-          { field: "firstName", label: "First Name", required: true },
-          { field: "lastName", label: "Last Name", required: true },
-          { field: "fullName", label: "Full Name (auto-split)" },
-          { field: "email", label: "Email" },
-          { field: "phone", label: "Phone" },
-          { field: "stateCode", label: "State Code" },
-          { field: "zipCode", label: "ZIP Code" },
-          { field: "leadSource", label: "Lead Source" },
-          { field: "tags", label: "Tags" },
-          { field: "optOut", label: "Opt-Out (yes/true = opt out)" },
-        ],
-      });
-    } catch (err) {
-      logger.error({ err }, "imports: failed to parse contacts CSV upload");
-      captureWorkerError(err, { worker: "imports", route: "contacts/upload" });
-      res.status(400).json({ error: "Failed to parse CSV" });
+    const parsed = parseUpload(req, res, "contacts/upload");
+    if (!parsed) return;
+    const { headers, rows } = parsed;
+    const suggestedMapping: Record<string, string> = {};
+    const taken = new Set<string>();
+    for (const h of headers) {
+      const field = suggestContactField(h);
+      // One column per target field; a second "Phone" column stays unmapped.
+      suggestedMapping[h] = field && !taken.has(field) ? field : "";
+      if (field) taken.add(field);
     }
+    res.json({
+      headers,
+      sampleRows: rows.slice(0, 5),
+      totalRows: rows.length,
+      suggestedMapping,
+      targetFields: CONTACT_TARGET_FIELDS,
+      parseIssues: parseIssueErrors(parsed),
+    });
+  },
+);
+
+// Step 2: validate mapping + detect duplicates (same response shape as monday/ghl validate)
+router.post(
+  "/imports/contacts/validate",
+  requireAuth,
+  requireRole("super_admin", "agency_admin"),
+  upload.single("file"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const parsed = parseUpload(req, res, "contacts/validate");
+    if (!parsed) return;
+    const mapping = parseMapping(req);
+    const duplicateAction = parseDuplicateAction(req.body.duplicateAction);
+
+    const summary = await previewContactImport(authReq.orgId, parsed.rows, parsed.rowNumbers, mapping, duplicateAction);
+    const all = [...parsed.issues, ...summary.issues].sort((a, b) => a.row - b.row);
+    const errorCount = all.filter((e) => e.severity === "error").length;
+    // Errors first so the rows that will NOT import are never cut off by the cap.
+    const ordered = [...all.filter((e) => e.severity === "error"), ...all.filter((e) => e.severity === "warning")];
+
+    res.json({
+      totalRows: parsed.rows.length + parsed.issues.filter((i) => i.severity === "error").length,
+      validRows: summary.validRows,
+      errorCount,
+      warningCount: all.length - errorCount,
+      errors: ordered.slice(0, 500),
+      duplicateCount: summary.duplicateCount,
+      enrollmentCount: summary.enrollmentCount,
+      newCarriers: summary.newCarriers,
+    });
   },
 );
 
@@ -819,19 +820,24 @@ router.post(
   upload.single("file"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
-    const mapping = req.body.mapping ? JSON.parse(req.body.mapping as string) as Record<string, string> : {};
+    const parsed = parseUpload(req, res, "contacts/confirm");
+    if (!parsed) return;
+    const mapping = parseMapping(req);
+    const duplicateAction = parseDuplicateAction(req.body.duplicateAction);
 
-    const { rows } = parseCSV(req.file.buffer);
     const jobId = randomUUID();
-
     try {
+      // Encrypts the Medicare ID cells before they are persisted for the worker.
+      const rows = prepareRowsForQueue(parsed.rows, parsed.rowNumbers, mapping);
       await db.insert(importJobsTable).values({
         id: jobId, orgId: authReq.orgId, userId: authReq.userId,
         importType: "csv_contacts", status: "processing", totalRows: rows.length,
         columnMapping: mapping as Record<string, unknown>,
-        options: { rows, mapping } as Record<string, unknown>,
-        fileName: req.file.originalname,
+        options: { rows, mapping, duplicateAction } as Record<string, unknown>,
+        // Rows that could not be parsed never reach the worker; record them now.
+        errors: parsed.issues.map((i) => ({ row: i.row, field: i.field, message: i.message })),
+        errorCount: parsed.issues.filter((i) => i.severity === "error").length,
+        fileName: req.file!.originalname,
       });
 
       const queuedId = await enqueue(JOB_NAMES.IMPORT_CSV_CONTACTS, { jobId });
@@ -849,64 +855,6 @@ router.post(
     }
   },
 );
-
-export async function processCsvContactImport(jobId: string, orgId: string, rows: Record<string, string>[], mapping: Record<string, string>) {
-  let created = 0, errors = 0;
-  const errorList: unknown[] = [];
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    try {
-      const get = (field: string) => {
-        const col = Object.keys(mapping).find((k) => mapping[k] === field);
-        return col ? (row[col] ?? "").trim() : "";
-      };
-
-      let firstName = get("firstName");
-      let lastName = get("lastName");
-      const fullName = get("fullName");
-      if (!firstName && fullName) { firstName = fullName.split(" ")[0] ?? ""; lastName = fullName.split(" ").slice(1).join(" "); }
-      if (!firstName || !lastName) { errors++; errorList.push({ row: i + 2, message: "Missing name" }); continue; }
-
-      const optOutRaw = get("optOut").toLowerCase();
-      const optOut = optOutRaw === "yes" || optOutRaw === "true" || optOutRaw === "1";
-      const tagsRaw = get("tags");
-      const tags = tagsRaw ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean) : [];
-
-      await db.insert(contactsTable).values({
-        id: randomUUID(),
-        orgId,
-        firstName,
-        lastName,
-        email: get("email") || undefined,
-        phone: get("phone") || undefined,
-        stateCode: get("stateCode") || undefined,
-        zipCode: get("zipCode") || undefined,
-        leadSource: get("leadSource") || undefined,
-        tags: tags.length > 0 ? tags : undefined,
-        optOutSms: optOut,
-        optOutEmail: optOut,
-        status: "lead",
-      });
-      created++;
-    } catch (err) {
-      errors++;
-      errorList.push({ row: i + 2, message: "Failed to create contact" });
-      logger.error({ err, jobId, row: i + 2 }, "imports: failed to create contact");
-      captureWorkerError(err, { worker: "imports", route: "contacts/confirm", jobId, row: i + 2 });
-    }
-
-    if (i % 50 === 0) {
-      await persistProgress(jobId, i + 1, errors, errorList);
-      await new Promise((r) => setTimeout(r, 10));
-    }
-  }
-
-  await db.update(importJobsTable).set({
-    status: "completed", processedRows: rows.length, createdCount: created,
-    errorCount: errors, errors: errorList as Record<string, unknown>[], completedAt: new Date(),
-  }).where(eq(importJobsTable.id, jobId));
-}
 
 // ─── Import History ───────────────────────────────────────────────────────────
 

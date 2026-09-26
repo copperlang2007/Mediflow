@@ -89,6 +89,8 @@ export const contactsTable = pgTable(
       { onDelete: "set null" }
     ),
     planYear: integer("plan_year"),
+    address1: text("address1"),
+    city: text("city"),
     county: text("county"),
     stateCode: text("state_code"),
     zipCode: text("zip_code"),

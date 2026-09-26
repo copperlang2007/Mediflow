@@ -78,7 +78,14 @@ export async function importCsvContactsWorker(payload: ImportJobPayload): Promis
     return;
   }
 
-  const opts = job.options as { rows?: Record<string, string>[]; mapping?: Record<string, string> } | null;
+  // A redelivered job that already finished has had its rows purged; leave it be.
+  if (job.status === "completed") return;
+
+  const opts = job.options as {
+    rows?: Record<string, string>[];
+    mapping?: Record<string, string>;
+    duplicateAction?: string;
+  } | null;
   if (!opts?.rows?.length) {
     logger.warn({ jobId: payload.jobId }, "import-csv-contacts: no rows in job options");
     await db.update(importJobsTable).set({ status: "failed" }).where(eq(importJobsTable.id, payload.jobId));
@@ -86,5 +93,6 @@ export async function importCsvContactsWorker(payload: ImportJobPayload): Promis
   }
 
   const { processCsvContactImport } = await import("../routes/imports");
-  await processCsvContactImport(payload.jobId, job.orgId, opts.rows, opts.mapping ?? {});
+  const { parseDuplicateAction } = await import("../lib/contactImport");
+  await processCsvContactImport(payload.jobId, job.orgId, opts.rows, opts.mapping ?? {}, parseDuplicateAction(opts.duplicateAction));
 }
