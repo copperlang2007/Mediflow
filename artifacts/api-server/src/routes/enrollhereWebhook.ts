@@ -35,6 +35,7 @@ import {
   db,
   activitiesTable,
   organizationsTable,
+  agentsTable,
   integrationEventsTable,
 } from "@workspace/db";
 import { verifyWebhookSignature } from "../lib/dialer/signature";
@@ -226,6 +227,11 @@ router.post(
           ? await loadAgentsByEmail(orgId, tx, contact.assignedAgentEmail)
           : new Map<string, string>();
         const agentId = contact.assignedAgentEmail ? agentsByEmail.get(contact.assignedAgentEmail) ?? null : null;
+        // The agent made the call: credit it to their login so per-agent call
+        // counts (grouped by the activity's author) include EnrollHere calls.
+        const agentUserId = agentId
+          ? (await tx.select({ userId: agentsTable.userId }).from(agentsTable).where(eq(agentsTable.id, agentId)).limit(1))[0]?.userId ?? null
+          : null;
         if (!contact.leadSource) contact.leadSource = "EnrollHere";
 
         const { contactId, created, matchedOn, warnings: mergeWarnings } = await upsertContact(tx, orgId, contact, agentId);
@@ -251,6 +257,7 @@ router.post(
           orgId,
           contactId,
           agentId,
+          createdBy: agentUserId,
           type: "call_log",
           body: summary,
           metadata: {
