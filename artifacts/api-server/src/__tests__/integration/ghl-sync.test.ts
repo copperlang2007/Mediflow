@@ -168,7 +168,7 @@ describe("GHL feed", () => {
     const org2 = await seedOrg(tdb, { id: "ghl-org-2" });
     process.env.GHL_SYNC_ORG_IDS = `${org.id},${org2.id}`;
     try {
-      const cfg2 = sync.ghlConfigFor(org2.id)!;
+      const cfg2 = ({ orgId: org2.id, token: TOKEN, locationId: `loc-${org2.id}` });
       const ghl = fakeGhl(Array.from({ length: 250 }, (_, k) =>
         ghlContact(1000 + k, { dateUpdated: new Date(Date.UTC(2026, 6, 1, 0, 0, k)).toISOString() })));
       const r1 = await sync.runGhlSync(cfg2, { fetchImpl: ghl.impl, maxPages: 2 });
@@ -242,7 +242,7 @@ describe("GHL feed", () => {
     const org4 = await seedOrg(tdb, { id: "ghl-org-4" });
     process.env.GHL_SYNC_ORG_IDS = `${org.id},${org4.id}`;
     try {
-      const cfg4 = sync.ghlConfigFor(org4.id)!;
+      const cfg4 = ({ orgId: org4.id, token: TOKEN, locationId: `loc-${org4.id}` });
       const ghl = fakeGhl(Array.from({ length: 450 }, (_, k) => ghlContact(7000 + k, { dateUpdated: "2026-08-15T12:00:00.000Z" })), undefined, true);
       const statuses: string[] = [];
       for (let run = 0; run < 3; run++) statuses.push((await sync.runGhlSync(cfg4, { fetchImpl: ghl.impl, maxPages: 2 })).status);
@@ -273,7 +273,7 @@ describe("GHL feed", () => {
     const org5 = await seedOrg(tdb, { id: "ghl-org-5" });
     process.env.GHL_SYNC_ORG_IDS = `${org.id},${org5.id}`;
     try {
-      const cfg5 = sync.ghlConfigFor(org5.id)!;
+      const cfg5 = ({ orgId: org5.id, token: TOKEN, locationId: `loc-${org5.id}` });
       const undated = Array.from({ length: 3 }, (_, k) => ({ ...ghlContact(9000 + k), dateUpdated: null }));
       const impl = (async (_u: string, init: RequestInit) => {
         const body = JSON.parse(String(init.body));
@@ -292,7 +292,7 @@ describe("GHL feed", () => {
     const org6 = await seedOrg(tdb, { id: "ghl-org-6" });
     process.env.GHL_SYNC_ORG_IDS = `${org.id},${org6.id}`;
     try {
-      const cfg6 = sync.ghlConfigFor(org6.id)!;
+      const cfg6 = ({ orgId: org6.id, token: TOKEN, locationId: `loc-${org6.id}` });
       const all = Array.from({ length: 250 }, (_, k) => ghlContact(11000 + k, { dateUpdated: new Date(Date.UTC(2026, 9, 1, 0, 0, k)).toISOString() }));
       // Tuples on the first page only, then GHL "forgets" them.
       let call = 0;
@@ -322,7 +322,7 @@ describe("GHL feed", () => {
     const org3 = await seedOrg(tdb, { id: "ghl-org-3" });
     process.env.GHL_SYNC_ORG_IDS = `${org.id},${org3.id}`;
     try {
-      const cfg3 = sync.ghlConfigFor(org3.id)!;
+      const cfg3 = ({ orgId: org3.id, token: TOKEN, locationId: `loc-${org3.id}` });
       const sameTs = "2026-08-01T00:00:00.000Z";
       const ghl = fakeGhl(Array.from({ length: 250 }, (_, k) => ghlContact(5000 + k, { dateUpdated: sameTs })));
       const statuses: string[] = [];
@@ -376,3 +376,30 @@ describe("GHL client", () => {
     expect(perContact.searchAfter).toEqual([1, "a"]);
   });
 });
+
+describe("GHL multi-agency config safety", () => {
+  const snapshot = () => ({ ...process.env });
+  it("refuses orgs that would read the same GHL location, and orgs whose ids collide as env suffixes", async () => {
+    const saved = snapshot();
+    try {
+      // Two orgs, only the global token/location set → both would read one sub-account.
+      process.env.GHL_SYNC_ORG_IDS = "agency-a,agency-b";
+      expect(sync.ghlConfigs()).toEqual([]);
+      expect(sync.ghlConfigFor("agency-a")).toBeNull();
+
+      // Distinct per-org locations → both allowed.
+      process.env.GHL_LOCATION_ID_AGENCY_A = "loc-a";
+      process.env.GHL_LOCATION_ID_AGENCY_B = "loc-b";
+      expect(sync.ghlConfigs().map((c) => [c.orgId, c.locationId])).toEqual([["agency-a", "loc-a"], ["agency-b", "loc-b"]]);
+
+      // "org-1" and "ORG_1" share the suffix ORG_1 → both refused.
+      process.env.GHL_SYNC_ORG_IDS = "org-1,ORG_1";
+      process.env.GHL_LOCATION_ID_ORG_1 = "loc-1";
+      expect(sync.ghlConfigs()).toEqual([]);
+    } finally {
+      for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+      Object.assign(process.env, saved);
+    }
+  });
+});
+

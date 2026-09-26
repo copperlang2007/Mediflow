@@ -44,32 +44,78 @@ export interface GhlConfig {
   locationId: string;
 }
 
+function envSuffix(orgId: string): string {
+  return orgId.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+}
+
 function envFor(base: string, orgId: string): string | undefined {
-  const suffix = orgId.toUpperCase().replace(/[^A-Z0-9]/g, "_");
-  return process.env[`${base}_${suffix}`]?.trim() || process.env[base]?.trim() || undefined;
+  return process.env[`${base}_${envSuffix(orgId)}`]?.trim() || process.env[base]?.trim() || undefined;
+}
+
+function enabledOrgIds(): string[] {
+  return [...new Set((process.env.GHL_SYNC_ORG_IDS ?? "").split(/[,;]/).map((s) => s.trim()).filter(Boolean))];
+}
+
+function rawConfig(orgId: string): GhlConfig | null {
+  const token = envFor("GHL_PRIVATE_INTEGRATION_TOKEN", orgId);
+  const locationId = envFor("GHL_LOCATION_ID", orgId);
+  return token && locationId ? { orgId, token, locationId } : null;
+}
+
+/** Orgs already warned about (once per process, not every tick). */
+const warnedMisconfigured = new Set<string>();
+function warnOnce(key: string, log: () => void): void {
+  if (warnedMisconfigured.has(key)) return;
+  warnedMisconfigured.add(key);
+  log();
+}
+
+/**
+ * Orgs whose GHL config is unsafe to run, because two agencies would read the
+ * SAME GHL sub-account (and so copy one agency's contacts into another's):
+ *   - their ids collapse to the same env-var suffix ("org-1" / "ORG_1"), so a
+ *     per-org override can't tell them apart;
+ *   - they resolve to the same location id (typically: several orgs listed
+ *     but only the global GHL_LOCATION_ID / token set).
+ * Every org involved is refused — there is no safe way to pick a winner.
+ */
+function unsafeOrgIds(ids: string[]): Map<string, string> {
+  const reasons = new Map<string, string>();
+  const bySuffix = new Map<string, string[]>();
+  const byLocation = new Map<string, string[]>();
+  for (const id of ids) {
+    const suffix = envSuffix(id);
+    bySuffix.set(suffix, [...(bySuffix.get(suffix) ?? []), id]);
+    const cfg = rawConfig(id);
+    if (cfg) byLocation.set(cfg.locationId, [...(byLocation.get(cfg.locationId) ?? []), id]);
+  }
+  for (const group of bySuffix.values()) {
+    if (group.length > 1) for (const id of group) reasons.set(id, `org ids ${group.join(", ")} map to the same env-var suffix`);
+  }
+  for (const group of byLocation.values()) {
+    if (group.length > 1) for (const id of group) reasons.set(id, `orgs ${group.join(", ")} resolve to the same GHL location`);
+  }
+  return reasons;
 }
 
 export function ghlConfigFor(orgId: string): GhlConfig | null {
-  const enabled = (process.env.GHL_SYNC_ORG_IDS ?? "").split(/[,;]/).map((s) => s.trim()).filter(Boolean);
-  if (!enabled.includes(orgId)) return null;
-  const token = envFor("GHL_PRIVATE_INTEGRATION_TOKEN", orgId);
-  const locationId = envFor("GHL_LOCATION_ID", orgId);
-  if (!token || !locationId) return null;
-  return { orgId, token, locationId };
+  const ids = enabledOrgIds();
+  if (!ids.includes(orgId)) return null;
+  const unsafe = unsafeOrgIds(ids).get(orgId);
+  if (unsafe) {
+    warnOnce(`unsafe:${orgId}`, () => logger.error({ orgId, reason: unsafe }, "GHL sync: refusing to sync — set a distinct GHL_LOCATION_ID_<ORGID> / token per org"));
+    return null;
+  }
+  return rawConfig(orgId);
 }
 
-/** Orgs already warned about missing config (once per process, not every tick). */
-const warnedMisconfigured = new Set<string>();
-
 export function ghlConfigs(): GhlConfig[] {
-  const ids = (process.env.GHL_SYNC_ORG_IDS ?? "").split(/[,;]/).map((s) => s.trim()).filter(Boolean);
   const configs: GhlConfig[] = [];
-  for (const id of ids) {
+  for (const id of enabledOrgIds()) {
     const cfg = ghlConfigFor(id);
     if (cfg) configs.push(cfg);
-    else if (!warnedMisconfigured.has(id)) {
-      warnedMisconfigured.add(id);
-      logger.warn({ orgId: id }, "GHL sync: org listed in GHL_SYNC_ORG_IDS but token or location id is missing");
+    else if (!rawConfig(id)) {
+      warnOnce(`missing:${id}`, () => logger.warn({ orgId: id }, "GHL sync: org listed in GHL_SYNC_ORG_IDS but token or location id is missing"));
     }
   }
   return configs;
