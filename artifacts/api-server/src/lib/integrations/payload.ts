@@ -14,7 +14,9 @@ import { interpretContactRow, suggestContactField, type InterpretedRow } from ".
 
 type Json = unknown;
 
-const PERSON_CONTAINERS = ["contact", "lead", "client", "customer", "beneficiary", "member", "person", "caller", "prospect"];
+// "caller" is deliberately absent: telephony payloads use it for call-leg
+// metadata (a support line's number, a display name), not the person.
+const PERSON_CONTAINERS = ["contact", "lead", "client", "customer", "beneficiary", "member", "person", "prospect"];
 
 function isObject(v: Json): v is Record<string, Json> {
   return typeof v === "object" && v !== null && !Array.isArray(v);

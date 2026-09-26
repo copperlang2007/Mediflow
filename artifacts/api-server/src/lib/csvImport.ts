@@ -379,6 +379,10 @@ export function normalizeStateCode(raw: string): string | null {
 export function normalizePhone(raw: string): string | null {
   const s = raw.trim();
   if (!s) return null;
+  // Letters mean it isn't a number (caller-ID display names like "JOHN DOE",
+  // "Unknown", "Anonymous") — storing it would poison phone-based dedupe.
+  // A trailing extension ("x123", "ext. 4") is allowed.
+  if (/[a-z]/i.test(s.replace(/\s*(x|ext\.?|extension)\s*\d+\s*$/i, ""))) return null;
   const digits = s.replace(/\D/g, "");
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
