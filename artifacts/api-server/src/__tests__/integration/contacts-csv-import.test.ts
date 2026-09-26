@@ -417,3 +417,16 @@ describe("import bookkeeping", () => {
   });
 });
 
+describe("skip mode", () => {
+  it("still reports an unknown assigned-agent email on a skipped duplicate row", async () => {
+    const file = "First Name,Last Name,Email,Agent Email\nIris,Conflict,iris@example.com,nobody@agency.example\n";
+    const up = await request(app).post("/api/imports/contacts/upload").set(withAuth(admin.id)).attach("file", Buffer.from(file), "s.csv");
+    const res = await request(app).post("/api/imports/contacts/confirm").set(withAuth(admin.id))
+      .attach("file", Buffer.from(file), "s.csv").field("mapping", JSON.stringify(up.body.suggestedMapping)).field("duplicateAction", "skip");
+    await worker({ jobId: res.body.jobId });
+    const [job] = await tdb.select().from(importJobsTable).where(eq(importJobsTable.id, res.body.jobId));
+    expect(job!.skippedCount).toBe(1);
+    expect(job!.errors).toContainEqual(expect.objectContaining({ field: "assignedAgentEmail" }));
+  });
+});
+
