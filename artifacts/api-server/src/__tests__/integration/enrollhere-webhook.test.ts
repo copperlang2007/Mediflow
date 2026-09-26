@@ -211,6 +211,15 @@ describe("EnrollHere webhook processing", () => {
     expect((a!.metadata as { recordingUrl: unknown }).recordingUrl).toBeNull();
   });
 
+  it("uses the caller ID when the payload's phone is a placeholder, and never stores a delivery timestamp as the call start", async () => {
+    const res = await withHeaderSecret({ call_id: "cid-unknown", first_name: "Placeholder", last_name: "Phone", phone: "Unknown", caller_id: "5125551166", timestamp: "2026-05-15T09:30:00Z" });
+    expect(res.status).toBe(200);
+    const [c] = await tdb.select().from(contactsTable).where(and(eq(contactsTable.orgId, org.id), eq(contactsTable.firstName, "Placeholder")));
+    expect(c!.phone).toBe("+15125551166");
+    const [a] = await tdb.select().from(activitiesTable).where(eq(activitiesTable.contactId, c!.id));
+    expect((a!.metadata as { startedAt?: unknown }).startedAt).toBeNull();
+  });
+
   it("never stores a caller-ID display name as a phone number", async () => {
     const res = await withHeaderSecret({ call_id: "cid-1", first_name: "NoPhone", last_name: "Real", caller_id: "JOHN DOE" });
     const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, res.body.contactId));
