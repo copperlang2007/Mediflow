@@ -26,7 +26,9 @@ export async function ghlSyncWorker(payload: GhlSyncPayload = {}): Promise<void>
     logger.warn({ orgId: payload.orgId }, "GHL sync: org is not configured");
     return;
   }
-  for (const cfg of configs) {
+  // Orgs run concurrently: each has its own lease and state row, so one slow
+  // or rate-limited agency never holds up the others.
+  await Promise.all(configs.map(async (cfg) => {
     try {
       const result = await runGhlSync(cfg, { full: payload.full });
       if (result.status === "more_pending") {
@@ -40,5 +42,5 @@ export async function ghlSyncWorker(payload: GhlSyncPayload = {}): Promise<void>
       logger.error({ err, orgId: cfg.orgId }, "GHL sync: run failed");
       captureWorkerError(err, { worker: "ghl-sync", orgId: cfg.orgId });
     }
-  }
+  }));
 }

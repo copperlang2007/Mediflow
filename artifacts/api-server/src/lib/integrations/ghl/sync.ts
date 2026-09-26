@@ -135,6 +135,9 @@ export async function runGhlSync(
   let pages = 0;
   let morePending = false;
   let runMax: Date | null = null;
+  // Page-number continuation is only valid when this window has been paged
+  // by number from its start; once GHL has given a tuple, page N means nothing.
+  let usedTuple = searchAfter !== null;
 
   try {
     for (;;) {
@@ -153,6 +156,7 @@ export async function runGhlSync(
       }
       if (cursor && (!runMax || cursor > runMax)) runMax = cursor;
       searchAfter = page.searchAfter;
+      if (searchAfter) usedTuple = true;
       // Persist the exact position after the page is written: a crash re-reads
       // the page rather than skipping it, and the next run resumes strictly
       // after the last contact — even when thousands share one dateUpdated.
@@ -163,6 +167,11 @@ export async function runGhlSync(
         // Keep the tuple even when no contact on the page had a usable
         // dateUpdated, so such a page is never re-read forever.
         await writeState({ ...(cursor ? { cursorUpdatedAt: cursor } : {}), cursorSearchAfter: searchAfter, runningSince: new Date() });
+      } else if (usedTuple) {
+        // GHL stopped sending a tuple mid-window: resume from the newest
+        // contact written (re-reading is idempotent) rather than a page number
+        // that no longer corresponds to anything.
+        await writeState({ cursorUpdatedAt: runMax ?? updatedSince, cursorSearchAfter: null, runningSince: new Date() });
       } else {
         await writeState({ cursorUpdatedAt: updatedSince, cursorSearchAfter: { page: startPage + pages }, runningSince: new Date() });
       }
@@ -170,8 +179,10 @@ export async function runGhlSync(
     }
 
     await writeState({
-      // Window finished without a tuple: next run starts after the newest contact seen.
-      ...(!morePending && !searchAfter && runMax ? { cursorUpdatedAt: runMax, cursorSearchAfter: null } : {}),
+      // Window finished without a tuple: next run starts from the newest contact
+      // seen, and any page-number position is cleared (it must never outlive
+      // its window, or later runs would ask for pages past the end forever).
+      ...(!morePending && !searchAfter ? { cursorUpdatedAt: runMax ?? updatedSince, cursorSearchAfter: null } : {}),
       runningSince: null,
       leaseToken: null,
       lastRunAt: new Date(),

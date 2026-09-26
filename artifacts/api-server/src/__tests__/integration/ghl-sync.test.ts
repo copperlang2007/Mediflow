@@ -288,6 +288,36 @@ describe("GHL feed", () => {
     }
   });
 
+  it("recovers when GHL stops sending searchAfter mid-window instead of stalling on page numbers", async () => {
+    const org6 = await seedOrg(tdb, { id: "ghl-org-6" });
+    process.env.GHL_SYNC_ORG_IDS = `${org.id},${org6.id}`;
+    try {
+      const cfg6 = sync.ghlConfigFor(org6.id)!;
+      const all = Array.from({ length: 250 }, (_, k) => ghlContact(11000 + k, { dateUpdated: new Date(Date.UTC(2026, 9, 1, 0, 0, k)).toISOString() }));
+      // Tuples on the first page only, then GHL "forgets" them.
+      let call = 0;
+      const base = fakeGhl(all);
+      const flaky = (async (u: string, init: RequestInit) => {
+        const res = await base.impl(u, init);
+        const json = await res.json() as { contacts: GhlContact[] };
+        if (call++ > 0) json.contacts = json.contacts.map(({ searchAfter: _drop, ...c }) => c);
+        return new Response(JSON.stringify(json), { status: 200 });
+      }) as unknown as typeof fetch;
+      await sync.runGhlSync(cfg6, { fetchImpl: flaky, maxPages: 2 });
+      const [mid] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org6.id));
+      expect(mid!.cursorSearchAfter).toBeNull(); // no stale page number
+      // New contacts arriving later are still fetched.
+      const later = [...all, ...Array.from({ length: 5 }, (_, k) => ghlContact(12000 + k, { dateUpdated: "2026-11-01T00:00:00.000Z" }))];
+      for (let run = 0; run < 3; run++) await sync.runGhlSync(cfg6, { fetchImpl: fakeGhl(later).impl, maxPages: 5 });
+      const links = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.orgId, org6.id));
+      expect(links).toHaveLength(255);
+      const [end] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org6.id));
+      expect(end!.cursorUpdatedAt!.toISOString()).toBe("2026-11-01T00:00:00.000Z");
+    } finally {
+      process.env.GHL_SYNC_ORG_IDS = org.id;
+    }
+  });
+
   it("gets past a bulk edit where more contacts share one timestamp than fit in a run", async () => {
     const org3 = await seedOrg(tdb, { id: "ghl-org-3" });
     process.env.GHL_SYNC_ORG_IDS = `${org.id},${org3.id}`;
