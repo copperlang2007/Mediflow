@@ -381,6 +381,15 @@ function TimelineTab({ contactId }: { contactId: string }) {
                             {entry.activity.body}
                           </p>
                         )}
+                        {(() => {
+                          const url = entry.activity.metadata?.recordingUrl;
+                          // https only — never render javascript:/data: URLs from a webhook.
+                          return typeof url === "string" && /^https:\/\//i.test(url) ? (
+                            <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline mt-0.5 inline-block">
+                              Listen to recording
+                            </a>
+                          ) : null;
+                        })()}
                       </div>
                       <p className="text-xs text-muted-foreground shrink-0 mt-0.5">
                         {formatDistanceToNow(entry.at)} ago
