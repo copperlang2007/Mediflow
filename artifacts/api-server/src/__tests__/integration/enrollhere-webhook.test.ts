@@ -213,6 +213,23 @@ describe("EnrollHere webhook processing", () => {
     expect(rows.find((r) => r.lastName === "Two")!.phone).toBe("+15125550103");
   });
 
+  it("never uses the agent's nested address as the contact's address", async () => {
+    await withHeaderSecret({ call_id: "agent-addr", contact: {
+      // Agent block first, so the old first-wins rule would have taken its address.
+      agent: { email: "closer@agency.example", address: { street: "1 Agent Way", city: "AGENT_CITY", state: "CA", zip: "90210" } },
+      first_name: "Home", last_name: "Owner", phone: "5125550555",
+      address: { street: "9 Client Ln", city: "Austin", state: "TX", zip: "78701" },
+    } });
+    const [c] = await tdb.select().from(contactsTable).where(and(eq(contactsTable.orgId, org.id), eq(contactsTable.firstName, "Home")));
+    expect(c).toMatchObject({ address1: "9 Client Ln", city: "Austin", stateCode: "TX", zipCode: "78701" });
+  });
+
+  it("dedupes an id-less retry whose only change is a bumped created_at", async () => {
+    const body = (at: string) => ({ first_name: "Cre", last_name: "Ated", phone: "5125550666", created_at: at });
+    expect((await withHeaderSecret(body("2026-09-26T10:00:00Z"))).body.duplicate).toBe(false);
+    expect((await withHeaderSecret(body("2026-09-26T10:03:00Z"))).body).toEqual({ ok: true, duplicate: true });
+  });
+
   it("does not treat a top-level entity id as the call id", async () => {
     const a = await withHeaderSecret({ id: "entity-abc", event: "call.started", first_name: "Ent", last_name: "Ity", phone: "5125550444" });
     const b = await withHeaderSecret({ id: "entity-abc", event: "call.completed", first_name: "Ent", last_name: "Ity", phone: "5125550444" });

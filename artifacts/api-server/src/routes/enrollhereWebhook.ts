@@ -110,8 +110,8 @@ const DURATION_KEYS = ["duration_seconds", "duration", "call_duration", "talk_ti
 const DISPOSITION_KEYS = ["disposition", "call_disposition", "outcome", "call_result", "result", "call_status", "status"];
 const RECORDING_KEYS = ["recording_url", "recording", "recording_link", "call_recording_url"];
 // A bare "date" is deliberately absent: vendors use it for submission or appointment dates.
-// Not "timestamp": that is a delivery field (see VOLATILE_KEYS) and changes on retry.
-const STARTED_KEYS = ["started_at", "start_time", "call_start", "call_started_at", "created_at"];
+// Not "timestamp" or "created_at": delivery-record fields (see VOLATILE_KEYS) that change on retry.
+const STARTED_KEYS = ["started_at", "start_time", "call_start", "call_started_at"];
 
 /**
  * Per-delivery transport fields that change on a retry of the SAME event.
@@ -119,7 +119,7 @@ const STARTED_KEYS = ["started_at", "start_time", "call_start", "call_started_at
  */
 const VOLATILE_KEYS = new Set([
   "timestamp", "sent_at", "delivered_at", "delivery_id", "webhook_id", "attempt",
-  "attempt_number", "retry", "retry_count", "nonce", "received_at", "now", "request_id",
+  "attempt_number", "retry", "retry_count", "nonce", "received_at", "now", "request_id", "created_at",
   // A whole block of delivery/transport details (e.g. { delivery: { id, attempt } }).
   "delivery",
 ]);

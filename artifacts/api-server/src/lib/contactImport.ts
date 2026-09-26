@@ -158,6 +158,8 @@ export interface InterpretedRow {
 
 const UNIT_IN_CITY = /^(?:(?:apt|apartment|suite|ste|unit|bldg|building|fl|floor|lot|rm|room|space|spc|trlr)\.?\s*#?\s*(?:\d|[a-z](?![a-z.]))|#\s*\d)/i;
 
+const UNIT_IN_STATE = /^(?:(?:apt|apartment|suite|ste|unit|bldg|building|fl|floor|lot|rm|room|space|spc|trlr)\.?\s*#?\s*\d|#\s*\d)/i;
+
 export function interpretContactRow(
   raw: Record<string, string>,
   mapping: Record<string, string>,
@@ -276,7 +278,9 @@ export function interpretContactRow(
   // Same check on the state column: with no city column, the unit lands there.
   const unitIn = opts.detectShift === false ? null
     : cityRaw && UNIT_IN_CITY.test(cityRaw) ? "City"
-    : stateRaw && stateInvalid && UNIT_IN_CITY.test(stateRaw) ? "State" : null;
+    // State requires a number ("Apt 2", "Ste 4"), so informal abbreviations
+    // like "Fla" or "Flo" aren't mistaken for a unit.
+    : stateRaw && stateInvalid && UNIT_IN_STATE.test(stateRaw) ? "State" : null;
   if (unitIn) {
     issues.push({
       row: rowNumber,
