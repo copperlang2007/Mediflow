@@ -324,3 +324,27 @@ describe("carrier-less enrollments", () => {
     expect(rows[0]!.carrierId).toBeNull();
   });
 });
+
+describe("review round 3", () => {
+  it("skips a shifted row whose other values all validate ('Suite 100' in City)", async () => {
+    const { interpretContactRow } = await import("../../lib/contactImport");
+    const mapping = { First: "firstName", Last: "lastName", Address: "address1", City: "city", State: "stateCode", Phone: "phone" };
+    const r = interpretContactRow({ First: "John", Last: "Roe", Address: "12 Main St", City: "Suite 100", State: "TX", Phone: "5125550001" }, mapping, 2);
+    expect(r.contact).toBeNull();
+    expect(r.issues).toContainEqual(expect.objectContaining({ field: "row", severity: "error" }));
+  });
+
+  it("matches an existing carrier whose name contains an 's' (DB-side whitespace normalization)", async () => {
+    await tdb.insert(carriersTable).values({ id: "carrier-bcbs", orgId: org.id, name: "Blue Cross  Blue Shield" });
+    const file = "First Name,Last Name,DOB,Carrier,Plan Type,Effective Date\nSal,Shield,3/3/1947,blue cross blue shield,MA,1/1/2026\n";
+    const up = await request(app).post("/api/imports/contacts/upload").set(withAuth(admin.id)).attach("file", Buffer.from(file), "b.csv");
+    const res = await request(app).post("/api/imports/contacts/confirm").set(withAuth(admin.id))
+      .attach("file", Buffer.from(file), "b.csv").field("mapping", JSON.stringify(up.body.suggestedMapping));
+    await worker({ jobId: res.body.jobId });
+    const bcbs = await tdb.select().from(carriersTable).where(eq(carriersTable.orgId, org.id));
+    expect(bcbs.filter((c) => c.name.toLowerCase().replace(/\s+/g, " ") === "blue cross blue shield")).toHaveLength(1);
+    const [sal] = await tdb.select().from(contactsTable).where(eq(contactsTable.lastName, "Shield"));
+    const [enr] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.contactId, sal!.id));
+    expect(enr!.carrierId).toBe("carrier-bcbs");
+  });
+});
