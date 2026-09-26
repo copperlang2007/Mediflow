@@ -51,6 +51,21 @@ describe("parseCsvTolerant", () => {
     expect(r.issues).toEqual([expect.objectContaining({ row: 3, severity: "error" })]);
   });
 
+  it("keeps rows when the whole export pads every row with blank columns", () => {
+    const r = parseCsvTolerant(csv("First Name,Last Name,Email\nAlpha,Zulu,az@example.com,,\nBravo,Yankee,by@example.com,,\n"));
+    expect(r.rows.map((x) => x["Last Name"])).toEqual(["Zulu", "Yankee"]);
+    expect(r.issues).toEqual([expect.objectContaining({ row: 2, severity: "warning" })]);
+  });
+
+  it("still skips a padded-looking row that is the odd one out", () => {
+    const r = parseCsvTolerant(csv("addr,state,zip\n1 Elm,TX,78701\n12 Elm St, Village,TX,78701,\n5 Oak,TX,78702\n7 Ash,TX,78703\n"));
+    // "12 Elm St, Village,TX,78701," → 5 values; the trailing blank pops to 4 > 3 → hard error either way.
+    expect(r.rows.map((x) => x.addr)).toEqual(["1 Elm", "5 Oak", "7 Ash"]);
+    const r2 = parseCsvTolerant(csv("a,b,c\n1,2,3\n4,5,6,,\n7,8,9\n10,11,12\n"));
+    expect(r2.rows.map((x) => x.a)).toEqual(["1", "7", "10"]);
+    expect(r2.issues).toEqual([expect.objectContaining({ row: 3, severity: "error" })]);
+  });
+
   it("does not flag rows when the header itself carries the trailing blank columns", () => {
     const r = parseCsvTolerant(csv("a,b,c,,\n3,4,5,,\n"));
     expect(r.issues).toEqual([]);

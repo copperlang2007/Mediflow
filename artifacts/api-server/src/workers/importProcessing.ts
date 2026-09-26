@@ -78,8 +78,9 @@ export async function importCsvContactsWorker(payload: ImportJobPayload): Promis
     return;
   }
 
-  // A redelivered job that already finished has had its rows purged; leave it be.
-  if (job.status === "completed") return;
+  // A redelivered job that already finished (or was failed by cleanup) has had
+  // its rows purged; leave it be.
+  if (job.status === "completed" || job.status === "failed") return;
 
   const opts = job.options as {
     rows?: Record<string, string>[];

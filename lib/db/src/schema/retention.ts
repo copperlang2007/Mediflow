@@ -76,6 +76,8 @@ export const importJobsTable = pgTable(
       .notNull()
       .defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    /** Last sign of life from the import worker; null until it starts. */
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
   },
   (t) => [
     index("import_jobs_org_id_created_at_idx").on(t.orgId, t.createdAt),

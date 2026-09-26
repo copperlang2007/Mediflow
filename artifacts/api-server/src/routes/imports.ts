@@ -27,6 +27,7 @@ import { captureWorkerError } from "../lib/sentry";
 import { randomUUID } from "crypto";
 import multer from "multer";
 import { parseCsvTolerant, CsvFileError, type TolerantCsvResult } from "../lib/csvImport";
+import { STALE_MINUTES, staleProcessingJobs } from "../workers/importRowsSweep";
 import {
   CONTACT_TARGET_FIELDS,
   ROW_NUMBER_KEY,
@@ -43,12 +44,13 @@ export { processCsvContactImport };
 const router: IRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-// On startup: mark any jobs that were still "processing" as "failed" (orphaned
-// by prior crash/restart), dropping their queued rows — those hold plaintext
-// PHI (names, DOBs, addresses) and a failed job never reads them again.
+// On startup: mark jobs orphaned by a prior crash/restart as "failed", dropping
+// their queued rows — those hold plaintext PHI (names, DOBs, addresses) and a
+// failed job never reads them again. Only jobs with no recent worker progress:
+// during a rolling deploy another instance may still be running an import.
 void db.update(importJobsTable)
   .set({ status: "failed", options: sql`${importJobsTable.options} - 'rows'` })
-  .where(eq(importJobsTable.status, "processing"))
+  .where(staleProcessingJobs(new Date(Date.now() - STALE_MINUTES * 60_000)))
   .catch((err) => {
     logger.error({ err }, "imports: failed to mark orphaned import jobs as failed on startup");
     captureWorkerError(err, { worker: "imports", phase: "startup-cleanup" });
