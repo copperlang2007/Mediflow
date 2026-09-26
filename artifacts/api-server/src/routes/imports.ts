@@ -285,7 +285,7 @@ async function persistProgress(jobId: string, processedRows: number, errorCount:
     processedRows,
     errorCount,
     errors: errorList as Record<string, unknown>[],
-  }).where(eq(importJobsTable.id, jobId));
+  }).where(and(eq(importJobsTable.id, jobId), eq(importJobsTable.status, "processing")));
 }
 
 export async function processMondayImport(jobId: string, orgId: string, rows: Record<string, string>[], mapping: Record<string, string>) {
@@ -370,7 +370,7 @@ export async function processMondayImport(jobId: string, orgId: string, rows: Re
     errorCount: errors,
     errors: errorList as Record<string, unknown>[],
     completedAt: new Date(),
-  }).where(eq(importJobsTable.id, jobId));
+  }).where(and(eq(importJobsTable.id, jobId), eq(importJobsTable.status, "processing")));
 }
 
 async function importMondayAgentRelations(get: (f: string) => string, orgId: string, agentId: string) {
@@ -741,7 +741,7 @@ export async function processGhlImport(jobId: string, orgId: string, rows: Recor
     status: "completed", processedRows: rows.length, createdCount: created,
     updatedCount: updated, skippedCount: skipped, errorCount: errors,
     errors: errorList as Record<string, unknown>[], completedAt: new Date(),
-  }).where(eq(importJobsTable.id, jobId));
+  }).where(and(eq(importJobsTable.id, jobId), eq(importJobsTable.status, "processing")));
 }
 
 async function createGhlDeal(orgId: string, contactId: string, pipelineStageRaw: string, allStages: { id: string; name: string; pipelineId: string }[]) {
