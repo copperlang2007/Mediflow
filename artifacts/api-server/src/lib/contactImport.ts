@@ -263,12 +263,16 @@ export function interpretContactRow(
   // The designator must be followed by a unit number ("Suite 100", "Apt 5",
   // "Unit 3B", "#42", "Apt B") — so real towns like "Ste. Genevieve", "Ste.
   // Marie" or "Unit, WV" are not mistaken for a unit.
-  if (opts.detectShift !== false && cityRaw && UNIT_IN_CITY.test(cityRaw)) {
+  // Same check on the state column: with no city column, the unit lands there.
+  const unitIn = opts.detectShift === false ? null
+    : cityRaw && UNIT_IN_CITY.test(cityRaw) ? "City"
+    : stateRaw && stateInvalid && UNIT_IN_CITY.test(stateRaw) ? "State" : null;
+  if (unitIn) {
     issues.push({
       row: rowNumber,
       field: "row",
       severity: "error",
-      message: "City looks like an apartment/suite number — the row looks shifted (the address was probably split by an unquoted comma). Row skipped; fix it and re-import.",
+      message: `${unitIn} looks like an apartment/suite number — the row looks shifted (the address was probably split by an unquoted comma). Row skipped; fix it and re-import.`,
     });
     return { row: rowNumber, contact: null, enrollment: null, issues };
   }
