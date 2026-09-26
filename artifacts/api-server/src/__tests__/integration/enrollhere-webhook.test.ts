@@ -245,6 +245,40 @@ describe("EnrollHere webhook processing", () => {
     const [evt] = await tdb.select().from(integrationEventsTable).where(eq(integrationEventsTable.activityId, a.body.activityId));
     expect(evt!.externalId).toMatch(/^sha256:/);
   });
+
+  it("dedupes an id-less retry whose only difference is delivery metadata", async () => {
+    const base = { first_name: "Retry", last_name: "Meta", phone: "5125550444", disposition: "answered" };
+    const a = await withHeaderSecret({ ...base, timestamp: "2026-09-26T10:00:00Z", attempt: 1, delivery_id: "d-1" });
+    const b = await withHeaderSecret({ ...base, timestamp: "2026-09-26T10:05:00Z", attempt: 2, delivery_id: "d-2" });
+    expect(a.body.duplicate).toBe(false);
+    expect(b.body).toEqual({ ok: true, duplicate: true });
+  });
+
+  it("does not read a generic 'date' field as the call start", async () => {
+    const res = await withHeaderSecret({ call_id: "date-1", first_name: "Date", last_name: "Field", date: "2019-04-20" });
+    const [a] = await tdb.select().from(activitiesTable).where(eq(activitiesTable.id, res.body.activityId));
+    expect((a!.metadata as { startedAt: unknown }).startedAt).toBeNull();
+  });
+
+  it("rejects +json media types instead of failing their signature confusingly", async () => {
+    const res = await request(app).post(url()).set("X-Webhook-Secret", SECRET).set("Content-Type", "application/vnd.enrollhere+json")
+      .send(JSON.stringify({ call_id: "vnd-1", first_name: "V", last_name: "Nd" }));
+    expect(res.status).toBe(415);
+  });
+});
+
+describe("integration_events prune", () => {
+  it("deletes ledger rows older than the retention window only", async () => {
+    const { integrationEventsPruneWorker } = await import("../../workers/integrationEventsPrune");
+    await tdb.insert(integrationEventsTable).values([
+      { id: "old-evt", orgId: org.id, source: "enrollhere", externalId: "old-1", receivedAt: new Date(Date.now() - 100 * 86_400_000) },
+      { id: "new-evt", orgId: org.id, source: "enrollhere", externalId: "new-1" },
+    ]);
+    await integrationEventsPruneWorker();
+    const ids = (await tdb.select().from(integrationEventsTable)).map((r) => r.id);
+    expect(ids).not.toContain("old-evt");
+    expect(ids).toContain("new-evt");
+  });
 });
 
 describe("header recognition for compound address columns (CSV and webhook)", () => {

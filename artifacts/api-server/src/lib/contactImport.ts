@@ -472,9 +472,12 @@ export async function loadMatcher(orgId: string, rows: InterpretedContact[], exe
   return matcher;
 }
 
-export async function loadAgentsByEmail(orgId: string, exec: Executor = db): Promise<Map<string, string>> {
+/** All the org's agents by email, or — with `email` — just that one (single-row lookup). */
+export async function loadAgentsByEmail(orgId: string, exec: Executor = db, email?: string): Promise<Map<string, string>> {
   const agents = await exec.select({ id: agentsTable.id, email: agentsTable.email }).from(agentsTable)
-    .where(eq(agentsTable.orgId, orgId));
+    .where(email
+      ? and(eq(agentsTable.orgId, orgId), sql`lower(${agentsTable.email}) = ${email.toLowerCase()}`)
+      : eq(agentsTable.orgId, orgId));
   return new Map(agents.filter((a) => a.email).map((a) => [a.email.toLowerCase(), a.id]));
 }
 
@@ -627,7 +630,14 @@ export async function processCsvContactImport(
         rowWarnings.push({ row: r.row, field: "assignedAgentEmail", message: "No agent in agencyBRIDGE has that email — left unassigned" });
       }
       const hit = duplicateAction === "create_new" ? null : matcher.find(c);
-      if (hit && duplicateAction === "skip") { skipped++; continue; }
+      if (hit && duplicateAction === "skip") {
+        // Nothing is written for a skipped row, but the agent-column warning is
+        // still true and tells the admin their mapping is off.
+        errorList.push(...rowWarnings);
+        warnings += rowWarnings.length;
+        skipped++;
+        continue;
+      }
 
       const contactId = await db.transaction(async (tx) => {
         const carrierId = r.enrollment?.carrierName

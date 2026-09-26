@@ -1,5 +1,9 @@
 # EnrollHere → agencyBRIDGE webhook
 
+> **Compliance prerequisite:** these payloads carry PHI (names, DOB, Medicare
+> ID). Confirm a signed Business Associate Agreement (BAA) with EnrollHere
+> covering this data flow before enabling the webhook for an agency.
+
 Every call EnrollHere reports creates or updates the caller's contact and adds a
 **Call Log** entry to their timeline.
 

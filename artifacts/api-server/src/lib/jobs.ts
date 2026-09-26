@@ -12,6 +12,7 @@
  *    lead-callback-sweep         every 5 min (callback SLA queue re-attempt)
  *    ghl-sync                    every 15 min (GoHighLevel contact feed; also ad-hoc backfill)
  *    import-rows-sweep           hourly (drop queued import rows / PHI of finished or dead jobs)
+ *    integration-events-prune    daily 03:10 UTC (webhook idempotency ledger > 90 days)
  *
  *  Ad-hoc (enqueue via `enqueue(JOB_NAMES.X, data)`):
  *    task-auto-assign            on agent creation / status change
@@ -114,6 +115,8 @@ export const JOB_NAMES = {
   IMPORT_CSV_CONTACTS: "import-csv-contacts",
   // Hourly: drop queued import rows (PHI) left by finished or dead jobs.
   IMPORT_ROWS_SWEEP: "import-rows-sweep",
+  // Daily: prune the webhook idempotency ledger (integration_events).
+  INTEGRATION_EVENTS_PRUNE: "integration-events-prune",
   // Ad-hoc
   TASK_AUTO_ASSIGN: "task-auto-assign",
   RUN_AUTOMATION_RULES: "run-automation-rules",
@@ -418,6 +421,8 @@ export async function startWorkers(): Promise<void> {
   await boss.schedule(JOB_NAMES.GHL_SYNC, "7,22,37,52 * * * *", {}, { tz: "UTC" });
   // Import-row PHI sweep — hourly at :17. Idempotent.
   await boss.schedule(JOB_NAMES.IMPORT_ROWS_SWEEP, "17 * * * *", {}, { tz: "UTC" });
+  // Webhook idempotency ledger prune — daily 03:10 UTC. Idempotent.
+  await boss.schedule(JOB_NAMES.INTEGRATION_EVENTS_PRUNE, "10 3 * * *", {}, { tz: "UTC" });
 
   // ---- Workers ----
 
@@ -713,6 +718,17 @@ export async function startWorkers(): Promise<void> {
     JOB_NAMES.IMPORT_ROWS_SWEEP,
     { batchSize: 1, localConcurrency: 1 },
     importRowsSweepHandler,
+  );
+
+  const integrationEventsPruneHandler: WorkHandler<Record<string, never>> = async () => {
+    const { integrationEventsPruneWorker } = await import("../workers/integrationEventsPrune");
+    await integrationEventsPruneWorker();
+  };
+  // Scheduled cron — singleton; one prune pass per node, no fan-out.
+  await boss.work<Record<string, never>>(
+    JOB_NAMES.INTEGRATION_EVENTS_PRUNE,
+    { batchSize: 1, localConcurrency: 1 },
+    integrationEventsPruneHandler,
   );
 
   logger.info("All background workers registered");
