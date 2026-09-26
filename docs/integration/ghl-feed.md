@@ -1,10 +1,13 @@
 # GoHighLevel → agencyBRIDGE contact feed
 
 > **Step 0 — compliance prerequisite (required).** The feed copies PHI (names,
-> DOB, address, phone, email) out of GoHighLevel. Before adding an agency to
-> `GHL_SYNC_ORG_IDS`, confirm a signed Business Associate Agreement (BAA) with
-> HighLevel/LeadConnector covers that sub-account and that the sub-account is
-> on a HIPAA-eligible plan. Record both in the rollout ticket.
+> DOB, address, phone, email) out of GoHighLevel. Nothing in code can check
+> this, so before adding an agency's org id to `GHL_SYNC_ORG_IDS`:
+>
+> - [ ] A signed BAA with HighLevel/LeadConnector covering this sub-account is on file
+> - [ ] The sub-account is on a HIPAA-eligible plan
+> - [ ] Both are recorded in the rollout ticket, with its link
+> - [ ] The rollout ticket is approved by whoever owns compliance
 
 Pulls contacts from a GoHighLevel sub-account into agencyBRIDGE: a one-time
 **backfill** of everything, then a **scheduled pull** every 15 minutes of

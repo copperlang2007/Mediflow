@@ -310,6 +310,14 @@ export async function runGhlSync(
 }
 
 /**
+ * A match that identifies the person, not just someone in their household:
+ * the Medicare ID, or matching dates of birth on both records.
+ */
+function isStrongMatch(reason: string, dobA: string | null | undefined, dobB: string | null | undefined): boolean {
+  return reason === "Medicare ID" || (!!dobA && !!dobB && dobA === dobB);
+}
+
+/**
  * Ask for a full re-sync. Repeated requests collapse into one: the next run to
  * start honours the flag and clears it. Safe while a run is in progress.
  */
@@ -361,7 +369,8 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
   contact.tags = [...new Set([...contact.tags, ...(Array.isArray(gc.tags) ? gc.tags : []).filter((t): t is string => typeof t === "string").map((t) => t.trim()).filter(Boolean)])];
   contact.leadSource ??= "GoHighLevel";
   if (gc.dnd) contact.optOut = true;
-  const externalUpdatedAt = gc.dateUpdated ? new Date(gc.dateUpdated) : null;
+  const parsedUpdated = gc.dateUpdated ? new Date(gc.dateUpdated) : null;
+  const externalUpdatedAt = parsedUpdated && !Number.isNaN(parsedUpdated.getTime()) ? parsedUpdated : null;
 
   const [link] = await tx.select().from(externalContactLinksTable).where(and(
     eq(externalContactLinksTable.orgId, orgId),
@@ -371,6 +380,8 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
 
   let contactId: string;
   let created = false;
+  /** Same person beyond doubt: the same GHL record, a new contact, or a strong match. */
+  let sureOfIdentity = false;
   if (link) {
     // A contact deleted in agencyBRIDGE stays deleted: never refill, re-flag or
     // recreate it. A hard delete leaves the link as a tombstone (contactId null).
@@ -379,6 +390,7 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
       .where(and(eq(contactsTable.id, link.contactId), eq(contactsTable.orgId, orgId))).limit(1);
     if (!target || target.deletedAt) return "skipped";
     contactId = link.contactId;
+    sureOfIdentity = true;
     await fillBlanks(tx, orgId, contactId, contact, null);
     // An undated response must not erase the timestamp we already have.
     if (externalUpdatedAt) {
@@ -392,17 +404,28 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
     const live = (await loadMatcher(orgId, [contact], tx)).find(contact);
     if (!live) {
       const gone = (await loadMatcher(orgId, [contact], tx, { deleted: true })).find(contact);
-      // A name + date-of-birth match is weak: if the email or phone on both
-      // sides disagree, it's a different person who happens to share them.
-      const conflicts = gone?.reason === "name + date of birth" && (
-        (!!contact.email && !!gone.match.email && contact.email.toLowerCase() !== gone.match.email.toLowerCase()) ||
-        (!!contact.phone && !!gone.match.phone && contact.phone !== gone.match.phone)
-      );
-      if (gone && !conflicts) {
-        await tx.insert(externalContactLinksTable).values({
-          id: randomUUID(), orgId, source: GHL_SOURCE, externalId: gc.id, contactId: gone.match.id, externalUpdatedAt,
-        }).onConflictDoNothing();
-        return "skipped";
+      if (gone) {
+        // A name + date-of-birth match whose email or phone disagree is a
+        // different person who happens to share them: import normally.
+        const conflicts = gone.reason === "name + date of birth" && (
+          (!!contact.email && !!gone.match.email && contact.email.toLowerCase() !== gone.match.email.toLowerCase()) ||
+          (!!contact.phone && !!gone.match.phone && contact.phone !== gone.match.phone)
+        );
+        if (!conflicts) {
+          if (isStrongMatch(gone.reason, contact.dob, gone.match.dob)) {
+            // Clearly the deleted person: link permanently so they stay deleted.
+            await tx.insert(externalContactLinksTable).values({
+              id: randomUUID(), orgId, source: GHL_SOURCE, externalId: gc.id, contactId: gone.match.id, externalUpdatedAt,
+            }).onConflictDoNothing();
+          } else {
+            // Only a shared email/phone + name (e.g. parent and child in one
+            // household). Don't recreate a deleted person, but don't bind this
+            // GHL record to them forever either: hold it unlinked, so it is
+            // re-checked on its next update (or once the deleted record is gone).
+            logger.warn({ orgId, ghlContactId: gc.id, reason: gone.reason }, "GHL sync: held a contact that weakly matches a deleted contact");
+          }
+          return "skipped";
+        }
       }
     }
     // Run the dedupe merge in a savepoint: if it lands on a contact already
@@ -430,12 +453,23 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
     if (!result) return "skipped";
     contactId = result.contactId;
     created = result.created;
+    if (created) {
+      sureOfIdentity = true;
+    } else if (result.matchedOn) {
+      const [existing] = await tx.select({ dob: contactsTable.dob }).from(contactsTable).where(eq(contactsTable.id, contactId)).limit(1);
+      sureOfIdentity = isStrongMatch(result.matchedOn, contact.dob, existing?.dob ? existing.dob.toISOString().slice(0, 10) : null);
+    }
     await tx.insert(externalContactLinksTable).values({
       id: randomUUID(), orgId, source: GHL_SOURCE, externalId: gc.id, contactId, externalUpdatedAt,
     }).onConflictDoNothing();
   }
 
-  if (gc.dnd) {
+  // DND only flips opt-outs on a contact we're sure is this person: merging
+  // on a shared household phone/email + name must not opt out a relative.
+  if (gc.dnd && !sureOfIdentity) {
+    logger.info({ orgId, ghlContactId: gc.id }, "GHL sync: DND not applied to a contact matched without a birth date or Medicare ID");
+  }
+  if (gc.dnd && sureOfIdentity) {
     await tx.update(contactsTable).set({ optOutSms: true, optOutEmail: true })
       .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId), isNull(contactsTable.deletedAt),
         sql`(${contactsTable.optOutSms} = false OR ${contactsTable.optOutEmail} = false)`));

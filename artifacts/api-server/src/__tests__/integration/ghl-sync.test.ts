@@ -450,13 +450,47 @@ describe("GHL feed", () => {
   });
 
   it("does not recreate a person the agency soft-deleted, even when their GHL record was never linked", async () => {
-    const gone = await seedContact(tdb, { orgId: org.id, firstName: "Gone", lastName: "Person", email: "gone@example.com" });
+    const dob = new Date("1948-02-02T00:00:00.000Z");
+    const gone = await seedContact(tdb, { orgId: org.id, firstName: "Gone", lastName: "Person", email: "gone@example.com", dob });
     await tdb.update(contactsTable).set({ deletedAt: new Date() }).where(eq(contactsTable.id, gone.id));
-    const r = await sync.runGhlSync(cfg(), { fetchImpl: fakeGhl([ghlContact(13000, { firstName: "Gone", lastName: "Person", email: "gone@example.com", dateUpdated: "2026-12-01T00:00:00.000Z" })]).impl });
+    const r = await sync.runGhlSync(cfg(), { fetchImpl: fakeGhl([ghlContact(13000, { firstName: "Gone", lastName: "Person", email: "gone@example.com", dateOfBirth: "1948-02-02T00:00:00.000Z", dateUpdated: "2026-12-01T00:00:00.000Z" })]).impl });
     expect(r).toMatchObject({ created: 0, skipped: 1 });
     expect((await orgContacts()).filter((c) => c.lastName === "Person" && !c.deletedAt)).toHaveLength(0);
     const [link] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, "ghl-13000"));
     expect(link!.contactId).toBe(gone.id); // tombstone: later syncs stay skipped
+  });
+
+  it("holds (without binding) a GHL contact that only shares a household email + name with a deleted contact", async () => {
+    const org12 = await seedOrg(tdb, { id: "ghl-org-12" });
+    const cfg12 = ({ orgId: org12.id, token: TOKEN, locationId: `loc-${org12.id}` });
+    const grandma = await seedContact(tdb, { orgId: org12.id, firstName: "Mary", lastName: "Johnson", email: "johnsons@example.com" });
+    await tdb.update(contactsTable).set({ deletedAt: new Date() }).where(eq(contactsTable.id, grandma.id));
+    const r = await sync.runGhlSync(cfg12, { fetchImpl: fakeGhl([ghlContact(13100, { firstName: "Mary", lastName: "Johnson", email: "johnsons@example.com" })]).impl });
+    expect(r).toMatchObject({ created: 0, skipped: 1 });
+    // Not recreated, and not permanently bound to the deleted grandmother either.
+    const links = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.orgId, org12.id));
+    expect(links).toHaveLength(0);
+  });
+
+  it("does not apply GHL DND to a household relative matched only by shared phone + name", async () => {
+    const org13 = await seedOrg(tdb, { id: "ghl-org-13" });
+    const cfg13 = ({ orgId: org13.id, token: TOKEN, locationId: `loc-${org13.id}` });
+    const sr = await seedContact(tdb, { orgId: org13.id, firstName: "Bob", lastName: "Anderson", email: null });
+    await tdb.update(contactsTable).set({ phone: "+15125557777", optOutSms: false, optOutEmail: false }).where(eq(contactsTable.id, sr.id));
+    await sync.runGhlSync(cfg13, { fetchImpl: fakeGhl([ghlContact(13200, { firstName: "Bob", lastName: "Anderson", phone: "+15125557777", dnd: true })]).impl });
+    const [after] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, sr.id));
+    expect(after).toMatchObject({ optOutSms: false, optOutEmail: false });
+  });
+
+  it("ignores an unparseable GHL dateUpdated instead of failing the contact", async () => {
+    const org14 = await seedOrg(tdb, { id: "ghl-org-14" });
+    const cfg14 = ({ orgId: org14.id, token: TOKEN, locationId: `loc-${org14.id}` });
+    const bad = Array.from({ length: 6 }, (_, k) => ({ ...ghlContact(13300 + k), dateUpdated: "not-a-valid-date" }));
+    const undated = (async () => new Response(JSON.stringify({ contacts: bad }), { status: 200 })) as unknown as typeof fetch;
+    const r1 = await sync.runGhlSync(cfg14, { fetchImpl: undated });
+    expect(r1).toMatchObject({ status: "ok", created: 6, failed: 0 });
+    const r2 = await sync.runGhlSync(cfg14, { fetchImpl: undated }); // linked path
+    expect(r2).toMatchObject({ status: "ok", updated: 6, failed: 0 });
   });
 
   it("does not recreate a hard-deleted contact (link survives as a tombstone)", async () => {
@@ -587,6 +621,22 @@ describe("GHL client resilience", () => {
       await vi.runAllTimersAsync();
       await expect(p).resolves.toMatchObject({ contacts: [] });
       expect(calls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still backs off when Retry-After is a date in the past", async () => {
+    const { searchContacts } = await import("../../lib/integrations/ghl/client");
+    vi.useFakeTimers();
+    try {
+      const times: number[] = [];
+      const limited = (async () => { times.push(Date.now()); return new Response("", { status: 429, headers: { "Retry-After": "Wed, 21 Oct 2020 07:28:00 GMT" } }); }) as unknown as typeof fetch;
+      const p = searchContacts({ token: TOKEN, locationId: LOCATION, updatedSince: null }, limited).catch((e: Error) => e);
+      await vi.runAllTimersAsync();
+      expect(await p).toBeInstanceOf(Error);
+      expect(times.length).toBe(4);
+      expect(times[3]! - times[0]!).toBeGreaterThanOrEqual(2000 + 4000 + 8000);
     } finally {
       vi.useRealTimers();
     }

@@ -133,7 +133,8 @@ export async function searchContacts(params: SearchParams, fetchImpl: FetchLike 
           res.status,
         );
       }
-      const waitMs = retryAfterMs ?? 1000 * 2 ** attempt;
+      // A Retry-After in the past (clock skew) must not mean "no wait at all".
+      const waitMs = retryAfterMs && retryAfterMs > 0 ? retryAfterMs : 1000 * 2 ** attempt;
       logger.warn({ status: res.status, attempt, waitMs }, "GHL search: retrying");
       await sleep(waitMs);
       continue;
