@@ -409,6 +409,10 @@ describe("import bookkeeping", () => {
       { id: "sweep-live", orgId: org.id, status: "processing", options: { rows: [{ a: "1" }] } },
       // Started long ago but still making progress: a big import, not a dead one.
       { id: "sweep-long", orgId: org.id, status: "processing", options: { rows: [{ a: "1" }] }, createdAt: old, heartbeatAt: new Date() },
+      // Started 45 min ago by code from before heartbeats: not old enough to call dead.
+      { id: "sweep-legacy", orgId: org.id, status: "processing", options: { rows: [{ a: "1" }] }, createdAt: new Date(Date.now() - 45 * 60_000) },
+      // Other import types don't heartbeat; the sweep leaves them alone.
+      { id: "sweep-monday", orgId: org.id, importType: "monday_com", status: "processing", options: { rows: [{ a: "1" }] }, createdAt: old },
     ]);
     await importRowsSweepWorker();
     const rows = await tdb.select().from(importJobsTable);
@@ -419,6 +423,8 @@ describe("import bookkeeping", () => {
     expect((by("sweep-live").options as { rows?: unknown }).rows).toBeDefined();
     expect(by("sweep-dead-hb")).toMatchObject({ status: "failed" });
     expect(by("sweep-long")).toMatchObject({ status: "processing" });
+    expect(by("sweep-legacy")).toMatchObject({ status: "processing" });
+    expect(by("sweep-monday")).toMatchObject({ status: "processing" });
     expect((by("sweep-long").options as { rows?: unknown }).rows).toBeDefined();
   });
 

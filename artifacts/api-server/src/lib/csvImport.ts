@@ -224,8 +224,8 @@ export function parseCsvTolerant(buffer: Buffer): TolerantCsvResult {
   const rows: Record<string, string>[] = [];
   const rowNumbers: number[] = [];
   const issues: CsvIssue[] = [];
-  /** Rows kept provisionally whose only extras were trailing blanks (index into rows). */
-  const padded: number[] = [];
+  /** Rows kept provisionally whose only extras were trailing blanks. */
+  const padded: { idx: number; rawLength: number }[] = [];
 
   for (const rec of records) {
     const values = rec.fields.map((f) => f.trim());
@@ -251,7 +251,7 @@ export function parseCsvTolerant(buffer: Buffer): TolerantCsvResult {
     // an unquoted comma moved every later value one column right, or the
     // export pads every row with blank columns. Decided once the whole file
     // has been read (below).
-    if (shifted) padded.push(rows.length);
+    if (shifted) padded.push({ idx: rows.length, rawLength });
     if (rec.warning) {
       issues.push({
         row: rec.line,
@@ -270,15 +270,25 @@ export function parseCsvTolerant(buffer: Buffer): TolerantCsvResult {
     // Nearly every row padded the same way is the export's shape, not a comma
     // problem: keep them. A few padded rows among normal ones are shifted rows:
     // skip them rather than import an address/city that looks valid but is wrong.
+    let reject = padded;
     if (padded.length >= 2 && padded.length >= 0.8 * rows.length) {
+      // The export's pad width is what most rows have. A row one value wider
+      // is a shifted row whose extra value happened to land in the padding
+      // (its own last column was blank): still a shift, still skipped.
+      const counts = new Map<number, number>();
+      for (const p of padded) counts.set(p.rawLength, (counts.get(p.rawLength) ?? 0) + 1);
+      const padWidth = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]![0];
+      reject = padded.filter((p) => p.rawLength > padWidth);
+      const kept = padded.length - reject.length;
       issues.push({
-        row: rowNumbers[padded[0]!]!,
+        row: rowNumbers[padded[0]!.idx]!,
         field: "row",
         severity: "warning",
-        message: `${padded.length} rows end with blank columns the header row doesn't have. They were treated as padding and imported.`,
+        message: `${kept} rows end with blank columns the header row doesn't have. They were treated as padding and imported.`,
       });
-    } else {
-      for (const idx of [...padded].reverse()) {
+    }
+    if (reject.length > 0) {
+      for (const { idx } of [...reject].reverse()) {
         issues.push({
           row: rowNumbers[idx]!,
           field: "row",

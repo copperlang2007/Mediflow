@@ -606,6 +606,7 @@ export async function processCsvContactImport(
     logger.warn({ jobId }, "imports: job is no longer processing; not starting");
     return;
   }
+  let lastBeat = Date.now();
   const parseIssues = ((job?.options as { parseIssues?: CsvIssue[] } | null)?.parseIssues) ?? [];
   let created = 0, updated = 0, skipped = 0;
   let errors = parseIssues.filter((p) => p.severity === "error").length;
@@ -707,7 +708,10 @@ export async function processCsvContactImport(
       captureWorkerError(err, { worker: "imports", route: "contacts/confirm", jobId, row: r.row });
     }
 
-    if (i % 50 === 0) {
+    // Every 50 rows, and at least once a minute so a small but slow import
+    // never looks dead to the cleanup sweep.
+    if (i % 50 === 0 || Date.now() - lastBeat > 60_000) {
+      lastBeat = Date.now();
       const alive = await db.update(importJobsTable)
         .set({ processedRows: i + 1, errorCount: errors, errors: errorList, heartbeatAt: new Date() })
         .where(stillMine).returning({ id: importJobsTable.id });

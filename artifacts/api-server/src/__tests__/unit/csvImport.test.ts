@@ -57,6 +57,16 @@ describe("parseCsvTolerant", () => {
     expect(r.issues).toEqual([expect.objectContaining({ row: 2, severity: "warning" })]);
   });
 
+  it("in a padded export, still skips a shifted row whose extra value landed in the padding", () => {
+    // Pad width is 2 blank columns; the shifted row (blank last column) is one value wider.
+    const r = parseCsvTolerant(csv("addr,state,zip\n1 Elm,TX,78701,,\n12 Main St, Apt 4,TX,,,\n5 Oak,TX,78702,,\n7 Ash,TX,78703,,\n9 Fir,TX,78704,,\n"));
+    expect(r.rows.map((x) => x.addr)).toEqual(["1 Elm", "5 Oak", "7 Ash", "9 Fir"]);
+    expect(r.issues).toEqual([
+      expect.objectContaining({ row: 2, severity: "warning" }),
+      expect.objectContaining({ row: 3, severity: "error" }),
+    ]);
+  });
+
   it("still skips a padded-looking row that is the odd one out", () => {
     const r = parseCsvTolerant(csv("addr,state,zip\n1 Elm,TX,78701\n12 Elm St, Village,TX,78701,\n5 Oak,TX,78702\n7 Ash,TX,78703\n"));
     // "12 Elm St, Village,TX,78701," → 5 values; the trailing blank pops to 4 > 3 → hard error either way.
