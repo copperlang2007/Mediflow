@@ -153,8 +153,14 @@ export function interpretContactRow(
   mapping: Record<string, string>,
   rowNumber: number,
 ): InterpretedRow {
+  // Messages name the field but never echo the value: they persist to
+  // import_jobs.errors and the downloadable errors CSV, and values here are PHI.
   const issues: CsvIssue[] = [];
   const warn = (field: string, message: string) => issues.push({ row: rowNumber, field, message, severity: "warning" });
+  // Format anomalies per row. Two or more in one row almost always means the
+  // columns are shifted (an unquoted comma in an address), which the parser
+  // cannot detect when the row still has exactly as many values as the header.
+  let anomalies = 0;
   const get = (field: string): string => {
     const col = Object.keys(mapping).find((k) => mapping[k] === field);
     return col ? (raw[col] ?? "").trim() : "";
@@ -187,8 +193,9 @@ export function interpretContactRow(
 
   let email: string | null = get("email") || null;
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    warn("email", `"${email}" is not a valid email — left blank`);
+    warn("email", "Email is not a valid address — left blank");
     email = null;
+    anomalies++;
   }
 
   const phone = normalizePhone(get("phone"));
@@ -197,10 +204,13 @@ export function interpretContactRow(
   const dobRaw = get("dob");
   if (dobRaw) {
     dob = parseFlexibleDate(dobRaw, "past");
-    if (!dob) warn("dob", `Date of birth "${dobRaw}" not recognized — use MM/DD/YYYY. Left blank`);
-    else if (dob > new Date().toISOString().slice(0, 10)) {
-      warn("dob", `Date of birth ${dobRaw} is in the future — left blank`);
+    if (!dob) {
+      warn("dob", "Date of birth not recognized — use MM/DD/YYYY. Left blank");
+      anomalies++;
+    } else if (dob > new Date().toISOString().slice(0, 10)) {
+      warn("dob", "Date of birth is in the future — left blank");
       dob = null;
+      anomalies++;
     }
   }
 
@@ -208,7 +218,21 @@ export function interpretContactRow(
   const stateRaw = get("stateCode");
   if (stateRaw) {
     stateCode = normalizeStateCode(stateRaw);
-    if (!stateCode) warn("stateCode", `"${stateRaw}" is not a US state — left blank`);
+    if (!stateCode) {
+      warn("stateCode", "State is not a US state — left blank");
+      anomalies++;
+    }
+  }
+
+  let zipCode: string | null = get("zipCode") || null;
+  if (zipCode) {
+    // Excel drops leading zeros (02134 → 2134); restore them.
+    if (/^\d{3,4}$/.test(zipCode)) zipCode = zipCode.padStart(5, "0");
+    if (!/^\d{5}(-?\d{4})?$/.test(zipCode)) {
+      warn("zipCode", "ZIP code is not a 5- or 9-digit ZIP — left blank");
+      zipCode = null;
+      anomalies++;
+    }
   }
 
   let mbi: string | null = null;
@@ -224,8 +248,19 @@ export function interpretContactRow(
 
   let assignedAgentEmail: string | null = get("assignedAgentEmail").toLowerCase() || null;
   if (assignedAgentEmail && !assignedAgentEmail.includes("@")) {
-    warn("assignedAgentEmail", `Assigned agent must be an email address (got "${assignedAgentEmail}") — left unassigned`);
+    warn("assignedAgentEmail", "Assigned agent must be an email address — left unassigned");
     assignedAgentEmail = null;
+    anomalies++;
+  }
+
+  if (anomalies >= 2) {
+    issues.push({
+      row: rowNumber,
+      field: "row",
+      severity: "error",
+      message: "Several values are in the wrong format for their columns — the row looks shifted (often an unquoted comma in an address). Row skipped; fix it and re-import.",
+    });
+    return { row: rowNumber, contact: null, enrollment: null, issues };
   }
 
   const tagsRaw = get("tags");
@@ -241,7 +276,7 @@ export function interpretContactRow(
     city: get("city") || null,
     county: get("county") || null,
     stateCode,
-    zipCode: get("zipCode") || null,
+    zipCode,
     leadSource: get("leadSource") || null,
     tags: tagsRaw ? tagsRaw.split(/[,;]/).map((t) => t.trim()).filter(Boolean) : [],
     optOut: ["yes", "y", "true", "1"].includes(optOutRaw),
@@ -260,12 +295,12 @@ export function interpretContactRow(
     const effectiveDate = effectiveRaw ? parseFlexibleDate(effectiveRaw, "2000s") : null;
     if (!planType) {
       warn("planType", planTypeRaw
-        ? `Plan type "${planTypeRaw}" not recognized (use MA, MAPD, PDP, Supplement, or Other) — contact imported without enrollment`
+        ? "Plan type not recognized (use MA, MAPD, PDP, Supplement, or Other) — contact imported without enrollment"
         : "Plan type is missing — contact imported without enrollment");
     }
     if (!effectiveDate) {
       warn("effectiveDate", effectiveRaw
-        ? `Effective date "${effectiveRaw}" not recognized — use MM/DD/YYYY. Contact imported without enrollment`
+        ? "Effective date not recognized — use MM/DD/YYYY. Contact imported without enrollment"
         : "Effective date is missing — contact imported without enrollment");
     }
     if (planType && effectiveDate) {
@@ -313,14 +348,20 @@ export class ContactMatcher {
         if (m) return { match: m, reason: "Medicare ID" };
       }
     }
-    const sameName = (k: KnownContact) => k.firstName.trim().toLowerCase() === contact.firstName.toLowerCase();
+    // A shared phone/email alone is not identity: households, Sr/Jr and care
+    // facilities share them. Require the first name, plus the DOB when both
+    // sides have one (distinguishes Sr/Jr), otherwise the last name.
+    const lower = (s: string) => s.trim().toLowerCase();
+    const sameName = (k: KnownContact) =>
+      lower(k.firstName) === lower(contact.firstName) &&
+      (k.dob && contact.dob ? k.dob === contact.dob : lower(k.lastName) === lower(contact.lastName));
     if (contact.email) {
       const m = (this.byEmail.get(contact.email.toLowerCase()) ?? []).find(sameName);
-      if (m) return { match: m, reason: "email + first name" };
+      if (m) return { match: m, reason: "email + name" };
     }
     if (contact.phone) {
       const m = (this.byPhone.get(contact.phone) ?? []).find(sameName);
-      if (m) return { match: m, reason: "phone + first name" };
+      if (m) return { match: m, reason: "phone + name" };
     }
     if (contact.dob) {
       const m = this.byNameDob.get(nameDobKey(contact.firstName, contact.lastName, contact.dob));
@@ -454,7 +495,7 @@ export async function previewContactImport(
     validRows++;
     const c = r.contact;
     if (c.assignedAgentEmail && !agentsByEmail.has(c.assignedAgentEmail)) {
-      issues.push({ row: r.row, field: "assignedAgentEmail", severity: "warning", message: `No agent with email ${c.assignedAgentEmail} — contact will be unassigned` });
+      issues.push({ row: r.row, field: "assignedAgentEmail", severity: "warning", message: "No agent in agencyBRIDGE has that email — contact will be unassigned" });
     }
     if (r.enrollment) {
       enrollmentCount++;
@@ -519,11 +560,14 @@ export async function processCsvContactImport(
   duplicateAction: DuplicateAction = "merge",
 ): Promise<void> {
   // Seed with the rows the confirm step could not parse, so they stay in the
-  // job's downloadable error report.
-  const [job] = await db.select({ errors: importJobsTable.errors, errorCount: importJobsTable.errorCount })
+  // job's report. Read from options (written once at confirm), never from
+  // job.errors: a retried attempt would otherwise re-append its own output.
+  const [job] = await db.select({ options: importJobsTable.options })
     .from(importJobsTable).where(eq(importJobsTable.id, jobId)).limit(1);
-  let created = 0, updated = 0, skipped = 0, errors = job?.errorCount ?? 0;
-  const errorList: ImportError[] = [...((job?.errors as ImportError[] | null) ?? [])];
+  const parseIssues = ((job?.options as { parseIssues?: CsvIssue[] } | null)?.parseIssues) ?? [];
+  let created = 0, updated = 0, skipped = 0;
+  let errors = parseIssues.filter((p) => p.severity === "error").length;
+  const errorList: ImportError[] = parseIssues.map((p) => ({ row: p.row, field: p.field, message: p.message }));
 
   const interpreted = rows.map((r, i) => interpretContactRow(r, mapping, Number(r[ROW_NUMBER_KEY]) || i + 2));
   const [matcher, agentsByEmail, carriersByName] = await Promise.all([
@@ -537,22 +581,26 @@ export async function processCsvContactImport(
     for (const issue of r.issues) errorList.push({ row: issue.row, field: issue.field, message: issue.message });
     if (!r.contact) { errors++; continue; }
     const c = r.contact;
+    const newCarrierKeys: string[] = [];
 
     try {
       const agentId = c.assignedAgentEmail ? agentsByEmail.get(c.assignedAgentEmail) ?? null : null;
       if (c.assignedAgentEmail && !agentId) {
-        errorList.push({ row: r.row, field: "assignedAgentEmail", message: `No agent with email ${c.assignedAgentEmail} — left unassigned` });
+        errorList.push({ row: r.row, field: "assignedAgentEmail", message: "No agent in agencyBRIDGE has that email — left unassigned" });
       }
       const hit = duplicateAction === "create_new" ? null : matcher.find(c);
       if (hit && duplicateAction === "skip") { skipped++; continue; }
 
-      const carrierId = r.enrollment?.carrierName ? await resolveCarrier(orgId, r.enrollment.carrierName, carriersByName) : null;
-
       const contactId = await db.transaction(async (tx) => {
+        const carrierId = r.enrollment?.carrierName
+          ? await resolveCarrier(tx, orgId, r.enrollment.carrierName, carriersByName, newCarrierKeys)
+          : null;
         let id: string;
         if (hit) {
           id = hit.match.id;
-          await fillBlanks(tx, orgId, id, c, agentId);
+          for (const w of await fillBlanks(tx, orgId, id, c, agentId)) {
+            errorList.push({ row: r.row, field: w.field, message: w.message });
+          }
         } else {
           id = await insertContact(tx, orgId, c, agentId, r.enrollment ? "enrolled" : "lead");
         }
@@ -593,6 +641,8 @@ export async function processCsvContactImport(
         matcher.add(known(contactId, c, r.row), c.mbi ? mbiHashesFor(c.mbi) : []);
       }
     } catch (err) {
+      // The transaction rolled back, including any carrier it created.
+      for (const k of newCarrierKeys) carriersByName.delete(k);
       errors++;
       errorList.push({ row: r.row, message: "Failed to save contact" });
       logger.error({ err, jobId, row: r.row }, "imports: failed to import CSV contact row");
@@ -664,19 +714,26 @@ export async function upsertContact(
   orgId: string,
   c: InterpretedContact,
   agentId: string | null,
-): Promise<{ contactId: string; created: boolean; matchedOn: string | null }> {
+): Promise<{ contactId: string; created: boolean; matchedOn: string | null; warnings: { field: string; message: string }[] }> {
   const matcher = await loadMatcher(orgId, [c], tx);
   const hit = matcher.find(c);
   if (hit) {
-    await fillBlanks(tx, orgId, hit.match.id, c, agentId);
-    return { contactId: hit.match.id, created: false, matchedOn: hit.reason };
+    const warnings = await fillBlanks(tx, orgId, hit.match.id, c, agentId);
+    return { contactId: hit.match.id, created: false, matchedOn: hit.reason, warnings };
   }
-  return { contactId: await insertContact(tx, orgId, c, agentId, "lead"), created: true, matchedOn: null };
+  return { contactId: await insertContact(tx, orgId, c, agentId, "lead"), created: true, matchedOn: null, warnings: [] };
 }
 
-export async function fillBlanks(tx: Tx, orgId: string, id: string, c: InterpretedContact, agentId: string | null): Promise<void> {
+export async function fillBlanks(
+  tx: Tx,
+  orgId: string,
+  id: string,
+  c: InterpretedContact,
+  agentId: string | null,
+): Promise<{ field: string; message: string }[]> {
+  const warnings: { field: string; message: string }[] = [];
   const [cur] = await tx.select().from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, orgId))).limit(1);
-  if (!cur) return;
+  if (!cur) return warnings;
   const patch: Partial<typeof contactsTable.$inferInsert> = {};
   if (!cur.email && c.email) patch.email = c.email;
   if (!cur.phone && c.phone) patch.phone = c.phone;
@@ -692,6 +749,12 @@ export async function fillBlanks(tx: Tx, orgId: string, id: string, c: Interpret
     const enc = encryptMedicareId(c.mbi);
     patch.medicareIdEncrypted = enc.encrypted;
     patch.medicareIdHash = enc.hash;
+  } else if (cur.medicareIdHash && c.mbi) {
+    const onFile = Buffer.from(cur.medicareIdHash);
+    if (!mbiHashesFor(c.mbi).some((h) => h.equals(onFile))) {
+      // Surface the conflict; never silently overwrite an identifier.
+      warnings.push({ field: "medicareId", message: "Medicare ID on file differs from the imported one — imported value not applied. Please review this contact." });
+    }
   }
   if (c.tags.length > 0) {
     const merged = [...new Set([...(cur.tags ?? []), ...c.tags])];
@@ -700,14 +763,36 @@ export async function fillBlanks(tx: Tx, orgId: string, id: string, c: Interpret
   if (Object.keys(patch).length > 0) {
     await tx.update(contactsTable).set(patch).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, orgId)));
   }
+  return warnings;
 }
 
-async function resolveCarrier(orgId: string, name: string, cache: Map<string, string>): Promise<string> {
+/**
+ * Find the org's carrier by case/space-insensitive name, creating it if absent.
+ * Runs inside the row's transaction, so a failed row leaves no orphan carrier.
+ *
+ * No unique index backs this: existing orgs may already hold same-named
+ * carriers, and adding one would make the migration fail on their data. The
+ * DB re-check below covers carriers added since the cache was loaded; the CSV
+ * worker runs one job at a time, so there is no concurrent writer to race.
+ */
+async function resolveCarrier(
+  tx: Tx,
+  orgId: string,
+  name: string,
+  cache: Map<string, string>,
+  created: string[],
+): Promise<string> {
   const key = carrierKey(name);
-  const hit = cache.get(key);
-  if (hit) return hit;
-  const id = randomUUID();
-  await db.insert(carriersTable).values({ id, orgId, name: name.trim().replace(/\s+/g, " ") });
+  const cached = cache.get(key);
+  if (cached) return cached;
+  const [existing] = await tx.select({ id: carriersTable.id }).from(carriersTable)
+    .where(and(eq(carriersTable.orgId, orgId), sql`lower(regexp_replace(trim(${carriersTable.name}), '\s+', ' ', 'g')) = ${key}`))
+    .limit(1);
+  const id = existing?.id ?? randomUUID();
+  if (!existing) {
+    await tx.insert(carriersTable).values({ id, orgId, name: name.trim().replace(/\s+/g, " ") });
+    created.push(key);
+  }
   cache.set(key, id);
   return id;
 }
