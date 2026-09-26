@@ -24,8 +24,12 @@ GitHub Secrets / the hosting provider as below.
 | `GHL_LOCATION_ID` | GitHub **Variable** / Render env | the location id |
 | `GHL_SYNC_ORG_IDS` | GitHub **Variable** / Render env | the agencyBRIDGE org id(s) to sync into |
 
-Several agencies: list their org ids and use per-org overrides
-`GHL_PRIVATE_INTEGRATION_TOKEN_<ORGID>` / `GHL_LOCATION_ID_<ORGID>`.
+Several agencies: list their org ids in `GHL_SYNC_ORG_IDS`; the app reads
+per-org overrides `GHL_PRIVATE_INTEGRATION_TOKEN_<ORGID>` / `GHL_LOCATION_ID_<ORGID>`.
+**The deploy workflow only passes the single (global) token and location**, so
+for more than one agency those per-org values must currently be set directly on
+the Cloud Run service (token via Secret Manager) — the workflow does not
+propagate them yet.
 
 **GCP:** re-run `scripts/deploy/gcp-bootstrap.sh` once so the
 `mediflow-ghl-private-integration-token` Secret Manager placeholder exists. The

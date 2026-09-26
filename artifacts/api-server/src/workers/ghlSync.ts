@@ -31,6 +31,10 @@ export async function ghlSyncWorker(payload: GhlSyncPayload = {}): Promise<void>
       const result = await runGhlSync(cfg, { full: payload.full });
       if (result.status === "more_pending") {
         await enqueue(JOB_NAMES.GHL_SYNC, { orgId: cfg.orgId });
+      } else if (result.status === "already_running" && payload.full) {
+        // A requested full re-sync must not be dropped because a run was in
+        // progress: try again once that run has had time to finish.
+        await enqueue(JOB_NAMES.GHL_SYNC, { orgId: cfg.orgId, full: true }, { startAfter: 120 });
       }
     } catch (err) {
       logger.error({ err, orgId: cfg.orgId }, "GHL sync: run failed");

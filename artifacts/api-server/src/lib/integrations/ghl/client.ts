@@ -43,6 +43,8 @@ export interface GhlContact {
 export interface SearchPage {
   contacts: GhlContact[];
   total: number | null;
+  /** Cursor for the next page: response-level if GHL sends one, else the last contact's. */
+  searchAfter: (string | number)[] | null;
 }
 
 export class GhlApiError extends Error {
@@ -101,17 +103,27 @@ export async function searchContacts(params: SearchParams, fetchImpl: FetchLike 
     }
 
     if (!res.ok) {
-      const detail = await res.text().catch(() => "");
+      // The upstream body is deliberately NOT included: this message is stored
+      // and shown to admins, and a proxy or error page could echo the request
+      // (including the Authorization header) back to us.
+      await res.body?.cancel().catch(() => undefined);
       const hint = res.status === 401 || res.status === 403
         ? " — check the Private Integration token and that it has the contacts.readonly scope for this location"
-        : "";
-      throw new GhlApiError(`GHL contacts search failed: HTTP ${res.status}${hint}. ${detail.slice(0, 300)}`, res.status);
+        : res.status === 422 || res.status === 400
+          ? " — GHL rejected the search request; the request format may need updating"
+          : "";
+      throw new GhlApiError(`GHL contacts search failed: HTTP ${res.status}${hint}`, res.status);
     }
 
-    const json = (await res.json()) as { contacts?: GhlContact[]; total?: number; count?: number };
+    const json = (await res.json()) as { contacts?: GhlContact[]; total?: number; count?: number; searchAfter?: (string | number)[] };
+    const contacts = Array.isArray(json.contacts) ? json.contacts : [];
+    const last = contacts[contacts.length - 1];
     return {
-      contacts: Array.isArray(json.contacts) ? json.contacts : [],
+      contacts,
       total: typeof json.total === "number" ? json.total : typeof json.count === "number" ? json.count : null,
+      searchAfter: Array.isArray(json.searchAfter) && json.searchAfter.length
+        ? json.searchAfter
+        : last?.searchAfter?.length ? last.searchAfter : null,
     };
   }
 }

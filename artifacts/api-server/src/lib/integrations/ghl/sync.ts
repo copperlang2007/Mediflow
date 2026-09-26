@@ -84,17 +84,14 @@ export async function runGhlSync(
   const maxPages = opts.maxPages ?? DEFAULT_MAX_PAGES;
 
   await db.insert(ghlSyncStateTable).values({ orgId, locationId }).onConflictDoNothing();
-  const [before] = await db.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, orgId));
-  // A different sub-account, or an explicit full backfill: start from the top.
-  if (opts.full || before!.locationId !== locationId) {
-    await db.update(ghlSyncStateTable)
-      .set({ locationId, cursorUpdatedAt: null, backfillCompletedAt: null })
-      .where(eq(ghlSyncStateTable.orgId, orgId));
-  }
 
+  // Acquire the lease with a fencing token. Every later write matches on the
+  // token, so a run that stalled past the lease window and was taken over can
+  // no longer move the cursor or clear the new run's lease.
+  const token = randomUUID();
   const leaseCutoff = new Date(Date.now() - LEASE_MINUTES * 60_000);
   const [lease] = await db.update(ghlSyncStateTable)
-    .set({ runningSince: new Date() })
+    .set({ runningSince: new Date(), leaseToken: token })
     .where(and(
       eq(ghlSyncStateTable.orgId, orgId),
       or(isNull(ghlSyncStateTable.runningSince), lt(ghlSyncStateTable.runningSince, leaseCutoff)),
@@ -102,13 +99,31 @@ export async function runGhlSync(
     .returning();
   if (!lease) return { status: "already_running", created: 0, updated: 0, skipped: 0, pages: 0 };
 
-  const updatedSince = lease.cursorUpdatedAt;
+  const mine = and(eq(ghlSyncStateTable.orgId, orgId), eq(ghlSyncStateTable.leaseToken, token));
+  /** Write state only while we still hold the lease; throws if it was taken over. */
+  const writeState = async (patch: Partial<typeof ghlSyncStateTable.$inferInsert>) => {
+    const done = await db.update(ghlSyncStateTable).set(patch).where(mine).returning({ orgId: ghlSyncStateTable.orgId });
+    if (done.length === 0) throw new LeaseLostError();
+  };
+
+  // A full re-sync or a different sub-account starts from the top — reset only
+  // now that we hold the lease, so it can't clobber a run already in progress.
+  let cursorUpdatedAt = lease.cursorUpdatedAt;
+  let searchAfter = (lease.cursorSearchAfter as (string | number)[] | null) ?? null;
+  let backfillCompletedAt = lease.backfillCompletedAt;
+  if (opts.full || lease.locationId !== locationId) {
+    cursorUpdatedAt = null;
+    searchAfter = null;
+    backfillCompletedAt = null;
+    await writeState({ locationId, cursorUpdatedAt: null, cursorSearchAfter: null, backfillCompletedAt: null });
+  }
+
+  const updatedSince = cursorUpdatedAt;
   const totals = { created: 0, updated: 0, skipped: 0 };
   let pages = 0;
   let morePending = false;
 
   try {
-    let searchAfter: (string | number)[] | null = null;
     for (;;) {
       if (pages >= maxPages) { morePending = true; break; }
       const page = await searchContacts(
@@ -123,40 +138,55 @@ export async function runGhlSync(
         const updated = gc.dateUpdated ? new Date(gc.dateUpdated) : null;
         if (updated && !Number.isNaN(updated.getTime()) && (!cursor || updated > cursor)) cursor = updated;
       }
-      // Advance after the page is written, so a crash re-reads rather than skips.
-      if (cursor) {
-        await db.update(ghlSyncStateTable).set({ cursorUpdatedAt: cursor, runningSince: new Date() })
-          .where(eq(ghlSyncStateTable.orgId, orgId));
-      }
+      searchAfter = page.searchAfter;
+      // Persist the exact position (timestamp + GHL's paging tuple) after the
+      // page is written: a crash re-reads the page rather than skipping it, and
+      // the next run resumes strictly after the last contact — even when
+      // thousands share one dateUpdated (bulk edits).
+      if (cursor) await writeState({ cursorUpdatedAt: cursor, cursorSearchAfter: searchAfter, runningSince: new Date() });
       if (page.contacts.length < GHL_PAGE_LIMIT) break;
-      const last = page.contacts[page.contacts.length - 1]!;
-      searchAfter = last.searchAfter?.length ? last.searchAfter : null;
+      if (!searchAfter) {
+        logger.warn({ orgId }, "GHL sync: response had no searchAfter; paging by page number");
+      }
     }
 
-    await db.update(ghlSyncStateTable).set({
+    await writeState({
       runningSince: null,
+      leaseToken: null,
       lastRunAt: new Date(),
       lastStatus: morePending ? "more_pending" : "ok",
       lastError: null,
       lastRunCreated: totals.created,
       lastRunUpdated: totals.updated,
       lastRunSkipped: totals.skipped,
-      ...(!morePending && !lease.backfillCompletedAt ? { backfillCompletedAt: new Date() } : {}),
-    }).where(eq(ghlSyncStateTable.orgId, orgId));
+      ...(!morePending && !backfillCompletedAt ? { backfillCompletedAt: new Date() } : {}),
+    });
 
     logger.info({ orgId, pages, ...totals, morePending }, "GHL sync: run finished");
     return { status: morePending ? "more_pending" : "ok", ...totals, pages };
   } catch (err) {
+    if (err instanceof LeaseLostError) {
+      logger.warn({ orgId }, "GHL sync: lease was taken over by a newer run; stopping without writing state");
+      return { status: "already_running", ...totals, pages };
+    }
     await db.update(ghlSyncStateTable).set({
       runningSince: null,
+      leaseToken: null,
       lastRunAt: new Date(),
       lastStatus: "error",
       lastError: err instanceof Error ? err.message.slice(0, 500) : "Unknown error",
       lastRunCreated: totals.created,
       lastRunUpdated: totals.updated,
       lastRunSkipped: totals.skipped,
-    }).where(eq(ghlSyncStateTable.orgId, orgId));
+    }).where(mine);
     throw err;
+  }
+}
+
+class LeaseLostError extends Error {
+  constructor() {
+    super("GHL sync lease lost");
+    this.name = "LeaseLostError";
   }
 }
 

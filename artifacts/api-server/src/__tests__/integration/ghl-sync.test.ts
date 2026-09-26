@@ -192,11 +192,58 @@ describe("GHL feed", () => {
   });
 
   it("records an auth failure without leaking the token, and releases the lease", async () => {
-    const failing = (async () => new Response("Invalid JWT", { status: 401 })) as unknown as typeof fetch;
+    // A proxy error page that echoes the request back, token included.
+    const failing = (async () => new Response(`Invalid JWT. Received: Authorization: Bearer ${TOKEN}`, { status: 401 })) as unknown as typeof fetch;
     await expect(sync.runGhlSync(cfg(), { fetchImpl: failing })).rejects.toThrow(/HTTP 401.*contacts.readonly/);
     const [state] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org.id));
     expect(state).toMatchObject({ lastStatus: "error", runningSince: null });
     expect(state!.lastError).not.toContain(TOKEN);
+  });
+
+  it("a run whose lease was taken over stops without touching state (fencing)", async () => {
+    const [before] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org.id));
+    const ghl = fakeGhl(store);
+    const hijack = (async (url: string, init: RequestInit) => {
+      // While this run is fetching, a newer run takes the lease over.
+      await tdb.update(ghlSyncStateTable).set({ leaseToken: "newer-run", runningSince: new Date() }).where(eq(ghlSyncStateTable.orgId, org.id));
+      return ghl.impl(url, init);
+    }) as unknown as typeof fetch;
+    const result = await sync.runGhlSync(cfg(), { fetchImpl: hijack });
+    expect(result.status).toBe("already_running");
+    const [after] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org.id));
+    expect(after).toMatchObject({ leaseToken: "newer-run", lastStatus: before!.lastStatus });
+    expect(after!.cursorUpdatedAt).toEqual(before!.cursorUpdatedAt);
+    await tdb.update(ghlSyncStateTable).set({ leaseToken: null, runningSince: null }).where(eq(ghlSyncStateTable.orgId, org.id));
+  });
+
+  it("a full re-sync requested while a run is active does not reset the cursor", async () => {
+    await tdb.update(ghlSyncStateTable).set({ runningSince: new Date(), leaseToken: "busy" }).where(eq(ghlSyncStateTable.orgId, org.id));
+    const [before] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org.id));
+    const r = await sync.runGhlSync(cfg(), { fetchImpl: fakeGhl(store).impl, full: true });
+    expect(r.status).toBe("already_running");
+    const [after] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org.id));
+    expect(after!.cursorUpdatedAt).toEqual(before!.cursorUpdatedAt);
+    expect(after!.backfillCompletedAt).toEqual(before!.backfillCompletedAt);
+    await tdb.update(ghlSyncStateTable).set({ leaseToken: null, runningSince: null }).where(eq(ghlSyncStateTable.orgId, org.id));
+  });
+
+  it("gets past a bulk edit where more contacts share one timestamp than fit in a run", async () => {
+    const org3 = await seedOrg(tdb, { id: "ghl-org-3" });
+    process.env.GHL_SYNC_ORG_IDS = `${org.id},${org3.id}`;
+    try {
+      const cfg3 = sync.ghlConfigFor(org3.id)!;
+      const sameTs = "2026-08-01T00:00:00.000Z";
+      const ghl = fakeGhl(Array.from({ length: 250 }, (_, k) => ghlContact(5000 + k, { dateUpdated: sameTs })));
+      const statuses: string[] = [];
+      for (let run = 0; run < 3; run++) statuses.push((await sync.runGhlSync(cfg3, { fetchImpl: ghl.impl, maxPages: 1 })).status);
+      expect(statuses).toEqual(["more_pending", "more_pending", "ok"]);
+      // Each continuation resumes with the persisted tuple, not from page 1.
+      expect(ghl.calls[1]!.body.searchAfter).toEqual([Date.parse(sameTs), "ghl-5099"]);
+      const links = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.orgId, org3.id));
+      expect(links).toHaveLength(250);
+    } finally {
+      process.env.GHL_SYNC_ORG_IDS = org.id;
+    }
   });
 });
 
@@ -223,5 +270,17 @@ describe("GHL admin endpoints", () => {
     } finally {
       process.env.GHL_SYNC_ORG_IDS = prev;
     }
+  });
+});
+
+describe("GHL client", () => {
+  it("prefers a response-level searchAfter and falls back to the last contact's", async () => {
+    const { searchContacts } = await import("../../lib/integrations/ghl/client");
+    const reply = (body: unknown) => (async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch;
+    const base = { token: TOKEN, locationId: LOCATION, updatedSince: null };
+    const top = await searchContacts(base, reply({ contacts: [{ id: "a", searchAfter: [1, "a"] }], searchAfter: [9, "z"] }));
+    expect(top.searchAfter).toEqual([9, "z"]);
+    const perContact = await searchContacts(base, reply({ contacts: [{ id: "a", searchAfter: [1, "a"] }] }));
+    expect(perContact.searchAfter).toEqual([1, "a"]);
   });
 });

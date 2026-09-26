@@ -1,7 +1,7 @@
 /**
  * Inbound third-party integrations (EnrollHere webhooks, GoHighLevel feed).
  */
-import { pgTable, text, timestamp, integer, index, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, jsonb, index, unique } from "drizzle-orm/pg-core";
 import { organizationsTable } from "./core";
 import { contactsTable, activitiesTable } from "./crm";
 
@@ -76,7 +76,11 @@ export const ghlSyncStateTable = pgTable("ghl_sync_state", {
     .references(() => organizationsTable.id),
   locationId: text("location_id").notNull(),
   cursorUpdatedAt: timestamp("cursor_updated_at", { withTimezone: true }),
+  /** GHL's paging tuple for the last contact written — resume strictly after it. */
+  cursorSearchAfter: jsonb("cursor_search_after"),
   runningSince: timestamp("running_since", { withTimezone: true }),
+  /** Fencing token of the run holding the lease; every state write matches on it. */
+  leaseToken: text("lease_token"),
   lastRunAt: timestamp("last_run_at", { withTimezone: true }),
   lastStatus: text("last_status"),
   lastError: text("last_error"),
