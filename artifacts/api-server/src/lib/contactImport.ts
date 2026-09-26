@@ -604,6 +604,14 @@ export async function processCsvContactImport(
   // job.errors: a retried attempt would otherwise re-append its own output.
   const [job] = await db.select({ options: importJobsTable.options })
     .from(importJobsTable).where(eq(importJobsTable.id, jobId)).limit(1);
+  // Every job write below applies only while the job is still `processing`:
+  // if cleanup declared it dead, this run must not resurrect it.
+  const stillMine = and(eq(importJobsTable.id, jobId), eq(importJobsTable.status, "processing"));
+  const beat = await db.update(importJobsTable).set({ heartbeatAt: new Date() }).where(stillMine).returning({ id: importJobsTable.id });
+  if (beat.length === 0) {
+    logger.warn({ jobId }, "imports: job is no longer processing; not starting");
+    return;
+  }
   const parseIssues = ((job?.options as { parseIssues?: CsvIssue[] } | null)?.parseIssues) ?? [];
   let created = 0, updated = 0, skipped = 0;
   let errors = parseIssues.filter((p) => p.severity === "error").length;
@@ -706,12 +714,17 @@ export async function processCsvContactImport(
     }
 
     if (i % 50 === 0) {
-      await db.update(importJobsTable).set({ processedRows: i + 1, errorCount: errors, errors: errorList })
-        .where(eq(importJobsTable.id, jobId));
+      const alive = await db.update(importJobsTable)
+        .set({ processedRows: i + 1, errorCount: errors, errors: errorList, heartbeatAt: new Date() })
+        .where(stillMine).returning({ id: importJobsTable.id });
+      if (alive.length === 0) {
+        logger.warn({ jobId, processedRows: i + 1 }, "imports: job was failed by cleanup; stopping");
+        return;
+      }
     }
   }
 
-  await db.update(importJobsTable).set({
+  const done = await db.update(importJobsTable).set({
     status: "completed",
     processedRows: rows.length,
     createdCount: created,
@@ -724,7 +737,8 @@ export async function processCsvContactImport(
     // not needed once the job is done. The error list is kept for download.
     options: { mapping, duplicateAction, rowsPurged: true },
     completedAt: new Date(),
-  }).where(eq(importJobsTable.id, jobId));
+  }).where(stillMine).returning({ id: importJobsTable.id });
+  if (done.length === 0) logger.warn({ jobId }, "imports: job was failed by cleanup before it finished; left as failed");
 }
 
 
@@ -847,7 +861,9 @@ async function resolveCarrier(
   const key = carrierKey(name);
   const cached = cache.get(key);
   if (cached) return cached;
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`carrier-create:${orgId}`}, 0))`);
+  // Keyed per carrier: rows naming different new carriers don't wait on each
+  // other; two rows racing to create the same one still serialize.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`carrier-create:${orgId}:${key}`}, 0))`);
   // Compare in JS with the same normalization as the cache. SQL lower() and
   // POSIX classes are locale/ASCII-bound and disagree with JS on NBSP and
   // accented letters. An org's carrier list is small.

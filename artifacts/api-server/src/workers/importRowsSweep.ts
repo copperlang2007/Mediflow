@@ -8,21 +8,34 @@
  * process start. This bounds that window to hours instead of "until restart".
  *
  *   - finished jobs (completed / failed) still holding rows → rows dropped
- *   - jobs `processing` for longer than STALE_HOURS → marked failed, rows dropped
+ *   - jobs `processing` with no worker progress for STALE_MINUTES (heartbeat,
+ *     or creation time if the worker never started) → marked failed, rows dropped
+ *
+ * A worker that is still alive keeps its heartbeat fresh, so a long import is
+ * never failed out from under it; and its writes only apply while the job is
+ * still `processing`, so a job failed here can't flip back to `completed`.
  */
-import { and, eq, lt, ne, sql } from "drizzle-orm";
+import { and, eq, lt, ne, sql, type SQL } from "drizzle-orm";
 import { db, importJobsTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 
-export const STALE_HOURS = 6;
+export const STALE_MINUTES = 30;
+
+/** `processing` jobs whose worker has shown no progress since `cutoff`. */
+export function staleProcessingJobs(cutoff: Date): SQL | undefined {
+  return and(
+    eq(importJobsTable.status, "processing"),
+    lt(sql`coalesce(${importJobsTable.heartbeatAt}, ${importJobsTable.createdAt})`, cutoff),
+  );
+}
 
 export async function importRowsSweepWorker(now: Date = new Date()): Promise<{ purged: number; failed: number }> {
-  const cutoff = new Date(now.getTime() - STALE_HOURS * 3_600_000);
+  const cutoff = new Date(now.getTime() - STALE_MINUTES * 60_000);
   const hasRows = sql`${importJobsTable.options} ? 'rows'`;
 
   const stale = await db.update(importJobsTable)
     .set({ status: "failed", options: sql`${importJobsTable.options} - 'rows'` })
-    .where(and(eq(importJobsTable.status, "processing"), lt(importJobsTable.createdAt, cutoff)))
+    .where(staleProcessingJobs(cutoff))
     .returning({ id: importJobsTable.id });
 
   const finished = await db.update(importJobsTable)
