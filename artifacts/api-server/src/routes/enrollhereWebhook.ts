@@ -145,7 +145,10 @@ router.post(
     // Person fields and event fields are read from differently-ordered views
     // so `contact.id` can never be taken for the call id (or vice versa).
     const flat = flattenPayload(req.body, "person-first");
-    const eventFlat = flattenPayload(req.body, "event-first");
+    // Event/call fields come only from the event itself — never from the
+    // person block, whose `id` would otherwise be taken for the call id and
+    // make every later call for that person look like a duplicate.
+    const eventFlat = flattenPayload(req.body, "event-only");
     const keys = payloadKeyPaths(req.body);
     const externalId = pick(eventFlat, CALL_ID_KEYS)
       ?? `sha256:${crypto.createHash("sha256").update(canonicalJson(req.body)).digest("hex")}`;

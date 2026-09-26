@@ -235,6 +235,16 @@ describe("EnrollHere webhook processing", () => {
     const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, res.body.contactId));
     expect(c).toMatchObject({ stateCode: null, zipCode: null, dob: null });
   });
+
+  it("logs each call when the only id in the payload is the contact's", async () => {
+    const person = { id: "cust-777", first_name: "Cid", last_name: "Collide", phone: "5125550778" };
+    const a = await withHeaderSecret({ contact: person, event: "call.started", duration: 5 });
+    const b = await withHeaderSecret({ contact: person, event: "call.completed", duration: 90 });
+    expect(a.body.duplicate).toBe(false);
+    expect(b.body.duplicate).toBe(false);
+    const [evt] = await tdb.select().from(integrationEventsTable).where(eq(integrationEventsTable.activityId, a.body.activityId));
+    expect(evt!.externalId).toMatch(/^sha256:/);
+  });
 });
 
 describe("header recognition for compound address columns (CSV and webhook)", () => {
