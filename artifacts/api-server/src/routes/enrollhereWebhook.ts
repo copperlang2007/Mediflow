@@ -116,10 +116,19 @@ const STARTED_KEYS = ["started_at", "start_time", "call_start", "call_started_at
 const VOLATILE_KEYS = new Set([
   "timestamp", "sent_at", "delivered_at", "delivery_id", "webhook_id", "attempt",
   "attempt_number", "retry", "retry_count", "nonce", "received_at", "now", "request_id",
+  // A whole block of delivery/transport details (e.g. { delivery: { id, attempt } }).
+  "delivery",
 ]);
 
-function stableForHash(body: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(body).filter(([k]) => !VOLATILE_KEYS.has(normalizeKey(k))));
+/** The body with delivery metadata removed at every depth (it changes on retry). */
+function stableForHash(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableForHash);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .filter(([k]) => !VOLATILE_KEYS.has(normalizeKey(k)))
+      .map(([k, v]) => [k, stableForHash(v)]));
+  }
+  return value;
 }
 const CALLER_PHONE_KEYS = ["caller_id", "caller_number", "from_number", "from", "ani", "customer_phone"];
 const AGENT_EMAIL_KEYS = ["agent_email", "user_email", "rep_email", "assigned_agent_email", "agent_email_address"];
