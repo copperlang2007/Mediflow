@@ -334,6 +334,18 @@ describe("review round 3", () => {
     expect(r.issues).toContainEqual(expect.objectContaining({ field: "row", severity: "error" }));
   });
 
+  it("skips a shifted row where the unit landed in State (no City column; padded export)", async () => {
+    const { interpretContactRow } = await import("../../lib/contactImport");
+    const { parseCsvTolerant } = await import("../../lib/csvImport");
+    const parsed = parseCsvTolerant(Buffer.from("First,Last,Address,State,ZIP,,\nA,One,1 Elm,TX,78701,,\nJohn,Roe,12 Main St, Apt 2,78703,,\nC,Three,5 Oak,TX,78702,,\n"));
+    const mapping = { First: "firstName", Last: "lastName", Address: "address1", State: "stateCode", ZIP: "zipCode" };
+    const r = interpretContactRow(parsed.rows[1]!, mapping, 3);
+    expect(r.contact).toBeNull();
+    expect(r.issues).toContainEqual(expect.objectContaining({ field: "row", severity: "error", message: expect.stringMatching(/^State looks like/) }));
+    // A normal row in the same file is untouched.
+    expect(interpretContactRow(parsed.rows[0]!, mapping, 2).contact).not.toBeNull();
+  });
+
   it("matches an existing carrier whose name contains an 's' (DB-side whitespace normalization)", async () => {
     await tdb.insert(carriersTable).values({ id: "carrier-bcbs", orgId: org.id, name: "Blue Cross  Blue Shield" });
     const file = "First Name,Last Name,DOB,Carrier,Plan Type,Effective Date\nSal,Shield,3/3/1947,blue cross blue shield,MA,1/1/2026\n";
