@@ -8,7 +8,7 @@
  * Job names: import-monday | import-ghl | import-csv-contacts
  */
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, importJobsTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 
@@ -26,10 +26,17 @@ export async function importMondayWorker(payload: ImportJobPayload): Promise<voi
     return;
   }
 
+  // A redelivered job that already finished or was failed by startup cleanup
+  // must not re-run its inserts (Monday/GHL imports aren't idempotent).
+  if (job.status === "completed" || job.status === "failed") {
+    logger.warn({ jobId: payload.jobId, status: job.status }, "import-monday: job is not processing; skipped");
+    return;
+  }
+
   const opts = job.options as { rows?: Record<string, string>[]; mapping?: Record<string, string> } | null;
   if (!opts?.rows?.length) {
     logger.warn({ jobId: payload.jobId }, "import-monday: no rows in job options");
-    await db.update(importJobsTable).set({ status: "failed" }).where(eq(importJobsTable.id, payload.jobId));
+    await db.update(importJobsTable).set({ status: "failed", options: sql`${importJobsTable.options} - 'rows'` }).where(eq(importJobsTable.id, payload.jobId));
     return;
   }
 
@@ -50,6 +57,13 @@ export async function importGhlWorker(payload: ImportJobPayload): Promise<void> 
     return;
   }
 
+  // A redelivered job that already finished or was failed by startup cleanup
+  // must not re-run its inserts (Monday/GHL imports aren't idempotent).
+  if (job.status === "completed" || job.status === "failed") {
+    logger.warn({ jobId: payload.jobId, status: job.status }, "import-ghl: job is not processing; skipped");
+    return;
+  }
+
   const opts = job.options as {
     rows?: Record<string, string>[];
     mapping?: Record<string, string>;
@@ -58,7 +72,7 @@ export async function importGhlWorker(payload: ImportJobPayload): Promise<void> 
 
   if (!opts?.rows?.length) {
     logger.warn({ jobId: payload.jobId }, "import-ghl: no rows in job options");
-    await db.update(importJobsTable).set({ status: "failed" }).where(eq(importJobsTable.id, payload.jobId));
+    await db.update(importJobsTable).set({ status: "failed", options: sql`${importJobsTable.options} - 'rows'` }).where(eq(importJobsTable.id, payload.jobId));
     return;
   }
 
@@ -78,13 +92,22 @@ export async function importCsvContactsWorker(payload: ImportJobPayload): Promis
     return;
   }
 
-  const opts = job.options as { rows?: Record<string, string>[]; mapping?: Record<string, string> } | null;
+  // A redelivered job that already finished (or was failed by cleanup) has had
+  // its rows purged; leave it be.
+  if (job.status === "completed" || job.status === "failed") return;
+
+  const opts = job.options as {
+    rows?: Record<string, string>[];
+    mapping?: Record<string, string>;
+    duplicateAction?: string;
+  } | null;
   if (!opts?.rows?.length) {
     logger.warn({ jobId: payload.jobId }, "import-csv-contacts: no rows in job options");
-    await db.update(importJobsTable).set({ status: "failed" }).where(eq(importJobsTable.id, payload.jobId));
+    await db.update(importJobsTable).set({ status: "failed", options: sql`${importJobsTable.options} - 'rows'` }).where(eq(importJobsTable.id, payload.jobId));
     return;
   }
 
   const { processCsvContactImport } = await import("../routes/imports");
-  await processCsvContactImport(payload.jobId, job.orgId, opts.rows, opts.mapping ?? {});
+  const { parseDuplicateAction } = await import("../lib/contactImport");
+  await processCsvContactImport(payload.jobId, job.orgId, opts.rows, opts.mapping ?? {}, parseDuplicateAction(opts.duplicateAction));
 }

@@ -66,6 +66,8 @@ export const importJobsTable = pgTable(
     updatedCount: integer("updated_count").notNull().default(0),
     skippedCount: integer("skipped_count").notNull().default(0),
     errorCount: integer("error_count").notNull().default(0),
+    /** Messages about rows that WERE imported (errorCount counts rows that were not). */
+    warningCount: integer("warning_count").notNull().default(0),
     errors: jsonb("errors"),
     columnMapping: jsonb("column_mapping"),
     options: jsonb("options"),
@@ -74,6 +76,8 @@ export const importJobsTable = pgTable(
       .notNull()
       .defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    /** Last sign of life from the import worker; null until it starts. */
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
   },
   (t) => [
     index("import_jobs_org_id_created_at_idx").on(t.orgId, t.createdAt),

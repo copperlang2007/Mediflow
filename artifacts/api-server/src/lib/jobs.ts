@@ -10,6 +10,7 @@
  *    export-anomaly-check        daily 02:15 UTC
  *    dialer-reconcile            every 15 min (missed-webhook recovery, §5.4)
  *    lead-callback-sweep         every 5 min (callback SLA queue re-attempt)
+ *    import-rows-sweep           hourly (drop queued import rows / PHI of finished or dead jobs)
  *
  *  Ad-hoc (enqueue via `enqueue(JOB_NAMES.X, data)`):
  *    task-auto-assign            on agent creation / status change
@@ -107,6 +108,8 @@ export const JOB_NAMES = {
   IMPORT_MONDAY: "import-monday",
   IMPORT_GHL: "import-ghl",
   IMPORT_CSV_CONTACTS: "import-csv-contacts",
+  // Hourly: drop queued import rows (PHI) left by finished or dead jobs.
+  IMPORT_ROWS_SWEEP: "import-rows-sweep",
   // Ad-hoc
   TASK_AUTO_ASSIGN: "task-auto-assign",
   RUN_AUTOMATION_RULES: "run-automation-rules",
@@ -406,6 +409,8 @@ export async function startWorkers(): Promise<void> {
   // MA member's review appointment can be set in time. Singleton; the pass is
   // idempotent (deduped per (season-year, contact)), so a re-run is a no-op.
   await boss.schedule(JOB_NAMES.AEP_RENEWAL_REVIEW, "0 6 1 9 *", {}, { tz: "UTC" });
+  // Import-row PHI sweep — hourly at :17. Idempotent.
+  await boss.schedule(JOB_NAMES.IMPORT_ROWS_SWEEP, "17 * * * *", {}, { tz: "UTC" });
 
   // ---- Workers ----
 
@@ -679,6 +684,17 @@ export async function startWorkers(): Promise<void> {
     JOB_NAMES.AEP_RENEWAL_REVIEW,
     { batchSize: 1, localConcurrency: 1 },
     aepRenewalReviewHandler,
+  );
+
+  const importRowsSweepHandler: WorkHandler<Record<string, never>> = async () => {
+    const { importRowsSweepWorker } = await import("../workers/importRowsSweep");
+    await importRowsSweepWorker();
+  };
+  // Scheduled cron — singleton; one sweep pass per node, no fan-out.
+  await boss.work<Record<string, never>>(
+    JOB_NAMES.IMPORT_ROWS_SWEEP,
+    { batchSize: 1, localConcurrency: 1 },
+    importRowsSweepHandler,
   );
 
   logger.info("All background workers registered");
