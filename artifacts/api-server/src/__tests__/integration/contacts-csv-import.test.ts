@@ -376,3 +376,14 @@ describe("review round 4", () => {
   });
 });
 
+describe("unit designator in City", () => {
+  it("flags unit numbers but not real place names", async () => {
+    const { interpretContactRow } = await import("../../lib/contactImport");
+    const m = { F: "firstName", L: "lastName", C: "city" };
+    const skipped = (city: string) => interpretContactRow({ F: "A", L: "B", C: city }, m, 2).contact === null;
+    for (const unit of ["Suite 100", "Apt 5", "Unit 3B", "#42", "Ste 200", "Apt B", "Apt. 7"]) expect([unit, skipped(unit)]).toEqual([unit, true]);
+    for (const town of ["Ste. Genevieve", "Ste Genevieve", "Ste. Marie", "Ste. Anne", "Unit", "Lotus", "Suitland", "Florence", "Roomsburg"]) {
+      expect([town, skipped(town)]).toEqual([town, false]);
+    }
+  });
+});
