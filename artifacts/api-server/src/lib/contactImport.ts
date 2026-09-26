@@ -212,7 +212,9 @@ export function interpretContactRow(
     email = null;
   }
 
-  const phone = normalizePhone(get("phone"));
+  const phoneRaw = get("phone");
+  const phone = normalizePhone(phoneRaw);
+  if (phoneRaw && !phone) warn("phone", "Phone is not a recognizable number — left blank");
 
   let dob: string | null = null;
   const dobRaw = get("dob");
