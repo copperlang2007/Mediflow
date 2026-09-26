@@ -405,7 +405,10 @@ describe("import bookkeeping", () => {
     await tdb.insert(importJobsTable).values([
       { id: "sweep-done", orgId: org.id, status: "completed", options: { rows: [{ a: "1" }] } },
       { id: "sweep-dead", orgId: org.id, status: "processing", options: { rows: [{ a: "1" }] }, createdAt: old },
+      { id: "sweep-dead-hb", orgId: org.id, status: "processing", options: { rows: [{ a: "1" }] }, createdAt: old, heartbeatAt: old },
       { id: "sweep-live", orgId: org.id, status: "processing", options: { rows: [{ a: "1" }] } },
+      // Started long ago but still making progress: a big import, not a dead one.
+      { id: "sweep-long", orgId: org.id, status: "processing", options: { rows: [{ a: "1" }] }, createdAt: old, heartbeatAt: new Date() },
     ]);
     await importRowsSweepWorker();
     const rows = await tdb.select().from(importJobsTable);
@@ -414,6 +417,23 @@ describe("import bookkeeping", () => {
     expect(by("sweep-dead")).toMatchObject({ status: "failed" });
     expect((by("sweep-dead").options as { rows?: unknown }).rows).toBeUndefined();
     expect((by("sweep-live").options as { rows?: unknown }).rows).toBeDefined();
+    expect(by("sweep-dead-hb")).toMatchObject({ status: "failed" });
+    expect(by("sweep-long")).toMatchObject({ status: "processing" });
+    expect((by("sweep-long").options as { rows?: unknown }).rows).toBeDefined();
+  });
+
+  it("a job failed by cleanup is not flipped back to completed by its worker", async () => {
+    const file = "First Name,Last Name,Email\nLate,Worker,late@example.com\n";
+    const up = await request(app).post("/api/imports/contacts/upload").set(withAuth(admin.id)).attach("file", Buffer.from(file), "l.csv");
+    const res = await request(app).post("/api/imports/contacts/confirm").set(withAuth(admin.id))
+      .attach("file", Buffer.from(file), "l.csv").field("mapping", JSON.stringify(up.body.suggestedMapping));
+    const [before] = await tdb.select().from(importJobsTable).where(eq(importJobsTable.id, res.body.jobId));
+    const rows = (before!.options as { rows: Record<string, string>[] }).rows;
+    await tdb.update(importJobsTable).set({ status: "failed" }).where(eq(importJobsTable.id, res.body.jobId));
+    const { processCsvContactImport } = await import("../../lib/contactImport");
+    await processCsvContactImport(res.body.jobId, org.id, rows, up.body.suggestedMapping);
+    const [after] = await tdb.select().from(importJobsTable).where(eq(importJobsTable.id, res.body.jobId));
+    expect(after!.status).toBe("failed");
   });
 });
 

@@ -224,6 +224,8 @@ export function parseCsvTolerant(buffer: Buffer): TolerantCsvResult {
   const rows: Record<string, string>[] = [];
   const rowNumbers: number[] = [];
   const issues: CsvIssue[] = [];
+  /** Rows kept provisionally whose only extras were trailing blanks (index into rows). */
+  const padded: number[] = [];
 
   for (const rec of records) {
     const values = rec.fields.map((f) => f.trim());
@@ -245,19 +247,11 @@ export function parseCsvTolerant(buffer: Buffer): TolerantCsvResult {
       });
       continue;
     }
-    if (shifted) {
-      // The header row has no cell for these extra (blank) values, so this row
-      // has more fields than any real column — almost always an unquoted comma
-      // that moved every later value one column right. Skip rather than import
-      // an address/city that looks valid but is wrong.
-      issues.push({
-        row: rec.line,
-        field: "row",
-        severity: "error",
-        message: "Row has more values than the header — an unquoted comma probably split a value (often an address). Row skipped; quote the value or remove the comma and re-import.",
-      });
-      continue;
-    }
+    // `shifted`: the header has no cell for these extra (blank) values. Either
+    // an unquoted comma moved every later value one column right, or the
+    // export pads every row with blank columns. Decided once the whole file
+    // has been read (below).
+    if (shifted) padded.push(rows.length);
     if (rec.warning) {
       issues.push({
         row: rec.line,
@@ -270,6 +264,32 @@ export function parseCsvTolerant(buffer: Buffer): TolerantCsvResult {
     headers.forEach((h, idx) => { row[h] = values[idx] ?? ""; });
     rows.push(row);
     rowNumbers.push(rec.line);
+  }
+
+  if (padded.length > 0) {
+    // Nearly every row padded the same way is the export's shape, not a comma
+    // problem: keep them. A few padded rows among normal ones are shifted rows:
+    // skip them rather than import an address/city that looks valid but is wrong.
+    if (padded.length >= 2 && padded.length >= 0.8 * rows.length) {
+      issues.push({
+        row: rowNumbers[padded[0]!]!,
+        field: "row",
+        severity: "warning",
+        message: `${padded.length} rows end with blank columns the header row doesn't have. They were treated as padding and imported.`,
+      });
+    } else {
+      for (const idx of [...padded].reverse()) {
+        issues.push({
+          row: rowNumbers[idx]!,
+          field: "row",
+          severity: "error",
+          message: "Row has more values than the header row. Usually an unquoted comma split a value (often an address) and moved later values one column right; otherwise the row has extra blank columns at the end. Row skipped — quote the value or remove the comma/extra columns and re-import.",
+        });
+        rows.splice(idx, 1);
+        rowNumbers.splice(idx, 1);
+      }
+      issues.sort((a, b) => a.row - b.row);
+    }
   }
 
   return { headers, rows, rowNumbers, issues, delimiter, encoding };
