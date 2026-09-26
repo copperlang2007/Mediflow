@@ -147,8 +147,10 @@ router.post(
 
     // The caller's number often arrives as call metadata rather than a contact field.
     if (!flat.phone && !flat.phone_number) {
-      const caller = pick(flat, CALLER_PHONE_KEYS);
-      if (caller) flat.phone = caller;
+      // Only a value that is actually a phone number (caller_id is often a
+      // display name such as "JOHN DOE").
+      const caller = normalizePhone(pick(eventFlat, CALLER_PHONE_KEYS) ?? "");
+      if (caller?.startsWith("+")) flat.phone = caller;
     }
     const agentEmail = pick(flat, AGENT_EMAIL_KEYS);
     if (agentEmail && !flat.assigned_agent_email) flat.assigned_agent_email = agentEmail;

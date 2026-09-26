@@ -208,4 +208,16 @@ describe("EnrollHere webhook processing", () => {
     const [a] = await tdb.select().from(activitiesTable).where(eq(activitiesTable.id, res.body.activityId));
     expect((a!.metadata as { recordingUrl: unknown }).recordingUrl).toBeNull();
   });
+
+  it("never stores a caller-ID display name as a phone number", async () => {
+    const res = await withHeaderSecret({ call_id: "cid-1", first_name: "NoPhone", last_name: "Real", caller_id: "JOHN DOE" });
+    const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, res.body.contactId));
+    expect(c!.phone).toBeNull();
+  });
+
+  it("does not take a call-leg 'caller' block's number over the person's own phone", async () => {
+    const res = await withHeaderSecret({ call_id: "cid-2", first_name: "Top", last_name: "Level", phone: "5125550555", caller: { name: "Support Line", phone: "18005550000" } });
+    const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, res.body.contactId));
+    expect(c!.phone).toBe("+15125550555");
+  });
 });
