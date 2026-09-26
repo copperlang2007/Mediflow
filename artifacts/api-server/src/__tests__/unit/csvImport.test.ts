@@ -45,10 +45,16 @@ describe("parseCsvTolerant", () => {
     expect(r.issues).toEqual([expect.objectContaining({ row: 2, severity: "error" })]);
   });
 
-  it("pads short rows; flags (but keeps) rows with extra trailing blanks", () => {
+  it("pads short rows; skips rows with more values than the header even if the extras are blank", () => {
     const r = parseCsvTolerant(csv("a,b,c\n1,2\n3,4,5,,\n"));
-    expect(r.rows).toEqual([{ a: "1", b: "2", c: "" }, { a: "3", b: "4", c: "5" }]);
-    expect(r.issues).toEqual([expect.objectContaining({ row: 3, severity: "warning" })]);
+    expect(r.rows).toEqual([{ a: "1", b: "2", c: "" }]);
+    expect(r.issues).toEqual([expect.objectContaining({ row: 3, severity: "error" })]);
+  });
+
+  it("does not flag rows when the header itself carries the trailing blank columns", () => {
+    const r = parseCsvTolerant(csv("a,b,c,,\n3,4,5,,\n"));
+    expect(r.issues).toEqual([]);
+    expect(r.rows[0]).toMatchObject({ a: "3", b: "4", c: "5" });
   });
 
   it("detects semicolon and tab delimiters", () => {
