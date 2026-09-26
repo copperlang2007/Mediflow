@@ -253,6 +253,20 @@ export function interpretContactRow(
     anomalies++;
   }
 
+  // "12 Main St, Suite 100" with an unquoted comma puts "Suite 100" in City.
+  // A city never starts with a unit designator, so this is a shift on its own,
+  // even when every other shifted value happens to validate.
+  const cityRaw = get("city");
+  if (cityRaw && /^(apt|apartment|suite|ste|unit|bldg|building|fl|floor|lot|rm|room|space|spc|trlr|#)\b|^#/i.test(cityRaw)) {
+    issues.push({
+      row: rowNumber,
+      field: "row",
+      severity: "error",
+      message: "City looks like an apartment/suite number — the row looks shifted (the address was probably split by an unquoted comma). Row skipped; fix it and re-import.",
+    });
+    return { row: rowNumber, contact: null, enrollment: null, issues };
+  }
+
   if (anomalies >= 2) {
     issues.push({
       row: rowNumber,
@@ -580,9 +594,12 @@ export async function processCsvContactImport(
     const newCarrierKeys: string[] = [];
 
     try {
+      // Row warnings are reported only once the row's transaction commits; a
+      // rolled-back row reports just its failure, never a stale warning.
+      const rowWarnings: ImportError[] = [];
       const agentId = c.assignedAgentEmail ? agentsByEmail.get(c.assignedAgentEmail) ?? null : null;
       if (c.assignedAgentEmail && !agentId) {
-        errorList.push({ row: r.row, field: "assignedAgentEmail", message: "No agent in agencyBRIDGE has that email — left unassigned" });
+        rowWarnings.push({ row: r.row, field: "assignedAgentEmail", message: "No agent in agencyBRIDGE has that email — left unassigned" });
       }
       const hit = duplicateAction === "create_new" ? null : matcher.find(c);
       if (hit && duplicateAction === "skip") { skipped++; continue; }
@@ -595,7 +612,7 @@ export async function processCsvContactImport(
         if (hit) {
           id = hit.match.id;
           for (const w of await fillBlanks(tx, orgId, id, c, agentId)) {
-            errorList.push({ row: r.row, field: w.field, message: w.message });
+            rowWarnings.push({ row: r.row, field: w.field, message: w.message });
           }
         } else {
           id = randomUUID();
@@ -654,6 +671,7 @@ export async function processCsvContactImport(
         return id;
       });
 
+      errorList.push(...rowWarnings);
       if (hit) updated++;
       else {
         created++;
@@ -753,7 +771,7 @@ async function resolveCarrier(
   const cached = cache.get(key);
   if (cached) return cached;
   const [existing] = await tx.select({ id: carriersTable.id }).from(carriersTable)
-    .where(and(eq(carriersTable.orgId, orgId), sql`lower(regexp_replace(trim(${carriersTable.name}), '\s+', ' ', 'g')) = ${key}`))
+    .where(and(eq(carriersTable.orgId, orgId), sql`lower(regexp_replace(trim(${carriersTable.name}), '[[:space:]]+', ' ', 'g')) = ${key}`))
     .limit(1);
   const id = existing?.id ?? randomUUID();
   if (!existing) {
