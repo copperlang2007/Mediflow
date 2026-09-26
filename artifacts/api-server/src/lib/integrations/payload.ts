@@ -35,20 +35,35 @@ function scalar(v: Json): string | null {
   return null;
 }
 
+/** Leaves of an `address` block that name a specific contact field. */
+const ADDRESS_PARTS: Record<string, string> = {
+  street: "address1", street1: "address1", street_1: "address1", line1: "address1", line_1: "address1",
+  address: "address1", address1: "address1", address_1: "address1", address_line_1: "address1",
+  city: "city", town: "city", county: "county",
+  state: "state", state_code: "state", region: "state",
+  zip: "zip", zip_code: "zip", zipcode: "zip", postal_code: "zip", postcode: "zip",
+};
+
 /**
  * Flatten one object's scalar leaves into `out` (first value wins). Nested
  * objects contribute `${parent}_${leaf}` keys, so `agent.email` becomes
- * `agent_email` and `address.city` becomes `address_city`… and also `city`
- * when the parent is an address block.
+ * `agent_email`. Inside an address block, known parts are emitted under
+ * their plain field name ONLY (`address.city` → `city`, `address.street` →
+ * `address1`): a prefixed `address_city` would be read as a street address.
  */
 function flattenInto(out: Record<string, string>, obj: Record<string, Json>, prefix = "", depth = 0): void {
+  const inAddress = /(^|_)(address|mailing_address|home_address|residential_address)$/.test(prefix);
   for (const [rawKey, value] of Object.entries(obj)) {
     const key = normalizeKey(rawKey);
     const full = prefix ? `${prefix}_${key}` : key;
     const s = scalar(value);
     if (s !== null) {
-      if (!(full in out)) out[full] = s;
-      if (prefix.endsWith("address") && !(key in out)) out[key] = s;
+      const part = inAddress ? ADDRESS_PARTS[key] : undefined;
+      if (part) {
+        if (!(part in out)) out[part] = s;
+      } else if (!(full in out)) {
+        out[full] = s;
+      }
     } else if (isObject(value) && depth < 2) {
       flattenInto(out, value, full, depth + 1);
     }
@@ -56,22 +71,42 @@ function flattenInto(out: Record<string, string>, obj: Record<string, Json>, pre
 }
 
 /**
- * Flattened view of a payload: the person container's fields (unprefixed)
- * take precedence, then top-level and `data` fields.
+ * Flattened view of a payload.
+ *
+ *  - `person-first` (for contact fields): the person container's fields win,
+ *    so `contact.email` beats a top-level `email` about the sender.
+ *  - `event-first` (for call/event metadata): top-level and `data` fields
+ *    win, so the event's own `id`/`type` is never shadowed by `contact.id`.
  */
-export function flattenPayload(payload: Json): Record<string, string> {
+export function flattenPayload(payload: Json, order: "person-first" | "event-first" = "person-first"): Record<string, string> {
   const out: Record<string, string> = {};
   if (!isObject(payload)) return out;
   const roots: Record<string, Json>[] = [payload];
   if (isObject(payload.data)) roots.push(payload.data);
-  for (const root of roots) {
-    for (const name of PERSON_CONTAINERS) {
-      const c = Object.entries(root).find(([k]) => normalizeKey(k) === name)?.[1];
-      if (isObject(c)) flattenInto(out, c);
+  const containers = () => {
+    for (const root of roots) {
+      for (const name of PERSON_CONTAINERS) {
+        const c = Object.entries(root).find(([k]) => normalizeKey(k) === name)?.[1];
+        if (isObject(c)) flattenInto(out, c);
+      }
     }
-  }
-  for (const root of roots) flattenInto(out, root);
+  };
+  const tops = () => { for (const root of roots) flattenInto(out, root); };
+  if (order === "event-first") { tops(); containers(); } else { containers(); tops(); }
   return out;
+}
+
+/**
+ * JSON with object keys sorted at every level, so two encodings of the same
+ * payload (key order, whitespace) produce the same string — used for the
+ * idempotency hash when the sender supplies no event id.
+ */
+export function canonicalJson(value: Json): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (isObject(value)) {
+    return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
 }
 
 /** Every key path seen in the payload (names only — never values). */

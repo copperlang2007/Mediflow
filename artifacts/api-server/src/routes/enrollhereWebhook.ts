@@ -38,7 +38,7 @@ import {
   integrationEventsTable,
 } from "@workspace/db";
 import { verifyWebhookSignature } from "../lib/dialer/signature";
-import { flattenPayload, interpretPayloadContact, payloadKeyPaths, pick } from "../lib/integrations/payload";
+import { canonicalJson, flattenPayload, interpretPayloadContact, payloadKeyPaths, pick } from "../lib/integrations/payload";
 import { loadAgentsByEmail, upsertContact } from "../lib/contactImport";
 import { normalizePhone } from "../lib/csvImport";
 import { logger } from "../lib/logger";
@@ -136,11 +136,14 @@ router.post(
       return;
     }
 
-    const flat = flattenPayload(req.body);
+    // Person fields and event fields are read from differently-ordered views
+    // so `contact.id` can never be taken for the call id (or vice versa).
+    const flat = flattenPayload(req.body, "person-first");
+    const eventFlat = flattenPayload(req.body, "event-first");
     const keys = payloadKeyPaths(req.body);
-    const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body));
-    const externalId = pick(flat, CALL_ID_KEYS) ?? `sha256:${crypto.createHash("sha256").update(rawBody).digest("hex")}`;
-    const eventType = pick(flat, EVENT_KEYS);
+    const externalId = pick(eventFlat, CALL_ID_KEYS)
+      ?? `sha256:${crypto.createHash("sha256").update(canonicalJson(req.body)).digest("hex")}`;
+    const eventType = pick(eventFlat, EVENT_KEYS);
 
     // The caller's number often arrives as call metadata rather than a contact field.
     if (!flat.phone && !flat.phone_number) {
@@ -184,11 +187,13 @@ router.post(
 
         const { contactId, created, matchedOn, warnings: mergeWarnings } = await upsertContact(tx, orgId, contact, agentId);
 
-        const direction = pick(flat, DIRECTION_KEYS)?.toLowerCase() ?? null;
-        const durationSeconds = parseDurationSeconds(pick(flat, DURATION_KEYS));
-        const disposition = pick(flat, DISPOSITION_KEYS);
-        const recordingUrl = pick(flat, RECORDING_KEYS);
-        const startedAt = pick(flat, STARTED_KEYS);
+        const direction = pick(eventFlat, DIRECTION_KEYS)?.toLowerCase() ?? null;
+        const durationSeconds = parseDurationSeconds(pick(eventFlat, DURATION_KEYS));
+        const disposition = pick(eventFlat, DISPOSITION_KEYS);
+        // Only an https link is kept: it is rendered as a clickable link.
+        const recordingRaw = pick(eventFlat, RECORDING_KEYS);
+        const recordingUrl = recordingRaw && /^https:\/\//i.test(recordingRaw) ? recordingRaw : null;
+        const startedAt = pick(eventFlat, STARTED_KEYS);
         const phone = normalizePhone(flat.phone ?? flat.phone_number ?? "");
 
         const summary = [

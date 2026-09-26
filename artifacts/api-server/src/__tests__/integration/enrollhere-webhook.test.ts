@@ -155,7 +155,8 @@ describe("EnrollHere webhook processing", () => {
     const ruths = await tdb.select().from(contactsTable)
       .where(and(eq(contactsTable.orgId, org.id), eq(contactsTable.firstName, "Ruth")));
     expect(ruths).toHaveLength(1);
-    expect(ruths[0]).toMatchObject({ city: "Round Rock", stateCode: "TX" });
+    // The city in a nested address block must not land in the street field.
+    expect(ruths[0]).toMatchObject({ city: "Round Rock", stateCode: "TX", address1: null });
   });
 
   it("keys a call with no id on the body hash, and records field names only", async () => {
@@ -172,5 +173,39 @@ describe("EnrollHere webhook processing", () => {
     const res = await withHeaderSecret({ call_id: "call-400", caller_id: "5125550400" });
     expect(res.status).toBe(422);
     expect(res.body.fieldsReceived).toEqual(["call_id", "caller_id"]);
+  });
+
+  it("never takes the contact's own id for the call id", async () => {
+    const person = { id: "contact-777", firstName: "Owen", lastName: "Idtest", phone: "5125550777" };
+    const a = await withHeaderSecret({ id: "evt-1", type: "call", contact: person });
+    const b = await withHeaderSecret({ id: "evt-2", type: "call", contact: person });
+    expect(a.body.duplicate).toBe(false);
+    expect(b.body.duplicate).toBe(false);
+    expect(b.body.activityId).not.toBe(a.body.activityId);
+  });
+
+  it("dedupes an id-less redelivery even when the JSON key order changes", async () => {
+    const first = await withHeaderSecret({ first_name: "Kay", last_name: "Order", phone: "5125550888" });
+    const again = await request(app).post(url()).set("X-Webhook-Secret", SECRET).set("Content-Type", "application/json")
+      .send('{ "phone": "5125550888",  "last_name": "Order", "first_name": "Kay" }');
+    expect(first.body.duplicate).toBe(false);
+    expect(again.body).toEqual({ ok: true, duplicate: true });
+  });
+
+  it("creates one contact when two deliveries for a new person arrive together", async () => {
+    const person = { first_name: "Sim", last_name: "Ultaneous", phone: "5125550999" };
+    const [r1, r2] = await Promise.all([
+      withHeaderSecret({ call_id: "par-1", ...person }),
+      withHeaderSecret({ call_id: "par-2", ...person }),
+    ]);
+    expect(r1.body.contactId).toBe(r2.body.contactId);
+    const sims = await tdb.select().from(contactsTable).where(and(eq(contactsTable.orgId, org.id), eq(contactsTable.lastName, "Ultaneous")));
+    expect(sims).toHaveLength(1);
+  });
+
+  it("keeps only https recording links", async () => {
+    const res = await withHeaderSecret({ call_id: "rec-1", first_name: "Rec", last_name: "Link", recording_url: "javascript:alert(1)" });
+    const [a] = await tdb.select().from(activitiesTable).where(eq(activitiesTable.id, res.body.activityId));
+    expect((a!.metadata as { recordingUrl: unknown }).recordingUrl).toBeNull();
   });
 });
