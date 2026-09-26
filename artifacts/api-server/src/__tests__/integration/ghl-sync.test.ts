@@ -389,6 +389,41 @@ describe("GHL feed", () => {
     expect(live[0]!.email).toBe("new-john@example.com");
   });
 
+  it("skips contacts whose fields have an unexpected shape, but stops if a whole page fails", async () => {
+    const org16 = await seedOrg(tdb, { id: "ghl-org-16" });
+    const cfg16 = ({ orgId: org16.id, token: TOKEN, locationId: `loc-${org16.id}` });
+    const weird = (k: number) => ghlContact(13500 + k, { address1: { street: "1 Elm" } as unknown as string });
+    const ok = await sync.runGhlSync(cfg16, { fetchImpl: fakeGhl([...Array.from({ length: 6 }, (_, k) => weird(k)), ghlContact(13599)]).impl });
+    expect(ok).toMatchObject({ status: "ok", created: 1, failed: 6 });
+
+    const org17 = await seedOrg(tdb, { id: "ghl-org-17" });
+    const cfg17 = ({ orgId: org17.id, token: TOKEN, locationId: `loc-${org17.id}` });
+    await expect(sync.runGhlSync(cfg17, { fetchImpl: fakeGhl(Array.from({ length: 6 }, (_, k) => weird(10 + k))).impl }))
+      .rejects.toThrow(/all 6 contacts on a page failed/);
+    const [state] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org17.id));
+    expect(state).toMatchObject({ lastStatus: "error", cursorUpdatedAt: null });
+  });
+
+  it("a re-sync requested mid-backfill waits for the window to finish instead of restarting it", async () => {
+    const org18 = await seedOrg(tdb, { id: "ghl-org-18" });
+    const cfg18 = ({ orgId: org18.id, token: TOKEN, locationId: `loc-${org18.id}` });
+    const ghl = fakeGhl(Array.from({ length: 250 }, (_, k) => ghlContact(13600 + k)));
+    expect((await sync.runGhlSync(cfg18, { fetchImpl: ghl.impl, maxPages: 1 })).status).toBe("more_pending");
+    await sync.requestFullResync(cfg18);
+    // The continuation carries on from the cursor (a filter), not from the top.
+    expect((await sync.runGhlSync(cfg18, { fetchImpl: ghl.impl, maxPages: 1 })).status).toBe("more_pending");
+    expect(ghl.calls.at(-1)!.body.filters).toBeDefined();
+    // Window ends; the pending request makes it report more work...
+    expect((await sync.runGhlSync(cfg18, { fetchImpl: ghl.impl })).status).toBe("more_pending");
+    // ...and the next run does the re-sync from the top, once.
+    expect((await sync.runGhlSync(cfg18, { fetchImpl: ghl.impl })).status).toBe("ok");
+    // "From the top" = no filter and no paging position.
+    const fromTop = ghl.calls.filter((c) => c.body.filters === undefined && !c.body.searchAfter && (c.body.page ?? 1) === 1);
+    expect(fromTop.length).toBe(2); // the original backfill + the one re-sync
+    const [state] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, org18.id));
+    expect(state!.fullResyncRequestedAt).toBeNull();
+  });
+
   it("does not fuse a second GHL contact onto a contact already linked to another GHL id", async () => {
     // ghl-1 is already linked to First1 (email one@example.com). A different
     // GHL record for the same person must not be merged into it too.

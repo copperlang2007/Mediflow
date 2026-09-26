@@ -175,7 +175,14 @@ export async function runGhlSync(
   let searchAfter = Array.isArray(stored) ? stored : null;
   let startPage = stored && !Array.isArray(stored) && Number.isInteger(stored.page) ? stored.page : 1;
   let backfillCompletedAt = lease.backfillCompletedAt;
-  if (opts.full || lease.fullResyncRequestedAt || lease.locationId !== locationId) {
+  // A requested re-sync waits while a window is mid-continuation (the last
+  // run stopped at the page cap): restarting it would redo pages this cycle
+  // already wrote. The flag stays set and is honoured once the window ends.
+  const wantsFull = !!opts.full || !!lease.fullResyncRequestedAt;
+  const midWindow = lease.lastStatus === "more_pending" && lease.locationId === locationId;
+  if (wantsFull && midWindow) {
+    if (!lease.fullResyncRequestedAt) await writeState({ fullResyncRequestedAt: new Date() });
+  } else if (wantsFull || lease.locationId !== locationId) {
     cursorUpdatedAt = null;
     searchAfter = null;
     startPage = 1;
@@ -188,6 +195,7 @@ export async function runGhlSync(
   const totals = { created: 0, updated: 0, skipped: 0, failed: 0 };
   let consecutiveFailures = 0;
   let pages = 0;
+  let failedOnPage = 0;
   let morePending = false;
   let runMax: Date | null = null;
 
@@ -200,6 +208,7 @@ export async function runGhlSync(
       );
       pages++;
       let cursor: Date | null = null;
+      failedOnPage = 0;
       for (const gc of page.contacts) {
         let outcome: "created" | "updated" | "skipped";
         try {
@@ -213,7 +222,12 @@ export async function runGhlSync(
           // Postgres data (22xxx) and constraint (23xxx) errors are about this
           // contact's values, so they never count toward the streak.
           const code = (err as { code?: unknown; cause?: { code?: unknown } })?.code ?? (err as { cause?: { code?: unknown } })?.cause?.code;
-          const dataError = typeof code === "string" && /^2[23]/.test(code);
+          // A TypeError/RangeError with no code means GHL sent a field in an
+          // unexpected shape (e.g. an object where a string belongs): also
+          // about this contact. A code bug would fail every contact instead,
+          // which the whole-page check below catches.
+          const dataError = (typeof code === "string" && /^2[23]/.test(code))
+            || (code === undefined && (err instanceof TypeError || err instanceof RangeError));
           if (err instanceof LeaseLostError || (!dataError && ++consecutiveFailures >= MAX_CONSECUTIVE_CONTACT_FAILURES)) throw err;
           logger.warn(
             { orgId, ghlContactId: gc.id, error: err instanceof Error ? err.name : "unknown", code: typeof code === "string" ? code : undefined },
@@ -221,10 +235,16 @@ export async function runGhlSync(
           );
           outcome = "skipped";
           totals.failed++;
+          failedOnPage++;
         }
         totals[outcome]++;
         const updated = gc.dateUpdated ? new Date(gc.dateUpdated) : null;
         if (updated && !Number.isNaN(updated.getTime()) && (!cursor || updated > cursor)) cursor = updated;
+      }
+      // Every contact on a full page failing is not bad data, it's us (a bug or
+      // an outage): stop without advancing past contacts never written.
+      if (page.contacts.length >= 5 && failedOnPage === page.contacts.length) {
+        throw new Error(`GHL sync: all ${failedOnPage} contacts on a page failed to save; stopped without advancing`);
       }
       if (cursor && (!runMax || cursor > runMax)) runMax = cursor;
       searchAfter = page.searchAfter;
