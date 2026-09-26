@@ -246,12 +246,17 @@ export function parseCsvTolerant(buffer: Buffer): TolerantCsvResult {
       continue;
     }
     if (shifted) {
+      // The header row has no cell for these extra (blank) values, so this row
+      // has more fields than any real column — almost always an unquoted comma
+      // that moved every later value one column right. Skip rather than import
+      // an address/city that looks valid but is wrong.
       issues.push({
         row: rec.line,
         field: "row",
-        severity: "warning",
-        message: "Row has more values than the header — if a value contains a comma (e.g. an address), columns may be shifted. Please double-check this row.",
+        severity: "error",
+        message: "Row has more values than the header — an unquoted comma probably split a value (often an address). Row skipped; quote the value or remove the comma and re-import.",
       });
+      continue;
     }
     if (rec.warning) {
       issues.push({

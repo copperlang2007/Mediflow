@@ -387,3 +387,33 @@ describe("unit designator in City", () => {
     }
   });
 });
+
+describe("import bookkeeping", () => {
+  it("counts warnings on imported rows separately from errors", async () => {
+    const file = "First Name,Last Name,Email\nWarn,Ing,not-an-email\n";
+    const up = await request(app).post("/api/imports/contacts/upload").set(withAuth(admin.id)).attach("file", Buffer.from(file), "w.csv");
+    const res = await request(app).post("/api/imports/contacts/confirm").set(withAuth(admin.id))
+      .attach("file", Buffer.from(file), "w.csv").field("mapping", JSON.stringify(up.body.suggestedMapping));
+    await worker({ jobId: res.body.jobId });
+    const [job] = await tdb.select().from(importJobsTable).where(eq(importJobsTable.id, res.body.jobId));
+    expect(job).toMatchObject({ errorCount: 0, warningCount: 1, createdCount: 1 });
+  });
+
+  it("the hourly sweep drops rows from finished and long-dead jobs only", async () => {
+    const { importRowsSweepWorker } = await import("../../workers/importRowsSweep");
+    const old = new Date(Date.now() - 7 * 3_600_000);
+    await tdb.insert(importJobsTable).values([
+      { id: "sweep-done", orgId: org.id, status: "completed", options: { rows: [{ a: "1" }] } },
+      { id: "sweep-dead", orgId: org.id, status: "processing", options: { rows: [{ a: "1" }] }, createdAt: old },
+      { id: "sweep-live", orgId: org.id, status: "processing", options: { rows: [{ a: "1" }] } },
+    ]);
+    await importRowsSweepWorker();
+    const rows = await tdb.select().from(importJobsTable);
+    const by = (id: string) => rows.find((r) => r.id === id)!;
+    expect((by("sweep-done").options as { rows?: unknown }).rows).toBeUndefined();
+    expect(by("sweep-dead")).toMatchObject({ status: "failed" });
+    expect((by("sweep-dead").options as { rows?: unknown }).rows).toBeUndefined();
+    expect((by("sweep-live").options as { rows?: unknown }).rows).toBeDefined();
+  });
+});
+

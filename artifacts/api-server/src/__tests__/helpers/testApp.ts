@@ -166,6 +166,7 @@ export const jobsMockFactory = (): Record<string, unknown> => ({
     IMPORT_MONDAY: "import-monday",
     IMPORT_GHL: "import-ghl",
     IMPORT_CSV_CONTACTS: "import-csv-contacts",
+    IMPORT_ROWS_SWEEP: "import-rows-sweep",
     TASK_AUTO_ASSIGN: "task-auto-assign",
     RUN_AUTOMATION_RULES: "run-automation-rules",
     SEND_SEQUENCE_STEP: "send-sequence-step",

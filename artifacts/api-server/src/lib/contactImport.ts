@@ -598,6 +598,7 @@ export async function processCsvContactImport(
   const parseIssues = ((job?.options as { parseIssues?: CsvIssue[] } | null)?.parseIssues) ?? [];
   let created = 0, updated = 0, skipped = 0;
   let errors = parseIssues.filter((p) => p.severity === "error").length;
+  let warnings = parseIssues.length - errors;
   const errorList: ImportError[] = parseIssues.map((p) => ({ row: p.row, field: p.field, message: p.message }));
 
   const interpreted = rows.map((r, i) => interpretContactRow(r, mapping, Number(r[ROW_NUMBER_KEY]) || i + 2));
@@ -609,7 +610,10 @@ export async function processCsvContactImport(
 
   for (let i = 0; i < interpreted.length; i++) {
     const r = interpreted[i]!;
-    for (const issue of r.issues) errorList.push({ row: issue.row, field: issue.field, message: issue.message });
+    for (const issue of r.issues) {
+      errorList.push({ row: issue.row, field: issue.field, message: issue.message });
+      if (issue.severity === "warning") warnings++;
+    }
     if (!r.contact) { errors++; continue; }
     const c = r.contact;
     const newCarrierKeys: string[] = [];
@@ -670,6 +674,7 @@ export async function processCsvContactImport(
       });
 
       errorList.push(...rowWarnings);
+      warnings += rowWarnings.length;
       if (hit) updated++;
       else {
         created++;
@@ -697,6 +702,7 @@ export async function processCsvContactImport(
     updatedCount: updated,
     skippedCount: skipped,
     errorCount: errors,
+    warningCount: warnings,
     errors: errorList,
     // Drop the queued rows: they hold PHI (names, DOBs, addresses) and are
     // not needed once the job is done. The error list is kept for download.
@@ -810,9 +816,10 @@ export async function fillBlanks(
  * Runs inside the row's transaction, so a failed row leaves no orphan carrier.
  *
  * No unique index backs this: existing orgs may already hold same-named
- * carriers, and adding one would make the migration fail on their data. The
- * re-check below covers carriers added since the cache was loaded; the CSV
- * worker runs one job at a time, so there is no concurrent writer to race.
+ * carriers, and adding one would make the migration fail on their data.
+ * Instead, a per-org transaction advisory lock serializes the
+ * re-check-then-insert, so concurrent imports (the CSV worker runs two at a
+ * time per instance, across instances) cannot both create the same carrier.
  */
 async function resolveCarrier(
   tx: Tx,
@@ -824,6 +831,7 @@ async function resolveCarrier(
   const key = carrierKey(name);
   const cached = cache.get(key);
   if (cached) return cached;
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`carrier-create:${orgId}`}, 0))`);
   // Compare in JS with the same normalization as the cache. SQL lower() and
   // POSIX classes are locale/ASCII-bound and disagree with JS on NBSP and
   // accented letters. An org's carrier list is small.
