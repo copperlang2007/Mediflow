@@ -43,7 +43,7 @@ The person can be top-level or nested under `contact`, `lead`, `client`,
 | Contact | `email`, `phone` / `phone_number` (falls back to `caller_id`, `from`, `ani`) |
 | Profile | `dob` / `date_of_birth`, `address1` / `address`, `city`, `county`, `state`, `zip`, `medicare_id` / `mbi` |
 | Agent | `agent_email`, `user_email`, `rep_email` |
-| Call id (dedupe) | `call_id`, `call_uuid`, `call_sid`, `event_id`, `id` (else a hash of the body) |
+| Call id (dedupe) | `call_id`, `call_uuid`, `call_sid`, `event_id` (else a hash of the body without delivery fields; a bare `id` is not used, since it is often the person's id) |
 | Call details | `direction`, `duration` (seconds or `mm:ss`), `disposition` / `outcome`, `recording_url`, `started_at` |
 
 The contact is matched with the same rules as the CSV import (Medicare ID,
