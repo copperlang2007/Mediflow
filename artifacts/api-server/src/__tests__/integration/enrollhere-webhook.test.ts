@@ -205,6 +205,24 @@ describe("EnrollHere webhook processing", () => {
     expect(again.body).toEqual({ ok: true, duplicate: true });
   });
 
+  it("uses a phone alias that is a real number over a placeholder in `phone`", async () => {
+    await withHeaderSecret({ call_id: "alias-1", first_name: "Alias", last_name: "One", phone: "Unknown", phone_number: "5125550100" });
+    await withHeaderSecret({ call_id: "alias-2", first_name: "Alias", last_name: "Two", phone: "JOHN DOE", mobile: "5125550103" });
+    const rows = await tdb.select().from(contactsTable).where(and(eq(contactsTable.orgId, org.id), eq(contactsTable.firstName, "Alias")));
+    expect(rows.find((r) => r.lastName === "One")!.phone).toBe("+15125550100");
+    expect(rows.find((r) => r.lastName === "Two")!.phone).toBe("+15125550103");
+  });
+
+  it("does not treat a top-level entity id as the call id", async () => {
+    const a = await withHeaderSecret({ id: "entity-abc", event: "call.started", first_name: "Ent", last_name: "Ity", phone: "5125550444" });
+    const b = await withHeaderSecret({ id: "entity-abc", event: "call.completed", first_name: "Ent", last_name: "Ity", phone: "5125550444" });
+    expect(a.body.duplicate).toBe(false);
+    expect(b.body.duplicate).toBe(false);
+  });
+
+  // Note: pglite runs queries one at a time, so this passes with or without
+  // the advisory lock. The race itself was verified on real Postgres 16 (see
+  // the PR description); this guards the single-contact outcome.
   it("creates one contact when two deliveries for a new person arrive together", async () => {
     const person = { first_name: "Sim", last_name: "Ultaneous", phone: "5125550999" };
     const [r1, r2] = await Promise.all([

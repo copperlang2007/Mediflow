@@ -99,7 +99,11 @@ export function authenticate(req: RawBodyRequest, orgId: string): AuthResult {
 }
 
 // Aliases for call fields, as normalized keys (see normalizeKey).
-const CALL_ID_KEYS = ["call_id", "call_uuid", "call_sid", "event_id", "id", "uuid"];
+// Only fields that name the call or event. A bare `id`/`uuid` is left out: in
+// many webhook shapes it is the person's or account's id, and using it would
+// swallow every later event for them as a "duplicate". Without one of these,
+// the content hash below still dedupes retries (the id is part of the body).
+const CALL_ID_KEYS = ["call_id", "call_uuid", "call_sid", "event_id"];
 const EVENT_KEYS = ["event", "event_type", "type", "trigger"];
 const DIRECTION_KEYS = ["direction", "call_direction", "call_type"];
 const DURATION_KEYS = ["duration_seconds", "duration", "call_duration", "talk_time", "billsec", "call_length"];

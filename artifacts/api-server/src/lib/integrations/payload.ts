@@ -11,6 +11,7 @@
  * row with the same fields produce the same contact.
  */
 import { interpretContactRow, suggestContactField, type InterpretedRow } from "../contactImport";
+import { normalizePhone } from "../csvImport";
 
 type Json = unknown;
 
@@ -161,12 +162,16 @@ export function interpretPayloadContact(flat: Record<string, string>): Interpret
   const mapping: Record<string, string> = {};
   const taken = new Set<string>();
   // Several keys can mean the same field (phone / mobile / cell). Pick the
-  // same one regardless of JSON key order: a key named exactly like the field
-  // first, then one with a non-blank value, then the shortest, then A-Z.
+  // same one regardless of JSON key order: for phone, one that is a real
+  // number first ("Unknown" in `phone` must not hide a good `phone_number`);
+  // then a key named exactly like the field, one with a non-blank value, the
+  // shortest, then A-Z.
+  const usable = (key: string, field: string) => field !== "phone" || !!normalizePhone(flat[key] ?? "");
   const candidates = Object.keys(flat)
     .map((key) => ({ key, field: suggestContactField(key) }))
     .filter((c): c is { key: string; field: string } => !!c.field)
     .sort((a, b) =>
+      Number(usable(b.key, b.field)) - Number(usable(a.key, a.field)) ||
       Number(b.key === b.field) - Number(a.key === a.field) ||
       Number(!!flat[b.key]?.trim()) - Number(!!flat[a.key]?.trim()) ||
       a.key.length - b.key.length ||
