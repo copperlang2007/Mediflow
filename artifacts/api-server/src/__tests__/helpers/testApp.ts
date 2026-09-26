@@ -167,6 +167,7 @@ export const jobsMockFactory = (): Record<string, unknown> => ({
     IMPORT_GHL: "import-ghl",
     IMPORT_CSV_CONTACTS: "import-csv-contacts",
     IMPORT_ROWS_SWEEP: "import-rows-sweep",
+    INTEGRATION_EVENTS_PRUNE: "integration-events-prune",
     TASK_AUTO_ASSIGN: "task-auto-assign",
     RUN_AUTOMATION_RULES: "run-automation-rules",
     SEND_SEQUENCE_STEP: "send-sequence-step",
@@ -177,6 +178,7 @@ export const jobsMockFactory = (): Record<string, unknown> => ({
     DIALER_RECONCILE: "dialer-reconcile",
     LEAD_CALLBACK_SWEEP: "lead-callback-sweep",
     AEP_RENEWAL_REVIEW: "aep-renewal-review",
+    GHL_SYNC: "ghl-sync",
   },
   enqueue: async (name: string, data: unknown): Promise<string> => {
     (globalThis.__TEST_ENQUEUED__ ??= []).push({ name, data });

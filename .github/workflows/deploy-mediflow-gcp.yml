@@ -138,6 +138,10 @@ jobs:
           ESIGN_SIGNING_CERT_PEM: ${{ secrets.ESIGN_SIGNING_CERT_PEM }}
           ESIGN_SIGNING_KEY_PEM: ${{ secrets.ESIGN_SIGNING_KEY_PEM }}
           PUBLIC_OBJECT_SEARCH_PATHS: ${{ secrets.PUBLIC_OBJECT_SEARCH_PATHS }}
+          ENROLLHERE_WEBHOOK_SECRET: ${{ secrets.ENROLLHERE_WEBHOOK_SECRET }}
+          GHL_PRIVATE_INTEGRATION_TOKEN: ${{ secrets.GHL_PRIVATE_INTEGRATION_TOKEN }}
+          GHL_LOCATION_ID: ${{ vars.GHL_LOCATION_ID }}
+          GHL_SYNC_ORG_IDS: ${{ vars.GHL_SYNC_ORG_IDS }}
 
           GITHUB_SHA: ${{ github.sha }}
 

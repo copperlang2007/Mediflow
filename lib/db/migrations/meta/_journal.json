@@ -323,6 +323,20 @@
       "when": 1790500000000,
       "tag": "0045_contacts_address_import",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1790600000000,
+      "tag": "0046_integration_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1790700000000,
+      "tag": "0047_ghl_sync",
+      "breakpoints": true
     }
   ]
 }

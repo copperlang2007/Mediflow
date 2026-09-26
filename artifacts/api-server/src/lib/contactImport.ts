@@ -20,7 +20,7 @@
  * "merge" only fills blanks on the existing contact. An import never
  * overwrites data an agent already entered by hand.
  */
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -96,6 +96,14 @@ export function suggestContactField(header: string): string {
   if (h.includes("phone") || h === "mobile" || h === "cell") return "phone";
   if (h === "dob" || h.includes("birth")) return "dob";
   if (h.includes("medicare") || h === "mbi" || h === "hicn" || h === "medicare_id") return "medicareId";
+  // "Address City" / "address_zip" are parts of an address, not the street line.
+  if (h.startsWith("address_") || h.startsWith("mailing_")) {
+    const part = h.replace(/^(mailing_)?(address_)?/, "");
+    if (part === "city" || part === "town") return "city";
+    if (part === "state" || part === "state_code" || part === "st") return "stateCode";
+    if (part === "county") return "county";
+    if (part.includes("zip") || part.includes("postal")) return "zipCode";
+  }
   if (h.startsWith("address") || h.startsWith("street") || h === "addr" || h === "addr1") return h.endsWith("2") ? "" : "address1";
   if (h === "city" || h === "town") return "city";
   if (h === "county") return "county";
@@ -206,7 +214,9 @@ export function interpretContactRow(
     email = null;
   }
 
-  const phone = normalizePhone(get("phone"));
+  const phoneRaw = get("phone");
+  const phone = normalizePhone(phoneRaw);
+  if (phoneRaw && !phone) warn("phone", "Phone is not a recognizable number — left blank");
 
   let dob: string | null = null;
   const dobRaw = get("dob");
@@ -427,10 +437,20 @@ function mbiHashesFor(canonical: string): Buffer[] {
   return [hashMedicareId(canonical), hashMedicareId(dashedMbi(canonical))];
 }
 
+export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+/** Anything that can run a select: the pool, or an open transaction. */
+type Executor = typeof db | Tx;
+
 const LOOKUP_CHUNK = 500;
 
 /** Load the org's contacts that could match any row in `rows`. */
-export async function loadMatcher(orgId: string, rows: InterpretedContact[]): Promise<ContactMatcher> {
+export async function loadMatcher(
+  orgId: string,
+  rows: InterpretedContact[],
+  exec: Executor = db,
+  /** `deleted: true` matches against soft-deleted contacts instead of live ones. */
+  opts: { deleted?: boolean } = {},
+): Promise<ContactMatcher> {
   const matcher = new ContactMatcher();
   const hashes = rows.flatMap((r) => (r.mbi ? mbiHashesFor(r.mbi) : []));
   const emails = [...new Set(rows.map((r) => r.email?.toLowerCase()).filter((e): e is string => !!e))];
@@ -448,8 +468,8 @@ export async function loadMatcher(orgId: string, rows: InterpretedContact[]): Pr
   };
   const found = new Map<string, { id: string; firstName: string; lastName: string; dob: Date | null; email: string | null; phone: string | null; medicareIdHash: Buffer | Uint8Array | null }>();
   const run = async (cond: ReturnType<typeof inArray>) => {
-    const res = await db.select(selectCols).from(contactsTable)
-      .where(and(eq(contactsTable.orgId, orgId), isNull(contactsTable.deletedAt), cond));
+    const res = await exec.select(selectCols).from(contactsTable)
+      .where(and(eq(contactsTable.orgId, orgId), opts.deleted ? isNotNull(contactsTable.deletedAt) : isNull(contactsTable.deletedAt), cond));
     for (const r of res) found.set(r.id, r);
   };
   for (let i = 0; i < hashes.length; i += LOOKUP_CHUNK) await run(inArray(contactsTable.medicareIdHash, hashes.slice(i, i + LOOKUP_CHUNK)));
@@ -466,9 +486,12 @@ export async function loadMatcher(orgId: string, rows: InterpretedContact[]): Pr
   return matcher;
 }
 
-export async function loadAgentsByEmail(orgId: string): Promise<Map<string, string>> {
-  const agents = await db.select({ id: agentsTable.id, email: agentsTable.email }).from(agentsTable)
-    .where(eq(agentsTable.orgId, orgId));
+/** All the org's agents by email, or — with `email` — just that one (single-row lookup). */
+export async function loadAgentsByEmail(orgId: string, exec: Executor = db, email?: string): Promise<Map<string, string>> {
+  const agents = await exec.select({ id: agentsTable.id, email: agentsTable.email }).from(agentsTable)
+    .where(email
+      ? and(eq(agentsTable.orgId, orgId), sql`lower(${agentsTable.email}) = ${email.toLowerCase()}`)
+      : eq(agentsTable.orgId, orgId));
   return new Map(agents.filter((a) => a.email).map((a) => [a.email.toLowerCase(), a.id]));
 }
 
@@ -650,30 +673,7 @@ export async function processCsvContactImport(
             rowWarnings.push({ row: r.row, field: w.field, message: w.message });
           }
         } else {
-          id = randomUUID();
-          const enc = c.mbi ? encryptMedicareId(c.mbi) : null;
-          await tx.insert(contactsTable).values({
-            id,
-            orgId,
-            assignedAgentId: agentId,
-            firstName: c.firstName,
-            lastName: c.lastName,
-            email: c.email,
-            phone: c.phone,
-            dob: c.dob ? new Date(`${c.dob}T00:00:00Z`) : null,
-            address1: c.address1,
-            city: c.city,
-            county: c.county,
-            stateCode: c.stateCode,
-            zipCode: c.zipCode,
-            leadSource: c.leadSource,
-            tags: c.tags.length > 0 ? c.tags : null,
-            medicareIdEncrypted: enc?.encrypted ?? null,
-            medicareIdHash: enc?.hash ?? null,
-            optOutSms: c.optOut,
-            optOutEmail: c.optOut,
-            status: r.enrollment ? "enrolled" : "lead",
-          });
+          id = await insertContact(tx, orgId, c, agentId, r.enrollment ? "enrolled" : "lead");
         }
 
         if (r.enrollment) {
@@ -753,9 +753,65 @@ export async function processCsvContactImport(
   if (done.length === 0) logger.warn({ jobId }, "imports: job was failed by cleanup before it finished; left as failed");
 }
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-async function fillBlanks(
+export async function insertContact(
+  tx: Tx,
+  orgId: string,
+  c: InterpretedContact,
+  agentId: string | null,
+  status: "lead" | "enrolled",
+): Promise<string> {
+  const id = randomUUID();
+  const enc = c.mbi ? encryptMedicareId(c.mbi) : null;
+  await tx.insert(contactsTable).values({
+    id,
+    orgId,
+    assignedAgentId: agentId,
+    firstName: c.firstName,
+    lastName: c.lastName,
+    email: c.email,
+    phone: c.phone,
+    dob: c.dob ? new Date(`${c.dob}T00:00:00Z`) : null,
+    address1: c.address1,
+    city: c.city,
+    county: c.county,
+    stateCode: c.stateCode,
+    zipCode: c.zipCode,
+    leadSource: c.leadSource,
+    tags: c.tags.length > 0 ? c.tags : null,
+    medicareIdEncrypted: enc?.encrypted ?? null,
+    medicareIdHash: enc?.hash ?? null,
+    optOutSms: c.optOut,
+    optOutEmail: c.optOut,
+    status,
+  });
+  return id;
+}
+
+/**
+ * Create-or-merge one contact arriving from an integration (webhook or feed),
+ * with the same duplicate rules and fill-blanks-only merge as the CSV import.
+ */
+export async function upsertContact(
+  tx: Tx,
+  orgId: string,
+  c: InterpretedContact,
+  agentId: string | null,
+): Promise<{ contactId: string; created: boolean; matchedOn: string | null; warnings: { field: string; message: string }[] }> {
+  // Serialize match-then-insert per org: without it, two deliveries for the
+  // same new person can both see "no match" and each create a contact.
+  // 64-bit key (hashtextextended) so unrelated orgs never collide on the lock.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`contact-upsert:${orgId}`}, 0))`);
+  const matcher = await loadMatcher(orgId, [c], tx);
+  const hit = matcher.find(c);
+  if (hit) {
+    const warnings = await fillBlanks(tx, orgId, hit.match.id, c, agentId);
+    return { contactId: hit.match.id, created: false, matchedOn: hit.reason, warnings };
+  }
+  return { contactId: await insertContact(tx, orgId, c, agentId, "lead"), created: true, matchedOn: null, warnings: [] };
+}
+
+export async function fillBlanks(
   tx: Tx,
   orgId: string,
   id: string,

@@ -92,6 +92,14 @@ services:
         sync: false
       - key: LEAD_QUEUE_WEBHOOK_SECRET
         sync: false
+      - key: ENROLLHERE_WEBHOOK_SECRET
+        sync: false
+      - key: GHL_PRIVATE_INTEGRATION_TOKEN
+        sync: false
+      - key: GHL_LOCATION_ID
+        sync: false
+      - key: GHL_SYNC_ORG_IDS
+        sync: false
 
       # ---- Third-party credentials: injected from GitHub Secrets ----
       - key: CLERK_SECRET_KEY

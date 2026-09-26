@@ -156,6 +156,10 @@ describe("field normalizers", () => {
     expect(normalizePhone("(512) 555-0100")).toBe("+15125550100");
     expect(normalizePhone("1-512-555-0100")).toBe("+15125550100");
     expect(normalizePhone("")).toBeNull();
+    expect(normalizePhone("Cell: 512-555-0100")).toBe("+15125550100");
+    expect(normalizePhone("(512) 555-0100 ext. 22")).toBe("+15125550100");
+    expect(normalizePhone("JOHN DOE")).toBeNull();
+    expect(normalizePhone("Unknown")).toBeNull();
   });
 });
 
