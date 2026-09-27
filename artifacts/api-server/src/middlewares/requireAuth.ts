@@ -4,6 +4,7 @@ import { db, usersTable, organizationsTable, orgSettingsTable, sessionActivityTa
 import { eq, lt } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
 import { isDemoMode, demoUserId } from "../lib/demoMode";
+import { mfaEnforced } from "./requireMfa";
 
 // TTL cache for org session timeout settings (refresh every 60 s)
 const orgTimeoutCache = new Map<string, { timeoutMinutes: number; fetchedAt: number }>();
@@ -134,7 +135,7 @@ async function applyViewAsContext(
     res.status(403).json({ error: "Only super admins can view an agency" });
     return false;
   }
-  if (process.env.NODE_ENV !== "test" && process.env.MFA_REQUIRED !== "false" && !authReq.mfaEnrolled) {
+  if (mfaEnforced() && !authReq.mfaEnrolled) {
     res.status(403).json({ error: "mfa_required", message: "Multi-factor authentication is required to view another agency." });
     return false;
   }
