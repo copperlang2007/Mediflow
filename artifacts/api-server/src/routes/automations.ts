@@ -13,20 +13,22 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { requireMfa } from "../middlewares/requireMfa";
-import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
+import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
+
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const router: IRouter = Router();
 
 router.use(
-  scopeToRouter(router, auditMiddleware("automation", undefined, {
+  routerAuditMiddleware(router, "automation", undefined, {
+
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.id;
       return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
     },
-  })),
+  }),
 );
 
 const TRIGGER_TYPES = [

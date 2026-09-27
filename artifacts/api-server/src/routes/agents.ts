@@ -20,7 +20,8 @@ import {
 } from "../middlewares/requireAuth";
 import { activeLicenseWhere, isLicenseActive } from "../lib/licenses/licenseStatus";
 import { enforceCapacity } from "../middlewares/requirePlan";
-import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
+import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
+
 import { randomUUID } from "crypto";
 import { createChecklistRun } from "./checklists";
 import { safeLimit, safeOffset } from "../lib/listGuards";
@@ -78,13 +79,14 @@ function isAgentStatus(value: string): value is AgentStatus {
 const router: IRouter = Router();
 
 router.use(
-  scopeToRouter(router, auditMiddleware("agent", undefined, {
+  routerAuditMiddleware(router, "agent", undefined, {
+
     includeReads: true,
     getResourceId: (req) => {
       const raw = req.params.id;
       return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
     },
-  })),
+  }),
 );
 
 router.get(

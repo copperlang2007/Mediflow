@@ -39,7 +39,8 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { requireMfa } from "../middlewares/requireMfa";
-import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
+import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
+
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import {
   parseStatement,
@@ -85,13 +86,14 @@ const upload = multer({
 });
 
 router.use(
-  scopeToRouter(router, auditMiddleware("commission", undefined, {
+  routerAuditMiddleware(router, "commission", undefined, {
+
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.id;
       return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
     },
-  })),
+  }),
 );
 
 // ─── Pagination guards (inlined; lib/listGuards.ts not yet on main) ────

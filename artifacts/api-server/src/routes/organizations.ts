@@ -9,7 +9,8 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { getEntitlements } from "../lib/billing/entitlements";
-import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
+import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
+
 import { requireMfa } from "../middlewares/requireMfa";
 
 /**
@@ -31,7 +32,8 @@ const UpdateOrgSchema = z.object({
 
 const router: IRouter = Router();
 
-router.use(scopeToRouter(router, auditMiddleware("org", undefined, { includeReads: true })));
+router.use(routerAuditMiddleware(router, "org", undefined, { includeReads: true }));
+
 
 router.get(
   "/admin/agencies",

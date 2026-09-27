@@ -597,7 +597,7 @@ function ClerkProviderWithRoutes() {
           </ErrorBoundary>
           {/* Radix toaster: used by the few pages on hooks/use-toast. */}
           <Toaster />
-          {/* Sonner toaster: most pages call toast() from "sonner". */}
+          {/* Pages call `toast` from "sonner" directly; this is its only mount. */}
           <SonnerToaster />
         </TooltipProvider>
       </QueryClientProvider>
