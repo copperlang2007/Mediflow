@@ -90,30 +90,10 @@ export function useSignIn() {
 // --- Components ------------------------------------------------------------
 
 export function ClerkProvider({ children }: { children: ReactNode }) {
-  return (
-    <>
-      {children}
-      <div
-        style={{
-          position: "fixed",
-          bottom: 12,
-          left: 12,
-          zIndex: 2147483647,
-          padding: "4px 10px",
-          borderRadius: 9999,
-          background: "rgba(15, 23, 42, 0.85)",
-          color: "#bfdbfe",
-          font: "600 11px/1.4 'Inter', system-ui, sans-serif",
-          letterSpacing: "0.06em",
-          textTransform: "uppercase",
-          pointerEvents: "none",
-          boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-        }}
-      >
-        Demo · sample data
-      </div>
-    </>
-  );
+  // The "Demo — sample agency, invented data" notice is rendered by the app
+  // shell as a slim top banner (AppShell.tsx, gated on IS_DEMO_BUILD) so it
+  // never covers page content the way a floating badge did.
+  return <>{children}</>;
 }
 
 /** Clerk's <Show when="signed-in|signed-out">. Demo is always signed in. */

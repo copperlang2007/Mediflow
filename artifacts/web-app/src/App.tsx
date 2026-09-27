@@ -12,6 +12,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import AppShell from "@/components/layout/AppShell";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
+import { ThemeProvider } from "@/components/theme/ThemeToggle";
+import { BrandMark } from "@/components/brand/BrandMark";
+import Landing from "@/pages/landing";
 
 // Route-level lazy loading
 const Dashboard = lazy(() => import("@/pages/dashboard"));
@@ -98,36 +101,36 @@ const clerkAppearance = {
     socialButtonsVariant: "blockButton" as const,
   },
   variables: {
-    colorPrimary: "hsl(221, 83%, 43%)",
+    colorPrimary: "hsl(222, 62%, 15%)",
     colorForeground: "hsl(222, 47%, 11%)",
-    colorMutedForeground: "hsl(215, 16%, 47%)",
+    colorMutedForeground: "hsl(215, 16%, 42%)",
     colorDanger: "hsl(0, 84%, 60%)",
     colorBackground: "hsl(0, 0%, 100%)",
-    colorInput: "hsl(215, 20%, 88%)",
+    colorInput: "hsl(214, 25%, 88%)",
     colorInputForeground: "hsl(222, 47%, 11%)",
-    colorNeutral: "hsl(215, 20%, 88%)",
-    fontFamily: "'Inter', sans-serif",
-    borderRadius: "0.5rem",
+    colorNeutral: "hsl(214, 25%, 88%)",
+    fontFamily: "'Figtree', system-ui, sans-serif",
+    borderRadius: "0.625rem",
   },
   elements: {
     rootBox: "w-full flex justify-center",
-    cardBox: "bg-white rounded-2xl w-[440px] max-w-full overflow-hidden shadow-xl border border-border",
+    cardBox: "bg-white/95 backdrop-blur-xl rounded-2xl w-[440px] max-w-full overflow-hidden shadow-2xl border border-white/10",
     card: "!shadow-none !border-0 !bg-transparent !rounded-none",
     footer: "!shadow-none !border-0 !bg-transparent !rounded-none",
-    headerTitle: "text-foreground font-semibold text-xl",
+    headerTitle: "text-foreground font-display font-bold text-xl",
     headerSubtitle: "text-muted-foreground text-sm",
     socialButtonsBlockButtonText: "text-foreground font-medium",
     formFieldLabel: "text-foreground text-sm font-medium",
-    footerActionLink: "text-primary font-medium hover:text-primary/80",
+    footerActionLink: "text-accent font-semibold hover:text-accent/80",
     footerActionText: "text-muted-foreground",
     dividerText: "text-muted-foreground text-xs",
-    identityPreviewEditButton: "text-primary",
+    identityPreviewEditButton: "text-accent",
     formFieldSuccessText: "text-green-600",
     alertText: "text-foreground",
-    logoBox: "flex justify-center py-2",
+    logoBox: "!hidden",
     logoImage: "h-12 w-auto",
     socialButtonsBlockButton: "border border-border hover:bg-secondary transition-colors",
-    formButtonPrimary: "bg-primary text-primary-foreground hover:bg-primary/90 font-medium transition-colors",
+    formButtonPrimary: "bg-gradient-to-r from-navy-700 to-navy-900 text-white hover:from-navy-800 hover:to-navy-950 font-semibold shadow-md transition-colors",
     formFieldInput: "border-input bg-background text-foreground rounded-md",
     footerAction: "border-t border-border bg-muted/30",
     dividerLine: "bg-border",
@@ -152,36 +155,65 @@ function PageLoadingFallback() {
   );
 }
 
+/**
+ * Navy backdrop + brand header shared by the Clerk sign-in / sign-up screens
+ * (agencyBRIDGE login look). Clerk's own card renders in the middle, so
+ * MFA, password reset and every other Clerk step keep working unchanged.
+ */
+function AuthFrame({ subtitle, children }: { subtitle: string; children: React.ReactNode }) {
+  return (
+    <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-gradient-to-br from-navy-900 via-navy-800 to-navy-950 px-4 py-10">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -top-40 -right-40 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 h-96 w-96 rounded-full bg-indigo-500/10 blur-3xl" />
+      </div>
+      <div className="relative flex w-full max-w-md flex-col items-center">
+        <a href={basePath || "/"} className="mb-8 flex flex-col items-center text-center" aria-label="agencyBRIDGE home">
+          <BrandMark size={64} tone="light" decorative className="mb-4 rounded-2xl shadow-lg shadow-blue-500/30" />
+          <span className="font-display text-2xl font-bold tracking-tight text-white">
+            agency<span className="font-extrabold">BRIDGE</span>
+          </span>
+          <span className="mt-1 text-sm text-blue-200/70">{subtitle}</span>
+        </a>
+        {children}
+        <p className="mt-6 text-center text-xs text-blue-200/60">
+          Your agency administrator manages who can sign in and what they can see.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function SignInPage() {
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 px-4">
+    <AuthFrame subtitle="Medicare Agency Management Platform">
       <SignIn
         routing="path"
         path={`${basePath}/sign-in`}
         signUpUrl={`${basePath}/sign-up`}
       />
-    </div>
+    </AuthFrame>
   );
 }
 
 function SignUpPage() {
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 px-4">
+    <AuthFrame subtitle="Set up your agency workspace">
       <SignUp
         routing="path"
         path={`${basePath}/sign-up`}
         signInUrl={`${basePath}/sign-in`}
       />
-    </div>
+    </AuthFrame>
   );
 }
 
 function DeploymentConfigRequired() {
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 px-4">
+    <div className="flex min-h-[100dvh] items-center justify-center bg-gradient-to-br from-navy-900 via-navy-800 to-navy-950 px-4">
       <div className="max-w-xl rounded-2xl border border-white/10 bg-white/10 p-8 text-center text-white shadow-2xl backdrop-blur">
         <div className="flex justify-center mb-6">
-          <img src={`${basePath}/logo.svg`} alt="agencyBRIDGE" className="h-16 w-16" />
+          <BrandMark size={64} tone="light" className="rounded-2xl" />
         </div>
         <p className="mb-3 text-sm font-semibold uppercase tracking-[0.24em] text-blue-200">Early access deployment</p>
         <h1 className="mb-4 text-4xl font-bold tracking-tight">agencyBRIDGE is deployed</h1>
@@ -197,108 +229,6 @@ function DeploymentConfigRequired() {
             <li>Attach the demo database before exercising API-backed pages.</li>
           </ul>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function Landing() {
-  const capabilities = [
-    {
-      number: "01",
-      title: "Bring your agency together",
-      description: "Keep your agents, onboarding steps, and everyday work in one place.",
-    },
-    {
-      number: "02",
-      title: "Stay ahead of the details",
-      description: "See licensing, certifications, and compliance work alongside your team.",
-    },
-    {
-      number: "03",
-      title: "Make room to grow",
-      description: "Connect your contacts, tasks, and agency reporting in a shared workspace.",
-    },
-  ];
-
-  return (
-    <div className="relative isolate min-h-[100dvh] overflow-hidden bg-[#091527] text-white">
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_82%_18%,rgba(59,130,246,0.24),transparent_34%),radial-gradient(circle_at_5%_72%,rgba(20,184,166,0.12),transparent_33%)]" />
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(255,255,255,.07)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.07)_1px,transparent_1px)] [background-size:72px_72px]" />
-
-      <div className="relative mx-auto flex min-h-[100dvh] max-w-7xl flex-col px-6 sm:px-10 lg:px-16">
-        <header className="flex items-center justify-between border-b border-white/10 py-6">
-          <div className="flex items-center gap-3">
-            <img src={`${basePath}/logo.svg`} alt="" className="h-10 w-10" />
-            <span className="text-xl font-semibold tracking-tight">agencyBRIDGE</span>
-          </div>
-          <span className="hidden text-sm text-slate-400 sm:inline">A clearer way to run your agency</span>
-        </header>
-
-        <main className="flex-1">
-          <section className="grid gap-12 py-20 sm:py-24 lg:grid-cols-[1.2fr_.8fr] lg:items-center lg:gap-16 lg:py-32">
-            <div>
-              <p className="mb-6 inline-flex rounded-full border border-blue-300/20 bg-blue-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-blue-200">
-                Built for Medicare sales agencies
-              </p>
-              <h1 className="max-w-3xl text-5xl font-semibold leading-[1.08] tracking-tight sm:text-6xl lg:text-7xl">
-                Your agency, <span className="text-blue-300">moving together.</span>
-              </h1>
-              <p className="mt-7 max-w-xl text-lg leading-8 text-slate-300">
-                agencyBRIDGE brings agent onboarding, licensing, compliance, contacts, and daily work into one connected workspace.
-              </p>
-              <a
-                href={`${basePath}/sign-in`}
-                className="mt-9 inline-flex min-h-12 items-center justify-center rounded-xl bg-blue-500 px-8 py-3 text-base font-semibold text-white shadow-lg shadow-blue-950/40 transition-colors hover:bg-blue-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-300"
-              >
-                Sign in
-                <span aria-hidden="true" className="ml-3">→</span>
-              </a>
-              <p className="mt-4 text-sm text-slate-400">For existing agencyBRIDGE users</p>
-            </div>
-
-            <div className="relative rounded-[2rem] border border-white/15 bg-white/[0.06] p-6 shadow-2xl shadow-black/30 backdrop-blur sm:p-8">
-              <div className="mb-7 flex items-center justify-between">
-                <span className="text-sm font-medium text-slate-300">One connected workspace</span>
-                <span className="flex gap-1.5" aria-hidden="true">
-                  <span className="h-2 w-2 rounded-full bg-blue-300" />
-                  <span className="h-2 w-2 rounded-full bg-teal-300" />
-                  <span className="h-2 w-2 rounded-full bg-white/30" />
-                </span>
-              </div>
-              <div className="space-y-3">
-                {["Agent onboarding", "Licensing & certifications", "Compliance", "Contacts & tasks"].map((label, index) => (
-                  <div key={label} className="flex items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-4">
-                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold ${index % 2 === 0 ? "bg-blue-400/20 text-blue-200" : "bg-teal-400/20 text-teal-200"}`}>
-                      0{index + 1}
-                    </span>
-                    <span className="font-medium text-slate-100">{label}</span>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-7 border-t border-white/10 pt-6 text-sm leading-6 text-slate-400">
-                Less time switching between tools. More clarity on what needs attention next.
-              </p>
-            </div>
-          </section>
-
-          <section className="border-t border-white/10 pb-20 pt-12">
-            <p className="mb-8 text-xs font-semibold uppercase tracking-[0.22em] text-blue-300">Made for the work behind every sale</p>
-            <div className="grid gap-8 sm:grid-cols-3">
-              {capabilities.map(({ number, title, description }) => (
-                <div key={number}>
-                  <span className="text-sm font-medium text-teal-300">{number}</span>
-                  <h2 className="mt-3 text-xl font-semibold tracking-tight">{title}</h2>
-                  <p className="mt-3 max-w-sm text-sm leading-7 text-slate-400">{description}</p>
-                </div>
-              ))}
-            </div>
-          </section>
-        </main>
-
-        <footer className="border-t border-white/10 py-6 text-sm text-slate-500">
-          © {new Date().getFullYear()} agencyBRIDGE
-        </footer>
       </div>
     </div>
   );
@@ -618,13 +548,19 @@ function App() {
   }, []);
 
   if (!clerkPubKey) {
-    return <DeploymentConfigRequired />;
+    return (
+      <ThemeProvider>
+        <DeploymentConfigRequired />
+      </ThemeProvider>
+    );
   }
 
   return (
-    <WouterRouter base={basePath}>
-      <ClerkProviderWithRoutes />
-    </WouterRouter>
+    <ThemeProvider>
+      <WouterRouter base={basePath}>
+        <ClerkProviderWithRoutes />
+      </WouterRouter>
+    </ThemeProvider>
   );
 }
 
