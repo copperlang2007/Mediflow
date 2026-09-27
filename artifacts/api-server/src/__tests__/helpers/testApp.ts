@@ -137,7 +137,7 @@ export const clerkMockFactory = async (): Promise<Record<string, unknown>> => {
     }): {
       userId: string | null;
       sessionId: string | null;
-      sessionClaims: { iat: number; two_factor?: boolean };
+      sessionClaims: { iat: number; two_factor?: boolean | string };
     } => {
       const userId = req.headers["x-test-user-id"];
       const sessionId = req.headers["x-test-session-id"];
@@ -148,7 +148,8 @@ export const clerkMockFactory = async (): Promise<Record<string, unknown>> => {
         // Always treat the synthetic JWT as freshly minted so requireRecentAuth passes.
         sessionClaims: {
           iat: Math.floor(Date.now() / 1000),
-          two_factor: mfa === "true",
+          // "as-string" mimics a Clerk template shortcode rendered as text.
+          two_factor: mfa === "as-string" ? "true" : mfa === "true",
         },
       };
     },
