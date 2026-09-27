@@ -202,6 +202,11 @@ export function BackofficeView({ data, isStaff }: { data: Backoffice; isStaff: b
     data.licenses.filter((l) => l.expiryDate && differenceInCalendarDays(parseISO(l.expiryDate), now) >= 0 && differenceInCalendarDays(parseISO(l.expiryDate), now) <= 60).length +
     data.certifications.filter((c) => c.expiryDate && differenceInCalendarDays(parseISO(c.expiryDate), now) >= 0 && differenceInCalendarDays(parseISO(c.expiryDate), now) <= 60).length;
   const provisioned = data.portals.filter((p) => p.status === "provisioned").length;
+  // Same test as the Ready-to-Sell gate: active AND not past its expiry date.
+  const pastExpiry = data.licenses.filter((l) => l.expiryDate && new Date(l.expiryDate) < now).length;
+  const currentLicenses = data.licenses.filter(
+    (l) => l.status === "active" && (!l.expiryDate || new Date(l.expiryDate) >= now),
+  ).length;
   const latestAhip = data.ahip[0];
   const ahipColor: KpiColor = score.ahipCompleted ? "green" : "orange";
   const tone = (done: number, total: number): KpiColor => (total > 0 && done >= total ? "green" : "orange");
@@ -242,7 +247,9 @@ export function BackofficeView({ data, isStaff }: { data: Backoffice; isStaff: b
         <div className="space-y-4 p-5">
           <div className="flex flex-col gap-4 rounded-xl border border-warning/30 bg-gradient-to-r from-warning/10 to-warning/5 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Readiness score</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground" title="Licenses 40% · certifications 30% · AHIP 20% · onboarding 10% — the same score as on the agent profile">
+                Compliance score
+              </p>
               <p className="font-display text-5xl font-bold text-warning leading-tight">
                 {score100}<span className="text-xl font-semibold text-muted-foreground"> / 100</span>
               </p>
@@ -266,8 +273,9 @@ export function BackofficeView({ data, isStaff }: { data: Backoffice; isStaff: b
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             <KpiCard label="AHIP" value={score.ahipCompleted ? "Passed" : latestAhip ? latestAhip.status.replace(/_/g, " ") : "Not started"}
               icon={GraduationCap} color={ahipColor} hint={`For ${readiness?.certificationYear ?? now.getFullYear()}`} />
-            <KpiCard label="Licenses" value={`${score.activeLicenses}/${score.totalLicenses}`} icon={MapPin}
-              color={tone(score.activeLicenses, score.totalLicenses)} hint="Active of total" />
+            <KpiCard label="Licenses" value={`${currentLicenses}/${data.licenses.length}`} icon={MapPin}
+              color={tone(currentLicenses, data.licenses.length)}
+              hint={pastExpiry > 0 ? `${pastExpiry} past the expiry date` : "Active and in date"} />
             <KpiCard label="Certifications" value={`${score.activeCertifications}/${score.totalCertifications}`} icon={Award}
               color={tone(score.activeCertifications, score.totalCertifications)} hint="Passed of total" />
             <KpiCard label="Portal access" value={`${provisioned}/${data.portals.length}`} icon={Building2}
@@ -338,14 +346,18 @@ export function BackofficeView({ data, isStaff }: { data: Backoffice; isStaff: b
             {data.licenses.length === 0 ? (
               <EmptyState compact icon={MapPin} title="No licenses on file" description="Add the agent's state licenses on the Licensing page." />
             ) : (
-              <SimpleList rows={data.licenses.map((l) => ({
-                key: l.id,
-                icon: l.status === "active" ? CheckCircle2 : XCircle,
-                ok: l.status === "active",
-                title: `${l.stateCode} · ${l.licenseType}`,
-                detail: l.expiryDate ? `Expires ${fmt(l.expiryDate)}` : "No expiry date on file",
-                status: l.status,
-              }))} />
+              <SimpleList rows={data.licenses.map((l) => {
+                const expired = Boolean(l.expiryDate && new Date(l.expiryDate) < now);
+                const ok = l.status === "active" && !expired;
+                return {
+                  key: l.id,
+                  icon: ok ? CheckCircle2 : XCircle,
+                  ok,
+                  title: `${l.stateCode} · ${l.licenseType}`,
+                  detail: l.expiryDate ? `${expired ? "Expired" : "Expires"} ${fmt(l.expiryDate)}` : "No expiry date on file",
+                  status: expired ? "expired" : l.status,
+                };
+              })} />
             )}
           </SectionCard>
         </TabsContent>
