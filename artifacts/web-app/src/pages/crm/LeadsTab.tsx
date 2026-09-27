@@ -8,8 +8,6 @@ import {
   useGetLeads, useGetContacts, useCreateLead, useUpdateLead, useConvertLead, useGetLeadStats,
   getGetLeadsQueryKey, getGetLeadStatsQueryKey,
 } from "@workspace/api-client-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,12 +15,21 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Plus, Target, ArrowRight, Star, CircleHelp } from "lucide-react";
+import {
+  Plus, Target, ArrowRight, Star, CircleHelp, Sparkles, PhoneCall, BadgeCheck, Ban, UserCheck,
+} from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { cn } from "@/lib/utils";
-import { LEAD_STATUS_STYLES, initials } from "./shared";
+import { EmptyState, MiniStat, StatusPill, humanizeStatus } from "@/components/shared";
+import { ContactAvatar, ListCard } from "./ui";
+
+const LEAD_STAT_ICONS: Record<string, typeof Target> = {
+  new: Sparkles,
+  contacted: PhoneCall,
+  qualified: BadgeCheck,
+  disqualified: Ban,
+  converted: UserCheck,
+};
 
 
 function FieldHelp({ label, children }: { label: string; children: string }) {
@@ -103,48 +110,63 @@ export default function LeadsTab() {
   };
 
   return (
-    <div className="space-y-4">
-      {leadStats && (
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+    <div className="space-y-6">
+      {leadStats && (leadStats.byStatus ?? []).length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           {(leadStats.byStatus ?? []).map((s) => {
             const item = s as Record<string, unknown>;
+            const status = String(item.status);
+            const Icon = LEAD_STAT_ICONS[status] ?? Target;
             return (
-              <Card key={String(item.status)} className="py-3">
-                <CardContent className="px-4 py-0 text-center">
-                  <p className="text-xl font-bold">{String(item.count)}</p>
-                  <p className="text-xs text-muted-foreground capitalize mt-0.5">{String(item.status)}</p>
-                </CardContent>
-              </Card>
+              <MiniStat
+                key={status}
+                icon={Icon}
+                label={humanizeStatus(status)}
+                value={String(item.count)}
+                tone={status === "converted" ? "success" : status === "disqualified" ? "danger" : "default"}
+              />
             );
           })}
         </div>
       )}
 
-      <div className="flex items-center gap-3">
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="new">New</SelectItem>
-            <SelectItem value="contacted">Contacted</SelectItem>
-            <SelectItem value="qualified">Qualified</SelectItem>
-            <SelectItem value="disqualified">Disqualified</SelectItem>
-            <SelectItem value="converted">Converted</SelectItem>
-          </SelectContent>
-        </Select>
-        <div className="flex-1" />
-        <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4 mr-1" />New Lead</Button>
-      </div>
-
+      <ListCard
+        toolbar={
+          <>
+            <div>
+              <h3 className="font-display font-semibold">Leads</h3>
+              <p className="text-xs text-muted-foreground">Sales opportunities, from first contact to converted</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 md:ml-auto">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-40" aria-label="Filter by status"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="new">New</SelectItem>
+                  <SelectItem value="contacted">Contacted</SelectItem>
+                  <SelectItem value="qualified">Qualified</SelectItem>
+                  <SelectItem value="disqualified">Disqualified</SelectItem>
+                  <SelectItem value="converted">Converted</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button onClick={() => setAddOpen(true)}><Plus className="h-4 w-4 mr-1.5" />New Lead</Button>
+            </div>
+          </>
+        }
+      >
       {isLoading ? (
         <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14 w-full rounded-lg" />)}</div>
       ) : leads.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <Target className="h-12 w-12 text-muted-foreground/20 mb-3" />
-          <p className="font-medium text-muted-foreground">No leads found</p>
-        </div>
+        <EmptyState
+          icon={Target}
+          title={statusFilter === "all" ? "No leads yet" : "No leads with this status"}
+          description={statusFilter === "all"
+            ? "A lead is a sales opportunity for one of your contacts. Create one to start tracking it."
+            : "Try another status, or pick “All statuses” to see every lead."}
+          action={statusFilter === "all" ? { label: "Create a lead", onClick: () => setAddOpen(true) } : undefined}
+        />
       ) : (
-        <div className="space-y-2">
+        <div className="rounded-lg border border-border divide-y divide-border">
           {leads.map((rowRaw) => {
             const row = rowRaw as Record<string, unknown>;
             const lead = row.lead as Record<string, unknown> | undefined;
@@ -153,21 +175,17 @@ export default function LeadsTab() {
             const leadId = String(lead.id);
             const leadStatus = String(lead.status ?? "new");
             return (
-              <div key={leadId} className="flex items-center gap-4 p-4 rounded-xl border bg-card hover:bg-muted/20 transition-colors">
-                <Avatar className="h-10 w-10 shrink-0">
-                  <AvatarFallback className="text-sm bg-primary/10 text-primary">
-                    {initials(String(contact?.firstName ?? ""), String(contact?.lastName ?? ""))}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
+              <div key={leadId} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 hover:bg-muted/30 transition-colors">
+                <ContactAvatar first={String(contact?.firstName ?? "")} last={String(contact?.lastName ?? "")} />
+                <div className="flex-1 min-w-[180px]">
                   <div className="flex items-center gap-2">
                     <p className="font-medium">{String(contact?.firstName ?? "")} {String(contact?.lastName ?? "")}</p>
-                    <Badge className={cn("text-xs border-0", LEAD_STATUS_STYLES[leadStatus] ?? "")}>{leadStatus}</Badge>
+                    <StatusPill status={leadStatus} tone={leadStatus === "converted" ? "success" : leadStatus === "disqualified" ? "danger" : undefined} />
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+                  <div className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground mt-0.5">
                     {lead.source != null && <span>{String(lead.source)}</span>}
-                    <span className="flex items-center gap-1"><Star className="h-3 w-3" />Score: {String(lead.score ?? 0)}</span>
-                    {lead.createdAt != null && <span>{format(new Date(String(lead.createdAt)), "MMM d, yyyy")}</span>}
+                    <span className="flex items-center gap-1"><Star className="h-3 w-3" />Score {String(lead.score ?? 0)}</span>
+                    {lead.createdAt != null && <span>Added {format(new Date(String(lead.createdAt)), "MMM d, yyyy")}</span>}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -195,6 +213,7 @@ export default function LeadsTab() {
           })}
         </div>
       )}
+      </ListCard>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-md">

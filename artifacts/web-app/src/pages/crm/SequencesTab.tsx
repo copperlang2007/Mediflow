@@ -21,6 +21,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Textarea } from "@/components/ui/textarea";
 import { Users, Plus, Workflow } from "lucide-react";
 import { toast } from "sonner";
+import { EmptyState, StatusPill } from "@/components/shared";
+import { ListCard } from "./ui";
 import { cn } from "@/lib/utils";
 import { SEQ_STATUS_STYLES } from "./shared";
 
@@ -380,48 +382,61 @@ export default function SequencesTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end">
-        <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4 mr-1" />New Sequence</Button>
-      </div>
-
+      <ListCard
+        toolbar={
+          <>
+            <div>
+              <h3 className="font-display font-semibold">Follow-up sequences</h3>
+              <p className="text-xs text-muted-foreground">Automatic texts, emails and tasks sent in order after a trigger</p>
+            </div>
+            <Button className="md:ml-auto" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4 mr-1.5" />New Sequence</Button>
+          </>
+        }
+      >
       {isLoading ? (
         <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-16 rounded-lg" />)}</div>
       ) : sequences.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <Workflow className="h-12 w-12 text-muted-foreground/20 mb-3" />
-          <p className="font-medium text-muted-foreground">No sequences yet</p>
-          <p className="text-sm text-muted-foreground/70 mt-1">Build automated outreach workflows</p>
-        </div>
+        <EmptyState
+          icon={Workflow}
+          title="No sequences yet"
+          description="A sequence sends a planned series of texts, emails and reminders for you — for example, a welcome series for new clients."
+          action={{ label: "Build a sequence", onClick: () => setAddOpen(true) }}
+        />
       ) : (
-        <div className="space-y-2">
+        <div className="rounded-lg border border-border divide-y divide-border">
           {sequences.map(({ sequence, stepCount, activeEnrollments }: SequenceWithStats) => (
-            <div key={sequence.id} className="flex items-center gap-4 p-4 rounded-xl border bg-card hover:bg-muted/20 transition-colors">
-              <div className="flex-1 min-w-0">
+            <div key={sequence.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 hover:bg-muted/30 transition-colors">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-accent">
+                <Workflow className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-[200px]">
                 <div className="flex items-center gap-2">
                   <p className="font-medium">{sequence.name}</p>
-                  <Badge className={cn("text-xs border-0", SEQ_STATUS_STYLES[sequence.status] ?? "")}>{sequence.status}</Badge>
+                  <StatusPill status={sequence.status} tone={sequence.status === "paused" ? "warning" : undefined} />
                 </div>
-                <div className="flex items-center gap-4 text-xs text-muted-foreground mt-0.5">
-                  <span><Workflow className="h-3 w-3 inline mr-1" />{stepCount} steps</span>
-                  <span><Users className="h-3 w-3 inline mr-1" />{activeEnrollments} enrolled</span>
-                  <span className="capitalize">Trigger: {(sequence.triggerType ?? "manual").replace(/_/g, " ")}</span>
+                <div className="flex flex-wrap items-center gap-x-4 text-xs text-muted-foreground mt-0.5">
+                  <span>{stepCount} step{stepCount === 1 ? "" : "s"}</span>
+                  <span className="inline-flex items-center gap-1"><Users className="h-3 w-3" />{activeEnrollments} people in it now</span>
+                  <span>Starts: {(sequence.triggerType ?? "manual").replace(/_/g, " ")}</span>
                 </div>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs shrink-0"
-                onClick={() => setStepsForSeq({ id: sequence.id, name: sequence.name })}
-              >
-                Edit steps
-              </Button>
-              <Button variant="outline" size="sm" className="h-7 text-xs shrink-0" onClick={() => toggleStatus(sequence.id, sequence.status)}>
-                {sequence.status === "active" ? "Pause" : "Activate"}
-              </Button>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setStepsForSeq({ id: sequence.id, name: sequence.name })}
+                >
+                  Edit steps
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => toggleStatus(sequence.id, sequence.status)}>
+                  {sequence.status === "active" ? "Pause" : "Activate"}
+                </Button>
+              </div>
             </div>
           ))}
         </div>
       )}
+      </ListCard>
 
       {stepsForSeq && (
         <StepBuilderDialog
