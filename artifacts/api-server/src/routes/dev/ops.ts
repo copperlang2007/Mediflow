@@ -22,6 +22,9 @@ import { logger } from "../../lib/logger";
 
 const router: IRouter = Router();
 
+const sqlJobNameList = (jobNames: JobName[]) =>
+  sql.join(jobNames.map((name) => sql`${name}`), sql`, `);
+
 // All dev endpoints require an authenticated user with dev_console read.
 // MFA is also required (HIPAA technical safeguard for privileged roles).
 router.use(requireAuth, requireMfa, requirePermission("dev_console", "read"));
@@ -54,20 +57,19 @@ router.get("/queues", async (_req: Request, res: Response): Promise<void> => {
 
     const jobNames = Object.values(JOB_NAMES) as JobName[];
 
-    // Drizzle renders a JS array in a sql template as a parenthesised
-    // parameter list, so use `IN ${arr}`; `= ANY(${arr})` becomes
-    // `ANY(($1, $2, ...))`, which Postgres rejects.
+    const jobNameList = sqlJobNameList(jobNames);
+
     const liveRows = (await db.execute(
       sql`SELECT name, state, count(*)::int AS count
           FROM pgboss.job
-          WHERE name IN ${jobNames as unknown as string[]}
+          WHERE name IN (${jobNameList})
           GROUP BY name, state`,
     )) as unknown as { rows: Array<{ name: string; state: string; count: number }> };
 
     const archiveRows = (await db.execute(
       sql`SELECT name, state, count(*)::int AS count
           FROM pgboss.archive
-          WHERE name IN ${jobNames as unknown as string[]}
+          WHERE name IN (${jobNameList})
             AND completedon >= now() - interval '24 hours'
           GROUP BY name, state`,
     )) as unknown as { rows: Array<{ name: string; state: string; count: number }> };
@@ -151,11 +153,12 @@ router.get("/workers", async (_req: Request, res: Response): Promise<void> => {
     await getQueue(); // ensure schema exists
 
     const jobNames = Object.values(JOB_NAMES) as JobName[];
+    const jobNameList = sqlJobNameList(jobNames);
 
     const rows = (await db.execute(
       sql`SELECT name, max(completedon) AS last_seen
           FROM pgboss.archive
-          WHERE name IN ${jobNames as unknown as string[]}
+          WHERE name IN (${jobNameList})
             AND state = 'completed'
           GROUP BY name`,
     )) as unknown as { rows: Array<{ name: string; last_seen: string | null }> };
