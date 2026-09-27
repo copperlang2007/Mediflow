@@ -8,20 +8,25 @@
 -- The indexed expression must stay byte-for-byte identical to
 -- phoneMatchKeySql() or the planner will not use it.
 --
--- NOTE ON CONCURRENCY (same as 0016_scale_indexes.sql): these use plain
--- `CREATE INDEX IF NOT EXISTS`, which takes a SHARE lock that blocks writes
--- to the table while the index builds. The migration runner wraps each file
--- in a transaction, so `CREATE INDEX CONCURRENTLY` cannot be used here. On a
--- large production `contacts` table, build both indexes by hand OUTSIDE a
--- transaction BEFORE deploying, so the statements below become no-ops and no
--- write lock is taken (a blocked write would stall the Twilio STOP webhook):
+-- NOTE ON CONCURRENCY: these use plain `CREATE INDEX IF NOT EXISTS`, which
+-- takes a SHARE lock that blocks writes while the index builds, because the
+-- migrator wraps each file in a transaction and CONCURRENTLY cannot run inside
+-- one. The production runner (lib/db/src/migrate-locked.ts,
+-- CONCURRENT_PREBUILDS) builds both indexes CONCURRENTLY on existing tables
+-- BEFORE applying migrations, so on a live database the statements below are
+-- no-ops and no write lock is taken. Only a fresh database (empty tables)
+-- builds them here. Keep the definitions in sync with CONCURRENT_PREBUILDS.
+--
+-- Running migrations some other way (drizzle-kit migrate:cli) skips the
+-- pre-build; on a large table, run these by hand first:
 --
 --   CREATE INDEX CONCURRENTLY IF NOT EXISTS contacts_phone_last10_idx
 --     ON contacts ((right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10)));
 --   CREATE INDEX CONCURRENTLY IF NOT EXISTS opt_outs_phone_last10_channel_idx
 --     ON opt_outs ((right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10)), channel);
 --
--- If a concurrent build fails it leaves an INVALID index; drop it and rerun.
+-- If a concurrent build fails it leaves an INVALID index; drop it and rerun
+-- (the runner does this automatically).
 CREATE INDEX IF NOT EXISTS contacts_phone_last10_idx
   ON contacts ((right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10)));
 CREATE INDEX IF NOT EXISTS opt_outs_phone_last10_channel_idx

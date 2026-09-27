@@ -103,37 +103,49 @@ export async function expireLapsedLicenses(
       .limit(MAX_LAPSES_PER_RUN);
 
     for (const lic of lapsed) {
-      const updated = await tx
-        .update(stateLicensesTable)
-        .set({ status: "expired" })
-        .where(
-          and(
-            eq(stateLicensesTable.id, lic.licenseId),
-            eq(stateLicensesTable.status, "active"),
-            lt(stateLicensesTable.expiryDate, now),
-          ),
-        )
-        .returning({ id: stateLicensesTable.id });
-      if (updated.length === 0) continue;
-      expiredCount++;
+      // Each license runs in its own savepoint: a bad row is skipped and
+      // logged instead of rolling back every other lapse in the batch.
+      let flipped: boolean;
+      try {
+        flipped = await tx.transaction(async (sp) => {
+          const updated = await sp
+            .update(stateLicensesTable)
+            .set({ status: "expired" })
+            .where(
+              and(
+                eq(stateLicensesTable.id, lic.licenseId),
+                eq(stateLicensesTable.status, "active"),
+                lt(stateLicensesTable.expiryDate, now),
+              ),
+            )
+            .returning({ id: stateLicensesTable.id });
+          if (updated.length === 0) return false;
 
-      await tx.insert(auditLogTable).values({
-        id: randomUUID(),
-        orgId: lic.orgId,
-        userId: "system",
-        userRole: null,
-        action: "license_auto_expired",
-        resourceType: "license",
-        resourceId: lic.licenseId,
-        changes: {
-          agentId: lic.agentId,
-          stateCode: lic.stateCode,
-          licenseType: lic.licenseType,
-          expiryDate: lic.expiryDate?.toISOString() ?? null,
-          from: "active",
-          to: "expired",
-        },
-      });
+          await sp.insert(auditLogTable).values({
+            id: randomUUID(),
+            orgId: lic.orgId,
+            userId: "system",
+            userRole: null,
+            action: "license_auto_expired",
+            resourceType: "license",
+            resourceId: lic.licenseId,
+            changes: {
+              agentId: lic.agentId,
+              stateCode: lic.stateCode,
+              licenseType: lic.licenseType,
+              expiryDate: lic.expiryDate?.toISOString() ?? null,
+              from: "active",
+              to: "expired",
+            },
+          });
+          return true;
+        });
+      } catch (err) {
+        logger.warn({ err, licenseId: lic.licenseId }, "License lapse sweep: skipped license after error");
+        continue;
+      }
+      if (!flipped) continue;
+      expiredCount++;
 
       if (!(ALERTABLE_AGENT_STATUSES as readonly string[]).includes(lic.agentStatus)) continue;
       const list = toNotify.get(lic.orgId) ?? [];
