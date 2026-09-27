@@ -226,6 +226,73 @@ describe("EnrollHere policy events", () => {
       .where(eq(enrollmentApplicationsTable.externalPolicyId, "policy-late-code"))).toHaveLength(1);
   });
 
+  it("dedupes a re-send whose only change is the activity timestamp", async () => {
+    const resend = sample();
+    resend.policy.lastActivityAt = { date: "2030-01-01T00:00:00.000Z", timestamp: 1893456000000 };
+    expect((await post(resend)).body).toEqual({ ok: true, duplicate: true });
+  });
+
+  it("a partial update keeps the plan details an earlier delivery set", async () => {
+    const partial = sample();
+    partial.event = "PE_POLICY_UPDATED";
+    partial.policy.manualStatus = "POL_SUBMITTED";
+    partial.policy.enrollment.plan = {};
+    delete partial.policy.enrollment.carrier;
+    partial.policy.enrollment.details = {};
+    delete partial.policy.effectiveDate;
+    delete partial.policy.agent;
+    delete partial.policy.enrollment.agent;
+    const res = await post(partial);
+    expect(res.status).toBe(200);
+    const [a] = await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, applicationId));
+    expect(a).toMatchObject({
+      policyStatus: "POL_SUBMITTED", planName: "Sample Dual Integrated (HMO D-SNP)", carrierName: "Carrier EH",
+      effectiveDate: "2026-01-01", agentEmail: "chris.smith@sampleagency.com",
+    });
+  });
+
+  it("keeps one enrollment when a later delivery adds the carrier", async () => {
+    const early = sample();
+    early.policy.id = "policy-carrier-later";
+    early.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF55550000"];
+    delete early.policy.identifiers.bySource.sunfire;
+    Object.assign(early.policy.enrollment.consumer, { firstName: "Robin", email: "robin@example.com", phone: "+15552220000" });
+    early.policy.lead = undefined;
+    const withCarrier = JSON.parse(JSON.stringify(early));
+    delete early.policy.enrollment.carrier;
+    const first = await post(early);
+    expect(first.status).toBe(200);
+    withCarrier.event = "PE_POLICY_UPDATED";
+    const second = await post(withCarrier);
+    expect(second.body).toMatchObject({ contactId: first.body.contactId, enrollmentId: first.body.enrollmentId });
+    const rows = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.contactId, first.body.contactId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.carrierId).not.toBeNull();
+  });
+
+  it("records only the client address in the view audit", async () => {
+    await request(app).get(`/api/applications/${applicationId}/full`).set(withAuth(admin.id))
+      .set("X-Forwarded-For", "203.0.113.1, 10.0.0.1");
+    const audits = await tdb.select().from(auditLogTable)
+      .where(and(eq(auditLogTable.resourceId, applicationId), eq(auditLogTable.action, "view_full_application")));
+    expect(audits.at(-1)!.ipAddress).not.toContain(",");
+  });
+
+  it("a failed decrypt writes no view audit", async () => {
+    const [v] = await tdb.select().from(enrollmentApplicationVersionsTable)
+      .where(and(eq(enrollmentApplicationVersionsTable.applicationId, applicationId), eq(enrollmentApplicationVersionsTable.version, 1)));
+    const saved = v!.payloadEncrypted;
+    await tdb.update(enrollmentApplicationVersionsTable).set({ payloadEncrypted: Buffer.alloc(32) }).where(eq(enrollmentApplicationVersionsTable.id, v!.id));
+    const before = await tdb.select().from(auditLogTable)
+      .where(and(eq(auditLogTable.resourceId, applicationId), eq(auditLogTable.action, "view_full_application")));
+    const res = await request(app).get(`/api/applications/${applicationId}/full?version=1`).set(withAuth(admin.id));
+    expect(res.status).toBe(500);
+    const after = await tdb.select().from(auditLogTable)
+      .where(and(eq(auditLogTable.resourceId, applicationId), eq(auditLogTable.action, "view_full_application")));
+    expect(after).toHaveLength(before.length);
+    await tdb.update(enrollmentApplicationVersionsTable).set({ payloadEncrypted: saved }).where(eq(enrollmentApplicationVersionsTable.id, v!.id));
+  });
+
   it("a deleted contact's application can't be opened, and a purge removes it", async () => {
     await tdb.update(contactsTable).set({ deletedAt: new Date() }).where(eq(contactsTable.id, contactId));
     const res = await request(app).get(`/api/applications/${applicationId}/full`).set(withAuth(admin.id));

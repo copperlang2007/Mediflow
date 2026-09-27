@@ -145,13 +145,19 @@ function topLevelScalars(body: Record<string, unknown>): Record<string, string> 
   return out;
 }
 
+/**
+ * Policy events also carry per-emit bookkeeping (`lastActivityAt`, `updatedAt`)
+ * that moves on a re-send without the policy itself changing.
+ */
+const POLICY_VOLATILE_KEYS = new Set([...VOLATILE_KEYS, "last_activity_at", "updated_at"]);
+
 /** The body with delivery metadata removed at every depth (it changes on retry). */
-function stableForHash(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stableForHash);
+function stableForHash(value: unknown, volatile: Set<string> = VOLATILE_KEYS): unknown {
+  if (Array.isArray(value)) return value.map((v) => stableForHash(v, volatile));
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-      .filter(([k]) => !VOLATILE_KEYS.has(normalizeKey(k)))
-      .map(([k, v]) => [k, stableForHash(v)]));
+      .filter(([k]) => !volatile.has(normalizeKey(k)))
+      .map(([k, v]) => [k, stableForHash(v, volatile)]));
   }
   return value;
 }
@@ -351,8 +357,8 @@ router.post(
 );
 
 /** Content hash of the body minus delivery metadata: the idempotency key. */
-function bodyHash(body: Record<string, unknown>): string {
-  return `sha256:${crypto.createHash("sha256").update(canonicalJson(stableForHash(body) as never)).digest("hex")}`;
+function bodyHash(body: Record<string, unknown>, volatile: Set<string> = VOLATILE_KEYS): string {
+  return `sha256:${crypto.createHash("sha256").update(canonicalJson(stableForHash(body, volatile) as never)).digest("hex")}`;
 }
 
 async function handlePolicyEvent(req: RawBodyRequest, res: Response, orgId: string): Promise<void> {
@@ -361,7 +367,7 @@ async function handlePolicyEvent(req: RawBodyRequest, res: Response, orgId: stri
   const keys = payloadKeyPaths(body);
   // A policy event has no per-delivery id (its top-level id is the policy's),
   // so the content hash is the key: a retry dedupes, an update is new.
-  const externalId = bodyHash(body);
+  const externalId = bodyHash(body, POLICY_VOLATILE_KEYS);
 
   const interpreted = interpretPayloadContact(parsed.contactFlat);
   const contact = interpreted.contact;

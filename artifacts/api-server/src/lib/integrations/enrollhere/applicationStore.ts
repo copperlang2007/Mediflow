@@ -41,9 +41,28 @@ export async function upsertPolicyEnrollment(
   p: ParsedPolicyEvent,
 ): Promise<string | null> {
   if (!p.planType || !p.effectiveDate) return null;
-  const carrierId = p.carrierName ? await resolveCarrier(tx, orgId, p.carrierName, new Map(), []) : null;
+  let carrierId = p.carrierName ? await resolveCarrier(tx, orgId, p.carrierName, new Map(), []) : null;
   const { status, effectuated } = mapPolicyStatus(p.policyStatus);
   const planYear = Number(p.effectiveDate.slice(0, 4));
+
+  // The carrier is part of the enrollment key, so a delivery that gains or
+  // loses it would otherwise start a second row for the same policy.
+  const sameSlot = and(
+    eq(enrollmentsTable.orgId, orgId),
+    eq(enrollmentsTable.contactId, contactId),
+    eq(enrollmentsTable.planYear, planYear),
+    eq(enrollmentsTable.planType, p.planType),
+  );
+  const existing = await tx.select({ id: enrollmentsTable.id, carrierId: enrollmentsTable.carrierId })
+    .from(enrollmentsTable).where(sameSlot);
+  if (!carrierId && existing.length === 1) {
+    carrierId = existing[0]!.carrierId; // lands on the one row already there
+  } else if (carrierId && !existing.some((e) => e.carrierId === carrierId)) {
+    const carrierless = existing.find((e) => e.carrierId === null);
+    if (carrierless) {
+      await tx.update(enrollmentsTable).set({ carrierId }).where(eq(enrollmentsTable.id, carrierless.id));
+    }
+  }
   const [row] = await tx.insert(enrollmentsTable).values({
     id: randomUUID(),
     orgId,
@@ -127,11 +146,39 @@ export async function storeApplication(
     submittedAt: p.submittedAt,
     agentEmail: p.agentEmail,
     agentNpn: p.agentNpn,
-    // The latest payload is authoritative: an update without a number clears
-    // it rather than leaving a stale one readable.
     medicareIdEncrypted: mbi?.encrypted ?? null,
     medicareIdHash: mbi?.hash ?? null,
     medicaidNumberEncrypted: medicaid,
+  };
+  const t = enrollmentApplicationsTable;
+  const keep = (col: typeof t.carrierName | typeof t.planId | typeof t.planName | typeof t.planType | typeof t.snpType
+    | typeof t.policyStatus | typeof t.effectiveDate | typeof t.signatureDate | typeof t.submittedAt
+    | typeof t.agentEmail | typeof t.agentNpn | typeof t.confirmationCode | typeof t.externalPolicyId) =>
+    sql`coalesce(excluded.${sql.identifier(col.name)}, ${col})`;
+  const onUpdate = {
+    lastEventType: p.eventType,
+    // A partial update (status only) must not blank what an earlier delivery set.
+    confirmationCode: keep(t.confirmationCode),
+    externalPolicyId: keep(t.externalPolicyId),
+    carrierName: keep(t.carrierName),
+    planId: keep(t.planId),
+    planName: keep(t.planName),
+    planType: keep(t.planType),
+    snpType: keep(t.snpType),
+    policyStatus: keep(t.policyStatus),
+    effectiveDate: keep(t.effectiveDate),
+    signatureDate: keep(t.signatureDate),
+    submittedAt: keep(t.submittedAt),
+    agentEmail: keep(t.agentEmail),
+    agentNpn: keep(t.agentNpn),
+    // Identifiers follow the latest payload that describes the person: an
+    // update that carries the person without a number clears it, so a stale
+    // one can't stay readable. A payload with no person leaves them alone.
+    ...(p.personPresent ? {
+      medicareIdEncrypted: promoted.medicareIdEncrypted,
+      medicareIdHash: promoted.medicareIdHash,
+      medicaidNumberEncrypted: promoted.medicaidNumberEncrypted,
+    } : {}),
   };
 
   const [app] = await tx.insert(enrollmentApplicationsTable).values({
@@ -145,7 +192,7 @@ export async function storeApplication(
   }).onConflictDoUpdate({
     target: [enrollmentApplicationsTable.orgId, enrollmentApplicationsTable.source, enrollmentApplicationsTable.applicationKey],
     set: {
-      ...promoted,
+      ...onUpdate,
       contactId: sql`coalesce(excluded.contact_id, ${enrollmentApplicationsTable.contactId})`,
       enrollmentId: sql`coalesce(excluded.enrollment_id, ${enrollmentApplicationsTable.enrollmentId})`,
     },

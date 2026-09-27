@@ -96,7 +96,11 @@ router.get(
       .where(and(eq(enrollmentApplicationVersionsTable.applicationId, id), eq(enrollmentApplicationVersionsTable.version, version))).limit(1);
     if (!row) { res.status(404).json({ error: "Version not found" }); return; }
 
-    // Audit first. No audit row, no data.
+    // Decrypt before auditing so a failed decrypt (nothing disclosed) leaves
+    // no view record; the audit row is still written before any data is sent.
+    const payload = JSON.parse(decryptPii(row.payloadEncrypted)) as Record<string, unknown>;
+
+    // No audit row, no data.
     await db.insert(auditLogTable).values({
       id: randomUUID(),
       orgId: authReq.orgId,
@@ -106,7 +110,7 @@ router.get(
       resourceType: "enrollment_application",
       resourceId: id,
       changes: { version, contactId: app.contactId },
-      ipAddress: (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || null,
+      ipAddress: req.ip ?? null, // the client address (trust proxy), not the whole forwarding chain
       userAgent: req.headers["user-agent"] || null,
     });
 
@@ -120,7 +124,6 @@ router.get(
 
     // Identifiers come from the selected version's own payload, so an older
     // version shows the numbers it was received with, not today's.
-    const payload = JSON.parse(decryptPii(row.payloadEncrypted)) as Record<string, unknown>;
     const ids = isPolicyEvent(payload) ? parsePolicyEvent(payload) : null;
 
     res.set("Cache-Control", "no-store");
