@@ -351,6 +351,20 @@
       "when": 1790900000000,
       "tag": "0049_schema_drift_renewals",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791100000000,
+      "tag": "0051_appointments",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1791200000000,
+      "tag": "0052_org_branding",
+      "breakpoints": true
     }
   ]
 }

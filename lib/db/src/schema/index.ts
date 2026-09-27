@@ -23,3 +23,6 @@ export * from "./billing";
 export * from "./enrollments";
 export * from "./invitations";
 export * from "./integrations";
+// --- stage2/calendar-branding ---
+export * from "./appointments";
+export * from "./branding";
