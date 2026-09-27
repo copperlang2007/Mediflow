@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, gte, lte, sql } from "drizzle-orm";
+import { eq, and, gte, lte, sql, inArray } from "drizzle-orm";
 import { db, auditLogTable, usersTable } from "@workspace/db";
 import {
   requireAuth,
@@ -7,12 +7,14 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
+
 import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const router: IRouter = Router();
 
 // Audit log reads are themselves audited — full access traceability.
 router.use(routerAuditMiddleware(router, "audit_log", undefined, { includeReads: true }));
+
 
 router.get(
   "/audit-log",
@@ -58,13 +60,15 @@ router.get(
         .where(and(...conditions)),
     ]);
 
-    const userIds = [...new Set(entries.map((e) => e.userId).filter(Boolean))];
+    const userIds = [
+      ...new Set(entries.map((e) => e.userId).filter((id): id is string => !!id)),
+    ];
     const users =
       userIds.length > 0
         ? await db
             .select({ id: usersTable.id, fullName: usersTable.fullName })
             .from(usersTable)
-            .where(sql`${usersTable.id} = ANY(${userIds})`)
+            .where(inArray(usersTable.id, userIds))
         : [];
 
     const userMap = new Map(users.map((u) => [u.id, u.fullName]));

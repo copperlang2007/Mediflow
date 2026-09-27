@@ -34,7 +34,7 @@ import type {
   AutomationRule,
   AutomationRuleListResponse,
   AutomationRuleLog,
-  BaaControl,
+  BaaChecklist,
   BulkAssignTasksFromTemplateBody,
   BulkAssignTasksFromTemplateResponse,
   BulkContactAction200,
@@ -16924,8 +16924,8 @@ export const getGetBaaChecklistUrl = () => {
  */
 export const getBaaChecklist = async (
   options?: Parameters<typeof customFetch>[1],
-): Promise<BaaControl[]> => {
-  return customFetch<BaaControl[]>(getGetBaaChecklistUrl(), {
+): Promise<BaaChecklist> => {
+  return customFetch<BaaChecklist>(getGetBaaChecklistUrl(), {
     ...options,
     method: "GET",
   });

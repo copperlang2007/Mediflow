@@ -28,8 +28,7 @@ vi.mock("@clerk/express", clerkF);
 vi.mock("../../lib/jobs", jobsF);
 
 import { randomUUID } from "node:crypto";
-import { retentionFlagsTable } from "@workspace/db/schema";
-
+import { activitiesTable, retentionFlagsTable } from "@workspace/db/schema";
 import { bootTestDb, shutdownTestDb, withAuth } from "../helpers/testApp";
 import { seedOrg, seedUser, seedContact } from "../helpers/testDb";
 import type { TestDb } from "../helpers/testDb";
@@ -38,14 +37,15 @@ import type { Express } from "express";
 let app: Express;
 let request: typeof import("supertest");
 let testDb: TestDb;
-
 let org: { id: string };
+let otherOrg: { id: string };
 let admin: { id: string };
 let soonId: string;
+const DAY = 86_400_000;
 
 /** A DOB `daysFromNow` days ahead of today (month/day), born in 1950. */
 function dobInDays(daysFromNow: number): Date {
-  const d = new Date(Date.now() + daysFromNow * 86_400_000);
+  const d = new Date(Date.now() + daysFromNow * DAY);
   return new Date(Date.UTC(1950, d.getUTCMonth(), d.getUTCDate()));
 }
 
@@ -56,29 +56,42 @@ beforeAll(async () => {
   request = ((await import("supertest")) as any).default;
 
   org = await seedOrg(testDb, { id: "retention-summary-org" });
+  otherOrg = await seedOrg(testDb);
   admin = await seedUser(testDb, { orgId: org.id, role: "agency_admin" });
 
-  // Birthday comfortably inside the 30-day window (avoids day-boundary edges).
   const soon = await seedContact(testDb, {
     orgId: org.id,
     firstName: "Soon",
-    status: "enrolled",
     dob: dobInDays(10),
   });
   soonId = soon.id;
-  // Birthday well outside the window.
   await seedContact(testDb, {
     orgId: org.id,
     firstName: "Later",
-    status: "enrolled",
     dob: dobInDays(120),
   });
-  await testDb.insert(retentionFlagsTable).values({
-    id: `rf-${randomUUID()}`,
+
+  // Enrolled, no recent activity -> at risk.
+  const quiet = await seedContact(testDb, { orgId: org.id, status: "enrolled" });
+  // Enrolled with recent activity -> not at risk.
+  const active = await seedContact(testDb, { orgId: org.id, status: "enrolled" });
+  await testDb.insert(activitiesTable).values({
+    id: `act-${randomUUID()}`,
     orgId: org.id,
-    contactId: soon.id,
+    contactId: active.id,
+    type: "call_log",
+    createdAt: new Date(Date.now() - 2 * DAY),
+  });
+
+  await testDb.insert(retentionFlagsTable).values({
+    id: `flag-${randomUUID()}`,
+    orgId: org.id,
+    contactId: quiet.id,
     flagType: "at_risk",
   });
+
+  // Another org's data must not leak into the counts.
+  await seedContact(testDb, { orgId: otherOrg.id, status: "enrolled", dob: dobInDays(10) });
 });
 
 afterAll(async () => {
@@ -86,15 +99,16 @@ afterAll(async () => {
 });
 
 describe("GET /api/retention/summary", () => {
-  it("returns 200 with numeric counts", async () => {
-    const res = await request(app).get("/api/retention/summary").set(withAuth(admin.id));
+  it("returns org-scoped badge counts with numeric fields", async () => {
+    const res = await request(app)
+      .get("/api/retention/summary")
+      .set(withAuth(admin.id));
     expect(res.status).toBe(200);
     expect(typeof res.body.birthdaysInNext30Days).toBe("number");
     expect(typeof res.body.atRiskContacts).toBe("number");
     expect(typeof res.body.openFlags).toBe("number");
     expect(res.body.birthdaysInNext30Days).toBe(1);
-    // Both contacts are enrolled with no activity in the last 60 days.
-    expect(res.body.atRiskContacts).toBe(2);
+    expect(res.body.atRiskContacts).toBe(1);
     expect(res.body.openFlags).toBe(1);
   });
 });

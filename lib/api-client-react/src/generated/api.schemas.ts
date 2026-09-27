@@ -2248,17 +2248,34 @@ export type BaaControlStatus =
   (typeof BaaControlStatus)[keyof typeof BaaControlStatus];
 
 export const BaaControlStatus = {
-  implemented: "implemented",
+  pass: "pass",
+  warn: "warn",
   partial: "partial",
-  not_implemented: "not_implemented",
+  fail: "fail",
 } as const;
 
 export interface BaaControl {
   id: string;
-  category: string;
-  control: string;
+  label: string;
   status: BaaControlStatus;
-  notes?: string;
+  note?: string;
+  evidenceUrl?: string;
+}
+
+export type BaaChecklistOverall =
+  (typeof BaaChecklistOverall)[keyof typeof BaaChecklistOverall];
+
+export const BaaChecklistOverall = {
+  pass: "pass",
+  warn: "warn",
+  partial: "partial",
+  fail: "fail",
+} as const;
+
+export interface BaaChecklist {
+  controls: BaaControl[];
+  overall: BaaChecklistOverall;
+  generatedAt: string;
 }
 
 export type ImportUploadResponseSampleRowsItem = { [key: string]: unknown };

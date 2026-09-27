@@ -3732,13 +3732,11 @@ paths:
       summary: HIPAA BAA readiness checklist
       responses:
         "200":
-          description: BAA controls list
+          description: BAA controls, each computed live from DB state, plus an overall verdict
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/BaaControl"
+                $ref: "#/components/schemas/BaaChecklist"
         "401":
           description: Unauthorized
           content:
@@ -7593,13 +7591,26 @@ components:
       type: object
       properties:
         id: { type: string }
-        category: { type: string }
-        control: { type: string }
+        label: { type: string }
         status:
           type: string
-          enum: [implemented, partial, not_implemented]
-        notes: { type: string }
-      required: [id, category, control, status]
+          enum: [pass, warn, partial, fail]
+        note: { type: string }
+        evidenceUrl: { type: string }
+      required: [id, label, status]
+
+    BaaChecklist:
+      type: object
+      properties:
+        controls:
+          type: array
+          items:
+            $ref: "#/components/schemas/BaaControl"
+        overall:
+          type: string
+          enum: [pass, warn, partial, fail]
+        generatedAt: { type: string, format: date-time }
+      required: [controls, overall, generatedAt]
 
     ImportUploadResponse:
       type: object

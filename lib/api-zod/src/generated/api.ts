@@ -4919,14 +4919,19 @@ export const UpdateDataRetentionPolicyResponse = zod.object({
 /**
  * @summary HIPAA BAA readiness checklist
  */
-export const GetBaaChecklistResponseItem = zod.object({
-  id: zod.string(),
-  category: zod.string(),
-  control: zod.string(),
-  status: zod.enum(["implemented", "partial", "not_implemented"]),
-  notes: zod.string().optional(),
+export const GetBaaChecklistResponse = zod.object({
+  controls: zod.array(
+    zod.object({
+      id: zod.string(),
+      label: zod.string(),
+      status: zod.enum(["pass", "warn", "partial", "fail"]),
+      note: zod.string().optional(),
+      evidenceUrl: zod.string().optional(),
+    }),
+  ),
+  overall: zod.enum(["pass", "warn", "partial", "fail"]),
+  generatedAt: zod.coerce.date(),
 });
-export const GetBaaChecklistResponse = zod.array(GetBaaChecklistResponseItem);
 
 /**
  * @summary Generate SOC 2 evidence PDF report
