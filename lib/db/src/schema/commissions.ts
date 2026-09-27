@@ -130,6 +130,8 @@ export const commissionStatementsTable = pgTable(
     storageKey: text("storage_key"),
     status: text("status").notNull(),
     uploadedByUserId: text("uploaded_by_user_id"),
+    /** Set by the reconcile worker each time the statement is reconciled (0055). */
+    reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

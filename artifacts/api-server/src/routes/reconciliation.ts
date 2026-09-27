@@ -29,6 +29,12 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 
+import {
+  VARIANCE_TOLERANCE,
+  displayStatementStatus,
+  statementVariance,
+} from "../lib/commissions/statementStatus";
+
 const router: IRouter = Router();
 
 const STATEMENT_LIMIT = 50;
@@ -75,6 +81,7 @@ router.get(
             periodStart: commissionStatementsTable.periodStart,
             periodEnd: commissionStatementsTable.periodEnd,
             status: commissionStatementsTable.status,
+            reconciledAt: commissionStatementsTable.reconciledAt,
             totalAmount: commissionStatementsTable.totalAmount,
             lineItemCount: itemAgg.lineItemCount,
             unmatchedCount: itemAgg.unmatchedCount,
@@ -108,6 +115,17 @@ router.get(
             pending: sql<number>`count(*) FILTER (WHERE ${commissionStatementsTable.status} = 'pending')::int`,
             parsed: sql<number>`count(*) FILTER (WHERE ${commissionStatementsTable.status} = 'parsed')::int`,
             reconciled: sql<number>`count(*) FILTER (WHERE ${commissionStatementsTable.status} = 'reconciled')::int`,
+            // Reconciled statements whose parsed lines don't add up to the
+            // carrier total. Subtracted from `reconciled` below so the page
+            // never counts them as cleanly reconciled.
+            // Column refs are written table-qualified on purpose: drizzle
+            // renders unqualified names in a single-table select, and an
+            // unqualified "id" inside the subquery would bind to li.id.
+            reconciledWithVariance: sql<number>`count(*) FILTER (WHERE commission_statements.status = 'reconciled' AND commission_statements.total_amount IS NOT NULL AND EXISTS (
+              SELECT 1 FROM commission_line_items li
+              WHERE li.statement_id = commission_statements.id AND li.org_id = ${orgId}
+              HAVING count(*) > 0 AND abs(commission_statements.total_amount - coalesce(sum(li.commission_amount), 0)) >= ${VARIANCE_TOLERANCE}
+            ))::int`,
           })
           .from(commissionStatementsTable)
           .where(eq(commissionStatementsTable.orgId, orgId)),
@@ -180,9 +198,9 @@ router.get(
       const lineItemCount = Number(s.lineItemCount ?? 0);
       const lineItemTotal = money(s.lineItemTotal);
       // Variance only means something when the carrier stated a total AND
-      // we parsed at least one line to compare it with.
-      const variance =
-        s.totalAmount != null && lineItemCount > 0 ? money(Number(s.totalAmount) - lineItemTotal) : null;
+      // we parsed at least one line to compare it with. Shared with the
+      // statement list/detail (lib/commissions/statementStatus.ts).
+      const variance = statementVariance(s.totalAmount, lineItemTotal, lineItemCount);
       return {
         id: s.id,
         carrierName: s.carrierName ?? null,
@@ -190,6 +208,8 @@ router.get(
         periodStart: s.periodStart,
         periodEnd: s.periodEnd,
         status: s.status,
+        displayStatus: displayStatementStatus(s.status, variance),
+        reconciledAt: s.reconciledAt ?? null,
         totalAmount: s.totalAmount != null ? money(s.totalAmount) : null,
         lineItemCount,
         unmatchedCount: Number(s.unmatchedCount ?? 0),
@@ -207,7 +227,10 @@ router.get(
         statements: Number(statementTotals?.total ?? 0),
         statementsPending: Number(statementTotals?.pending ?? 0),
         statementsParsed: Number(statementTotals?.parsed ?? 0),
-        statementsReconciled: Number(statementTotals?.reconciled ?? 0),
+        // Cleanly reconciled only; ones with a variance are counted apart.
+        statementsReconciled:
+          Number(statementTotals?.reconciled ?? 0) - Number(statementTotals?.reconciledWithVariance ?? 0),
+        statementsReconciledWithVariance: Number(statementTotals?.reconciledWithVariance ?? 0),
         lineItems: Number(itemTotals?.total ?? 0),
         matched: Number(itemTotals?.matched ?? 0),
         manual: Number(itemTotals?.manual ?? 0),
