@@ -9,3 +9,4 @@ export { KpiCard, MiniStat, type KpiColor, type KpiTrend } from "./KpiCard";
 export { SectionCard } from "./SectionCard";
 export { StatusPill, statusTone, humanizeStatus, type StatusTone } from "./StatusPill";
 export { EmptyState } from "./EmptyState";
+export { SensitiveValue, maskSensitive, isAlreadyMasked, type SensitiveKind } from "./SensitiveValue";

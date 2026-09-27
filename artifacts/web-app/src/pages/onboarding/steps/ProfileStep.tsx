@@ -64,16 +64,14 @@ export const __ProfileFormSchema = ProfileFormSchema;
 
 type FormState = z.infer<typeof ProfileFormSchema>;
 
-const MASKED_SSN = "***-**-****";
-const MASKED_EIN = "**-*******";
-
 function profileToForm(p: AgentContractingProfile | null): FormState {
   return {
-    // If the server returned the masked sentinel we DON'T pre-populate the
-    // input — that would re-display masked text as a value the user might
-    // accidentally submit. The task spec is explicit: SSN/EIN must not be
-    // re-rendered after submission.
-    ssn: p?.ssn && p.ssn !== MASKED_SSN ? p.ssn : "",
+    // SSN/EIN are NEVER pre-populated — not the masked sentinel (which the
+    // user might accidentally submit) and not the plaintext privileged roles
+    // receive (which would sit in a visible input). The placeholder says
+    // "On file — leave blank to keep"; SSN/EIN must not be re-rendered after
+    // submission.
+    ssn: "",
     dob: p?.dob ?? "",
     homeAddressLine1: p?.homeAddressLine1 ?? "",
     homeAddressLine2: p?.homeAddressLine2 ?? "",
@@ -90,7 +88,7 @@ function profileToForm(p: AgentContractingProfile | null): FormState {
     email: p?.email ?? "",
     entityType: (p?.entityType ?? "") as FormState["entityType"],
     businessName: p?.businessName ?? "",
-    businessEin: p?.ein && p.ein !== MASKED_EIN ? p.ein : "",
+    businessEin: "",
     eAndOCarrier: p?.eAndOCarrier ?? "",
     eAndOPolicyNumber: p?.eAndOPolicyNumber ?? "",
     eAndOExpiresOn: p?.eAndOExpiresOn ?? "",

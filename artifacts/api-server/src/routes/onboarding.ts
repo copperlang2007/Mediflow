@@ -19,6 +19,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import {
   db,
+  auditLogTable,
   agentsTable,
   carriersTable,
   agentOnboardingRunsTable,
@@ -64,6 +65,7 @@ import {
 } from "../middlewares/requireAuth";
 import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
 import { safeLimit, safeOffset } from "../lib/listGuards";
+import { logger } from "../lib/logger";
 import { PHI_PRIVILEGED_ROLES, type Role } from "../lib/permissions";
 import {
   canTransitionOnboarding,
@@ -140,6 +142,55 @@ function serializeProfile(
     ein,
     dob: privileged ? (rest.dob ?? null) : null,
   };
+}
+
+/** Audit action for a response that carried plaintext SSN/EIN/DOB. */
+export const CONTRACTING_PII_DISCLOSED = "contracting_pii_disclosed";
+
+/**
+ * serializeProfile + an audit_log row whenever the response carries any
+ * plaintext SSN / EIN / DOB (privileged roles only — see PHI_PRIVILEGED_ROLES).
+ *
+ * The router-level auditMiddleware skips reads (`includeReads: false`), so
+ * before this a super_admin opening /admin-onboarding/:agentId received the
+ * full SSN with no trace. The row records WHO saw WHICH fields for WHICH
+ * agent — never the values themselves.
+ *
+ * Fails closed: if the audit row cannot be written, the caller gets the
+ * masked serialization instead of unaudited plaintext.
+ */
+async function serializeProfileAudited(
+  req: Request,
+  profile: AgentContractingProfile,
+): Promise<ReturnType<typeof serializeProfile>> {
+  const authReq = req as AuthenticatedRequest;
+  const out = serializeProfile(profile, authReq.userRole);
+  if (!PHI_PRIVILEGED_ROLES.has(authReq.userRole as Role)) return out;
+
+  const fields: string[] = [];
+  if (out.ssn != null) fields.push("ssn");
+  if (out.ein != null) fields.push("ein");
+  if (out.dob != null) fields.push("dob");
+  if (fields.length === 0) return out;
+
+  try {
+    await db.insert(auditLogTable).values({
+      id: randomUUID(),
+      orgId: authReq.orgId,
+      userId: authReq.userId ?? null,
+      userRole: authReq.userRole ?? null,
+      action: CONTRACTING_PII_DISCLOSED,
+      resourceType: "agent_contracting_profile",
+      resourceId: profile.agentId,
+      ipAddress: req.ip ?? null,
+      userAgent: req.headers["user-agent"] ?? null,
+      changes: { fields, method: req.method, path: req.path },
+    });
+    return out;
+  } catch (err) {
+    logger.error({ err, agentId: profile.agentId }, "contracting PII disclosure audit failed — masking response");
+    return serializeProfile(profile, "__unprivileged__");
+  }
 }
 
 function formatSsn(digits: string): string {
@@ -389,7 +440,7 @@ router.post(
       await createCompleteProfileTask(existing, agent);
       res.status(200).json({
         run: existing,
-        profile: profile ? serializeProfile(profile, authReq.userRole) : null,
+        profile: profile ? await serializeProfileAudited(req, profile) : null,
         idempotent: true,
       });
       return;
@@ -438,7 +489,7 @@ router.post(
 
     res.status(201).json({
       run,
-      profile: profile ? serializeProfile(profile, authReq.userRole) : null,
+      profile: profile ? await serializeProfileAudited(req, profile) : null,
       idempotent: false,
     });
   },
@@ -491,7 +542,7 @@ router.get(
 
     res.json({
       run,
-      profile: profile ? serializeProfile(profile, authReq.userRole) : null,
+      profile: profile ? await serializeProfileAudited(req, profile) : null,
       carrierRequests,
     });
   },
@@ -621,7 +672,7 @@ router.patch(
       }
     }
 
-    res.json({ profile: serializeProfile(updated, authReq.userRole) });
+    res.json({ profile: await serializeProfileAudited(req, updated) });
   },
 );
 
