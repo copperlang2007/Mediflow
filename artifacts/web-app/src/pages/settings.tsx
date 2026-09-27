@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Settings, User, Building2, Shield, CalendarClock } from "lucide-react";
+import { Settings, User, Building2, Shield, CalendarClock, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -264,6 +264,26 @@ export default function SettingsPage() {
                 <span className="text-muted-foreground">Created</span>
                 <span>{new Date(org.createdAt).toLocaleDateString()}</span>
               </div>
+              {me && (me.role === "super_admin" || me.role === "agency_admin") && (
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="text-muted-foreground shrink-0">Agency ID</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <code className="truncate text-xs">{org.id}</code>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2"
+                      onClick={() => {
+                        navigator.clipboard.writeText(org.id)
+                          .then(() => toast.success("Agency ID copied"))
+                          .catch(() => toast.error("Could not copy. Select the ID and copy it instead."));
+                      }}
+                    >
+                      <Copy className="h-3.5 w-3.5 mr-1" /> Copy
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : null}
         </CardContent>
