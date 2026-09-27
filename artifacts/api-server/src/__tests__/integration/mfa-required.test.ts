@@ -122,6 +122,7 @@ describe("MFA required for admin roles (HIPAA technical safeguard)", () => {
     const { db } = await bootTestDb();
     const other = await seedOrg(db, { id: "mfa-org-other" });
     const superNoMfa = await seedUser(db, { orgId: org.id, role: "super_admin" });
+    const previousMfaRequired = process.env.MFA_REQUIRED;
     process.env.MFA_REQUIRED = "false";
     try {
       const denied = await request(app)
@@ -136,7 +137,11 @@ describe("MFA required for admin roles (HIPAA technical safeguard)", () => {
         .set("X-MediFlow-View-Org", other.id);
       expect(allowed.status).toBe(200);
     } finally {
-      process.env.MFA_REQUIRED = "true";
+      if (previousMfaRequired === undefined) {
+        delete process.env.MFA_REQUIRED;
+      } else {
+        process.env.MFA_REQUIRED = previousMfaRequired;
+      }
     }
   });
 
