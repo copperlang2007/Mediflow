@@ -46,6 +46,7 @@
 
 import { PgBoss, type Job, type Queue, type WorkHandler } from "pg-boss";
 import { logger } from "./logger";
+import type { ConsumerContext } from "./compliance/consumerOutreach";
 import { captureWorkerError } from "./sentry";
 import { jobEnqueueTotal, jobDeadLetterTotal } from "./metrics";
 
@@ -280,6 +281,13 @@ export interface SendScheduledEmailPayload {
   headers?: Record<string, string>;
   /** Display name for the From header (agency white-label email_from_name). */
   fromName?: string;
+  /**
+   * Set whenever the recipient is a contact (consumer). The job is then
+   * re-checked against opt-outs at send time and sent to the contact's current
+   * address; automated sends also get unsubscribe links. Omit for internal /
+   * system mail to staff.
+   */
+  consumer?: ConsumerContext;
 }
 
 /** `"Name <addr>"` using the configured sender address, or undefined for the default. */
@@ -296,6 +304,12 @@ export interface SendScheduledSmsPayload {
   body: string;
   agentId?: string;
   mediaUrl?: string[];
+  /**
+   * Set whenever the recipient is a contact (consumer). The job is then
+   * re-checked against STOP/DNC/quiet-hours at send time and sent to the
+   * contact's current phone. Omit for internal/system SMS.
+   */
+  consumer?: ConsumerContext;
 }
 
 export interface ReconcileCommissionStatementPayload extends Record<string, unknown> {

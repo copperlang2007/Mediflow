@@ -11,6 +11,7 @@
  * so this router is mounted above the Clerk-guarded /api router.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
+import rateLimit from "express-rate-limit";
 import { and, eq } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db, contactsTable, optOutsTable, auditLogTable } from "@workspace/db";
@@ -18,6 +19,14 @@ import { UNSUBSCRIBE_PATH, verifyUnsubscribeToken } from "../lib/compliance/unsu
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
+const unsubscribeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { forwardedHeader: false },
+  message: "Too many requests. Please try again in a minute.",
+});
 
 function page(title: string, body: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -43,7 +52,7 @@ const INVALID = page(
   "<h1>This unsubscribe link is not valid</h1><p>Reply to the email you received and ask to be removed, and we will take you off the list.</p>",
 );
 
-router.get(UNSUBSCRIBE_PATH, (req: Request, res: Response): void => {
+router.get(UNSUBSCRIBE_PATH, unsubscribeLimiter, (req: Request, res: Response): void => {
   const token = tokenFrom(req);
   if (!verifyUnsubscribeToken(token)) {
     res.status(400).type("html").send(INVALID);
@@ -58,7 +67,7 @@ router.get(UNSUBSCRIBE_PATH, (req: Request, res: Response): void => {
   );
 });
 
-router.post(UNSUBSCRIBE_PATH, async (req: Request, res: Response): Promise<void> => {
+router.post(UNSUBSCRIBE_PATH, unsubscribeLimiter, async (req: Request, res: Response): Promise<void> => {
   const claims = verifyUnsubscribeToken(tokenFrom(req));
   if (!claims) {
     res.status(400).type("html").send(INVALID);

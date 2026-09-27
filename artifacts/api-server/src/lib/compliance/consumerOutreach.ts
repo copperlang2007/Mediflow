@@ -78,14 +78,20 @@ async function loadContact(ctx: ConsumerContext) {
   return contact && !contact.deletedAt ? contact : null;
 }
 
-/** True when `phone` appears in the opt-out log for ANY org. */
-export async function isPhoneOptedOut(phone: string): Promise<boolean> {
+/** True when `phone` appears in the opt-out log for this org. */
+export async function isPhoneOptedOut(orgId: string, phone: string): Promise<boolean> {
   const key = phoneMatchKey(phone);
   if (!key) return false;
   const [row] = await db
     .select({ id: optOutsTable.id })
     .from(optOutsTable)
-    .where(and(eq(optOutsTable.channel, "sms"), sql`${phoneMatchKeySql(optOutsTable.phone)} = ${key}`))
+    .where(
+      and(
+        eq(optOutsTable.orgId, orgId),
+        eq(optOutsTable.channel, "sms"),
+        sql`${phoneMatchKeySql(optOutsTable.phone)} = ${key}`,
+      ),
+    )
     .limit(1);
   return Boolean(row);
 }
@@ -118,7 +124,7 @@ export async function evaluateConsumerSms(ctx: ConsumerContext, now: Date = new 
   const contact = await loadContact(ctx);
   if (!contact) return { action: "block", reason: "contact_not_found" };
   if (!contact.phone) return { action: "block", reason: "no_destination" };
-  if (contact.status === "do_not_contact" || contact.optOutSms || (await isPhoneOptedOut(contact.phone))) {
+  if (contact.status === "do_not_contact" || contact.optOutSms || (await isPhoneOptedOut(ctx.orgId, contact.phone))) {
     return { action: "block", reason: "opted_out" };
   }
   if (ctx.automated) {

@@ -284,7 +284,11 @@ router.patch(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const [existing] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
+    const [existing] = await db
+      .select({ id: contactsTable.id, tcpaConsentAt: contactsTable.tcpaConsentAt })
+      .from(contactsTable)
+      .where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt)))
+      .limit(1);
     if (!existing) { res.status(404).json({ error: "Contact not found" }); return; }
 
     const parsed = UpdateContactSchema.safeParse(req.body);
@@ -325,8 +329,11 @@ router.patch(
       updates.tcpaConsentAt = d.tcpaConsentAt ? new Date(d.tcpaConsentAt) : null;
       updates.tcpaConsentSource = d.tcpaConsentAt ? d.tcpaConsentSource ?? null : null;
     } else if (d.tcpaConsentSource !== undefined) {
-      res.status(400).json({ error: "Set tcpaConsentAt together with tcpaConsentSource" });
-      return;
+      if (!existing.tcpaConsentAt) {
+        res.status(400).json({ error: "Set tcpaConsentAt together with tcpaConsentSource" });
+        return;
+      }
+      updates.tcpaConsentSource = d.tcpaConsentSource ?? null;
     }
     if (d.county !== undefined) updates.county = d.county;
     if (d.stateCode !== undefined) updates.stateCode = d.stateCode;

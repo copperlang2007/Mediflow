@@ -17,6 +17,7 @@ import webhooksRouter from "./routes/webhooks";
 import stripeWebhookRouter from "./routes/stripeWebhook";
 import dialerEventsRouter from "./routes/dialerEvents";
 import queuePublicRouter from "./routes/queuePublic";
+import unsubscribeRouter from "./routes/unsubscribe";
 import enrollhereWebhookRouter from "./routes/enrollhereWebhook";
 import campaignsPublicRouter from "./routes/campaignsPublic";
 import { logger } from "./lib/logger";
