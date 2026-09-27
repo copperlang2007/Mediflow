@@ -6,7 +6,8 @@
  *
  * Action types must match ACTION_TYPES in routes/automations.ts:
  *   create_task | send_notification | send_email | send_sms |
- *   change_contact_status | enroll_sequence | change_deal_stage
+ *   change_contact_status | enroll_sequence | change_deal_stage |
+ *   create_appointment
  */
 
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -26,8 +27,15 @@ import {
   taskInstancesTable,
   usersTable,
   agentsTable,
+  appointmentsTable,
   type Contact,
 } from "@workspace/db";
+import {
+  APPOINTMENT_LOCATION_TYPES,
+  APPOINTMENT_TYPES,
+  insertAppointment,
+} from "../lib/appointments";
+import { resolveTimezone } from "../lib/dialer/preclearance";
 import { type RunAutomationRulesPayload, enqueue, JOB_NAMES } from "../lib/jobs";
 import { logger } from "../lib/logger";
 import { captureWorkerError } from "../lib/sentry";
@@ -48,7 +56,8 @@ interface AutomationAction {
     | "send_sms"
     | "change_contact_status"
     | "enroll_sequence"
-    | "change_deal_stage";
+    | "change_deal_stage"
+    | "create_appointment";
   config: Record<string, unknown>;
 }
 
@@ -409,12 +418,153 @@ async function executeAction(
       break;
     }
 
+    case "create_appointment": {
+      await createAppointmentAction(config, { orgId, resourceType, resourceId, context });
+      break;
+    }
+
     default: {
       const unhandled = (action as { type: string }).type;
       logger.warn({ actionType: unhandled }, "Unknown automation action type — skipped");
       break;
     }
   }
+}
+
+// ---- create_appointment (stage2/calendar-branding) ----
+
+/**
+ * UTC instant for wall-clock `hh:mm` on the calendar date `ymd` in `timeZone`.
+ * Two passes of offset correction make it DST-correct without a tz library.
+ */
+export function zonedWallTimeToUtc(ymd: string, hhmm: string, timeZone: string): Date {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const [hh, mm] = hhmm.split(":").map(Number);
+  const target = Date.UTC(y, m - 1, d, hh, mm);
+  let guess = target;
+  for (let i = 0; i < 2; i++) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date(guess));
+    const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+    const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") % 24, get("minute"));
+    guess += target - asUtc;
+  }
+  return new Date(guess);
+}
+
+/**
+ * Books an appointment from an automation rule.
+ *
+ * Config (all optional except where noted):
+ *   title            default "Follow-up appointment"
+ *   type             enrollment | review | renewal | consultation | other (default consultation)
+ *   status           confirmed | pending (default pending — a human confirms)
+ *   startsAt         explicit ISO date-time; otherwise:
+ *   startOffsetDays  days from now (default 1)
+ *   startTime        "HH:MM" wall-clock in the contact's timezone (default "10:00";
+ *                    UTC when the contact's state is unknown)
+ *   durationMinutes  5–720 (default 30)
+ *   locationType     office | phone | video | home (default phone)
+ *   agentId / contactId  default to the trigger's agent / contact, like create_task
+ *   notes            stored encrypted, like notes typed in the UI
+ */
+async function createAppointmentAction(
+  config: Record<string, unknown>,
+  {
+    orgId,
+    resourceType,
+    resourceId,
+    context,
+  }: { orgId: string; resourceType: string; resourceId: string; context: Record<string, unknown> },
+): Promise<void> {
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  const pick = <T extends string>(v: unknown, allowed: readonly T[], dflt: T): T =>
+    typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : dflt;
+
+  const contactId =
+    str(config.contactId) ??
+    str(context.contactId) ??
+    (resourceType === "contact" ? resourceId : undefined) ??
+    null;
+  const agentId =
+    str(config.agentId) ??
+    str(context.agentId) ??
+    str(context.assignedAgentId) ??
+    (resourceType === "agent" ? resourceId : undefined) ??
+    null;
+
+  let startsAt: Date | null = null;
+  const explicit = str(config.startsAt);
+  if (explicit && !Number.isNaN(Date.parse(explicit))) {
+    startsAt = new Date(explicit);
+  } else {
+    const offsetDays = Number(config.startOffsetDays ?? 1);
+    const days = Number.isFinite(offsetDays) ? Math.max(0, Math.min(365, offsetDays)) : 1;
+    const time = str(config.startTime) && /^\d{1,2}:\d{2}$/.test(str(config.startTime)!)
+      ? str(config.startTime)!
+      : "10:00";
+    let tz = "UTC";
+    if (contactId) {
+      const [c] = await db
+        .select({ stateCode: contactsTable.stateCode })
+        .from(contactsTable)
+        .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId)));
+      tz = resolveTimezone(c?.stateCode ?? undefined, undefined) ?? "UTC";
+    }
+    const day = new Date(Date.now() + days * 86_400_000);
+    const ymd = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(day);
+    startsAt = zonedWallTimeToUtc(ymd, time, tz);
+  }
+
+  const duration = Number(config.durationMinutes ?? 30);
+  const minutes = Number.isFinite(duration) ? Math.max(5, Math.min(720, duration)) : 30;
+  const endsAt = new Date(startsAt.getTime() + minutes * 60_000);
+  const title = str(config.title) ?? "Follow-up appointment";
+
+  // A re-delivered trigger must not double-book the same slot.
+  if (contactId) {
+    const [dupe] = await db
+      .select({ id: appointmentsTable.id })
+      .from(appointmentsTable)
+      .where(
+        and(
+          eq(appointmentsTable.orgId, orgId),
+          eq(appointmentsTable.contactId, contactId),
+          eq(appointmentsTable.startsAt, startsAt),
+          eq(appointmentsTable.title, title),
+        ),
+      )
+      .limit(1);
+    if (dupe) {
+      logger.info({ appointmentId: dupe.id }, "create_appointment skipped — identical appointment exists");
+      return;
+    }
+  }
+
+  await insertAppointment({
+    orgId,
+    title,
+    type: pick(config.type, APPOINTMENT_TYPES, "consultation"),
+    status: pick(config.status, ["confirmed", "pending"] as const, "pending"),
+    startsAt,
+    endsAt,
+    contactId,
+    agentId,
+    notes: str(config.notes) ?? null,
+    locationType: pick(config.locationType, APPOINTMENT_LOCATION_TYPES, "phone"),
+  });
 }
 
 // ---- Main worker ----

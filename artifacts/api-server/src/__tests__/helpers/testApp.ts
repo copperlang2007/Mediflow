@@ -180,6 +180,7 @@ export const jobsMockFactory = (): Record<string, unknown> => ({
     LEAD_CALLBACK_SWEEP: "lead-callback-sweep",
     AEP_RENEWAL_REVIEW: "aep-renewal-review",
     GHL_SYNC: "ghl-sync",
+    APPOINTMENT_REMINDERS: "appointment-reminders",
   },
   enqueue: async (name: string, data: unknown): Promise<string> => {
     (globalThis.__TEST_ENQUEUED__ ??= []).push({ name, data });
