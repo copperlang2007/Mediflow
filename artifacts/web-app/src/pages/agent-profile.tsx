@@ -5,6 +5,7 @@ import {
   useUpdateAgent,
   useOffboardAgent,
   useGetAgentOffboardingReport,
+  getGetAgentOffboardingReportQueryKey,
   getGetAgentQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -70,7 +71,18 @@ export default function AgentProfilePage() {
   const { data: agent, isLoading } = useGetAgent(agentId);
   const { mutateAsync: updateAgent } = useUpdateAgent();
   const { mutateAsync: offboard, isPending: offboarding } = useOffboardAgent();
-  const { data: offboardingReport } = useGetAgentOffboardingReport(agentId);
+  // The report only exists once offboarding has run (the worker files it as
+  // an "offboarding" document), and the endpoint 404s until then. Only ask
+  // for it on agents that are offboarding/offboarded, and treat a 404 as
+  // "not generated yet" rather than retrying.
+  const offboardingStarted = agent?.status === "offboarding" || agent?.status === "offboarded";
+  const { data: offboardingReport } = useGetAgentOffboardingReport(agentId, {
+    query: {
+      enabled: !!agentId && offboardingStarted,
+      retry: false,
+      queryKey: getGetAgentOffboardingReportQueryKey(agentId),
+    },
+  });
 
   const handleOffboard = async () => {
     try {

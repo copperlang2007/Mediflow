@@ -608,18 +608,35 @@ function SecurityConfigTab() {
 }
 
 // ─── BAA & SOC 2 Tab ──────────────────────────────────────────────────────────
-function BaaSoc2Tab() {
+const BAA_STATUS_LABEL: Record<BaaStatus, string> = {
+  pass: "Pass",
+  warn: "Needs review",
+  partial: "Partial",
+  fail: "Fail",
+};
+
+const BAA_STATUS_BADGE: Record<BaaStatus, string> = {
+  pass: "bg-green-100 text-green-800",
+  warn: "bg-yellow-100 text-yellow-800",
+  partial: "bg-yellow-100 text-yellow-800",
+  fail: "bg-red-100 text-red-800",
+};
+
+export function BaaSoc2Tab() {
   const { toast } = useToast();
   const [generating, setGenerating] = useState(false);
 
-  const { data: controls, isLoading } = useQuery({
+  // The endpoint returns `{ controls, overall, generatedAt }`, each control
+  // computed live from DB state with a pass/warn/partial/fail status.
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["admin", "baa-checklist"],
-    queryFn: () => apiFetch<BaaControl[]>("/api/admin/baa-checklist"),
+    queryFn: () => apiFetch<BaaChecklistResponse>("/api/admin/baa-checklist"),
   });
+  const controls = data?.controls ?? [];
 
-  const implemented = controls?.filter((c) => c.status === "implemented").length ?? 0;
-  const partial = controls?.filter((c) => c.status === "partial").length ?? 0;
-  const total = controls?.length ?? 0;
+  const passing = controls.filter((c) => c.status === "pass").length;
+  const attention = controls.filter((c) => c.status !== "pass").length;
+  const total = controls.length;
 
   const generatePdf = async () => {
     setGenerating(true);
@@ -640,27 +657,25 @@ function BaaSoc2Tab() {
     }
   };
 
-  const statusIcon = (status: string) => {
-    if (status === "implemented") return <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />;
-    if (status === "partial") return <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0" />;
-    return <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />;
+  const statusIcon = (status: BaaStatus) => {
+    if (status === "pass") return <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />;
+    if (status === "fail") return <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />;
+    return <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0" />;
   };
-
-  const categories = [...new Set(controls?.map((c) => c.category) ?? [])];
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">Implemented</p>
-            <p className="text-2xl font-bold text-green-600">{implemented}/{total}</p>
+            <p className="text-sm text-muted-foreground">Passing</p>
+            <p className="text-2xl font-bold text-green-600" data-testid="baa-passing">{passing}/{total}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">Partial</p>
-            <p className="text-2xl font-bold text-yellow-600">{partial}/{total}</p>
+            <p className="text-sm text-muted-foreground">Needs attention</p>
+            <p className="text-2xl font-bold text-yellow-600" data-testid="baa-attention">{attention}/{total}</p>
           </CardContent>
         </Card>
         <Card>
@@ -681,33 +696,31 @@ function BaaSoc2Tab() {
 
       {isLoading ? (
         <div className="space-y-2">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-14 rounded" />)}</div>
+      ) : isError ? (
+        <p className="text-sm text-muted-foreground">Couldn't load the BAA checklist. Try again in a moment.</p>
       ) : (
-        <div className="space-y-6">
-          {categories.map((category) => (
-            <Card key={category}>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{category}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {controls?.filter((c) => c.category === category).map((control) => (
-                  <div key={control.id} className="flex items-start gap-3 p-3 rounded-lg border bg-muted/20">
-                    {statusIcon(control.status)}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">{control.control}</p>
-                      {control.notes && <p className="text-xs text-muted-foreground mt-0.5">{control.notes}</p>}
-                    </div>
-                    <Badge
-                      variant={control.status === "implemented" ? "default" : "secondary"}
-                      className={`text-xs shrink-0 ${control.status === "implemented" ? "bg-green-100 text-green-800" : control.status === "partial" ? "bg-yellow-100 text-yellow-800" : ""}`}
-                    >
-                      {control.status === "implemented" ? "Implemented" : control.status === "partial" ? "Partial" : "Not Implemented"}
-                    </Badge>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">HIPAA BAA readiness</CardTitle>
+            {data?.generatedAt && (
+              <CardDescription>Checked {new Date(data.generatedAt).toLocaleString()}</CardDescription>
+            )}
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {controls.map((control) => (
+              <div key={control.id} className="flex items-start gap-3 p-3 rounded-lg border bg-muted/20" data-testid={`baa-control-${control.id}`}>
+                {statusIcon(control.status)}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{control.label}</p>
+                  {control.note && <p className="text-xs text-muted-foreground mt-0.5">{control.note}</p>}
+                </div>
+                <Badge variant="secondary" className={`text-xs shrink-0 ${BAA_STATUS_BADGE[control.status] ?? ""}`}>
+                  {BAA_STATUS_LABEL[control.status] ?? control.status}
+                </Badge>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       )}
     </div>
   );
@@ -915,7 +928,9 @@ type UserRow = { id: string; email: string; fullName: string; role: string; isAc
 type LoginEvent = { id: string; email: string | null; userId: string | null; success: boolean; ipAddress: string | null; failureReason: string | null; createdAt: string };
 type LoginHistoryResponse = { events: LoginEvent[]; total: number };
 type RetentionPolicy = { id: string | null; orgId: string; recordType: string; retentionDays: number; isEnabled: boolean };
-type BaaControl = { id: string; category: string; control: string; status: string; notes?: string };
+type BaaStatus = "pass" | "warn" | "partial" | "fail";
+type BaaControl = { id: string; label: string; status: BaaStatus; note?: string; evidenceUrl?: string };
+type BaaChecklistResponse = { controls: BaaControl[]; overall: BaaStatus; generatedAt: string };
 type ExportEntry = { id: string; userId: string | null; userFullName: string | null; exportType: string; recordCount: number | null; createdAt: string };
 type ExportLogResponse = { exports: ExportEntry[]; total: number };
 type ClerkSession = { sessionId: string; createdAt: string; lastActiveAt: string; expireAt: string; status: string };

@@ -344,6 +344,13 @@
       "when": 1790800000000,
       "tag": "0048_enrollment_applications",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1790900000000,
+      "tag": "0049_schema_drift_renewals",
+      "breakpoints": true
     }
   ]
 }
