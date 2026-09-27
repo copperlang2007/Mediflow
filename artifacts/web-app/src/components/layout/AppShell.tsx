@@ -7,6 +7,8 @@ import {
   useGetContact,
   useGetDashboardStats,
   getGetDashboardStatsQueryKey,
+  getGetAgentQueryKey,
+  getGetContactQueryKey,
 } from "@workspace/api-client-react";
 import type { AiContext } from "@/components/ai-assistant";
 import { PresenceToggle } from "@/components/layout/PresenceToggle";
@@ -349,8 +351,21 @@ function useAiContext(): AiContext {
   const agentId = agentMatch?.[1];
   const contactId = contactMatch?.[1];
 
-  const { data: agent } = useGetAgent(agentId ?? "");
-  const { data: contact } = useGetContact(contactId ?? "");
+  // `enabled` is explicit because the generated hooks treat "" as a valid
+  // id and would otherwise fetch on every page. Disabled queries never
+  // fetch, so the placeholder "" key is inert.
+  const { data: agent } = useGetAgent(agentId ?? "", {
+    query: {
+      queryKey: getGetAgentQueryKey(agentId ?? ""),
+      enabled: Boolean(agentId),
+    },
+  });
+  const { data: contact } = useGetContact(contactId ?? "", {
+    query: {
+      queryKey: getGetContactQueryKey(contactId ?? ""),
+      enabled: Boolean(contactId),
+    },
+  });
 
   if (agentId) {
     const label = agent
@@ -395,9 +410,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // count rolls over as items pass their due date without a hard refresh.
   const { data: dashboardStats } = useGetDashboardStats({
     query: {
+      // Shared with the dashboard page on purpose: one request, and this poll
+      // keeps the page's stats live. Silence only applies while no other
+      // (non-silent) component is watching — see isSilent in queryClient.
       queryKey: getGetDashboardStatsQueryKey(),
       refetchInterval: 60_000,
       staleTime: 30_000,
+      // Nav badge only; a failed background poll shouldn't toast every minute.
+      meta: { silent: true },
     },
   });
   const overdueTaskCount = dashboardStats?.overdueTasks ?? 0;
