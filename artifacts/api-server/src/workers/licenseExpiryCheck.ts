@@ -73,6 +73,7 @@ export async function expireLapsedLicenses(
   // notification per org instead of a burst of one per license.
   const toNotify = new Map<string, Lapsed[]>();
   let expiredCount = 0;
+  const broadcasts: { adminIds: string[]; orgId: string }[] = [];
 
   // One transaction per run, serialized by an advisory lock: an overlapping
   // or redispatched run waits, then finds nothing left to flip. Each run is
@@ -162,47 +163,54 @@ export async function expireLapsedLicenses(
       list.push(lic);
       toNotify.set(lic.orgId, list);
     }
+
+    // Notices are written in the same transaction as the flips: once a
+    // license is expired the sweep never selects it again, so an alert
+    // written after commit would be lost for good if the worker died first.
+    for (const [orgId, lics] of toNotify) {
+      const admins = await tx
+        .select({ id: usersTable.id })
+        .from(usersTable)
+        .where(
+          and(
+            eq(usersTable.orgId, orgId),
+            inArray(usersTable.role, ["super_admin", "agency_admin", "compliance_manager"]),
+            eq(usersTable.isActive, true),
+          ),
+        );
+      const adminIds = admins.map((a) => a.id);
+      if (adminIds.length === 0) continue;
+
+      const notices =
+        lics.length <= LAPSE_NOTICE_BATCH_THRESHOLD
+          ? lics.map((lic) => ({
+              title: `License lapsed — ${lic.stateCode}`,
+              body: `${lic.agentFirstName} ${lic.agentLastName}: ${lic.stateCode} ${lic.licenseType} expired ${lic.expiryDate?.toLocaleDateString() ?? ""}. The agent is no longer ready to sell in ${lic.stateCode}.`,
+              resourceType: "license",
+              resourceId: lic.licenseId,
+            }))
+          : [
+              {
+                title: `${lics.length} licenses lapsed`,
+                body: `${lics.length} active-agent licenses were past their expiry date and have been marked expired. Those agents are no longer ready to sell in the affected states — review the readiness board.`,
+                resourceType: "org",
+                resourceId: orgId,
+              },
+            ];
+
+      const rows = notices.flatMap((n) =>
+        adminIds.map((uid) => ({ id: randomUUID(), orgId, userId: uid, type: "license_lapsed", priority: "high", ...n })),
+      );
+      await tx.insert(notificationsTable).values(rows).onConflictDoNothing();
+      broadcasts.push({ adminIds, orgId });
+    }
   });
 
-  if (expiredCount === 0) return 0;
-
-  for (const [orgId, lics] of toNotify) {
-    const admins = await db
-      .select({ id: usersTable.id })
-      .from(usersTable)
-      .where(
-        and(
-          eq(usersTable.orgId, orgId),
-          inArray(usersTable.role, ["super_admin", "agency_admin", "compliance_manager"]),
-          eq(usersTable.isActive, true),
-        ),
-      );
-    const adminIds = admins.map((a) => a.id);
-    if (adminIds.length === 0) continue;
-
-    const notices =
-      lics.length <= LAPSE_NOTICE_BATCH_THRESHOLD
-        ? lics.map((lic) => ({
-            title: `License lapsed — ${lic.stateCode}`,
-            body: `${lic.agentFirstName} ${lic.agentLastName}: ${lic.stateCode} ${lic.licenseType} expired ${lic.expiryDate?.toLocaleDateString() ?? ""}. The agent is no longer ready to sell in ${lic.stateCode}.`,
-            resourceType: "license",
-            resourceId: lic.licenseId,
-          }))
-        : [
-            {
-              title: `${lics.length} licenses lapsed`,
-              body: `${lics.length} active-agent licenses were past their expiry date and have been marked expired. Those agents are no longer ready to sell in the affected states — review the readiness board.`,
-              resourceType: "org",
-              resourceId: orgId,
-            },
-          ];
-
-    const rows = notices.flatMap((n) =>
-      adminIds.map((uid) => ({ id: randomUUID(), orgId, userId: uid, type: "license_lapsed", priority: "high", ...n })),
-    );
-    await db.insert(notificationsTable).values(rows).onConflictDoNothing();
+  // Live push is best-effort and happens only after the commit.
+  for (const { adminIds, orgId } of broadcasts) {
     broadcastToUsers(adminIds, { type: "notification", resourceType: "license", resourceId: orgId });
   }
+  if (expiredCount === 0) return 0;
 
   logger.info({ count: expiredCount }, "License lapse sweep: expired lapsed licenses");
   return expiredCount;
