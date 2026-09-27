@@ -378,7 +378,7 @@ function TasksView() {
   const [fromTemplateOpen, setFromTemplateOpen] = useState(false);
   const [form, setForm] = useState({ title: "", description: "", dueDate: "", priority: "medium" as string });
 
-  const { data, isLoading } = useGetTasks({ status: statusFilter === "all" ? undefined : statusFilter, limit: 100 });
+  const { data, isLoading, error: tasksError } = useGetTasks({ status: statusFilter === "all" ? undefined : statusFilter, limit: 100 });
   const { data: templates } = useGetTaskTemplates();
   const { mutateAsync: createTask, isPending } = useCreateTask();
   const { mutateAsync: updateTask } = useUpdateTask();
@@ -452,6 +452,14 @@ function TasksView() {
             <div className="space-y-3">
               {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
             </div>
+          ) : tasksError ? (
+            <EmptyState
+              icon={CheckSquare}
+              title="We couldn't load tasks"
+              description={(tasksError as { status?: number }).status === 403
+                ? "Your account doesn't have access to the task list. Ask an admin if you think it should."
+                : "Something went wrong loading your tasks. Please try again in a moment."}
+            />
           ) : filtered.length === 0 ? (
             <EmptyState
               icon={CheckSquare}

@@ -87,7 +87,7 @@ export default function OnboardingPage() {
   // For non-agent roles, we expose a hint that they should use the admin
   // dashboard instead of this self-service wizard.
   const isAgent = me?.role === "agent";
-  const { data: agentsData, isLoading: agentsLoading } = useGetAgents(
+  const { data: agentsData, isLoading: agentsLoading, error: agentsError } = useGetAgents(
     { limit: 200 },
     { query: { enabled: Boolean(me), queryKey: getGetAgentsQueryKey({ limit: 200 }) } },
   );
@@ -154,8 +154,10 @@ export default function OnboardingPage() {
         <Card>
           <EmptyState
             icon={UserX}
-            title={<h1>No agent profile found</h1>}
-            description="Your user account isn't linked to an agent record yet. Please ask your administrator to invite you as an agent."
+            title={<h1>{agentsError ? "We couldn't find your agent record" : "No agent profile found"}</h1>}
+            description={agentsError
+              ? "Your account isn't allowed to look up agent records, so the wizard can't open. Ask your administrator to complete your contracting for you from the Contracting page."
+              : "Your user account isn't linked to an agent record yet. Please ask your administrator to invite you as an agent."}
           />
         </Card>
       </div>
