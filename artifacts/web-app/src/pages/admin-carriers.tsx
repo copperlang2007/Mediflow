@@ -60,6 +60,7 @@ import {
 import { Plus, Search, Mail, AlertCircle, Building2, CheckCircle2, MailWarning, Handshake, Lock } from "lucide-react";
 import { PageHeader, MiniStat, SectionCard, StatusPill, EmptyState } from "@/components/shared";
 import { PageShell, TableFrame } from "@/components/ops";
+import { useProductName } from "@/lib/branding/BrandingProvider";
 
 // ---- Types ------------------------------------------------------------------
 // `AdminCarrier` was a local interface that mirrored the generated `Carrier`
@@ -157,6 +158,7 @@ export function carrierToForm(c: AdminCarrier): CarrierFormValues {
 // ---- Page -------------------------------------------------------------------
 
 export default function AdminCarriersPage() {
+  const productName = useProductName();
   const { isAdmin, isLoading: meLoading } = useIsAdmin();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -257,7 +259,7 @@ export default function AdminCarriersPage() {
               <EmptyState
                 icon={Building2}
                 title="No carriers yet"
-                description="Add the carriers you're appointed with. Set a contracting email for each and Mediflow will send new agents' contracting packets there."
+                description={`Add the carriers you're appointed with. Set a contracting email for each and ${productName} will send new agents' contracting packets there.`}
                 action={{ label: "Add carrier", onClick: () => setEditing("new") }}
               />
             ) : (

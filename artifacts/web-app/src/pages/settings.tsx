@@ -180,7 +180,7 @@ const ADMIN_LINKS = [
   { href: "/settings/team", label: "Team", text: "Invite people and set their roles", icon: UserPlus },
   { href: "/settings/billing", label: "Billing", text: "Your plan, seats and invoices", icon: CreditCard },
   { href: "/admin-carriers", label: "Carriers", text: "Carriers you sell and their connections", icon: Building2 },
-  { href: "/admin-compliance", label: "HIPAA / SOC 2", text: "Security checks, access review and logs", icon: Lock },
+  { href: "/admin-compliance", label: "Security & HIPAA checklist", text: "Security checks, access review and logs", icon: Lock },
   { href: "/data-migration", label: "Import & Migration", text: "Bring in agents and clients", icon: ArrowLeftRight },
   { href: "/admin/health", label: "System Health", text: "Background jobs and integrations", icon: Activity },
 ];

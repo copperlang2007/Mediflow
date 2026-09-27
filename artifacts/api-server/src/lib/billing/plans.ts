@@ -86,7 +86,7 @@ export const PLANS: Record<PlanTier, PlanDefinition> = {
     name: "Agency",
     monthlyPriceCents: 99_700,
     blurb:
-      "For a multi-downline FMO. Unlimited agents and contacts, voice stack, API access, and SSO enforcement.",
+      "For a multi-downline FMO. Everything in Growth with unlimited agents and contacts.",
     includedSeats: 100,
     limits: {
       agents: null,

@@ -40,7 +40,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { EmptyState, MiniStat, PageHeader, StatusPill, type StatusTone } from "@/components/shared";
+import { EmptyState, MiniStat, PageHeader, StatusPill, TechnicalDetails, type StatusTone } from "@/components/shared";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import SequencesTab from "@/pages/crm/SequencesTab";
@@ -103,13 +103,23 @@ function SetupNotice({ channel, config, canManage, onOpenSettings }: {
   onOpenSettings: () => void;
 }) {
   if (!config) return null;
+  // Plain words for agents; the server setting names go in the admin-only
+  // "Technical details" disclosure.
   const missing: string[] = [];
+  const technical: string[] = [];
   if (channel === "email") {
-    if (!config.email.sendingConfigured) missing.push("connect the email provider (Resend API key)");
-    if (!config.email.unsubscribeConfigured) missing.push("turn on unsubscribe links (CAMPAIGN_UNSUBSCRIBE_SECRET and APP_BASE_URL)");
+    if (!config.email.sendingConfigured) {
+      missing.push("connect your email sending service");
+      technical.push("Email sending: set RESEND_API_KEY on the server.");
+    }
+    if (!config.email.unsubscribeConfigured) {
+      missing.push("turn on the unsubscribe link every marketing email must include");
+      technical.push("Unsubscribe links: set CAMPAIGN_UNSUBSCRIBE_SECRET and APP_BASE_URL on the server.");
+    }
     if (!config.email.senderAddressConfigured) missing.push("add your agency's mailing address in Settings");
   } else if (!config.sms.sendingConfigured) {
-    missing.push("connect Twilio (account SID, auth token and sending number)");
+    missing.push("connect your text messaging account and sending number");
+    technical.push("Texting: set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER on the server.");
   }
   if (missing.length === 0) return null;
   return (
@@ -121,6 +131,11 @@ function SetupNotice({ channel, config, canManage, onOpenSettings }: {
           <p className="mt-0.5 text-muted-foreground">
             You can build campaigns and templates now. To send, an administrator needs to {missing.join("; ")}. Nothing is sent until then.
           </p>
+          {technical.length > 0 && (
+            <TechnicalDetails>
+              {technical.map((t) => <div key={t}>{t}</div>)}
+            </TechnicalDetails>
+          )}
         </div>
       </div>
       {canManage && channel === "email" && !config.email.senderAddressConfigured && (

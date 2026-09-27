@@ -32,6 +32,7 @@ import { useQuery } from "@tanstack/react-query";
 import { PageHeader, SectionCard, StatusPill, EmptyState } from "@/components/shared";
 import { PageShell } from "@/components/ops";
 import { Database, Cog, Server, Sparkles, Lock } from "lucide-react";
+import { useProductName } from "@/lib/branding/BrandingProvider";
 
 // ---------- Response shape -------------------------------------------------
 // Mirrors `routes/adminHealth.ts`. We intentionally don't import the server
@@ -87,6 +88,7 @@ const SERVICE_LABELS: Record<string, { label: string; text: string; icon: typeof
 };
 
 function CoreServicesCard() {
+  const productName = useProductName();
   const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
   const { data, isLoading, refetch, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ["system-health", "readyz"],
@@ -109,7 +111,7 @@ function CoreServicesCard() {
   return (
     <SectionCard
       title="Core services"
-      description="Checked every minute — the same test our hosting uses to decide if Mediflow is up"
+      description={`Checked every minute — the same test our hosting uses to decide if ${productName} is up`}
       icon={Server}
       actions={
         <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isFetching}>

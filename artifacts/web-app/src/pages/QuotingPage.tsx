@@ -29,6 +29,7 @@ import {
   useCarriers,
   type ProviderResult,
 } from "@/lib/portalDialer/api";
+import { useProductName } from "@/lib/branding/BrandingProvider";
 
 const PLAN_TYPES = [
   { k: "MA", label: "Medicare Advantage" },
@@ -159,6 +160,7 @@ function ProviderSearch({ onAdd, added }: { onAdd: (p: ProviderResult) => void; 
 }
 
 export default function QuotingPage() {
+  const productName = useProductName();
   const { role, isLoading } = useIsAdmin(CONTACT_READ_ROLES);
   const allowed = !!role && (CONTACT_READ_ROLES as readonly string[]).includes(role);
 
@@ -266,7 +268,7 @@ export default function QuotingPage() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <SectionCard className="lg:col-span-2" title="Plan comparison" icon={Database}>
             <ComingSoonNote tone="setup" icon={Database} title="Plan data isn't connected yet">
-              Mediflow doesn't have plan, premium or star-rating data loaded, so no plans are shown — we never show sample prices.
+              {productName} doesn't have plan, premium or star-rating data loaded, so no plans are shown — we never show sample prices.
             </ComingSoonNote>
             <div className="mt-5 space-y-3">
               <p className="text-sm font-semibold">What will power this comparison</p>
