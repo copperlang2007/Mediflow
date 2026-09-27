@@ -96,12 +96,22 @@ router.post(
         // every contact saved as "(512) 555-0100" — and then no opt-out was
         // recorded at all.
         await db.transaction(async (tx) => {
-          // Flag EVERY matching contact, in every org (idempotent on retries).
+          const phoneMatch = sql`${phoneMatchKeySql(contactsTable.phone)} = ${phoneKey}`;
+          // Every contact, in every org, that holds this number.
           const matched = phoneKey
+            ? await tx
+                .select({ id: contactsTable.id, orgId: contactsTable.orgId })
+                .from(contactsTable)
+                .where(phoneMatch)
+            : [];
+          // Flip only contacts not already opted out, and audit exactly those.
+          // A Twilio retry of the same STOP (e.g. after a slow response) then
+          // flips nothing and writes no duplicate audit rows.
+          const flipped = phoneKey
             ? await tx
                 .update(contactsTable)
                 .set({ optOutSms: true })
-                .where(sql`${phoneMatchKeySql(contactsTable.phone)} = ${phoneKey}`)
+                .where(and(phoneMatch, eq(contactsTable.optOutSms, false)))
                 .returning({ id: contactsTable.id, orgId: contactsTable.orgId })
             : [];
 
@@ -117,7 +127,7 @@ router.post(
                 target: [optOutsTable.orgId, optOutsTable.phone, optOutsTable.channel],
               });
           }
-          for (const c of matched) {
+          for (const c of flipped) {
             await tx.insert(auditLogTable).values({
               id: randomUUID(),
               orgId: c.orgId,
@@ -167,6 +177,8 @@ router.post(
                 and(
                   inArray(contactsTable.orgId, orgIds),
                   sql`${phoneMatchKeySql(contactsTable.phone)} = ${phoneKey}`,
+                  // Only contacts actually opted out — a retried START audits nothing new.
+                  eq(contactsTable.optOutSms, true),
                 ),
               )
               .returning({ id: contactsTable.id, orgId: contactsTable.orgId });

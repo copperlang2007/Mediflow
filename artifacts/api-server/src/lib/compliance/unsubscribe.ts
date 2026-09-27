@@ -14,6 +14,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 const PURPOSE = "agencybridge:email-unsubscribe:v1";
+const HMAC_KEY_BYTES = 32;
 const DEV_KEY_MATERIAL = "agencybridge-dev-unsubscribe-key-not-for-production";
 
 export const UNSUBSCRIBE_PATH = "/api/public/unsubscribe";
@@ -29,7 +30,13 @@ function signingKey(): Buffer {
     if (isNonProdEnv()) return createHmac("sha256", DEV_KEY_MATERIAL).update(PURPOSE).digest();
     throw new Error("PHI_HMAC_KEY is required to sign unsubscribe links in production");
   }
-  return createHmac("sha256", Buffer.from(raw, "base64")).update(PURPOSE).digest();
+  const decoded = Buffer.from(raw, "base64");
+  // Same contract as the PHI key loader (lib/db encryption/pii.ts): a
+  // malformed value must not silently derive a guessable key.
+  if (decoded.length !== HMAC_KEY_BYTES) {
+    throw new Error(`PHI_HMAC_KEY must decode to exactly ${HMAC_KEY_BYTES} bytes (got ${decoded.length})`);
+  }
+  return createHmac("sha256", decoded).update(PURPOSE).digest();
 }
 
 export interface UnsubscribeClaims {
@@ -96,7 +103,11 @@ export function unsubscribeUrl(claims: UnsubscribeClaims): string | null {
 export function consumerEmailConfigIssues(env: NodeJS.ProcessEnv = process.env): string[] {
   if (env.NODE_ENV !== "production") return [];
   const issues: string[] = [];
-  if (!env.PHI_HMAC_KEY) issues.push("PHI_HMAC_KEY is not set: unsubscribe links cannot be signed");
+  if (!env.PHI_HMAC_KEY) {
+    issues.push("PHI_HMAC_KEY is not set: unsubscribe links cannot be signed");
+  } else if (Buffer.from(env.PHI_HMAC_KEY, "base64").length !== HMAC_KEY_BYTES) {
+    issues.push(`PHI_HMAC_KEY does not decode to ${HMAC_KEY_BYTES} bytes: unsubscribe links cannot be signed`);
+  }
   if (!(env.APP_BASE_URL ?? env.APP_PUBLIC_URL)?.trim()) {
     issues.push("APP_BASE_URL (or APP_PUBLIC_URL) is not set: unsubscribe links cannot be built");
   }

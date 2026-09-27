@@ -37,6 +37,8 @@ describe("unsubscribe tokens", () => {
   });
 });
 
+const KEY_32 = Buffer.alloc(32, 7).toString("base64");
+
 describe("consumerEmailConfigIssues", () => {
   it("reports nothing outside production", () => {
     expect(consumerEmailConfigIssues({ NODE_ENV: "development" })).toEqual([]);
@@ -45,7 +47,31 @@ describe("consumerEmailConfigIssues", () => {
   it("names each missing production setting", () => {
     expect(consumerEmailConfigIssues({ NODE_ENV: "production" })).toHaveLength(2);
     expect(
-      consumerEmailConfigIssues({ NODE_ENV: "production", PHI_HMAC_KEY: "a2V5", APP_BASE_URL: "https://app.example.com" }),
+      consumerEmailConfigIssues({ NODE_ENV: "production", PHI_HMAC_KEY: KEY_32, APP_BASE_URL: "https://app.example.com" }),
     ).toEqual([]);
+  });
+
+  it("flags a key that does not decode to 32 bytes", () => {
+    const issues = consumerEmailConfigIssues({ NODE_ENV: "production", PHI_HMAC_KEY: "!!!", APP_BASE_URL: "https://app.example.com" });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatch(/32 bytes/);
+  });
+});
+
+describe("signing key validation", () => {
+  it("refuses a malformed production key instead of deriving a guessable one", () => {
+    const saved = { env: process.env.NODE_ENV, key: process.env.PHI_HMAC_KEY };
+    try {
+      process.env.NODE_ENV = "production";
+      process.env.PHI_HMAC_KEY = "!!!";
+      expect(() => signUnsubscribeToken({ orgId: "o", contactId: "c" })).toThrow(/32 bytes/);
+      process.env.PHI_HMAC_KEY = KEY_32;
+      const token = signUnsubscribeToken({ orgId: "o", contactId: "c" });
+      expect(verifyUnsubscribeToken(token)).toEqual({ orgId: "o", contactId: "c" });
+    } finally {
+      process.env.NODE_ENV = saved.env;
+      if (saved.key === undefined) delete process.env.PHI_HMAC_KEY;
+      else process.env.PHI_HMAC_KEY = saved.key;
+    }
   });
 });

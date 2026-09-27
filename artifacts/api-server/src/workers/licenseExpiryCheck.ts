@@ -36,6 +36,9 @@ import { logger } from "../lib/logger";
 // e.g. 45 days → 60-day threshold (not 90).
 const ALERT_THRESHOLDS_DAYS = [7, 14, 30, 60, 90];
 
+/** Licenses expired per run at most; a larger backlog drains over later runs. */
+const MAX_LAPSES_PER_RUN = 500;
+
 /** Above this many lapses in one run, an org gets one summary notification. */
 const LAPSE_NOTICE_BATCH_THRESHOLD = 5;
 
@@ -43,46 +46,63 @@ const LAPSE_NOTICE_BATCH_THRESHOLD = 5;
 const ALERTABLE_AGENT_STATUSES = ["onboarding", "active"] as const;
 
 /**
- * Flip every `active` license past its expiry date to `expired`, write one
- * audit row per license, and notify compliance roles about lapses for agents
- * who can still sell. Returns the number of licenses expired.
+ * Flip `active` licenses past their expiry date to `expired` (up to
+ * MAX_LAPSES_PER_RUN per run, oldest first), write one audit row per license,
+ * and notify compliance roles about lapses for agents who can still sell.
+ * Returns the number of licenses expired.
  */
 export async function expireLapsedLicenses(
   now: Date,
   orgId?: string,
 ): Promise<number> {
-  const lapsed = await db
-    .select({
-      licenseId: stateLicensesTable.id,
-      stateCode: stateLicensesTable.stateCode,
-      licenseType: stateLicensesTable.licenseType,
-      expiryDate: stateLicensesTable.expiryDate,
-      agentId: agentsTable.id,
-      agentStatus: agentsTable.status,
-      agentFirstName: agentsTable.firstName,
-      agentLastName: agentsTable.lastName,
-      orgId: agentsTable.orgId,
-    })
-    .from(stateLicensesTable)
-    .innerJoin(agentsTable, eq(stateLicensesTable.agentId, agentsTable.id))
-    .where(
-      and(
-        eq(stateLicensesTable.status, "active"),
-        lt(stateLicensesTable.expiryDate, now),
-        orgId ? eq(agentsTable.orgId, orgId) : undefined,
-      ),
-    );
-
-  if (lapsed.length === 0) return 0;
-
+  type Lapsed = {
+    licenseId: string;
+    stateCode: string;
+    licenseType: string;
+    expiryDate: Date | null;
+    agentId: string;
+    agentStatus: string;
+    agentFirstName: string;
+    agentLastName: string;
+    orgId: string;
+  };
   // Lapses to report, grouped per org so a backlog becomes one summary
   // notification per org instead of a burst of one per license.
-  const toNotify = new Map<string, typeof lapsed>();
-  for (const lic of lapsed) {
-    let expired = false;
-    await db.transaction(async (tx) => {
-      // Re-check status inside the UPDATE so a concurrent renewal (status or
-      // expiry changed since the read) is never overwritten.
+  const toNotify = new Map<string, Lapsed[]>();
+  let expiredCount = 0;
+
+  // One transaction per run, serialized by an advisory lock: an overlapping
+  // or redispatched run waits, then finds nothing left to flip. Each run is
+  // capped so a large first-deploy backlog drains over successive daily runs
+  // instead of in one burst.
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('license_lapse_sweep'))`);
+
+    const lapsed = await tx
+      .select({
+        licenseId: stateLicensesTable.id,
+        stateCode: stateLicensesTable.stateCode,
+        licenseType: stateLicensesTable.licenseType,
+        expiryDate: stateLicensesTable.expiryDate,
+        agentId: agentsTable.id,
+        agentStatus: agentsTable.status,
+        agentFirstName: agentsTable.firstName,
+        agentLastName: agentsTable.lastName,
+        orgId: agentsTable.orgId,
+      })
+      .from(stateLicensesTable)
+      .innerJoin(agentsTable, eq(stateLicensesTable.agentId, agentsTable.id))
+      .where(
+        and(
+          eq(stateLicensesTable.status, "active"),
+          lt(stateLicensesTable.expiryDate, now),
+          orgId ? eq(agentsTable.orgId, orgId) : undefined,
+        ),
+      )
+      .orderBy(stateLicensesTable.expiryDate)
+      .limit(MAX_LAPSES_PER_RUN);
+
+    for (const lic of lapsed) {
       const updated = await tx
         .update(stateLicensesTable)
         .set({ status: "expired" })
@@ -94,8 +114,8 @@ export async function expireLapsedLicenses(
           ),
         )
         .returning({ id: stateLicensesTable.id });
-      if (updated.length === 0) return;
-      expired = true;
+      if (updated.length === 0) continue;
+      expiredCount++;
 
       await tx.insert(auditLogTable).values({
         id: randomUUID(),
@@ -114,13 +134,15 @@ export async function expireLapsedLicenses(
           to: "expired",
         },
       });
-    });
 
-    if (!expired || !(ALERTABLE_AGENT_STATUSES as readonly string[]).includes(lic.agentStatus)) continue;
-    const list = toNotify.get(lic.orgId) ?? [];
-    list.push(lic);
-    toNotify.set(lic.orgId, list);
-  }
+      if (!(ALERTABLE_AGENT_STATUSES as readonly string[]).includes(lic.agentStatus)) continue;
+      const list = toNotify.get(lic.orgId) ?? [];
+      list.push(lic);
+      toNotify.set(lic.orgId, list);
+    }
+  });
+
+  if (expiredCount === 0) return 0;
 
   for (const [orgId, lics] of toNotify) {
     const admins = await db
@@ -160,8 +182,8 @@ export async function expireLapsedLicenses(
     broadcastToUsers(adminIds, { type: "notification", resourceType: "license", resourceId: orgId });
   }
 
-  logger.info({ count: lapsed.length }, "License lapse sweep: expired lapsed licenses");
-  return lapsed.length;
+  logger.info({ count: expiredCount }, "License lapse sweep: expired lapsed licenses");
+  return expiredCount;
 }
 
 export async function licenseExpiryCheckWorker(

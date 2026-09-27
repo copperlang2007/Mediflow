@@ -236,6 +236,9 @@ describe("STOP / START phone matching", () => {
 
     const stop = await request(app).post("/webhooks/twilio/sms").type("form").set("x-twilio-signature", "x").send(inbound("+15125550177", "STOP"));
     expect(stop.status).toBe(200);
+    // Twilio retry of the same STOP: nothing new to flip, so no second audit row.
+    const retry = await request(app).post("/webhooks/twilio/sms").type("form").set("x-twilio-signature", "x").send(inbound("+15125550177", "STOP"));
+    expect(retry.status).toBe(200);
     let [row] = await db.select({ optOutSms: contactsTable.optOutSms }).from(contactsTable).where(eq(contactsTable.id, contact.id));
     expect(row.optOutSms).toBe(true);
     let log = await db.select().from(optOutsTable).where(and(eq(optOutsTable.orgId, org.id), eq(optOutsTable.phone, "+15125550177")));
@@ -295,6 +298,9 @@ describe("retention sweep and ended enrollments", () => {
     await enroll(recentlyTouched, "terminated", new Date()); // end date unknown, touched recently
     const stillActive = await mk("StillActive");
     await enroll(stillActive, "active", old);
+    // A current member whose enrollment row is missing is still a member.
+    const retainedNoRow = await mk("RetainedNoRow");
+    await db.update(contactsTable).set({ status: "retained" }).where(eq(contactsTable.id, retainedNoRow));
 
     const { retentionEnforcementWorker } = await import("../../workers/retentionEnforcement");
     await retentionEnforcementWorker();
@@ -304,6 +310,7 @@ describe("retention sweep and ended enrollments", () => {
     expect(await deleted(longEnded)).toBe(true);
     expect(await deleted(recentlyTouched)).toBe(false);
     expect(await deleted(stillActive)).toBe(false);
+    expect(await deleted(retainedNoRow)).toBe(false);
   });
 });
 

@@ -155,13 +155,14 @@ async function runOrgSweep(
               lt(contactsTable.createdAt, cutoff),
               // A member's record is retained for the full window after their
               // coverage relationship ends, not after the contact row was
-              // created: skip current members, any active/pending enrollment,
+              // created: skip current members (enrolled / retained, even if
+              // their enrollment row is missing), any active/pending enrollment,
               // and any ended enrollment that ended inside the window. An
               // ended enrollment with no end date on file (e.g. rows
               // backfilled by migration 0040) is measured from its last
               // update — the latest date we know it was still on the books —
               // so it is kept at least a full window, never forever.
-              sql`${contactsTable.status} <> 'enrolled'`,
+              sql`${contactsTable.status} NOT IN ('enrolled', 'retained')`,
               sql`NOT EXISTS (
                 SELECT 1 FROM enrollments e
                 WHERE e.contact_id = ${contactsTable.id}

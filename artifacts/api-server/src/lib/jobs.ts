@@ -44,6 +44,7 @@
 
 import { PgBoss, type Job, type Queue, type WorkHandler } from "pg-boss";
 import { logger } from "./logger";
+import { deferredJobId } from "./jobIds";
 import type { ConsumerContext } from "./compliance/consumerOutreach";
 import { captureWorkerError } from "./sentry";
 import { jobEnqueueTotal, jobDeadLetterTotal } from "./metrics";
@@ -575,7 +576,13 @@ export async function startWorkers(): Promise<void> {
     const { deliverScheduledSms } = await import("./compliance/consumerDelivery");
     for (const job of jobs) {
       await deliverScheduledSms(job.data, async (data, startAfter) => {
-        await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { ...data }, { startAfter });
+        // Deterministic id derived from this job: if this handler is retried
+        // after the deferral was already enqueued, the second insert collides
+        // on the id and is dropped, so the text is never queued twice.
+        await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { ...data }, {
+          startAfter,
+          id: deferredJobId(job.id),
+        });
       });
     }
   };
