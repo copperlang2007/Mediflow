@@ -103,6 +103,26 @@ function ActionConfigEditor({ action, onChange }: { action: AutomationAction; on
       return <div className="mt-2">{field("sequenceId", "Sequence ID")}</div>;
     case "change_deal_stage":
       return <div className="mt-2">{field("stageId", "Pipeline stage ID")}</div>;
+    case "create_appointment":
+      return (
+        <div className="mt-2 space-y-2">
+          {field("title", "Appointment title")}
+          <div className="grid grid-cols-3 gap-2">
+            {field("startOffsetDays", "Days from now (1)")}
+            {field("startTime", "Start (client's time)", "time")}
+            {field("durationMinutes", "Minutes (30)")}
+          </div>
+          <Select value={(action.config.type as string) ?? "consultation"} onValueChange={(v) => update("type", v)}>
+            <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Type" /></SelectTrigger>
+            <SelectContent>
+              {["enrollment", "review", "renewal", "consultation", "other"].map((s) => (
+                <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[11px] text-muted-foreground">Books a pending appointment for the trigger's client and agent, at that time in the client's timezone.</p>
+        </div>
+      );
     case "send_notification":
       return <div className="mt-2 space-y-2">{field("message", "Alert message")}{field("userId", "User ID (blank = all admins)")}</div>;
     default:

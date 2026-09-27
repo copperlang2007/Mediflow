@@ -1892,6 +1892,7 @@ export const AutomationActionType = {
   change_contact_status: "change_contact_status",
   enroll_sequence: "enroll_sequence",
   change_deal_stage: "change_deal_stage",
+  create_appointment: "create_appointment",
 } as const;
 
 export type AutomationActionConfig = { [key: string]: unknown };
@@ -3362,3 +3363,202 @@ export type ListOnboardingsParams = {
   limit?: number;
   offset?: number;
 };
+
+export type ListAppointmentsParams = {
+  from: string;
+  to: string;
+  agentId?: string;
+  contactId?: string;
+  status?: ListAppointmentsStatus;
+};
+
+export type ListAppointmentsStatus =
+  (typeof ListAppointmentsStatus)[keyof typeof ListAppointmentsStatus];
+
+export const ListAppointmentsStatus = {
+  confirmed: "confirmed",
+  pending: "pending",
+  completed: "completed",
+  cancelled: "cancelled",
+  no_show: "no_show",
+} as const;
+
+export type ListAppointments200DataItem = { [key: string]: unknown };
+
+export type ListAppointments200Summary = {
+  total?: number;
+  confirmed?: number;
+  pending?: number;
+  completed?: number;
+  cancelled?: number;
+  no_show?: number;
+};
+
+export type ListAppointments200Scope =
+  (typeof ListAppointments200Scope)[keyof typeof ListAppointments200Scope];
+
+export const ListAppointments200Scope = {
+  own: "own",
+  org: "org",
+} as const;
+
+export type ListAppointments200 = {
+  data?: ListAppointments200DataItem[];
+  summary?: ListAppointments200Summary;
+  scope?: ListAppointments200Scope;
+};
+
+export type CreateAppointmentBodyType =
+  (typeof CreateAppointmentBodyType)[keyof typeof CreateAppointmentBodyType];
+
+export const CreateAppointmentBodyType = {
+  enrollment: "enrollment",
+  review: "review",
+  renewal: "renewal",
+  consultation: "consultation",
+  other: "other",
+} as const;
+
+export type CreateAppointmentBodyStatus =
+  (typeof CreateAppointmentBodyStatus)[keyof typeof CreateAppointmentBodyStatus];
+
+export const CreateAppointmentBodyStatus = {
+  confirmed: "confirmed",
+  pending: "pending",
+  completed: "completed",
+  cancelled: "cancelled",
+  no_show: "no_show",
+} as const;
+
+export type CreateAppointmentBodyLocationType =
+  (typeof CreateAppointmentBodyLocationType)[keyof typeof CreateAppointmentBodyLocationType];
+
+export const CreateAppointmentBodyLocationType = {
+  office: "office",
+  phone: "phone",
+  video: "video",
+  home: "home",
+} as const;
+
+export type CreateAppointmentBody = {
+  /** @maxLength 200 */
+  title: string;
+  type?: CreateAppointmentBodyType;
+  status?: CreateAppointmentBodyStatus;
+  startsAt: string;
+  endsAt: string;
+  /** @nullable */
+  contactId?: string | null;
+  /** @nullable */
+  agentId?: string | null;
+  /**
+   * @maxLength 4000
+   * @nullable
+   */
+  notes?: string | null;
+  locationType?: CreateAppointmentBodyLocationType;
+  /**
+   * @maxLength 300
+   * @nullable
+   */
+  locationDetail?: string | null;
+  /**
+   * https:// only
+   * @nullable
+   */
+  meetingUrl?: string | null;
+};
+
+export type CreateAppointment201 = { [key: string]: unknown };
+
+export type ListAppointmentContactOptionsParams = {
+  search?: string;
+};
+
+export type ListAppointmentContactOptions200DataItem = {
+  id?: string;
+  firstName?: string;
+  lastName?: string;
+  /** @nullable */
+  assignedAgentId?: string | null;
+};
+
+export type ListAppointmentContactOptions200 = {
+  data?: ListAppointmentContactOptions200DataItem[];
+};
+
+export type ListAppointmentAgentOptions200DataItem = {
+  id?: string;
+  firstName?: string;
+  lastName?: string;
+  isMe?: boolean;
+};
+
+export type ListAppointmentAgentOptions200 = {
+  data?: ListAppointmentAgentOptions200DataItem[];
+};
+
+export type GetAppointment200 = { [key: string]: unknown };
+
+export type UpdateAppointmentBody = { [key: string]: unknown };
+
+export type UpdateAppointment200 = { [key: string]: unknown };
+
+export type GetOrgBranding200 = { [key: string]: unknown };
+
+export type UpdateOrgBrandingBody = {
+  /**
+   * @maxLength 40
+   * @nullable
+   */
+  productName?: string | null;
+  /**
+   * @maxLength 80
+   * @nullable
+   */
+  tagline?: string | null;
+  /**
+   * @nullable
+   * @pattern ^#[0-9a-fA-F]{6}$
+   */
+  primaryColor?: string | null;
+  /**
+   * @nullable
+   * @pattern ^#[0-9a-fA-F]{6}$
+   */
+  accentColor?: string | null;
+  /** @nullable */
+  displayFont?: string | null;
+  /** @nullable */
+  bodyFont?: string | null;
+  /** @nullable */
+  logoUrl?: string | null;
+  /** @nullable */
+  markUrl?: string | null;
+  /** @nullable */
+  faviconUrl?: string | null;
+  /**
+   * @maxLength 60
+   * @nullable
+   */
+  emailFromName?: string | null;
+};
+
+export type UpdateOrgBranding200 = { [key: string]: unknown };
+
+export type ResetOrgBranding200 = { [key: string]: unknown };
+
+export type ListAgenciesOverview200 = { [key: string]: unknown };
+
+export type CreateAgencyBody = {
+  /**
+   * @minLength 2
+   * @maxLength 120
+   */
+  name: string;
+  /** @pattern ^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$ */
+  slug: string;
+  adminEmail: string;
+};
+
+export type CreateAgency201 = { [key: string]: unknown };

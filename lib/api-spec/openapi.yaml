@@ -4911,6 +4911,210 @@ paths:
       responses:
         "204": { description: Deleted }
         "404": { description: Not found in this org }
+  # --- stage2/calendar-branding ---
+  # Calendar appointments, agency white-label branding and super_admin
+  # workspace provisioning. Schemas are inline so this block stays contiguous.
+  /appointments:
+    get:
+      operationId: listAppointments
+      tags: [appointments]
+      summary: Appointments starting in [from, to) (max 100 days). Agents see only their own.
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: agentId, in: query, schema: { type: string } }
+        - { name: contactId, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [confirmed, pending, completed, cancelled, no_show] } }
+      responses:
+        "200":
+          description: Appointments plus status counts for the range
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { type: object, additionalProperties: true } }
+                  summary:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      confirmed: { type: integer }
+                      pending: { type: integer }
+                      completed: { type: integer }
+                      cancelled: { type: integer }
+                      no_show: { type: integer }
+                  scope: { type: string, enum: [own, org] }
+        "400": { description: Missing or oversized range, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    post:
+      operationId: createAppointment
+      tags: [appointments]
+      summary: Book an appointment (notes are encrypted at rest)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, startsAt, endsAt]
+              properties:
+                title: { type: string, maxLength: 200 }
+                type: { type: string, enum: [enrollment, review, renewal, consultation, other] }
+                status: { type: string, enum: [confirmed, pending, completed, cancelled, no_show] }
+                startsAt: { type: string, format: date-time }
+                endsAt: { type: string, format: date-time }
+                contactId: { type: [string, "null"] }
+                agentId: { type: [string, "null"] }
+                notes: { type: [string, "null"], maxLength: 4000 }
+                locationType: { type: string, enum: [office, phone, video, home] }
+                locationDetail: { type: [string, "null"], maxLength: 300 }
+                meetingUrl: { type: [string, "null"], description: "https:// only" }
+      responses:
+        "201": { description: Created appointment, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "400": { description: Validation error, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "403": { description: Not permitted (agents book only their own calendar and contacts), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /appointments/contact-options:
+    get:
+      operationId: listAppointmentContactOptions
+      tags: [appointments]
+      summary: Contact picker (names only). Agents get only contacts assigned to them.
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Contacts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        firstName: { type: string }
+                        lastName: { type: string }
+                        assignedAgentId: { type: [string, "null"] }
+  /appointments/agent-options:
+    get:
+      operationId: listAppointmentAgentOptions
+      tags: [appointments]
+      summary: Agent picker. Agents get only themselves.
+      responses:
+        "200":
+          description: Agents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        firstName: { type: string }
+                        lastName: { type: string }
+                        isMe: { type: boolean }
+  /appointments/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getAppointment
+      tags: [appointments]
+      summary: One appointment
+      responses:
+        "200": { description: Appointment, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "404": { description: Not found (or not yours), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    patch:
+      operationId: updateAppointment
+      tags: [appointments]
+      summary: Edit or reschedule (rescheduling clears the reminder claim)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200": { description: Updated appointment, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "404": { description: Not found (or not yours), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    delete:
+      operationId: deleteAppointment
+      tags: [appointments]
+      summary: Delete an appointment
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Not found (or not yours), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /organizations/me/branding:
+    get:
+      operationId: getOrgBranding
+      tags: [organizations]
+      summary: This agency's white-label settings (null = agencyBRIDGE default). Any member.
+      responses:
+        "200": { description: Branding, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+    put:
+      operationId: updateOrgBranding
+      tags: [organizations]
+      summary: Update branding (agency_admin / super_admin). Rejects colours under 3:1 contrast on white.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                productName: { type: [string, "null"], maxLength: 40 }
+                tagline: { type: [string, "null"], maxLength: 80 }
+                primaryColor: { type: [string, "null"], pattern: "^#[0-9a-fA-F]{6}$" }
+                accentColor: { type: [string, "null"], pattern: "^#[0-9a-fA-F]{6}$" }
+                displayFont: { type: [string, "null"] }
+                bodyFont: { type: [string, "null"] }
+                logoUrl: { type: [string, "null"] }
+                markUrl: { type: [string, "null"] }
+                faviconUrl: { type: [string, "null"] }
+                emailFromName: { type: [string, "null"], maxLength: 60 }
+      responses:
+        "200": { description: Saved branding plus contrast warnings, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "400": { description: Invalid value or low contrast (code low_contrast), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    delete:
+      operationId: resetOrgBranding
+      tags: [organizations]
+      summary: Reset to the agencyBRIDGE defaults (also clears the logo)
+      responses:
+        "200": { description: Default branding, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /admin/agencies/overview:
+    get:
+      operationId: listAgenciesOverview
+      tags: [admin]
+      summary: Every agency with live member, agent, client and pending-invitation counts (super_admin)
+      responses:
+        "200": { description: Agencies, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "403": { description: Not super_admin, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /admin/agencies:
+    post:
+      operationId: createAgency
+      tags: [admin]
+      summary: Create an agency and invite its first admin via the invitation flow (super_admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug, adminEmail]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 120 }
+                slug: { type: string, pattern: "^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$" }
+                adminEmail: { type: string, format: email }
+      responses:
+        "201": { description: "Agency, invitation and one-time accept link", content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "409": { description: Slug taken or address already has an account, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { description: APP_BASE_URL not configured, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  # --- end stage2/calendar-branding ---
+
 
 components:
   securitySchemes:
@@ -7386,7 +7590,7 @@ components:
       properties:
         type:
           type: string
-          enum: [create_task, send_notification, send_email, send_sms, change_contact_status, enroll_sequence, change_deal_stage]
+          enum: [create_task, send_notification, send_email, send_sms, change_contact_status, enroll_sequence, change_deal_stage, create_appointment]
         config:
           type: object
           additionalProperties: true

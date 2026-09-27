@@ -44,7 +44,8 @@ export type Resource =
   | "invitation"
   | "seat"
   | "dev_console"
-  | "kb_article";
+  | "kb_article"
+  | "appointment";
 
 export type Action = "read" | "create" | "update" | "delete" | "admin";
 
@@ -249,6 +250,16 @@ const MATRIX: PermissionMatrix = {
     create: ["super_admin", "agency_admin"],
     update: ["super_admin", "agency_admin"],
     delete: ["super_admin", "agency_admin"],
+  },
+  // Calendar appointments (stage2/calendar-branding). Back office mirrors
+  // `contact`; `agent` is added because an agent books their own meetings.
+  // routes/appointments.ts narrows the `agent` role to rows whose agent_id is
+  // the caller's own agent profile — this matrix only admits the role.
+  appointment: {
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "agent", "developer"],
+    create: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "agent"],
+    update: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "agent"],
+    delete: ["super_admin", "agency_admin", "agent"],
   },
 };
 

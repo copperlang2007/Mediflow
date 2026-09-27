@@ -44,6 +44,7 @@ import CreateLeadDialog from "@/pages/crm/CreateLeadDialog";
 import ApplicationsTab from "@/pages/crm/ApplicationsTab";
 import { ContactAvatar } from "@/pages/crm/ui";
 import { EmptyState, SectionCard, StatusPill } from "@/components/shared";
+import { BookAppointmentButton } from "@/components/calendar/BookAppointmentButton";
 import {
   useContactCallSummaries,
   type CallSummary,
@@ -974,6 +975,7 @@ export default function ContactDetailPage() {
               {c.phone && !c.optOutSms && <Button size="sm" onClick={() => setSmsOpen(true)}><MessageSquare className="h-4 w-4 mr-1.5" />SMS</Button>}
               {c.email && !c.optOutEmail && <Button size="sm" variant="outline" onClick={() => setEmailOpen(true)}><Mail className="h-4 w-4 mr-1.5" />Email</Button>}
               <Button size="sm" variant="outline" onClick={() => setLogOpen(true)}><ActivityIcon className="h-4 w-4 mr-1.5" />Log</Button>
+              <BookAppointmentButton contactId={id} contactName={contactName} />
               <Button size="sm" variant="outline" onClick={() => setLeadOpen(true)}><Plus className="h-4 w-4 mr-1.5" />Create Lead</Button>
               <Button size="sm" variant="outline" onClick={openEdit}><Edit className="h-4 w-4 mr-1.5" />Edit</Button>
             </div>

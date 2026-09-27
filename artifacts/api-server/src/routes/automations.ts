@@ -57,6 +57,7 @@ const ACTION_TYPES = [
   "change_contact_status",
   "enroll_sequence",
   "change_deal_stage",
+  "create_appointment",
 ] as const;
 
 const ConditionSchema = z.object({

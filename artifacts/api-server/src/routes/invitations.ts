@@ -41,7 +41,7 @@ import { sendEmail, invitationEmailHtml, isEmailConfigured } from "../lib/email"
 import { logger } from "../lib/logger";
 
 /** How long an invitation stays acceptable. */
-const INVITE_TTL_DAYS = 7;
+export const INVITE_TTL_DAYS = 7;
 
 /**
  * Roles an admin may hand out. `super_admin` is excluded deliberately: an
@@ -81,7 +81,7 @@ function hashToken(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
 }
 
-function newToken(): { raw: string; hash: string } {
+export function newToken(): { raw: string; hash: string } {
   const raw = randomBytes(32).toString("base64url");
   return { raw, hash: hashToken(raw) };
 }
@@ -95,14 +95,14 @@ function newToken(): { raw: string; hash: string } {
  * machine. The feature would look like it worked and silently fail for every
  * invitee. Refusing to create the invitation at all is the honest failure.
  */
-class AppBaseUrlUnconfiguredError extends Error {
+export class AppBaseUrlUnconfiguredError extends Error {
   readonly statusCode = 503;
   constructor() {
     super("APP_BASE_URL is not set");
   }
 }
 
-function appBaseUrl(): string {
+export function appBaseUrl(): string {
   const configured = process.env.APP_BASE_URL?.trim();
   if (configured) return configured.replace(/\/+$/, "");
   if (process.env.NODE_ENV === "production") {
@@ -111,7 +111,7 @@ function appBaseUrl(): string {
   return "http://localhost:5173";
 }
 
-function acceptUrlFor(token: string): string {
+export function acceptUrlFor(token: string): string {
   return `${appBaseUrl()}/accept-invite?token=${encodeURIComponent(token)}`;
 }
 
@@ -128,7 +128,7 @@ function baseUrlUnconfigured(res: Response): void {
 }
 
 /** Public shape — never leaks `tokenHash`. */
-function serialize(row: typeof userInvitationsTable.$inferSelect) {
+export function serialize(row: typeof userInvitationsTable.$inferSelect) {
   return {
     id: row.id,
     email: row.email,
@@ -673,7 +673,7 @@ class InviteUnusableError extends Error {
 }
 
 /** Postgres unique-violation, unwrapping driver wrappers. */
-function isUniqueViolation(err: unknown): boolean {
+export function isUniqueViolation(err: unknown): boolean {
   let cur: unknown = err;
   for (let i = 0; i < 5 && cur != null; i++) {
     if (
@@ -744,7 +744,7 @@ async function expirePastDue(
 }
 
 /** Sends the invitation email. Never throws — delivery is best-effort. */
-async function deliver(
+export async function deliver(
   invite: typeof userInvitationsTable.$inferSelect,
   authReq: AuthenticatedRequest,
   rawToken: string,

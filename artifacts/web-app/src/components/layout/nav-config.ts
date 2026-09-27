@@ -18,6 +18,7 @@ import {
   Award,
   BarChart2,
   BookOpen,
+  Boxes,
   Briefcase,
   Building2,
   CalendarClock,
@@ -111,7 +112,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/policies", label: "Policies", icon: FileStack, roles: BACK_OFFICE },
       { href: "/tasks", label: "Tasks", icon: CheckSquare, roles: ALL_ROLES, badge: "overdueTasks" },
       { href: "/onboarding", label: "My Onboarding", icon: ClipboardCheck, roles: ["agent"] },
-      { href: "/calendar", label: "Calendar", icon: CalendarDays, roles: ALL_ROLES, upcoming: true },
+      { href: "/calendar", label: "Calendar", icon: CalendarDays, roles: ALL_ROLES },
       { href: "/dialer", label: "Softphone", icon: Phone, roles: BACK_OFFICE },
       { href: "/supervisor", label: "Supervisor", icon: Headphones, roles: ADMINS },
     ],
@@ -184,7 +185,9 @@ export const NAV_GROUPS: NavGroup[] = [
       // Import / Export hub; the import wizards stay at /data-migration.
       { href: "/data-tools", label: "Import / Export", icon: ArrowLeftRight, roles: ADMINS },
       { href: "/admin/health", label: "System Health", icon: Activity, roles: ADMINS },
-      { href: "/branding", label: "Branding", icon: Palette, roles: ADMINS, upcoming: true },
+      { href: "/branding", label: "Branding", icon: Palette, roles: ADMINS },
+      // Platform owner only: create and list every agency on the platform.
+      { href: "/admin/workspaces", label: "Workspaces", icon: Boxes, roles: ["super_admin"] },
       { href: "/settings", label: "Settings", icon: Settings, roles: ALL_ROLES },
     ],
   },

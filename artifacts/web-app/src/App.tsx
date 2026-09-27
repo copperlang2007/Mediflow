@@ -16,6 +16,7 @@ import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
 import { ThemeProvider } from "@/components/theme/ThemeToggle";
 import { BrandMark } from "@/components/brand/BrandMark";
 import Landing from "@/pages/landing";
+import { BrandingProvider } from "@/lib/branding/BrandingProvider";
 
 // Route-level lazy loading
 const Dashboard = lazy(() => import("@/pages/dashboard"));
@@ -68,6 +69,10 @@ const ReconciliationPage = lazy(() => import("@/pages/reconciliation"));
 const AgentBackofficePage = lazy(() => import("@/pages/agent-backoffice"));
 const DataToolsPage = lazy(() => import("@/pages/data-tools"));
 const KnowledgeBasePage = lazy(() => import("@/pages/knowledge-base"));
+// --- stage2/calendar-branding ---
+const CalendarPage = lazy(() => import("@/pages/calendar"));
+const BrandingPage = lazy(() => import("@/pages/branding"));
+const WorkspacesPage = lazy(() => import("@/pages/workspaces"));
 
 // Dev console pages are only imported when the build-time flag is set, so
 // production bundles never include this code.
@@ -258,13 +263,15 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
     <>
       <Show when="signed-in">
         <ProvisioningGate>
-          <AppShell>
-            <ErrorBoundary>
-              <Suspense fallback={<PageLoadingFallback />}>
-                {children}
-              </Suspense>
-            </ErrorBoundary>
-          </AppShell>
+          <BrandingProvider>
+            <AppShell>
+              <ErrorBoundary>
+                <Suspense fallback={<PageLoadingFallback />}>
+                  {children}
+                </Suspense>
+              </ErrorBoundary>
+            </AppShell>
+          </BrandingProvider>
         </ProvisioningGate>
       </Show>
       <Show when="signed-out">
@@ -541,6 +548,15 @@ function ClerkProviderWithRoutes() {
               </Route>
               <Route path="/knowledge-base">
                 <ProtectedLayout><KnowledgeBasePage /></ProtectedLayout>
+              {/* --- stage2/calendar-branding --- */}
+              <Route path="/calendar">
+                <ProtectedLayout><CalendarPage /></ProtectedLayout>
+              </Route>
+              <Route path="/branding">
+                <ProtectedLayout><BrandingPage /></ProtectedLayout>
+              </Route>
+              <Route path="/admin/workspaces">
+                <ProtectedLayout><WorkspacesPage /></ProtectedLayout>
               </Route>
               {DEV_CONSOLE_ENABLED && DevOpsPage && (
                 <Route path="/dev/ops">

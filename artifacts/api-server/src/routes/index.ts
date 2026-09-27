@@ -58,6 +58,10 @@ import knowledgeBaseRouter from "./knowledgeBase";
 import reconciliationRouter from "./reconciliation";
 import agentBackofficeRouter from "./agentBackoffice";
 import dataExportsRouter from "./dataExports";
+// --- stage2/calendar-branding ---
+import appointmentsRouter from "./appointments";
+import brandingRouter from "./branding";
+import workspacesRouter from "./workspaces";
 
 const router: IRouter = Router();
 
@@ -125,6 +129,10 @@ router.use(knowledgeBaseRouter);
 router.use(reconciliationRouter);
 router.use(agentBackofficeRouter);
 router.use(dataExportsRouter);
+// --- stage2/calendar-branding ---
+router.use(appointmentsRouter);
+router.use(brandingRouter);
+router.use(workspacesRouter);
 
 // Dev console is mounted only when the env var is set. The router itself
 // also applies the `devOnly` middleware, so even if this guard were

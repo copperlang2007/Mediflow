@@ -4064,6 +4064,7 @@ export const GetAutomationRulesResponse = zod.object({
               "change_contact_status",
               "enroll_sequence",
               "change_deal_stage",
+              "create_appointment",
             ]),
             config: zod.record(zod.string(), zod.unknown()),
           }),
@@ -4106,6 +4107,7 @@ export const CreateAutomationRuleBody = zod.object({
         "change_contact_status",
         "enroll_sequence",
         "change_deal_stage",
+        "create_appointment",
       ]),
       config: zod.record(zod.string(), zod.unknown()),
     }),
@@ -4140,6 +4142,7 @@ export const CreateAutomationRuleResponse = zod.object({
           "change_contact_status",
           "enroll_sequence",
           "change_deal_stage",
+          "create_appointment",
         ]),
         config: zod.record(zod.string(), zod.unknown()),
       }),
@@ -4186,6 +4189,7 @@ export const GetAutomationRuleResponse = zod.object({
           "change_contact_status",
           "enroll_sequence",
           "change_deal_stage",
+          "create_appointment",
         ]),
         config: zod.record(zod.string(), zod.unknown()),
       }),
@@ -4230,6 +4234,7 @@ export const UpdateAutomationRuleBody = zod.object({
           "change_contact_status",
           "enroll_sequence",
           "change_deal_stage",
+          "create_appointment",
         ]),
         config: zod.record(zod.string(), zod.unknown()),
       }),
@@ -4265,6 +4270,7 @@ export const UpdateAutomationRuleResponse = zod.object({
           "change_contact_status",
           "enroll_sequence",
           "change_deal_stage",
+          "create_appointment",
         ]),
         config: zod.record(zod.string(), zod.unknown()),
       }),
@@ -4320,6 +4326,7 @@ export const ToggleAutomationRuleResponse = zod.object({
           "change_contact_status",
           "enroll_sequence",
           "change_deal_stage",
+          "create_appointment",
         ]),
         config: zod.record(zod.string(), zod.unknown()),
       }),
@@ -5812,3 +5819,212 @@ export const PostDialerV1EventsResponse = zod.object({
   status: zod.enum(["accepted", "ignored", "duplicate"]),
   eventId: zod.string(),
 });
+
+/**
+ * @summary Appointments starting in [from, to) (max 100 days). Agents see only their own.
+ */
+export const ListAppointmentsQueryParams = zod.object({
+  from: zod.date(),
+  to: zod.date(),
+  agentId: zod.coerce.string().optional(),
+  contactId: zod.coerce.string().optional(),
+  status: zod
+    .enum(["confirmed", "pending", "completed", "cancelled", "no_show"])
+    .optional(),
+});
+
+export const ListAppointmentsResponse = zod.object({
+  data: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  summary: zod
+    .object({
+      total: zod.number().int().optional(),
+      confirmed: zod.number().int().optional(),
+      pending: zod.number().int().optional(),
+      completed: zod.number().int().optional(),
+      cancelled: zod.number().int().optional(),
+      no_show: zod.number().int().optional(),
+    })
+    .optional(),
+  scope: zod.enum(["own", "org"]).optional(),
+});
+
+/**
+ * @summary Book an appointment (notes are encrypted at rest)
+ */
+export const createAppointmentBodyTitleMax = 200;
+
+export const createAppointmentBodyNotesMax = 4000;
+
+export const createAppointmentBodyLocationDetailMax = 300;
+
+export const CreateAppointmentBody = zod.object({
+  title: zod.string().max(createAppointmentBodyTitleMax),
+  type: zod
+    .enum(["enrollment", "review", "renewal", "consultation", "other"])
+    .optional(),
+  status: zod
+    .enum(["confirmed", "pending", "completed", "cancelled", "no_show"])
+    .optional(),
+  startsAt: zod.coerce.date(),
+  endsAt: zod.coerce.date(),
+  contactId: zod.string().nullish(),
+  agentId: zod.string().nullish(),
+  notes: zod.string().max(createAppointmentBodyNotesMax).nullish(),
+  locationType: zod.enum(["office", "phone", "video", "home"]).optional(),
+  locationDetail: zod
+    .string()
+    .max(createAppointmentBodyLocationDetailMax)
+    .nullish(),
+  meetingUrl: zod.string().nullish().describe("https:\/\/ only"),
+});
+
+export const CreateAppointmentResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Contact picker (names only). Agents get only contacts assigned to them.
+ */
+export const ListAppointmentContactOptionsQueryParams = zod.object({
+  search: zod.coerce.string().optional(),
+});
+
+export const ListAppointmentContactOptionsResponse = zod.object({
+  data: zod
+    .array(
+      zod.object({
+        id: zod.string().optional(),
+        firstName: zod.string().optional(),
+        lastName: zod.string().optional(),
+        assignedAgentId: zod.string().nullish(),
+      }),
+    )
+    .optional(),
+});
+
+/**
+ * @summary Agent picker. Agents get only themselves.
+ */
+export const ListAppointmentAgentOptionsResponse = zod.object({
+  data: zod
+    .array(
+      zod.object({
+        id: zod.string().optional(),
+        firstName: zod.string().optional(),
+        lastName: zod.string().optional(),
+        isMe: zod.boolean().optional(),
+      }),
+    )
+    .optional(),
+});
+
+/**
+ * @summary One appointment
+ */
+export const GetAppointmentParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetAppointmentResponse = zod.record(zod.string(), zod.unknown());
+
+/**
+ * @summary Edit or reschedule (rescheduling clears the reminder claim)
+ */
+export const UpdateAppointmentParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateAppointmentBody = zod.record(zod.string(), zod.unknown());
+
+export const UpdateAppointmentResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Delete an appointment
+ */
+export const DeleteAppointmentParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const DeleteAppointmentResponse = zod.void();
+
+/**
+ * @summary This agency's white-label settings (null = agencyBRIDGE default). Any member.
+ */
+export const GetOrgBrandingResponse = zod.record(zod.string(), zod.unknown());
+
+/**
+ * @summary Update branding (agency_admin / super_admin). Rejects colours under 3:1 contrast on white.
+ */
+export const updateOrgBrandingBodyProductNameMax = 40;
+
+export const updateOrgBrandingBodyTaglineMax = 80;
+
+export const updateOrgBrandingBodyPrimaryColorRegExp = new RegExp(
+  "^#[0-9a-fA-F]{6}$",
+);
+export const updateOrgBrandingBodyAccentColorRegExp = new RegExp(
+  "^#[0-9a-fA-F]{6}$",
+);
+export const updateOrgBrandingBodyEmailFromNameMax = 60;
+
+export const UpdateOrgBrandingBody = zod.object({
+  productName: zod.string().max(updateOrgBrandingBodyProductNameMax).nullish(),
+  tagline: zod.string().max(updateOrgBrandingBodyTaglineMax).nullish(),
+  primaryColor: zod
+    .string()
+    .regex(updateOrgBrandingBodyPrimaryColorRegExp)
+    .nullish(),
+  accentColor: zod
+    .string()
+    .regex(updateOrgBrandingBodyAccentColorRegExp)
+    .nullish(),
+  displayFont: zod.string().nullish(),
+  bodyFont: zod.string().nullish(),
+  logoUrl: zod.string().nullish(),
+  markUrl: zod.string().nullish(),
+  faviconUrl: zod.string().nullish(),
+  emailFromName: zod
+    .string()
+    .max(updateOrgBrandingBodyEmailFromNameMax)
+    .nullish(),
+});
+
+export const UpdateOrgBrandingResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Reset to the agencyBRIDGE defaults (also clears the logo)
+ */
+export const ResetOrgBrandingResponse = zod.record(zod.string(), zod.unknown());
+
+/**
+ * @summary Every agency with live member, agent, client and pending-invitation counts (super_admin)
+ */
+export const ListAgenciesOverviewResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Create an agency and invite its first admin via the invitation flow (super_admin)
+ */
+export const createAgencyBodyNameMin = 2;
+export const createAgencyBodyNameMax = 120;
+
+export const createAgencyBodySlugRegExp = new RegExp(
+  "^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$",
+);
+
+export const CreateAgencyBody = zod.object({
+  name: zod.string().min(createAgencyBodyNameMin).max(createAgencyBodyNameMax),
+  slug: zod.string().regex(createAgencyBodySlugRegExp),
+  adminEmail: zod.string().email(),
+});
+
+export const CreateAgencyResponse = zod.record(zod.string(), zod.unknown());

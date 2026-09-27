@@ -45,6 +45,7 @@ export const ACTIONS: { value: AutomationAction["type"]; label: string; phrase: 
   { value: "change_contact_status", label: "Update status", phrase: "update the client's status" },
   { value: "enroll_sequence", label: "Start sequence", phrase: "start a follow-up sequence" },
   { value: "change_deal_stage", label: "Move deal", phrase: "move the deal to a new stage" },
+  { value: "create_appointment", label: "Book appointment", phrase: "book an appointment" },
 ];
 
 export const ACTION_BY_VALUE = new Map(ACTIONS.map((a) => [a.value, a]));
