@@ -121,6 +121,22 @@ afterAll(async () => {
   await shutdownTestDb();
 });
 
+async function runMigration0049(): Promise<void> {
+  const sql = fs.readFileSync(MIGRATION_0049, "utf8");
+  for (const stmt of sql.split(/-->\s*statement-breakpoint/g)) {
+    if (stmt.trim()) await handle.pg.exec(stmt);
+  }
+}
+
+async function orgFkNames(): Promise<string[]> {
+  const res = await handle.pg.query<{ conname: string }>(
+    `SELECT conname FROM pg_constraint
+     WHERE contype = 'f' AND conrelid = 'public.renewal_snoozes'::regclass
+     ORDER BY conname`,
+  );
+  return res.rows.map((r) => r.conname);
+}
+
 describe("renewal_snoozes migration", () => {
   it("is created by the SQL migrations", async () => {
     const res = await handle.pg.query<{ exists: string | null }>(
@@ -130,9 +146,27 @@ describe("renewal_snoozes migration", () => {
   });
 
   it("0049 is idempotent (safe on DBs that got the table via db push)", async () => {
-    const sql = fs.readFileSync(MIGRATION_0049, "utf8");
-    for (const stmt of sql.split(/-->\s*statement-breakpoint/g)) {
-      if (stmt.trim()) await handle.pg.exec(stmt);
+    await runMigration0049();
+    expect(await orgFkNames()).toEqual([
+      "renewal_snoozes_org_id_organizations_id_fk",
+    ]);
+  });
+
+  it("0049 does not duplicate an equivalent FK stored under another name", async () => {
+    await handle.pg.exec(`
+      ALTER TABLE renewal_snoozes DROP CONSTRAINT renewal_snoozes_org_id_organizations_id_fk;
+      ALTER TABLE renewal_snoozes ADD CONSTRAINT renewal_snoozes_org_fk_legacy
+        FOREIGN KEY (org_id) REFERENCES organizations(id);
+    `);
+    try {
+      await runMigration0049();
+      expect(await orgFkNames()).toEqual(["renewal_snoozes_org_fk_legacy"]);
+    } finally {
+      await handle.pg.exec(`
+        ALTER TABLE renewal_snoozes DROP CONSTRAINT renewal_snoozes_org_fk_legacy;
+        ALTER TABLE renewal_snoozes ADD CONSTRAINT renewal_snoozes_org_id_organizations_id_fk
+          FOREIGN KEY (org_id) REFERENCES organizations(id);
+      `);
     }
   });
 });
@@ -144,16 +178,19 @@ describe("GET /api/renewals", () => {
       .set(withAuth(admin.id));
     expect(res.status).toBe(200);
     expect(res.body.daysAhead).toBe(90);
-    const ids = res.body.renewals.map((r: { id: string }) => r.id);
-    expect(ids).toEqual([licenseId, certId]);
-    expect(res.body.renewals[0]).toMatchObject({
+    const renewals = res.body.renewals as Array<{ id: string }>;
+    const byId = (id: string) => renewals.find((r) => r.id === id);
+    expect(byId(licenseId)).toMatchObject({
       type: "license",
       urgency: "critical",
     });
-    expect(res.body.renewals[1]).toMatchObject({
+    expect(byId(certId)).toMatchObject({
       type: "certification",
       urgency: "warning",
     });
+    // The route sorts soonest-expiring first (20 days vs 45 — no tie).
+    const ids = renewals.map((r) => r.id);
+    expect(ids).toEqual([licenseId, certId]);
     // Other org's license never leaks in.
     expect(ids).not.toContain(otherOrgLicenseId);
   });

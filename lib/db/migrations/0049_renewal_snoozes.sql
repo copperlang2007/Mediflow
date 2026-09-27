@@ -17,8 +17,20 @@ CREATE TABLE IF NOT EXISTS "renewal_snoozes" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+-- Guard on the FK's shape, not just its name: a pushed DB could carry an
+-- equivalent org_id -> organizations(id) FK under a different name, and a
+-- name-only guard would then add a duplicate.
 DO $$ BEGIN
- ALTER TABLE "renewal_snoozes" ADD CONSTRAINT "renewal_snoozes_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
-EXCEPTION
- WHEN duplicate_object THEN null;
+ IF NOT EXISTS (
+  SELECT 1 FROM pg_constraint c
+  WHERE c.contype = 'f'
+    AND c.conrelid = 'public.renewal_snoozes'::regclass
+    AND c.confrelid = 'public.organizations'::regclass
+    AND c.conkey = ARRAY[(
+      SELECT a.attnum FROM pg_attribute a
+      WHERE a.attrelid = 'public.renewal_snoozes'::regclass AND a.attname = 'org_id'
+    )]::smallint[]
+ ) THEN
+  ALTER TABLE "renewal_snoozes" ADD CONSTRAINT "renewal_snoozes_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
+ END IF;
 END $$;
