@@ -8,6 +8,8 @@ export interface SendSmsOptions {
   body: string;
   from?: string;
   mediaUrl?: string[];
+  /** Twilio StatusCallback URL for delivery receipts (campaign tracking). */
+  statusCallback?: string;
 }
 
 export interface SmsResult {
@@ -76,6 +78,7 @@ export async function sendSms(
     From: fromNumber,
     Body: opts.body,
   });
+  if (opts.statusCallback) body.set("StatusCallback", opts.statusCallback);
   if (opts.mediaUrl) {
     opts.mediaUrl.forEach((url) => body.append("MediaUrl", url));
   }

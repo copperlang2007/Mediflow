@@ -44,6 +44,7 @@ import {
 } from "@workspace/db";
 import { type SendSequenceStepPayload, enqueue, JOB_NAMES } from "../lib/jobs";
 import { logger } from "../lib/logger";
+import { sequenceEmailCompliance } from "../lib/campaigns/service";
 
 function delayToMs(value: number, unit: string): number {
   switch (unit) {
@@ -276,14 +277,28 @@ export async function sendSequenceStepWorker(
           break;
         }
         const subject = String(cfg.subject ?? "");
-        const html = String(cfg.html ?? cfg.body ?? `Hello ${contactName}`);
+        let html = String(cfg.html ?? cfg.body ?? `Hello ${contactName}`);
+        // CAN-SPAM: when the org has a mailing address on file and the
+        // unsubscribe signer is configured, append the signed unsubscribe
+        // footer and List-Unsubscribe headers (see lib/campaigns). If not
+        // configured this is a no-op and the email goes out as before.
+        let headers: Record<string, string> | undefined;
+        try {
+          const compliance = await sequenceEmailCompliance(contact.orgId, contact.id);
+          if (compliance) {
+            html = `${html}\n${compliance.footerHtml}`;
+            headers = compliance.headers;
+          }
+        } catch (err) {
+          logger.warn({ err, contactId }, "Could not build unsubscribe footer for sequence email");
+        }
         // Belt-and-braces: pg-boss singletonKey collapses any duplicate
         // job that slips past the ledger (e.g. concurrent worker on a
         // different node racing the same step). The ledger is the
         // primary guard; this is defense in depth.
         await enqueue(
           JOB_NAMES.SEND_SCHEDULED_EMAIL,
-          { to, subject, html },
+          { to, subject, html, ...(headers ? { headers } : {}) },
           { singletonKey: `seq:${enrollment.id}:${stepIndex}` },
         );
         logger.info({ contactId, stepIndex, stepId: step.id }, "Sequence email step enqueued");

@@ -27,3 +27,4 @@ export * from "./knowledgeBase";
 // --- stage2/calendar-branding ---
 export * from "./appointments";
 export * from "./branding";
+export * from "./campaigns";

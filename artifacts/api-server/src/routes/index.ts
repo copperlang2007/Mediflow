@@ -47,6 +47,7 @@ import clawbacksRouter from "./clawbacks";
 import enrollmentsRouter from "./enrollments";
 import billingRouter from "./billing";
 import invitationsRouter from "./invitations";
+import campaignsRouter from "./campaigns";
 import devRouter from "./dev";
 // --- stage2/portal-dialer ---
 import clientPortalRouter from "./clientPortal";
@@ -133,6 +134,7 @@ router.use(dataExportsRouter);
 router.use(appointmentsRouter);
 router.use(brandingRouter);
 router.use(workspacesRouter);
+router.use(campaignsRouter);
 
 // Dev console is mounted only when the env var is set. The router itself
 // also applies the `devOnly` middleware, so even if this guard were

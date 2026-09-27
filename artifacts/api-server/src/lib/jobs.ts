@@ -22,6 +22,7 @@
  *    generate-offboarding-pdf    on agent offboard
  *    send-scheduled-email        deferred transactional email
  *    send-scheduled-sms          deferred transactional SMS
+ *    campaign-send               omnichannel campaign fan-out (throttled, self re-enqueues)
  *
  * IMPORTANT: pg-boss v12 requires createQueue() before schedule()/work().
  *
@@ -132,6 +133,9 @@ export const JOB_NAMES = {
   // stage2/calendar-branding: every 15 min, text/email clients about
   // appointments in the next 24h (opt-outs, STOP list and calling hours apply).
   APPOINTMENT_REMINDERS: "appointment-reminders",
+  // Omnichannel campaign fan-out (stage2/campaigns). Idempotent per
+  // recipient (claim-before-send), throttled, re-enqueues itself until done.
+  CAMPAIGN_SEND: "campaign-send",
 } as const;
 
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
@@ -272,6 +276,8 @@ export interface SendScheduledEmailPayload {
   text?: string;
   replyTo?: string;
   tags?: Record<string, string>;
+  /** e.g. List-Unsubscribe headers on drip-sequence marketing email. */
+  headers?: Record<string, string>;
   /** Display name for the From header (agency white-label email_from_name). */
   fromName?: string;
 }
@@ -574,6 +580,7 @@ export async function startWorkers(): Promise<void> {
         replyTo: job.data.replyTo,
         tags: job.data.tags,
         from: fromHeaderFor(job.data.fromName),
+        headers: job.data.headers,
       });
     }
   };
@@ -597,6 +604,20 @@ export async function startWorkers(): Promise<void> {
     JOB_NAMES.SEND_SCHEDULED_SMS,
     { batchSize: 3, localConcurrency: 3 },
     smsHandler,
+  );
+
+  const campaignSendHandler: WorkHandler<{ campaignId: string; orgId: string }> = async (
+    jobs: Job<{ campaignId: string; orgId: string }>[],
+  ) => {
+    const { campaignSendWorker } = await import("../workers/campaignSend");
+    for (const job of jobs) await campaignSendWorker(job.data);
+  };
+  // Campaign fan-out throttles itself per message; keep one job per node at
+  // a time per batch so provider rate limits are respected.
+  await boss.work<{ campaignId: string; orgId: string }>(
+    JOB_NAMES.CAMPAIGN_SEND,
+    { batchSize: 1, localConcurrency: 2 },
+    campaignSendHandler,
   );
 
   const retentionHandler: WorkHandler<Record<string, never>> = async () => {

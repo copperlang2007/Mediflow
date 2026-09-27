@@ -73,6 +73,9 @@ tags:
     description: Native e-signature envelopes for carrier contracting paperwork
   - name: dialer
     description: masterBRIDGE dialer integration — inbound lifecycle events (Option A)
+  # --- stage2/campaigns ---
+  - name: campaigns
+    description: Omnichannel email/SMS marketing campaigns
 
 paths:
   /healthz:
@@ -5115,6 +5118,229 @@ paths:
         "503": { description: APP_BASE_URL not configured, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   # --- end stage2/calendar-branding ---
 
+  # --- stage2/campaigns ---
+  # Omnichannel email/SMS campaigns (routes/campaigns.ts, routes/campaignsPublic.ts).
+  # The web page calls these with customFetch; no generated hooks are required.
+  /campaigns:
+    get:
+      operationId: listCampaigns
+      tags: [campaigns]
+      summary: List campaigns for the org (optionally one channel)
+      parameters:
+        - { name: channel, in: query, required: false, schema: { type: string, enum: [email, sms] } }
+      responses:
+        "200": { description: Campaigns, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Campaign" } } } } }
+    post:
+      operationId: createCampaign
+      tags: [campaigns]
+      summary: Create a draft campaign (communication:create)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CampaignInput" } } }
+      responses:
+        "201": { description: Draft created, content: { application/json: { schema: { $ref: "#/components/schemas/Campaign" } } } }
+        "400": { description: Invalid body, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /campaigns/overview:
+    get:
+      operationId: getCampaignOverview
+      tags: [campaigns]
+      summary: KPI totals from real recipient rows; rates are null until tracking is connected
+      parameters:
+        - { name: channel, in: query, required: false, schema: { type: string, enum: [email, sms] } }
+      responses:
+        "200": { description: Totals, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /campaigns/config:
+    get:
+      operationId: getCampaignConfig
+      tags: [campaigns]
+      summary: Which sending / tracking / compliance settings are configured
+      responses:
+        "200": { description: Config state, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /campaigns/settings:
+    put:
+      operationId: updateCampaignSettings
+      tags: [campaigns]
+      summary: Sender name, physical mailing address (CAN-SPAM), reply-to, quiet-hours time zone (communication:update)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                senderName: { type: [string, "null"] }
+                physicalAddress: { type: [string, "null"] }
+                replyToEmail: { type: [string, "null"] }
+                defaultTimeZone: { type: string }
+      responses:
+        "200": { description: Updated config state, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /campaigns/activity:
+    get:
+      operationId: getCampaignActivity
+      tags: [campaigns]
+      summary: Recent delivered / opened / clicked / bounced / unsubscribed recipient events
+      parameters:
+        - { name: channel, in: query, required: false, schema: { type: string, enum: [email, sms] } }
+      responses:
+        "200": { description: Events, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+  /campaigns/audience/preview:
+    post:
+      operationId: previewCampaignAudience
+      tags: [campaigns]
+      summary: Live recipient count for an audience filter (opt-outs excluded)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel]
+              properties:
+                channel: { type: string, enum: [email, sms] }
+                audience: { $ref: "#/components/schemas/CampaignAudience" }
+      responses:
+        "200":
+          description: Counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matched: { type: integer }
+                  eligible: { type: integer }
+                  optedOut: { type: integer }
+                  missingAddress: { type: integer }
+  /campaigns/audience/options:
+    get:
+      operationId: getCampaignAudienceOptions
+      tags: [campaigns]
+      summary: Distinct states, sources, tags and carriers for the audience builder
+      responses:
+        "200": { description: Options, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /campaigns/opt-outs:
+    get:
+      operationId: listCampaignOptOuts
+      tags: [campaigns]
+      summary: Email unsubscribes or the SMS STOP list for the org
+      parameters:
+        - { name: channel, in: query, required: false, schema: { type: string, enum: [email, sms] } }
+      responses:
+        "200": { description: Opt-outs, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /campaigns/opt-outs/{channel}/resubscribe:
+    post:
+      operationId: resubscribeCampaignContact
+      tags: [campaigns]
+      summary: Re-opt-in a contact to EMAIL with explicit confirmation + reason (audited). SMS always 403 — only the consumer texting START can re-opt-in.
+      parameters:
+        - { name: channel, in: path, required: true, schema: { type: string, enum: [email, sms] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contactId, confirm, reason]
+              properties:
+                contactId: { type: string }
+                confirm: { type: boolean, const: true }
+                reason: { type: string, minLength: 5 }
+      responses:
+        "200": { description: Re-subscribed }
+        "403": { description: SMS re-opt-in is never allowed from the UI }
+  /campaigns/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getCampaign
+      tags: [campaigns]
+      summary: Campaign detail with up to 200 recipients
+      responses:
+        "200": { description: Campaign, content: { application/json: { schema: { $ref: "#/components/schemas/Campaign" } } } }
+        "404": { description: Not found in this org }
+    patch:
+      operationId: updateCampaign
+      tags: [campaigns]
+      summary: Edit a draft
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CampaignInput" } } }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { $ref: "#/components/schemas/Campaign" } } } }
+        "409": { description: Not a draft }
+    delete:
+      operationId: deleteCampaign
+      tags: [campaigns]
+      summary: Delete a draft or a cancelled campaign that reached nobody (communication:update)
+      responses:
+        "204": { description: Deleted }
+        "409": { description: Sent campaigns are kept as a record }
+  /campaigns/{id}/send:
+    post:
+      operationId: sendCampaign
+      tags: [campaigns]
+      summary: Send now or schedule (communication:update). 409 when the provider, mailing address or unsubscribe signer is not configured, or the audience is empty.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scheduledAt: { type: [string, "null"], format: date-time }
+      responses:
+        "200": { description: Scheduled, content: { application/json: { schema: { $ref: "#/components/schemas/Campaign" } } } }
+        "409": { description: Not configured / empty audience / not a draft }
+  /campaigns/{id}/cancel:
+    post:
+      operationId: cancelCampaign
+      tags: [campaigns]
+      summary: Cancel a scheduled or sending campaign
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Cancelled, content: { application/json: { schema: { $ref: "#/components/schemas/Campaign" } } } }
+  /campaigns/v1/unsubscribe/{token}:
+    parameters:
+      - { name: token, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: campaignUnsubscribePage
+      tags: [campaigns]
+      security: []
+      summary: Public unsubscribe confirmation page (HMAC-signed token, rate-limited)
+      responses:
+        "200": { description: HTML page }
+        "400": { description: Generic invalid-link page }
+    post:
+      operationId: campaignUnsubscribe
+      tags: [campaigns]
+      security: []
+      summary: Unsubscribe (form button or RFC 8058 List-Unsubscribe=One-Click)
+      responses:
+        "200": { description: HTML confirmation }
+        "400": { description: Generic invalid-link page }
+  /campaigns/v1/webhooks/resend:
+    post:
+      operationId: campaignResendWebhook
+      tags: [campaigns]
+      security: []
+      summary: Resend delivery/open/click/bounce/complaint events (svix signature, RESEND_WEBHOOK_SECRET)
+      responses:
+        "200": { description: Accepted (or duplicate) }
+        "401": { description: Bad signature }
+        "503": { description: RESEND_WEBHOOK_SECRET not configured }
+  /campaigns/v1/webhooks/twilio-status:
+    post:
+      operationId: campaignTwilioStatusCallback
+      tags: [campaigns]
+      security: []
+      summary: Twilio SMS delivery receipts (X-Twilio-Signature)
+      responses:
+        "204": { description: Accepted }
+        "403": { description: Bad signature }
+  # --- end stage2/campaigns ---
+
 
 components:
   securitySchemes:
@@ -8711,3 +8937,48 @@ components:
         content: { type: string, maxLength: 20000 }
         keywords: { type: array, maxItems: 50, items: { type: string, maxLength: 60 } }
         isActive: { type: boolean }
+    # --- stage2/campaigns ---
+    CampaignAudience:
+      type: object
+      description: Audience filter over contacts. Health conditions and race are never filterable.
+      additionalProperties: false
+      properties:
+        statuses: { type: array, items: { type: string, enum: [lead, prospect, enrolled, retained, lost] } }
+        planTypes: { type: array, items: { type: string, enum: [MA, PDP, MAPD, supp, other] } }
+        carrierIds: { type: array, items: { type: string } }
+        states: { type: array, items: { type: string } }
+        sources: { type: array, items: { type: string } }
+        tags: { type: array, items: { type: string } }
+        birthdayMonth: { type: integer, minimum: 1, maximum: 12 }
+    CampaignInput:
+      type: object
+      properties:
+        channel: { type: string, enum: [email, sms] }
+        name: { type: string }
+        templateId: { type: [string, "null"] }
+        subject: { type: [string, "null"] }
+        body: { type: [string, "null"] }
+        audience: { $ref: "#/components/schemas/CampaignAudience" }
+    Campaign:
+      type: object
+      properties:
+        id: { type: string }
+        channel: { type: string, enum: [email, sms] }
+        name: { type: string }
+        status: { type: string, enum: [draft, scheduled, sending, sent, cancelled] }
+        subject: { type: [string, "null"] }
+        body: { type: [string, "null"] }
+        audience: { $ref: "#/components/schemas/CampaignAudience" }
+        templateName: { type: [string, "null"] }
+        scheduledAt: { type: [string, "null"], format: date-time }
+        sentAt: { type: [string, "null"], format: date-time }
+        recipientCount: { type: integer }
+        sentCount: { type: integer }
+        deliveredCount: { type: integer }
+        openedCount: { type: integer }
+        clickedCount: { type: integer }
+        bouncedCount: { type: integer }
+        failedCount: { type: integer }
+        skippedCount: { type: integer }
+        unsubscribedCount: { type: integer }
+    # --- end stage2/campaigns ---

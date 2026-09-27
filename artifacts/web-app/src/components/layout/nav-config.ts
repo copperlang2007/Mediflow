@@ -127,7 +127,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/quoting", label: "Quoting Engine", icon: Search, roles: BACK_OFFICE },
       // The one automation page (/automations redirects here). Rule edits are owner-only server-side.
       { href: "/workflows", label: "Workflow Automation", icon: Workflow, roles: ADMINS },
-      { href: "/campaigns", label: "Omnichannel Campaigns", icon: Mail, roles: ADMINS, upcoming: true },
+      // Same audience as the `communication:read` permission; sending is admin-only server-side.
+      { href: "/campaigns", label: "Omnichannel Campaigns", icon: Mail, roles: BACK_OFFICE },
     ],
   },
   {
