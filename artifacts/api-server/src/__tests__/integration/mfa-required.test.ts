@@ -118,6 +118,28 @@ describe("MFA required for admin roles (HIPAA technical safeguard)", () => {
     }
   });
 
+  it("ignores MFA_REQUIRED=false for a super admin viewing another agency in production", async () => {
+    const { db } = await bootTestDb();
+    const other = await seedOrg(db, { id: "mfa-org-other" });
+    const superNoMfa = await seedUser(db, { orgId: org.id, role: "super_admin" });
+    process.env.MFA_REQUIRED = "false";
+    try {
+      const denied = await request(app)
+        .get("/api/contacts")
+        .set(withMfaAuth(superNoMfa.id, false))
+        .set("X-MediFlow-View-Org", other.id);
+      expect(denied.status).toBe(403);
+      expect(denied.body).toMatchObject({ error: "mfa_required" });
+      const allowed = await request(app)
+        .get("/api/contacts")
+        .set(withMfaAuth(superNoMfa.id, true))
+        .set("X-MediFlow-View-Org", other.id);
+      expect(allowed.status).toBe(200);
+    } finally {
+      process.env.MFA_REQUIRED = "true";
+    }
+  });
+
   it("still lets local development switch MFA off", async () => {
     const { mfaEnforced } = await import("../../middlewares/requireMfa");
     process.env.NODE_ENV = "development";
