@@ -19,6 +19,7 @@ import {
   checklistItemsTable,
 } from "@workspace/db";
 import { isLicenseActive } from "../licenses/licenseStatus";
+import { isAhipComplete } from "./ahipCoverage";
 
 export type ComplianceScore = {
   agentId: string;
@@ -84,9 +85,11 @@ export async function computeComplianceScore(
       onboardingTotalItems > 0 ? (onboardingCompletedItems / onboardingTotalItems) * 100 : 0;
   }
 
-  const activeLicenses = licenses.filter((l) => isLicenseActive(l)).length;
+  // Judge every license against the same `now` snapshot as the AHIP year.
+  const activeLicenses = licenses.filter((l) => isLicenseActive(l, now)).length;
   const activeCerts = certs.filter((c) => c.status === "passed").length;
-  const ahipCompleted = ahip[0]?.status === "passed";
+  // passed OR waived — the one AHIP "complete" definition (ahipCoverage.ts).
+  const ahipCompleted = isAhipComplete(ahip[0]?.status);
 
   const licenseScore = licenses.length > 0 ? (activeLicenses / licenses.length) * 100 : 0;
   const certScore = certs.length > 0 ? (activeCerts / certs.length) * 100 : 0;
