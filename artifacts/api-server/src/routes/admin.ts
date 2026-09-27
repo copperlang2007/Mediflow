@@ -3,7 +3,7 @@
  * All endpoints require super_admin or agency_admin role.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, gte, lte, sql, desc, count, isNull, lt, isNotNull } from "drizzle-orm";
+import { eq, and, gte, lte, sql, desc, count, isNull, lt, isNotNull, inArray } from "drizzle-orm";
 import {
   db,
   auditLogTable,
@@ -75,7 +75,7 @@ router.get(
     const userIds = [...new Set(entries.map((e) => e.userId).filter(Boolean))] as string[];
     const userMap: Record<string, string> = {};
     if (userIds.length > 0) {
-      const users = await db.select({ id: usersTable.id, fullName: usersTable.fullName }).from(usersTable).where(sql`${usersTable.id} = ANY(${userIds})`);
+      const users = await db.select({ id: usersTable.id, fullName: usersTable.fullName }).from(usersTable).where(inArray(usersTable.id, userIds));
       for (const u of users) userMap[u.id] = u.fullName;
     }
 
@@ -1175,7 +1175,7 @@ router.post(
           eq(table.orgId, authReq.orgId),
           isNotNull(table.deletedAt),
           lt(table.deletedAt, cutoff),
-          sql`${table.id} = ANY(${ids})`,
+          inArray(table.id, ids),
         ),
       );
 

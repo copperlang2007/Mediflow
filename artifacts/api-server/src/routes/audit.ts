@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, gte, lte, sql } from "drizzle-orm";
+import { eq, and, gte, lte, sql, inArray } from "drizzle-orm";
 import { db, auditLogTable, usersTable } from "@workspace/db";
 import {
   requireAuth,
@@ -58,13 +58,15 @@ router.get(
         .where(and(...conditions)),
     ]);
 
-    const userIds = [...new Set(entries.map((e) => e.userId).filter(Boolean))];
+    const userIds = [
+      ...new Set(entries.map((e) => e.userId).filter((id): id is string => !!id)),
+    ];
     const users =
       userIds.length > 0
         ? await db
             .select({ id: usersTable.id, fullName: usersTable.fullName })
             .from(usersTable)
-            .where(sql`${usersTable.id} = ANY(${userIds})`)
+            .where(inArray(usersTable.id, userIds))
         : [];
 
     const userMap = new Map(users.map((u) => [u.id, u.fullName]));

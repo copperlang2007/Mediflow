@@ -54,17 +54,20 @@ router.get("/queues", async (_req: Request, res: Response): Promise<void> => {
 
     const jobNames = Object.values(JOB_NAMES) as JobName[];
 
+    // Drizzle renders a JS array in a sql template as a parenthesised
+    // parameter list, so use `IN ${arr}`; `= ANY(${arr})` becomes
+    // `ANY(($1, $2, ...))`, which Postgres rejects.
     const liveRows = (await db.execute(
       sql`SELECT name, state, count(*)::int AS count
           FROM pgboss.job
-          WHERE name = ANY(${jobNames as unknown as string[]})
+          WHERE name IN ${jobNames as unknown as string[]}
           GROUP BY name, state`,
     )) as unknown as { rows: Array<{ name: string; state: string; count: number }> };
 
     const archiveRows = (await db.execute(
       sql`SELECT name, state, count(*)::int AS count
           FROM pgboss.archive
-          WHERE name = ANY(${jobNames as unknown as string[]})
+          WHERE name IN ${jobNames as unknown as string[]}
             AND completedon >= now() - interval '24 hours'
           GROUP BY name, state`,
     )) as unknown as { rows: Array<{ name: string; state: string; count: number }> };
@@ -152,7 +155,7 @@ router.get("/workers", async (_req: Request, res: Response): Promise<void> => {
     const rows = (await db.execute(
       sql`SELECT name, max(completedon) AS last_seen
           FROM pgboss.archive
-          WHERE name = ANY(${jobNames as unknown as string[]})
+          WHERE name IN ${jobNames as unknown as string[]}
             AND state = 'completed'
           GROUP BY name`,
     )) as unknown as { rows: Array<{ name: string; last_seen: string | null }> };
