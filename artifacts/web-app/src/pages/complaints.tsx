@@ -31,6 +31,10 @@ import {
   Plus,
 } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState, type StatusTone } from "@/components/shared";
+import { PageShell, KpiGrid, FilterBar } from "@/components/ops";
+import { ListChecks, Smile } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 // ─── Types (shape returned by routes/complaints.ts) ───────────────────────────
 type Severity = "low" | "medium" | "high" | "critical";
@@ -80,18 +84,25 @@ interface ComplaintSummary {
   total: number;
 }
 
-const SEVERITY_CONFIG: Record<Severity, { label: string; className: string }> = {
-  critical: { label: "Critical", className: "bg-red-100 text-red-800 border-red-200" },
-  high: { label: "High", className: "bg-orange-100 text-orange-800 border-orange-200" },
-  medium: { label: "Medium", className: "bg-amber-100 text-amber-800 border-amber-200" },
-  low: { label: "Low", className: "bg-slate-100 text-slate-700 border-slate-200" },
+const SEVERITY_CONFIG: Record<Severity, { label: string; tone: StatusTone }> = {
+  critical: { label: "Critical", tone: "danger" },
+  high: { label: "High", tone: "danger" },
+  medium: { label: "Medium", tone: "warning" },
+  low: { label: "Low", tone: "neutral" },
 };
 
-const STATUS_CONFIG: Record<Status, { label: string; className: string }> = {
-  open: { label: "Open", className: "bg-blue-100 text-blue-800 border-blue-200" },
-  investigating: { label: "Investigating", className: "bg-violet-100 text-violet-800 border-violet-200" },
-  resolved: { label: "Resolved", className: "bg-green-100 text-green-800 border-green-200" },
-  closed: { label: "Closed", className: "bg-slate-100 text-slate-600 border-slate-200" },
+const STATUS_CONFIG: Record<Status, { label: string; tone: StatusTone }> = {
+  open: { label: "Open", tone: "info" },
+  investigating: { label: "Investigating", tone: "navy" },
+  resolved: { label: "Resolved", tone: "success" },
+  closed: { label: "Closed", tone: "neutral" },
+};
+
+const SEVERITY_BAR: Record<Severity, string> = {
+  critical: "bg-destructive",
+  high: "bg-orange-500",
+  medium: "bg-warning",
+  low: "bg-muted-foreground/30",
 };
 
 const CATEGORY_LABEL: Record<Category, string> = {
@@ -180,8 +191,8 @@ function LogComplaintDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm">
-          <Plus className="h-3.5 w-3.5 mr-1.5" />
+        <Button>
+          <Plus className="h-4 w-4 mr-1.5" />
           Log complaint
         </Button>
       </DialogTrigger>
@@ -301,23 +312,23 @@ function ComplaintCard({ row }: { row: ComplaintRow }) {
     : null;
 
   return (
-    <Card>
-      <CardContent className="p-4">
+    <div className="relative overflow-hidden rounded-lg border border-border bg-card p-4 pl-5 transition-colors hover:bg-muted/30">
+      <span className={cn("absolute inset-y-0 left-0 w-1", SEVERITY_BAR[c.severity])} aria-hidden />
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-medium truncate">{c.subject}</span>
-              <Badge variant="outline" className={SEVERITY_CONFIG[c.severity].className}>
+              <StatusPill tone={SEVERITY_CONFIG[c.severity].tone}>
                 {SEVERITY_CONFIG[c.severity].label}
-              </Badge>
-              <Badge variant="outline" className={STATUS_CONFIG[c.status].className}>
+              </StatusPill>
+              <StatusPill tone={STATUS_CONFIG[c.status].tone}>
                 {STATUS_CONFIG[c.status].label}
-              </Badge>
+              </StatusPill>
               {overdue && (
-                <Badge variant="outline" className="bg-red-100 text-red-800 border-red-200">
-                  <AlertTriangle className="h-3 w-3 mr-1" />
+                <StatusPill tone="danger" className="gap-1">
+                  <AlertTriangle className="h-3 w-3" />
                   Overdue
-                </Badge>
+                </StatusPill>
               )}
             </div>
             {c.description && (
@@ -329,7 +340,7 @@ function ComplaintCard({ row }: { row: ComplaintRow }) {
               {c.ctmCaseId && <span>CTM #{c.ctmCaseId}</span>}
               {contactName && <span>Beneficiary: {contactName}</span>}
               {agentName && <span>Agent: {agentName}</span>}
-              <span className={overdue ? "text-red-600 font-medium" : ""}>
+              <span className={overdue ? "text-destructive font-medium" : ""}>
                 <Clock className="h-3 w-3 inline mr-1" />
                 Due {fmtDate(c.dueAt)}
               </span>
@@ -347,8 +358,7 @@ function ComplaintCard({ row }: { row: ComplaintRow }) {
             </Select>
           </div>
         </div>
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
@@ -376,55 +386,63 @@ export default function ComplaintsPage() {
     },
   });
 
-  const cards: Array<{ key: string; label: string; value: number; icon: typeof ShieldAlert; className: string }> = [
-    { key: "active", label: "Active", value: summary?.active ?? 0, icon: ShieldAlert, className: "text-blue-600" },
-    { key: "overdue", label: "Overdue", value: summary?.overdue ?? 0, icon: AlertTriangle, className: "text-red-600" },
-    { key: "resolved", label: "Resolved", value: summary?.resolved ?? 0, icon: CheckCircle2, className: "text-green-600" },
-    { key: "total", label: "Total", value: summary?.total ?? 0, icon: ShieldAlert, className: "text-slate-600" },
-  ];
+  const total = summary?.total ?? 0;
+  const filtered = statusFilter !== "all" || severityFilter !== "all" || overdueOnly;
 
   return (
-    <div className="p-6 space-y-5 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Complaints</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Log, triage, and resolve beneficiary complaints (CMS CTM) within SLA
-          </p>
-        </div>
+    <PageShell>
+      <PageHeader
+        title="Complaints"
+        subtitle="Log, look into and resolve member complaints (including CMS CTM cases) before they're due"
+      >
         <LogComplaintDialog />
-      </div>
+      </PageHeader>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {cards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <button
-              key={card.key}
-              onClick={() => {
-                if (card.key === "overdue") {
-                  setOverdueOnly((v) => !v);
-                } else if (card.key === "resolved") {
-                  setStatusFilter((s) => (s === "resolved" ? "all" : "resolved"));
-                }
-              }}
-              className="rounded-lg border p-4 text-left transition-all hover:shadow-sm"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {card.label}
-                </span>
-                <Icon className={`h-4 w-4 ${card.className}`} />
-              </div>
-              <div className={`text-2xl font-bold mt-1 ${card.className}`}>{card.value}</div>
-            </button>
-          );
-        })}
-      </div>
+      <KpiGrid>
+        <KpiCard
+          label="Active"
+          value={summary?.active ?? 0}
+          icon={ShieldAlert}
+          color="navy"
+          hint={summary && summary.active === 0 ? "Nothing open right now" : "Open or being looked into"}
+        />
+        <button type="button" className="text-left" onClick={() => setOverdueOnly((v) => !v)} aria-pressed={overdueOnly}>
+          <KpiCard
+            label="Overdue"
+            value={summary?.overdue ?? 0}
+            icon={AlertTriangle}
+            color="orange"
+            className={cn("hover:shadow-lg", overdueOnly && "ring-2 ring-offset-2 ring-warning ring-offset-background")}
+            hint={summary && summary.overdue === 0 ? "Everything is on time" : overdueOnly ? "Showing overdue only" : "Click to show only these"}
+          />
+        </button>
+        <button
+          type="button"
+          className="text-left"
+          onClick={() => setStatusFilter((s) => (s === "resolved" ? "all" : "resolved"))}
+          aria-pressed={statusFilter === "resolved"}
+        >
+          <KpiCard
+            label="Resolved"
+            value={summary?.resolved ?? 0}
+            icon={CheckCircle2}
+            color="green"
+            className={cn("hover:shadow-lg", statusFilter === "resolved" && "ring-2 ring-offset-2 ring-success ring-offset-background")}
+            hint={statusFilter === "resolved" ? "Showing resolved only" : "Click to show only these"}
+          />
+        </button>
+        <KpiCard
+          label="All time"
+          value={total}
+          icon={ListChecks}
+          color="blue"
+          hint={total === 0 ? "No complaints logged — nice" : "Every complaint logged"}
+        />
+      </KpiGrid>
 
+      <SectionCard title="Complaint log" description="Newest first. Change the status right on each row.">
       {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <FilterBar>
         <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "all" | Status)}>
           <SelectTrigger className="w-[160px] h-9"><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>
@@ -451,7 +469,7 @@ export default function ComplaintsPage() {
           <AlertTriangle className="h-3.5 w-3.5 mr-1.5" />
           Overdue only
         </Button>
-      </div>
+      </FilterBar>
 
       {/* List */}
       {isLoading ? (
@@ -459,16 +477,25 @@ export default function ComplaintsPage() {
           {[0, 1, 2].map((i) => <Skeleton key={i} className="h-24 w-full" />)}
         </div>
       ) : (rows ?? []).length === 0 ? (
-        <Card>
-          <CardContent className="p-10 text-center text-sm text-muted-foreground">
-            No complaints match the current filters.
-          </CardContent>
-        </Card>
+        filtered ? (
+          <EmptyState
+            icon={ShieldAlert}
+            title="No complaints match the current filters."
+            description="Try a different status or severity."
+          />
+        ) : (
+          <EmptyState
+            icon={Smile}
+            title="No complaints logged — nice"
+            description="When a member or CMS raises a complaint, log it here. We set a due date from its severity and flag it if it runs late."
+          />
+        )
       ) : (
         <div className="space-y-3">
           {(rows ?? []).map((row) => <ComplaintCard key={row.complaint.id} row={row} />)}
         </div>
       )}
-    </div>
+      </SectionCard>
+    </PageShell>
   );
 }

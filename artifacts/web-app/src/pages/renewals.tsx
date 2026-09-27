@@ -22,6 +22,10 @@ import { RefreshCcw, AlertTriangle, Clock, Info, CheckCircle2, BellOff } from "l
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
+import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState } from "@/components/shared";
+import { PageShell, KpiGrid } from "@/components/ops";
+import { FileText, Award, ShieldCheck, Users, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const URGENCY_CONFIG = {
   critical: { label: "Critical", color: "bg-red-100 text-red-800 border-red-200", icon: AlertTriangle, iconColor: "text-red-500" },
@@ -71,132 +75,94 @@ function ComplianceAlertsCard({
   });
 
   if (isLoading) {
-    return <Skeleton className="h-44 w-full" />;
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-32 rounded-xl" />)}
+      </div>
+    );
   }
   if (!data) return null;
 
-  const ahipPending =
-    data.ahip.in_progress + data.ahip.not_started + data.ahip.missing + data.ahip.failed;
   const totalLicenseAlerts =
     data.licenses.critical + data.licenses.warning + data.licenses.notice;
   const totalCertAlerts =
     data.certifications.critical + data.certifications.warning + data.certifications.notice;
 
   return (
-    <Card>
-      <CardHeader className="pb-3 pt-4 px-5">
-        <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-          Agency-wide compliance alerts
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="px-5 pb-5 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="rounded-lg border border-border p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-              Expiring licenses (≤90d)
-            </p>
-            <p className="text-2xl font-bold mt-0.5 tabular-nums">{totalLicenseAlerts}</p>
-            <p className="text-[11px] text-muted-foreground mt-1">
-              <span className="text-red-600 font-medium">{data.licenses.critical}</span> critical ·{" "}
-              <span className="text-amber-600 font-medium">{data.licenses.warning}</span> warning ·{" "}
-              <span className="text-blue-600 font-medium">{data.licenses.notice}</span> notice
-            </p>
-          </div>
-          <div className="rounded-lg border border-border p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-              Expiring certifications (≤90d)
-            </p>
-            <p className="text-2xl font-bold mt-0.5 tabular-nums">{totalCertAlerts}</p>
-            <p className="text-[11px] text-muted-foreground mt-1">
-              <span className="text-red-600 font-medium">{data.certifications.critical}</span> critical ·{" "}
-              <span className="text-amber-600 font-medium">{data.certifications.warning}</span> warning ·{" "}
-              <span className="text-blue-600 font-medium">{data.certifications.notice}</span> notice
-            </p>
-          </div>
-          <div className="rounded-lg border border-border p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-              AHIP {data.currentCertYear}{" "}
-              {data.daysUntilAhipDeadline >= 0
-                ? `· ${data.daysUntilAhipDeadline}d to Oct 1`
-                : "· deadline passed"}
-            </p>
-            <p className="text-2xl font-bold mt-0.5 tabular-nums">
-              {data.ahip.completionRate}%
-              <span className="text-sm font-normal text-muted-foreground ml-2">
-                {data.ahip.passed}/{data.ahip.totalActiveAgents}
-              </span>
-            </p>
-            <p className="text-[11px] text-muted-foreground mt-1">
-              {data.ahip.missing > 0 && (
-                <span className="text-red-600 font-medium">{data.ahip.missing} missing</span>
-              )}
-              {data.ahip.missing > 0 && (data.ahip.in_progress > 0 || data.ahip.not_started > 0) && " · "}
-              {data.ahip.in_progress > 0 && (
-                <span className="text-amber-600 font-medium">
-                  {data.ahip.in_progress} in progress
-                </span>
-              )}
-              {data.ahip.in_progress > 0 && data.ahip.not_started > 0 && " · "}
-              {data.ahip.not_started > 0 && (
-                <span className="text-amber-600 font-medium">
-                  {data.ahip.not_started} not started
-                </span>
-              )}
-              {ahipPending === 0 && (
-                <span className="text-green-700 font-medium">All caught up</span>
-              )}
-            </p>
-          </div>
-        </div>
-
+    <div className="space-y-6">
+        <KpiGrid>
+          <KpiCard
+            label="Licenses expiring (90 days)"
+            value={totalLicenseAlerts}
+            icon={FileText}
+            color="navy"
+            hint={totalLicenseAlerts === 0 ? "None — nice" : `${data.licenses.critical} within 30 days`}
+          />
+          <KpiCard
+            label="Certifications expiring (90 days)"
+            value={totalCertAlerts}
+            icon={Award}
+            color="blue"
+            hint={totalCertAlerts === 0 ? "None — nice" : `${data.certifications.critical} within 30 days`}
+          />
+          <KpiCard
+            label={`AHIP ${data.currentCertYear} complete`}
+            value={`${data.ahip.completionRate}%`}
+            icon={ShieldCheck}
+            color="green"
+            hint={`${data.ahip.passed} of ${data.ahip.totalActiveAgents} agents · ${
+              data.daysUntilAhipDeadline >= 0 ? `${data.daysUntilAhipDeadline} days to Oct 1` : "deadline passed"
+            }`}
+          />
+          <KpiCard
+            label="Agents needing attention"
+            value={data.agentsWithAlerts}
+            icon={Users}
+            color="orange"
+            hint={data.agentsWithAlerts === 0 ? "Everyone's in good standing" : "See the list below"}
+          />
+        </KpiGrid>
         {data.topAgents.length > 0 && (
-          <div>
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">
-              Top {data.topAgents.length} of {data.agentsWithAlerts} agent
-              {data.agentsWithAlerts !== 1 ? "s" : ""} needing attention
-            </p>
-            <div className="space-y-1">
+          <SectionCard
+            title="Agents needing attention"
+            description={`Top ${data.topAgents.length} of ${data.agentsWithAlerts} agent${data.agentsWithAlerts !== 1 ? "s" : ""}, most alerts first`}
+            icon={Users}
+          >
+            <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
               {data.topAgents.map((a) => (
                 <button
                   key={a.agentId}
                   onClick={() => onNavigate(`/agents/${a.agentId}`)}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-muted/50 transition-colors text-left"
+                  className="group w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors text-left"
                 >
                   <span className="flex-1 text-sm font-medium truncate">{a.agentName}</span>
                   <div className="flex items-center gap-1.5 text-[11px]">
                     {a.licensesExpiring > 0 && (
-                      <Badge variant="secondary" className="font-mono">
-                        {a.licensesExpiring} lic
-                      </Badge>
+                      <StatusPill tone="warning">
+                        {a.licensesExpiring} license{a.licensesExpiring !== 1 ? "s" : ""}
+                      </StatusPill>
                     )}
                     {a.certsExpiring > 0 && (
-                      <Badge variant="secondary" className="font-mono">
-                        {a.certsExpiring} cert
-                      </Badge>
+                      <StatusPill tone="warning">
+                        {a.certsExpiring} cert{a.certsExpiring !== 1 ? "s" : ""}
+                      </StatusPill>
                     )}
                     {a.ahipStatus !== "passed" && (
-                      <Badge
-                        variant="secondary"
-                        className={
-                          a.ahipStatus === "missing" || a.ahipStatus === "failed"
-                            ? "bg-red-100 text-red-800"
-                            : "bg-amber-100 text-amber-800"
-                        }
-                      >
+                      <StatusPill tone={a.ahipStatus === "missing" || a.ahipStatus === "failed" ? "danger" : "warning"}>
                         AHIP {a.ahipStatus.replace("_", " ")}
-                      </Badge>
+                      </StatusPill>
                     )}
                   </div>
-                  <span className="text-xs font-bold tabular-nums w-6 text-right">
+                  <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-navy-100 px-1.5 text-xs font-bold tabular-nums text-navy-800 dark:bg-secondary dark:text-secondary-foreground">
                     {a.alertCount}
                   </span>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-accent" />
                 </button>
               ))}
             </div>
-          </div>
+          </SectionCard>
         )}
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
@@ -244,24 +210,21 @@ export default function RenewalsPage() {
   };
 
   return (
-    <div className="p-6 space-y-5 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Renewals</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Track upcoming license and certification expirations</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCcw className="h-3.5 w-3.5 mr-1.5" />
-            Refresh
-          </Button>
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Renewals"
+        subtitle="Licenses and certifications that are about to expire — snooze or mark them done"
+      >
+        <Button variant="outline" onClick={() => refetch()}>
+          <RefreshCcw className="h-4 w-4 mr-1.5" />
+          Refresh
+        </Button>
+      </PageHeader>
 
       <ComplianceAlertsCard onNavigate={navigate} />
 
       {/* Urgency summary cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {(["critical", "warning", "notice"] as const).map((urgency) => {
           const cfg = URGENCY_CONFIG[urgency];
           const IconComp = cfg.icon;
@@ -269,27 +232,42 @@ export default function RenewalsPage() {
             <button
               key={urgency}
               onClick={() => setUrgencyFilter(urgencyFilter === urgency ? "all" : urgency)}
-              className={`rounded-lg border p-4 text-left transition-all hover:shadow-sm
-                ${urgencyFilter === urgency ? "ring-2 ring-primary ring-offset-1" : ""}
-                ${urgency === "critical" ? "border-red-200 bg-red-50" : urgency === "warning" ? "border-amber-200 bg-amber-50" : "border-blue-200 bg-blue-50"}`}
+              aria-pressed={urgencyFilter === urgency}
+              className={cn(
+                "rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-all hover:shadow-md",
+                urgencyFilter === urgency && "ring-2 ring-accent ring-offset-2 ring-offset-background",
+              )}
             >
-              <div className="flex items-center justify-between">
-                <span className={`text-xs font-semibold uppercase tracking-wide ${cfg.iconColor}`}>
-                  {cfg.label}
+              <div className="flex items-center gap-3">
+                <div
+                  className={cn(
+                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
+                    urgency === "critical" ? "bg-destructive/10 text-destructive" : urgency === "warning" ? "bg-warning/15 text-warning" : "bg-accent/10 text-accent",
+                  )}
+                >
+                  <IconComp className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">
+                    {urgency === "critical" ? "Due within 30 days" : urgency === "warning" ? "Due in 31–60 days" : "Due in 61–90 days"}
+                  </p>
+                  <p className="font-display text-xl font-bold leading-tight">{counts[urgency]}</p>
+                </div>
+                <span className="ml-auto text-[11px] text-muted-foreground">
+                  {urgencyFilter === urgency ? "Filtering" : "Click to filter"}
                 </span>
-                <IconComp className={`h-4 w-4 ${cfg.iconColor}`} />
-              </div>
-              <div className={`text-2xl font-bold mt-1 ${cfg.iconColor}`}>{counts[urgency]}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">
-                {urgency === "critical" ? "Expiring in ≤30 days" : urgency === "warning" ? "31–60 days" : "61–90 days"}
               </div>
             </button>
           );
         })}
       </div>
 
+      <SectionCard
+        title={`${renewals.length} renewal${renewals.length !== 1 ? "s" : ""}${urgencyFilter !== "all" ? ` · ${URGENCY_CONFIG[urgencyFilter].label.toLowerCase()}` : ""}`}
+        description="Snooze hides an item for 30 days; Resolve marks it renewed"
+      >
       {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-3 flex-wrap mb-4">
         <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as TypeFilter)}>
           <SelectTrigger className="w-44">
             <SelectValue placeholder="All types" />
@@ -318,31 +296,24 @@ export default function RenewalsPage() {
         )}
       </div>
 
-      <Card>
-        <CardHeader className="pb-3 pt-4 px-5">
-          <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-            {renewals.length} renewal{renewals.length !== 1 ? "s" : ""}
-            {urgencyFilter !== "all" ? ` (${urgencyFilter})` : ""}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
+        <div className="rounded-lg border border-border overflow-hidden">
           {isLoading ? (
             <div className="p-4 space-y-3">
               {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
             </div>
           ) : renewals.length === 0 ? (
-            <div className="py-16 text-center">
-              <CheckCircle2 className="h-12 w-12 mx-auto mb-3 text-green-400/60" />
-              <p className="text-sm font-medium text-muted-foreground">No renewals due</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {urgencyFilter !== "all" || typeFilter !== "all"
+            <EmptyState
+              icon={CheckCircle2}
+              title={urgencyFilter !== "all" || typeFilter !== "all" ? "Nothing matches these filters" : "No renewals due — nice"}
+              description={
+                urgencyFilter !== "all" || typeFilter !== "all"
                   ? "Try adjusting your filters"
-                  : `No expiring items in the next ${days} days`}
-              </p>
-            </div>
+                  : `No licenses or certifications expire in the next ${days} days.`
+              }
+            />
           ) : (
             <>
-              <div className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-4 px-5 py-2.5 border-b border-border">
+              <div className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-4 px-5 py-3 border-b border-border bg-muted/50">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Item</span>
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-20 text-center">Type</span>
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-24 text-center">Expires</span>
@@ -368,9 +339,9 @@ export default function RenewalsPage() {
                         <p className="text-xs text-muted-foreground truncate">{item.detail}</p>
                       </div>
                       <div className="w-20 flex justify-center">
-                        <Badge variant="secondary" className="text-xs capitalize">
+                        <StatusPill tone="navy">
                           {item.type === "license" ? "License" : "Cert"}
-                        </Badge>
+                        </StatusPill>
                       </div>
                       <div className="w-24 text-center">
                         <div className="text-sm font-semibold tabular-nums">
@@ -381,13 +352,13 @@ export default function RenewalsPage() {
                         </div>
                       </div>
                       <div className="w-20 flex justify-center">
-                        <Badge
-                          variant="secondary"
-                          className={`text-xs border capitalize flex items-center gap-1 ${cfg?.color ?? ""}`}
+                        <StatusPill
+                          tone={item.urgency === "critical" ? "danger" : item.urgency === "warning" ? "warning" : "info"}
+                          className="gap-1"
                         >
                           <IconComp className="h-3 w-3" />
                           {cfg?.label ?? item.urgency}
-                        </Badge>
+                        </StatusPill>
                       </div>
                       <div className="w-36 flex items-center justify-end gap-1.5">
                         <Button
@@ -404,7 +375,7 @@ export default function RenewalsPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-7 px-2 text-xs text-green-700 border-green-200 hover:bg-green-50"
+                          className="h-7 px-2 text-xs text-success border-success/30 hover:bg-success/10"
                           disabled={snoozing || resolving}
                           onClick={() => handleResolve(item.type ?? "license", item.id, item.agentName ?? "")}
                           title="Mark as resolved"
@@ -419,14 +390,14 @@ export default function RenewalsPage() {
               </div>
             </>
           )}
-        </CardContent>
-      </Card>
+        </div>
 
       {data && data.total > 0 && (
-        <p className="text-xs text-muted-foreground text-center">
+        <p className="text-xs text-muted-foreground mt-3">
           Showing {renewals.length} of {data.total} upcoming renewals (snoozed items hidden)
         </p>
       )}
-    </div>
+      </SectionCard>
+    </PageShell>
   );
 }

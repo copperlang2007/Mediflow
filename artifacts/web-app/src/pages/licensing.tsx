@@ -24,13 +24,16 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
+import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState } from "@/components/shared";
+import { PageShell, KpiGrid, FilterBar } from "@/components/ops";
+import { Users, ShieldCheck, ChevronRight } from "lucide-react";
 
 const LICENSE_STATUS_STYLES: Record<string, string> = {
-  active: "bg-green-100 text-green-800",
-  pending: "bg-amber-100 text-amber-800",
-  expired: "bg-red-100 text-red-800",
-  suspended: "bg-red-100 text-red-800",
-  not_appointed: "bg-slate-100 text-slate-600",
+  active: "bg-success/12 text-success border border-success/25",
+  pending: "bg-warning/15 text-amber-700 border border-warning/30 dark:text-warning",
+  expired: "bg-destructive/10 text-destructive border border-destructive/25",
+  suspended: "bg-destructive/10 text-destructive border border-destructive/25",
+  not_appointed: "bg-muted text-muted-foreground border border-border",
 };
 
 const URGENCY_STYLES: Record<string, { badge: string; icon: React.ComponentType<{ className?: string }>; label: string }> = {
@@ -180,77 +183,61 @@ export default function LicensingPage() {
   });
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Licensing</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Track and manage state licenses across all agents</p>
-        </div>
-        <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
-          <Upload className="h-3.5 w-3.5 mr-1.5" />
+    <PageShell>
+      <PageHeader
+        title="Licensing"
+        subtitle="Every agent's state licenses, and which ones need renewing soon"
+      >
+        <Button variant="outline" onClick={() => setImportOpen(true)}>
+          <Upload className="h-4 w-4 mr-1.5" />
           Import CSV
         </Button>
-      </div>
+      </PageHeader>
       <CsvImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
 
-      <div className="grid grid-cols-3 gap-4">
-        {renewalsLoading ? (
-          [...Array(3)].map((_, i) => <Skeleton key={i} className="h-24" />)
-        ) : (
-          <>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-lg bg-red-100 flex items-center justify-center">
-                    <AlertTriangle className="h-5 w-5 text-red-600" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold">{licenseRenewals.filter((r) => r.urgency === "critical").length}</p>
-                    <p className="text-xs text-muted-foreground">Expiring in ≤30 days</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-lg bg-amber-100 flex items-center justify-center">
-                    <Clock className="h-5 w-5 text-amber-600" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold">{licenseRenewals.filter((r) => r.urgency === "warning").length}</p>
-                    <p className="text-xs text-muted-foreground">Expiring in 31–60 days</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-lg bg-blue-100 flex items-center justify-center">
-                    <Clock className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold">{licenseRenewals.filter((r) => r.urgency === "notice").length}</p>
-                    <p className="text-xs text-muted-foreground">Expiring in 61–90 days</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </>
-        )}
-      </div>
+      <KpiGrid>
+        <KpiCard
+          label="Agents tracked"
+          value={agents.length}
+          icon={Users}
+          color="navy"
+          loading={agentsLoading}
+          hint="Click an agent to see each state"
+        />
+        <KpiCard
+          label="Expiring in 30 days"
+          value={licenseRenewals.filter((r) => r.urgency === "critical").length}
+          icon={AlertTriangle}
+          color="orange"
+          loading={renewalsLoading}
+          hint={licenseRenewals.some((r) => r.urgency === "critical") ? "Renew these first" : "None due in the next 30 days"}
+        />
+        <KpiCard
+          label="Expiring in 31–60 days"
+          value={licenseRenewals.filter((r) => r.urgency === "warning").length}
+          icon={Clock}
+          color="blue"
+          loading={renewalsLoading}
+          hint="Worth starting the paperwork"
+        />
+        <KpiCard
+          label="Expiring in 61–90 days"
+          value={licenseRenewals.filter((r) => r.urgency === "notice").length}
+          icon={CheckCircle}
+          color="green"
+          loading={renewalsLoading}
+          hint="On the radar"
+        />
+      </KpiGrid>
 
       {licenseRenewals.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-500" />
-              Upcoming Renewals
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="divide-y divide-border">
+        <SectionCard
+          title="Renewals coming up"
+          description="Licenses expiring in the next 90 days, soonest first"
+          icon={AlertTriangle}
+          iconClassName="text-warning"
+        >
+            <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
               {licenseRenewals.slice(0, 10).map((r) => {
                 const config = URGENCY_STYLES[r.urgency];
                 const Icon = config?.icon ?? Clock;
@@ -271,23 +258,29 @@ export default function LicensingPage() {
                         {r.daysUntilExpiry}d left
                       </p>
                     </div>
-                    <Badge variant="secondary" className={cn("text-xs border", config?.badge)}>
+                    <StatusPill tone={r.urgency === "critical" ? "danger" : r.urgency === "warning" ? "warning" : "info"}>
                       {config?.label}
-                    </Badge>
+                    </StatusPill>
                   </div>
                 );
               })}
             </div>
-          </CardContent>
-        </Card>
+        </SectionCard>
       )}
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold">Agent Licenses</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <div className="flex gap-3 mb-4 flex-wrap">
+      {!renewalsLoading && licenseRenewals.length === 0 && agents.length > 0 && (
+        <SectionCard>
+          <EmptyState
+            compact
+            icon={ShieldCheck}
+            title="Nothing coming due in the next 90 days"
+            description="We'll list a license here once it's within 90 days of expiring. Licenses that have already expired are flagged in red on each agent below."
+          />
+        </SectionCard>
+      )}
+
+      <SectionCard title="Agent licenses" description="Each agent's states at a glance — red outline means it expires within 30 days">
+          <FilterBar>
             <div className="relative flex-1 min-w-[200px] max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -308,17 +301,22 @@ export default function LicensingPage() {
                 <SelectItem value="suspended">Suspended</SelectItem>
               </SelectContent>
             </Select>
-          </div>
+          </FilterBar>
 
           {agentsLoading ? (
             <div className="space-y-3">
               {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
             </div>
           ) : filteredAgents.length === 0 ? (
-            <div className="py-10 text-center text-muted-foreground">
-              <FileText className="h-8 w-8 mx-auto mb-2 opacity-20" />
-              <p className="text-sm">No agents found</p>
-            </div>
+            <EmptyState
+              icon={FileText}
+              title={agents.length === 0 ? "No agents yet" : "No agents match your search"}
+              description={
+                agents.length === 0
+                  ? "Add agents from the Agents page, then import or add their state licenses."
+                  : "Try a different name or status."
+              }
+            />
           ) : (
             <div className="space-y-2">
               {filteredAgents.map((agent) => (
@@ -332,9 +330,8 @@ export default function LicensingPage() {
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
-    </div>
+      </SectionCard>
+    </PageShell>
   );
 }
 
@@ -374,15 +371,18 @@ function AgentLicenseRow({
 
   return (
     <div
-      className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 hover:bg-muted/40 cursor-pointer transition-colors"
+      className="group flex items-center gap-3 rounded-lg border border-border px-4 py-3 hover:bg-muted/40 hover:border-accent/40 cursor-pointer transition-colors"
       onClick={onNavigate}
     >
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-navy-100 text-navy-800 text-xs font-semibold dark:bg-secondary dark:text-secondary-foreground">
+        {agentName.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()}
+      </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium">{agentName}</p>
         <p className="text-xs text-muted-foreground">{agentEmail}</p>
         {nearestExpiry && nearestExpiry.daysLeft <= 90 && (
           <p className={cn("text-xs mt-0.5", expiryColor)}>
-            {nearestExpiry.stateCode} expires {nearestExpiry.daysLeft <= 0 ? "now" : `in ${nearestExpiry.daysLeft}d`}
+            {nearestExpiry.stateCode} {nearestExpiry.daysLeft < 0 ? "has expired" : nearestExpiry.daysLeft === 0 ? "expires today" : `expires in ${nearestExpiry.daysLeft} days`}
           </p>
         )}
       </div>
@@ -405,7 +405,7 @@ function AgentLicenseRow({
                     <span
                       key={lic.id}
                       className={cn(
-                        "text-[10px] px-1.5 py-0.5 rounded font-medium",
+                        "text-[10px] px-1.5 py-0.5 rounded-full font-semibold",
                         LICENSE_STATUS_STYLES[lic.status] ?? "bg-slate-100 text-slate-600",
                         urgentBorder
                       )}
@@ -422,6 +422,7 @@ function AgentLicenseRow({
           )}
         </div>
       )}
+      <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-accent shrink-0" />
     </div>
   );
 }

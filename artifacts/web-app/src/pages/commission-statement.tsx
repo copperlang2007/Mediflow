@@ -477,9 +477,13 @@ export default function CommissionStatementPage() {
                   <TableRow key={li.id}>
                     <TableCell className="font-medium">
                       {li.contactName ?? (
-                        <span className="text-muted-foreground italic">
-                          Unmatched{li.memberId && ` · ${li.memberId}`}
-                        </span>
+                        li.matchStatus === "unmatched" ? (
+                          <span className="text-muted-foreground italic">
+                            Unmatched{li.memberId && ` · ${li.memberId}`}
+                          </span>
+                        ) : (
+                          <span>{li.memberId ? `Member ${li.memberId}` : "Linked client"}</span>
+                        )
                       )}
                     </TableCell>
                     <TableCell className="text-xs font-mono text-muted-foreground">
