@@ -31,6 +31,7 @@ import {
 import { type RunAutomationRulesPayload, enqueue, JOB_NAMES } from "../lib/jobs";
 import { logger } from "../lib/logger";
 import { captureWorkerError } from "../lib/sentry";
+import { phoneMatchKey, phoneMatchKeySql } from "../lib/compliance/phone";
 import {
   evaluateConditions,
   renderConfig,
@@ -66,6 +67,73 @@ function consumerContactFor(
 ): string | null {
   if (resourceType === "contact" && resourceId) return resourceId;
   return typeof context.contactId === "string" ? context.contactId : null;
+}
+
+type ExplicitRecipient =
+  | { kind: "internal" }
+  | { kind: "consumer"; contactId: string }
+  | { kind: "unknown" };
+
+/**
+ * Classify an explicit `to` from a rule's config. `to` is templated, so it can
+ * resolve to a consumer's own address (`{{email}}`, `{{phone}}`): it counts as
+ * an internal notification only when it belongs to this org's staff (an active
+ * user or an agent). A consumer address is routed through the outreach gate as
+ * that contact; anything else is not sent.
+ */
+async function classifyExplicitRecipient(
+  orgId: string,
+  channel: "email" | "sms",
+  to: string,
+): Promise<ExplicitRecipient> {
+  if (channel === "email") {
+    const address = to.trim().toLowerCase();
+    const [user] = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(and(eq(usersTable.orgId, orgId), eq(usersTable.isActive, true), sql`lower(${usersTable.email}) = ${address}`))
+      .limit(1);
+    if (user) return { kind: "internal" };
+    const [agent] = await db
+      .select({ id: agentsTable.id })
+      .from(agentsTable)
+      .where(and(eq(agentsTable.orgId, orgId), sql`lower(${agentsTable.email}) = ${address}`))
+      .limit(1);
+    if (agent) return { kind: "internal" };
+    const [contact] = await db
+      .select({ id: contactsTable.id })
+      .from(contactsTable)
+      .where(
+        and(
+          eq(contactsTable.orgId, orgId),
+          sql`${contactsTable.deletedAt} IS NULL`,
+          sql`lower(${contactsTable.email}) = ${address}`,
+        ),
+      )
+      .limit(1);
+    return contact ? { kind: "consumer", contactId: contact.id } : { kind: "unknown" };
+  }
+
+  const key = phoneMatchKey(to);
+  if (!key) return { kind: "unknown" };
+  const [agent] = await db
+    .select({ id: agentsTable.id })
+    .from(agentsTable)
+    .where(and(eq(agentsTable.orgId, orgId), sql`${phoneMatchKeySql(agentsTable.phone)} = ${key}`))
+    .limit(1);
+  if (agent) return { kind: "internal" };
+  const [contact] = await db
+    .select({ id: contactsTable.id })
+    .from(contactsTable)
+    .where(
+      and(
+        eq(contactsTable.orgId, orgId),
+        sql`${contactsTable.deletedAt} IS NULL`,
+        sql`${phoneMatchKeySql(contactsTable.phone)} = ${key}`,
+      ),
+    )
+    .limit(1);
+  return contact ? { kind: "consumer", contactId: contact.id } : { kind: "unknown" };
 }
 
 async function executeAction(
@@ -197,12 +265,27 @@ async function executeAction(
         logger.warn({ action: "send_email", resourceType, resourceId }, "send_email skipped — missing subject/html");
         break;
       }
-      // An explicit `to` in the rule config is an internal notification (a
-      // staff address the admin typed). Without one, the email goes to the
-      // resource itself: an agent (internal) or a consumer contact, which
-      // must pass the outreach compliance gate at send time.
+      // An explicit `to` goes out as an internal notification only when it is
+      // a staff address; a consumer's address is gated as that contact.
+      // Without one, the email goes to the resource itself: an agent
+      // (internal) or a consumer contact, gated at send time.
       if (to) {
-        await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, { to, subject, html });
+        const recipient = await classifyExplicitRecipient(orgId, "email", to);
+        if (recipient.kind === "internal") {
+          await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, { to, subject, html });
+        } else if (recipient.kind === "consumer") {
+          await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
+            to: "",
+            subject,
+            html,
+            consumer: { orgId, contactId: recipient.contactId, automated: true },
+          });
+        } else {
+          logger.warn(
+            { action: "send_email", resourceType, resourceId },
+            "send_email skipped — explicit recipient is neither staff nor a contact in this org",
+          );
+        }
         break;
       }
       const consumerContactId = consumerContactFor(resourceType, resourceId, context);
@@ -239,7 +322,21 @@ async function executeAction(
         break;
       }
       if (to) {
-        await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { to, body });
+        const recipient = await classifyExplicitRecipient(orgId, "sms", to);
+        if (recipient.kind === "internal") {
+          await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { to, body });
+        } else if (recipient.kind === "consumer") {
+          await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, {
+            to: "",
+            body,
+            consumer: { orgId, contactId: recipient.contactId, automated: true },
+          });
+        } else {
+          logger.warn(
+            { action: "send_sms", resourceType, resourceId },
+            "send_sms skipped — explicit recipient is neither staff nor a contact in this org",
+          );
+        }
         break;
       }
       const consumerContactId = consumerContactFor(resourceType, resourceId, context);

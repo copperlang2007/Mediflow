@@ -6,7 +6,7 @@
  * lib/compliance/planYear.ts) and sends reminder notifications + emails.
  */
 
-import { and, eq, not, exists, sql } from "drizzle-orm";
+import { and, eq, inArray, not, exists, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -38,7 +38,8 @@ export async function ahipReminderCheckWorker(
             and(
               eq(ahipRecordsTable.agentId, agentsTable.id),
               eq(ahipRecordsTable.certificationYear, year),
-              eq(ahipRecordsTable.status, "passed"),
+              // Same rule as the compliance score and readiness gate.
+              inArray(ahipRecordsTable.status, ["passed", "waived"]),
             ),
           ),
       ),

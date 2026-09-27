@@ -135,6 +135,9 @@ export const optOutsTable = pgTable(
     phone: text("phone"),
     email: text("email"),
     channel: channelEnum("channel").notNull(),
+    // How the opt-out was recorded: 'keyword' (inbound STOP),
+    // 'unsubscribe_link', … START only lifts 'keyword' rows (migration 0050).
+    source: text("source"),
     optedOutAt: timestamp("opted_out_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

@@ -122,7 +122,7 @@ router.post(
           for (const orgId of orgIds) {
             await tx
               .insert(optOutsTable)
-              .values({ id: randomUUID(), orgId, phone: from, channel: "sms" })
+              .values({ id: randomUUID(), orgId, phone: from, channel: "sms", source: "keyword" })
               .onConflictDoNothing({
                 target: [optOutsTable.orgId, optOutsTable.phone, optOutsTable.channel],
               });
@@ -166,7 +166,13 @@ router.post(
           await db.transaction(async (tx) => {
             const lifted = await tx
               .delete(optOutsTable)
-              .where(and(eq(optOutsTable.channel, "sms"), sql`${phoneMatchKeySql(optOutsTable.phone)} = ${phoneKey}`))
+              .where(
+                and(
+                  eq(optOutsTable.channel, "sms"),
+                  eq(optOutsTable.source, "keyword"),
+                  sql`${phoneMatchKeySql(optOutsTable.phone)} = ${phoneKey}`,
+                ),
+              )
               .returning({ orgId: optOutsTable.orgId });
             const orgIds = [...new Set(lifted.map((r) => r.orgId))];
             if (orgIds.length === 0) return;

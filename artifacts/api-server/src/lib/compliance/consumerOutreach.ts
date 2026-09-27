@@ -14,7 +14,7 @@
  *   - opt_outs row for the number    → block (matched on the last 10 digits,
  *                                      so "(512) 555-0100" matches Twilio's
  *                                      "+15125550100")
- *   - automated + org requires consent + no tcpa_consent_at → block
+ *   - automated + org requires consent + no tcpa_consent_at/source → block
  *   - automated + outside the recipient's legal texting hours → defer
  * Email:
  *   - contact deleted                → block
@@ -68,6 +68,7 @@ async function loadContact(ctx: ConsumerContext) {
       optOutSms: contactsTable.optOutSms,
       optOutEmail: contactsTable.optOutEmail,
       tcpaConsentAt: contactsTable.tcpaConsentAt,
+      tcpaConsentSource: contactsTable.tcpaConsentSource,
       status: contactsTable.status,
       deletedAt: contactsTable.deletedAt,
     })
@@ -121,7 +122,9 @@ export async function evaluateConsumerSms(ctx: ConsumerContext, now: Date = new 
     return { action: "block", reason: "opted_out" };
   }
   if (ctx.automated) {
-    if (!contact.tcpaConsentAt && (await orgRequiresSmsConsent(ctx.orgId))) {
+    // Consent counts only as the documented pair: when AND where it was given.
+    const hasConsent = Boolean(contact.tcpaConsentAt && contact.tcpaConsentSource?.trim());
+    if (!hasConsent && (await orgRequiresSmsConsent(ctx.orgId))) {
       return { action: "block", reason: "no_tcpa_consent" };
     }
     const opensAt = nextContactWindowStart(contact.stateCode, now);

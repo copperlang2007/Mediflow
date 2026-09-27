@@ -130,6 +130,15 @@ describe("SMS gate", () => {
     expect((await gate.evaluateConsumerSms(auto(orgId, contactId), MIDDAY)).action).toBe("send");
   });
 
+  it("treats a consent date without a source as no consent", async () => {
+    const orgId = await newOrg();
+    const contactId = await newContact(orgId, { tcpaConsentSource: "  " });
+    expect(await gate.evaluateConsumerSms(auto(orgId, contactId), MIDDAY)).toEqual({
+      action: "block",
+      reason: "no_tcpa_consent",
+    });
+  });
+
   it("defers automated SMS outside texting hours to the next window", async () => {
     const orgId = await newOrg();
     const contactId = await newContact(orgId);

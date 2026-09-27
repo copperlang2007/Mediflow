@@ -283,6 +283,20 @@ describe("START only reverses keyword opt-outs", () => {
     const [row] = await db.select({ optOutSms: contactsTable.optOutSms }).from(contactsTable).where(eq(contactsTable.id, contact.id));
     expect(row.optOutSms).toBe(true);
   });
+
+  it("does not delete an sms opt-out log row that a STOP did not create", async () => {
+    const orgC = await seedOrg(db, { id: `org-cm-c-${randomUUID().slice(0, 8)}` });
+    const contact = await seedContact(db, { orgId: orgC.id });
+    await db.update(contactsTable).set({ phone: "512-555-0189", optOutSms: true }).where(eq(contactsTable.id, contact.id));
+    await db.insert(optOutsTable).values({ id: randomUUID(), orgId: orgC.id, phone: "5125550189", channel: "sms", source: "agent" });
+
+    const start = await request(app).post("/webhooks/twilio/sms").type("form").set("x-twilio-signature", "x").send(inbound("+15125550189", "START"));
+    expect(start.status).toBe(200);
+    const log = await db.select().from(optOutsTable).where(eq(optOutsTable.orgId, orgC.id));
+    expect(log).toHaveLength(1);
+    const [row] = await db.select({ optOutSms: contactsTable.optOutSms }).from(contactsTable).where(eq(contactsTable.id, contact.id));
+    expect(row.optOutSms).toBe(true);
+  });
 });
 
 describe("retention sweep and ended enrollments", () => {

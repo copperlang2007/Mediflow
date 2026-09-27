@@ -232,6 +232,7 @@ async function collectReportData(orgId: string, now: Date): Promise<WeeklyReport
       .where(
         and(
           inArray(carrierCertificationsTable.agentId, agentIds),
+          eq(carrierCertificationsTable.certificationYear, planYear),
           inArray(carrierCertificationsTable.status, ["passed", "waived"]),
           gt(carrierCertificationsTable.expiryDate, now),
           lte(carrierCertificationsTable.expiryDate, inWindow),
