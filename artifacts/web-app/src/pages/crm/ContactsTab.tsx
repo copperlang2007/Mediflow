@@ -136,7 +136,7 @@ export default function ContactsTab() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard variant="white" color="green" icon={UserCheck} label="Clients (enrolled)" value={clientsCount ?? "—"} loading={enrolled.isLoading || retained.isLoading} />
         <KpiCard variant="white" color="blue" icon={Sparkles} label="Prospects" value={prospects.count ?? "—"} loading={prospects.isLoading} />
-        <KpiCard variant="white" color="navy" icon={UserPlus} label="New leads" value={leads.count ?? "—"} loading={leads.isLoading} />
+        <KpiCard variant="white" color="navy" icon={UserPlus} label="Leads" value={leads.count ?? "—"} loading={leads.isLoading} />
         <KpiCard variant="white" color="orange" icon={UserX} label="Lost" value={lost.count ?? "—"} loading={lost.isLoading} />
       </div>
 

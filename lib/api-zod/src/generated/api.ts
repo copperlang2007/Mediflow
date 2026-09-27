@@ -150,7 +150,11 @@ export const GetMyOrganizationResponse = zod.object({
   id: zod.string(),
   name: zod.string(),
   slug: zod.string(),
-  planTier: zod.string(),
+  planTier: zod
+    .string()
+    .describe(
+      "The plan the product actually enforces (from the subscription \/ entitlements — the same tier \/billing\/subscription reports), not the legacy organizations.plan_tier column.\n",
+    ),
   logoUrl: zod.string().nullish(),
   createdAt: zod.coerce.date(),
 });
@@ -167,7 +171,11 @@ export const UpdateMyOrganizationResponse = zod.object({
   id: zod.string(),
   name: zod.string(),
   slug: zod.string(),
-  planTier: zod.string(),
+  planTier: zod
+    .string()
+    .describe(
+      "The plan the product actually enforces (from the subscription \/ entitlements — the same tier \/billing\/subscription reports), not the legacy organizations.plan_tier column.\n",
+    ),
   logoUrl: zod.string().nullish(),
   createdAt: zod.coerce.date(),
 });
@@ -189,9 +197,27 @@ export const GetDashboardStatsResponse = zod.object({
   licensesExpiringIn90Days: zod.number().int(),
   openTasksCount: zod.number().int(),
   overdueTasks: zod.number().int(),
-  openLeadsCount: zod.number().int(),
+  openLeadsCount: zod
+    .number()
+    .int()
+    .describe(
+      "CRM contacts whose status is Lead (not deleted) — the same number the Clients & Leads page shows. Not the inbound queue's `leads` table.\n",
+    ),
   unreadNotificationsCount: zod.number().int(),
-  ahipCompletionRateCurrent: zod.number(),
+  ahipCompletionRateCurrent: zod
+    .number()
+    .describe(
+      "Percent of agents who need AHIP (status active or onboarding) with a passed or waived record for the current year.\n",
+    ),
+  ahipCompleteCount: zod.number().int().optional(),
+  agentsRequiringAhip: zod.number().int().optional(),
+  licensesExpiredCount: zod
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "Licenses past their expiry date (or stored as expired) for agents still on the team (onboarding, active, suspended).\n",
+    ),
   totalContacts: zod.number().int(),
   agentsWithExpiringLicenses: zod.array(
     zod.object({
@@ -224,6 +250,12 @@ export const GetDashboardActivityResponseItem = zod.object({
   description: zod.string().nullish(),
   userId: zod.string().nullish(),
   userFullName: zod.string().nullish(),
+  contactName: zod
+    .string()
+    .nullish()
+    .describe(
+      "The client the activity is about; null unless the caller has contact:read.",
+    ),
   resourceType: zod.string().nullish(),
   resourceId: zod.string().nullish(),
   createdAt: zod.coerce.date(),
@@ -601,6 +633,12 @@ export const GetAgentLicensesResponse = zod.object({
         "suspended",
         "not_appointed",
       ]),
+      effectiveStatus: zod
+        .enum(["active", "pending", "expired", "suspended", "not_appointed"])
+        .optional()
+        .describe(
+          'The status to show and count. Same as `status`, except a license whose expiry date has passed is always \"expired\". Active means status active AND no expiry or expiry in the future — the shared definition Licensing, the agent profile, Ready to Sell, the back office and the dashboard all use.\n',
+        ),
       renewalSubmittedAt: zod.coerce.date().nullish(),
       documentKey: zod.string().nullish(),
       createdAt: zod.coerce.date(),
@@ -645,6 +683,12 @@ export const CreateAgentLicenseResponse = zod.object({
     "suspended",
     "not_appointed",
   ]),
+  effectiveStatus: zod
+    .enum(["active", "pending", "expired", "suspended", "not_appointed"])
+    .optional()
+    .describe(
+      'The status to show and count. Same as `status`, except a license whose expiry date has passed is always \"expired\". Active means status active AND no expiry or expiry in the future — the shared definition Licensing, the agent profile, Ready to Sell, the back office and the dashboard all use.\n',
+    ),
   renewalSubmittedAt: zod.coerce.date().nullish(),
   documentKey: zod.string().nullish(),
   createdAt: zod.coerce.date(),
@@ -731,6 +775,12 @@ export const UpdateAgentLicenseResponse = zod.object({
     "suspended",
     "not_appointed",
   ]),
+  effectiveStatus: zod
+    .enum(["active", "pending", "expired", "suspended", "not_appointed"])
+    .optional()
+    .describe(
+      'The status to show and count. Same as `status`, except a license whose expiry date has passed is always \"expired\". Active means status active AND no expiry or expiry in the future — the shared definition Licensing, the agent profile, Ready to Sell, the back office and the dashboard all use.\n',
+    ),
   renewalSubmittedAt: zod.coerce.date().nullish(),
   documentKey: zod.string().nullish(),
   createdAt: zod.coerce.date(),
@@ -1033,8 +1083,21 @@ export const GetAhipDashboardQueryParams = zod.object({
 
 export const GetAhipDashboardResponse = zod.object({
   year: zod.number().int(),
-  totalActiveAgents: zod.number().int(),
-  passedCount: zod.number().int(),
+  totalActiveAgents: zod
+    .number()
+    .int()
+    .describe("Deprecated alias of agentsRequiringAhip."),
+  agentsRequiringAhip: zod
+    .number()
+    .int()
+    .optional()
+    .describe("Agents whose status is active or onboarding."),
+  passedCount: zod
+    .number()
+    .int()
+    .describe(
+      "Of those, how many have a passed or waived AHIP record for the year.",
+    ),
   completionRate: zod.number(),
   records: zod.array(
     zod.object({

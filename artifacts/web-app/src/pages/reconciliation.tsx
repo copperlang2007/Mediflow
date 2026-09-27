@@ -52,6 +52,9 @@ type Overview = {
     periodStart: string;
     periodEnd: string;
     status: string;
+    /** Shared derivation: reconciled + variance ⇒ "reconciled_with_variance". */
+    displayStatus?: string;
+    reconciledAt?: string | null;
     totalAmount: number | null;
     lineItemCount: number;
     unmatchedCount: number;
@@ -63,6 +66,7 @@ type Overview = {
     statementsPending: number;
     statementsParsed: number;
     statementsReconciled: number;
+    statementsReconciledWithVariance?: number;
     lineItems: number;
     matched: number;
     manual: number;
@@ -178,7 +182,13 @@ export default function ReconciliationPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <KpiCard label="Statements" value={t?.statements ?? 0} icon={FileSpreadsheet} color="navy" loading={overview.isLoading}
-          hint={t ? `${t.statementsReconciled} reconciled · ${t.statementsPending + t.statementsParsed} to finish` : undefined} />
+          hint={
+            t
+              ? `${t.statementsReconciled} reconciled${
+                  (t.statementsReconciledWithVariance ?? 0) > 0 ? ` · ${t.statementsReconciledWithVariance} with a variance` : ""
+                } · ${t.statementsPending + t.statementsParsed} to finish`
+              : undefined
+          } />
         <KpiCard label="Lines not matched" value={t?.unmatched ?? 0} icon={Link2Off} color="orange" loading={overview.isLoading}
           hint={t ? `${usd(t.unmatchedAmount)} waiting to be matched` : undefined} />
         <KpiCard label="Missed payments" value={t?.openMissedPayments ?? 0} icon={CalendarX} color="blue" loading={overview.isLoading}
@@ -227,7 +237,12 @@ export default function ReconciliationPage() {
                         <TableRow key={s.id} className="hover:bg-muted/30">
                           <TableCell className="font-medium text-sm">{s.carrierName ?? "—"}</TableCell>
                           <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{day(s.periodStart)} – {day(s.periodEnd)}</TableCell>
-                          <TableCell><StatusPill status={s.status} /></TableCell>
+                          <TableCell>
+                            <StatusPill
+                              status={s.displayStatus ?? s.status}
+                              tone={(s.displayStatus ?? s.status) === "reconciled_with_variance" ? "warning" : undefined}
+                            />
+                          </TableCell>
                           <TableCell className="text-right text-sm">{usd(s.totalAmount)}</TableCell>
                           <TableCell className="text-right text-sm">{s.lineItemCount > 0 ? usd(s.lineItemTotal) : <span className="text-muted-foreground">Not read yet</span>}</TableCell>
                           <TableCell className={cn("text-right text-sm font-medium", off ? "text-warning" : "text-success")}>

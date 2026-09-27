@@ -15,7 +15,10 @@ export interface AgentLeaderboardEntry {
   status: string;
   inboundsRouted: number;
   callbacksResolved: number;
+  /** Open inbound-queue leads (the `leads` table) — routing workload. */
   openLeads: number;
+  /** CRM contacts at the Lead stage assigned to the agent (shared definition). */
+  leadContacts?: number;
   readyToSell: boolean;
   rank: number;
 }

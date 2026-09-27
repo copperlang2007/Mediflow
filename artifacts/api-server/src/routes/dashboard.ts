@@ -5,9 +5,7 @@ import {
   agentsTable,
   stateLicensesTable,
   taskInstancesTable,
-  leadsTable,
   notificationsTable,
-  ahipRecordsTable,
   contactsTable,
   activitiesTable,
   usersTable,
@@ -15,6 +13,10 @@ import {
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
 import { safeLimit } from "../lib/listGuards";
+import { can, type Role } from "../lib/permissions";
+import { leadContactsWhere } from "../lib/metrics/leads";
+import { getAhipCoverage } from "../lib/agents/ahipCoverage";
+import { expiredLicenseWhere } from "../lib/licenses/licenseStatus";
 
 const router: IRouter = Router();
 
@@ -40,9 +42,10 @@ router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read
     overdueTasks,
     openLeads,
     unreadNotif,
-    ahipRecords,
+    ahipCoverage,
     totalContacts,
     alertLicenses,
+    expiredLicenses,
   ] = await Promise.all([
     db.select().from(agentsTable).where(eq(agentsTable.orgId, orgId)),
     db
@@ -100,15 +103,14 @@ router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read
           sql`${taskInstancesTable.dueDate} < ${now}`
         )
       ),
+    // Leads = CRM contacts whose status is Lead (shared definition in
+    // lib/metrics/leads.ts) — the same number the Clients & Leads page and
+    // the "Your book" donut show. The `leads` table is the inbound queue's
+    // routing record and is not what agents mean by "my leads".
     db
-      .select({ id: leadsTable.id })
-      .from(leadsTable)
-      .where(
-        and(
-          eq(leadsTable.orgId, orgId),
-          sql`${leadsTable.status} IN ('new', 'contacted', 'qualified')`
-        )
-      ),
+      .select({ n: sql<number>`count(*)::int` })
+      .from(contactsTable)
+      .where(leadContactsWhere(orgId)),
     db
       .select({ id: notificationsTable.id })
       .from(notificationsTable)
@@ -119,20 +121,11 @@ router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read
           isNull(notificationsTable.readAt)
         )
       ),
-    db
-      .select()
-      .from(ahipRecordsTable)
-      .innerJoin(agentsTable, eq(ahipRecordsTable.agentId, agentsTable.id))
-      .where(
-        and(
-          eq(agentsTable.orgId, orgId),
-          eq(ahipRecordsTable.certificationYear, currentYear)
-        )
-      ),
+    getAhipCoverage(orgId, currentYear),
     db
       .select({ id: contactsTable.id })
       .from(contactsTable)
-      .where(eq(contactsTable.orgId, orgId)),
+      .where(and(eq(contactsTable.orgId, orgId), isNull(contactsTable.deletedAt))),
     db
       .select({
         agentId: agentsTable.id,
@@ -154,6 +147,19 @@ router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read
       )
       .orderBy(stateLicensesTable.expiryDate)
       .limit(10),
+    // Licenses already past their expiry date (shared definition), for
+    // agents still on the team.
+    db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(stateLicensesTable)
+      .innerJoin(agentsTable, eq(stateLicensesTable.agentId, agentsTable.id))
+      .where(
+        and(
+          eq(agentsTable.orgId, orgId),
+          sql`${agentsTable.status} IN ('onboarding', 'active', 'suspended')`,
+          expiredLicenseWhere(now),
+        ),
+      ),
   ]);
 
   const agentsByStatus = {
@@ -169,11 +175,6 @@ router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read
     }
   }
 
-  const ahipTotal = ahipRecords.length;
-  const ahipCompleted = ahipRecords.filter(
-    (r) => r.ahip_records.status === "passed"
-  ).length;
-  const ahipRate = ahipTotal > 0 ? (ahipCompleted / ahipTotal) * 100 : 0;
 
   const agentsWithExpiringLicenses = alertLicenses.map((row) => {
     const daysUntilExpiry = row.expiryDate
@@ -199,9 +200,13 @@ router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read
     licensesExpiringIn90Days: licenses90.length,
     openTasksCount: openTasks.length,
     overdueTasks: overdueTasks.length,
-    openLeadsCount: openLeads.length,
+    openLeadsCount: Number(openLeads[0]?.n ?? 0),
     unreadNotificationsCount: unreadNotif.length,
-    ahipCompletionRateCurrent: Math.round(ahipRate * 10) / 10,
+    // Shared with Certifications / Renewals (lib/agents/ahipCoverage.ts).
+    ahipCompletionRateCurrent: ahipCoverage.completionRate,
+    ahipCompleteCount: ahipCoverage.complete,
+    agentsRequiringAhip: ahipCoverage.agentsRequiringAhip,
+    licensesExpiredCount: Number(expiredLicenses[0]?.n ?? 0),
     totalContacts: totalContacts.length,
     agentsWithExpiringLicenses,
   });
@@ -212,6 +217,11 @@ router.get("/dashboard/activity", requireAuth, requirePermission("dashboard", "r
   const { limit } = req.query as { limit?: string };
   const limitNum = safeLimit(limit, 20, 200);
 
+  // Contact names are only included for roles that may read contacts; the
+  // actor's name comes from users (org-scoped). Before this join every row
+  // had userFullName = null and no subject, so six different activities on
+  // six different clients rendered as the same three lines twice.
+  const showContact = can(authReq.userRole as Role, "contact", "read");
   const activities = await db
     .select({
       id: activitiesTable.id,
@@ -220,23 +230,47 @@ router.get("/dashboard/activity", requireAuth, requirePermission("dashboard", "r
       metadata: activitiesTable.metadata,
       createdBy: activitiesTable.createdBy,
       createdAt: activitiesTable.createdAt,
+      contactId: activitiesTable.contactId,
+      contactFirstName: contactsTable.firstName,
+      contactLastName: contactsTable.lastName,
+      userFullName: usersTable.fullName,
     })
     .from(activitiesTable)
+    .leftJoin(
+      contactsTable,
+      and(eq(contactsTable.id, activitiesTable.contactId), eq(contactsTable.orgId, authReq.orgId)),
+    )
+    .leftJoin(
+      usersTable,
+      and(eq(usersTable.id, activitiesTable.createdBy), eq(usersTable.orgId, authReq.orgId)),
+    )
     .where(eq(activitiesTable.orgId, authReq.orgId))
-    .orderBy(sql`${activitiesTable.createdAt} DESC`)
+    .orderBy(sql`${activitiesTable.createdAt} DESC`, activitiesTable.id)
     .limit(limitNum);
 
-  const enriched = activities.map((a) => ({
-    id: a.id,
-    type: a.type,
-    title: (a.metadata as Record<string, unknown> | null)?.title ?? a.body ?? a.type,
-    description: a.body ?? null,
-    userId: a.createdBy ?? null,
-    userFullName: null as string | null,
-    resourceType: (a.metadata as Record<string, unknown> | null)?.resourceType as string | null ?? null,
-    resourceId: (a.metadata as Record<string, unknown> | null)?.resourceId as string | null ?? null,
-    createdAt: a.createdAt,
-  }));
+  const enriched = activities.map((a) => {
+    const meta = a.metadata as Record<string, unknown> | null;
+    const contactName =
+      showContact && (a.contactFirstName || a.contactLastName)
+        ? `${a.contactFirstName ?? ""} ${a.contactLastName ?? ""}`.trim()
+        : null;
+    return {
+      id: a.id,
+      type: a.type,
+      title: (meta?.title as string | undefined) ?? a.body ?? a.type,
+      description: a.body ?? null,
+      userId: a.createdBy ?? null,
+      userFullName: a.userFullName ?? null,
+      contactName,
+      resourceType:
+        (meta?.resourceType as string | null | undefined) ??
+        (a.contactId && showContact ? "contact" : null),
+      resourceId:
+        (meta?.resourceId as string | null | undefined) ??
+        (showContact ? (a.contactId ?? null) : null),
+      createdAt: a.createdAt,
+    };
+  });
 
   res.json(enriched);
 });

@@ -15,6 +15,8 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { AHIP_REQUIRED_AGENT_STATUSES, isAhipComplete } from "../lib/agents/ahipCoverage";
+import { expiredLicenseWhere } from "../lib/licenses/licenseStatus";
 
 const router: IRouter = Router();
 
@@ -230,7 +232,7 @@ router.get(
       (ahipDeadline.getTime() - now.getTime()) / 86_400_000,
     );
 
-    const [licRows, certRows, agentsActive, ahipRecords] = await Promise.all([
+    const [licRows, certRows, agentsActive, ahipRecords, expiredLicRows] = await Promise.all([
       db
         .select({
           id: stateLicensesTable.id,
@@ -277,7 +279,8 @@ router.get(
         .where(
           and(
             eq(agentsTable.orgId, authReq.orgId),
-            inArray(agentsTable.status, ["onboarding", "active"]),
+            // Shared with Certifications / dashboard (lib/agents/ahipCoverage.ts).
+            inArray(agentsTable.status, [...AHIP_REQUIRED_AGENT_STATUSES]),
           ),
         ),
       db
@@ -293,12 +296,31 @@ router.get(
             eq(ahipRecordsTable.certificationYear, currentYear),
           ),
         ),
+      // Licenses already past their expiry (shared definition), for agents
+      // still on the team. These never appear in the "expiring" buckets, so
+      // without this count a fully-expired agency read as "none expiring".
+      db
+        .select({
+          agentId: stateLicensesTable.agentId,
+          firstName: agentsTable.firstName,
+          lastName: agentsTable.lastName,
+        })
+        .from(stateLicensesTable)
+        .innerJoin(agentsTable, eq(stateLicensesTable.agentId, agentsTable.id))
+        .where(
+          and(
+            eq(agentsTable.orgId, authReq.orgId),
+            inArray(agentsTable.status, [...AHIP_REQUIRED_AGENT_STATUSES, "suspended"]),
+            expiredLicenseWhere(now),
+          ),
+        ),
     ]);
 
     type AgentRollup = {
       agentId: string;
       agentName: string;
       licensesExpiring: number;
+      licensesExpired: number;
       certsExpiring: number;
       ahipStatus: "passed" | "in_progress" | "not_started" | "missing" | "failed";
       alertCount: number;
@@ -311,6 +333,7 @@ router.get(
           agentId: id,
           agentName: name,
           licensesExpiring: 0,
+          licensesExpired: 0,
           certsExpiring: 0,
           ahipStatus: "missing",
           alertCount: 0,
@@ -326,7 +349,10 @@ router.get(
       return "notice" as const;
     };
 
-    const licCounts = { critical: 0, warning: 0, notice: 0 };
+    const licCounts = { critical: 0, warning: 0, notice: 0, expired: expiredLicRows.length };
+    for (const r of expiredLicRows) {
+      ensureAgent(r.agentId, `${r.firstName} ${r.lastName}`).licensesExpired++;
+    }
     for (const r of licRows) {
       if (!r.expiryDate) continue;
       const b = bucketize(r.expiryDate);
@@ -356,7 +382,8 @@ router.get(
     for (const a of agentsActive) {
       const row = ensureAgent(a.id, `${a.firstName} ${a.lastName}`);
       const status = ahipByAgent.get(a.id);
-      if (status === "passed") {
+      // Waived counts as complete, same as the Ready-to-Sell gate.
+      if (isAhipComplete(status)) {
         row.ahipStatus = "passed";
         ahipCounts.passed++;
       } else if (status === "in_progress") {
@@ -378,6 +405,7 @@ router.get(
     for (const row of rollup.values()) {
       row.alertCount =
         row.licensesExpiring +
+        row.licensesExpired +
         row.certsExpiring +
         (row.ahipStatus !== "passed" ? 1 : 0);
     }
@@ -403,6 +431,7 @@ router.get(
       ahip: {
         ...ahipCounts,
         totalActiveAgents,
+        agentsRequiringAhip: totalActiveAgents,
         completionRate: ahipCompletionRate,
       },
       topAgents,

@@ -43,7 +43,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { ChevronLeft, AlertTriangle, Send, Lock, Handshake, Check, UserRound, Building2 } from "lucide-react";
-import { EmptyState, SectionCard, StatusPill } from "@/components/shared";
+import { EmptyState, SectionCard, StatusPill, SensitiveValue, type SensitiveKind } from "@/components/shared";
 import { ContactAvatar } from "@/pages/crm/ui";
 import { cn } from "@/lib/utils";
 
@@ -262,9 +262,9 @@ export default function AdminOnboardingDetail({ agentId }: { agentId: string }) 
             <EmptyState compact icon={UserRound} title="Profile not started" description="The agent hasn't started their contracting profile yet." />
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
-              <Row label="SSN" value={profile.ssn} />
-              <Row label="EIN" value={profile.ein} />
-              <Row label="DOB" value={profile.dob} />
+              <SensitiveRow kind="ssn" label="SSN" value={profile.ssn} />
+              <SensitiveRow kind="ein" label="EIN" value={profile.ein} />
+              <SensitiveRow kind="dob" label="DOB" value={profile.dob} />
               <Row label="Phone" value={profile.phone} />
               <Row label="Email" value={profile.email} />
               <Row label="Entity" value={profile.entityType} />
@@ -288,8 +288,8 @@ export default function AdminOnboardingDetail({ agentId }: { agentId: string }) 
           {profile && (profile.ssn === null || profile.ssn === "***-**-****") && (
             <p className="text-xs text-muted-foreground mt-4 flex items-start gap-1.5">
               <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-              SSN and EIN are masked — only super admins, agency admins, and
-              compliance managers can view the plaintext values.
+              SSN, EIN and date of birth are hidden — only super admins, agency
+              admins, and compliance managers can view them.
             </p>
           )}
       </SectionCard>
@@ -560,6 +560,15 @@ export function WritingNumberCell({
       >
         Cancel
       </Button>
+    </div>
+  );
+}
+
+function SensitiveRow({ kind, label, value }: { kind: SensitiveKind; label: string; value: string | null | undefined }) {
+  return (
+    <div className="min-w-0">
+      <span className="block text-muted-foreground text-xs">{label}</span>
+      <SensitiveValue kind={kind} label={label} value={value} className="text-sm font-medium" />
     </div>
   );
 }

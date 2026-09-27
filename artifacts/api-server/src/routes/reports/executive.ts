@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, gte, lte, sql, count, sum, isNull } from "drizzle-orm";
+import { eq, and, gte, lte, sql, count, sum, isNull, inArray } from "drizzle-orm";
 import {
   db,
   agentsTable,
@@ -18,6 +18,8 @@ import {
   requireExportConfirm,
 } from "../../middlewares/requireAuth";
 import { parseRange, logExport } from "./shared";
+import { getAhipCoverage } from "../../lib/agents/ahipCoverage";
+import { activeLicenseFlagSql, activeLicenseWhere, expiredLicenseWhere } from "../../lib/licenses/licenseStatus";
 
 const router: IRouter = Router();
 
@@ -66,9 +68,10 @@ router.get(
       db.select({ cnt: count(), val: sum(dealsTable.valueEst) }).from(dealsTable).where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "won"), gte(dealsTable.wonAt, start), lte(dealsTable.wonAt, end))),
       db.select({ cnt: count() }).from(dealsTable).where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "lost"), gte(dealsTable.updatedAt, start), lte(dealsTable.updatedAt, end))),
       db.select({ val: sum(dealsTable.valueEst) }).from(dealsTable).where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "open"))),
-      db.select({ cnt: count() }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"))),
+      db.select({ cnt: count() }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.status, ["enrolled", "retained"]), isNull(contactsTable.deletedAt))),
       db.select({ cnt: count() }).from(messagesTable).innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id)).where(and(eq(messageThreadsTable.orgId, authReq.orgId), eq(messagesTable.direction, "outbound"), gte(messagesTable.createdAt, start), lte(messagesTable.createdAt, end))),
-      db.select({ total: count(), passed: sum(sql<number>`CASE WHEN ${ahipRecordsTable.status} = 'passed' THEN 1 ELSE 0 END`) }).from(ahipRecordsTable).innerJoin(agentsTable, eq(ahipRecordsTable.agentId, agentsTable.id)).where(eq(agentsTable.orgId, authReq.orgId)),
+      // Shared AHIP definition (lib/agents/ahipCoverage.ts) for the current year.
+      getAhipCoverage(authReq.orgId, new Date().getFullYear()),
     ]);
 
     const wonCount = Number(dealsWon[0]?.cnt ?? 0);
@@ -77,8 +80,8 @@ router.get(
     const leadsTotal = Number(totalLeads[0]?.cnt ?? 0);
     const leadsPrior = Number(priorLeads[0]?.cnt ?? 0);
     const leadsChangePct = leadsPrior > 0 ? Math.round(((leadsTotal - leadsPrior) / leadsPrior) * 100) : null;
-    const ahipTotal = Number(ahipStats[0]?.total ?? 0);
-    const ahipPassed = Number(ahipStats[0]?.passed ?? 0);
+    const ahipTotal = ahipStats.agentsRequiringAhip;
+    const ahipPassed = ahipStats.complete;
 
     const rows: (string | number | null)[][] = [
       ["Metric", "Value"],
@@ -86,18 +89,18 @@ router.get(
       ["Period End", end.toISOString().slice(0, 10)],
       ["Active Agents", Number(activeAgents[0]?.cnt ?? 0)],
       ["Onboarding Agents", Number(onboardingAgents[0]?.cnt ?? 0)],
-      ["New Leads (Period)", leadsTotal],
-      ["Prior Period Leads", leadsPrior],
+      ["New Clients & Leads Added (Period)", leadsTotal],
+      ["Prior Period Clients & Leads Added", leadsPrior],
       ["Lead Change %", leadsChangePct != null ? leadsChangePct + "%" : "N/A"],
       ["Deals Won", wonCount],
       ["Deals Lost", lostCount],
       ["Win Rate", winRate + "%"],
       ["Won Value ($)", Number(dealsWon[0]?.val ?? 0)],
       ["Active Pipeline Value ($)", Number(activePipeline[0]?.val ?? 0)],
-      ["Enrolled Members", Number(enrolledMembers[0]?.cnt ?? 0)],
+      ["Members (enrolled + retained)", Number(enrolledMembers[0]?.cnt ?? 0)],
       ["Outbound Messages", Number(commsVolume[0]?.cnt ?? 0)],
-      ["AHIP Passed", ahipPassed],
-      ["AHIP Total", ahipTotal],
+      ["AHIP Complete (passed or waived)", ahipPassed],
+      ["Agents Needing AHIP (active + onboarding)", ahipTotal],
       ["AHIP Pass Rate", ahipTotal > 0 ? Math.round((ahipPassed / ahipTotal) * 100) + "%" : "N/A"],
     ];
 
@@ -130,6 +133,7 @@ router.get(
     const priorEnd = new Date(start.getTime() - 1);
 
     const now = new Date();
+    const execNow = now;
     const currentYear = now.getFullYear();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
@@ -179,16 +183,14 @@ router.get(
         .where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "open"), isNull(dealsTable.deletedAt))),
 
       db.select({ cnt: count() }).from(contactsTable)
-        .where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"), isNull(contactsTable.deletedAt))),
+        .where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.status, ["enrolled", "retained"]), isNull(contactsTable.deletedAt))),
 
       db.select({ cnt: count() }).from(messagesTable)
         .innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id))
         .where(and(eq(messageThreadsTable.orgId, authReq.orgId), eq(messagesTable.direction, "outbound"), gte(messagesTable.createdAt, start), lte(messagesTable.createdAt, end))),
 
-      db.select({ total: count(), passed: sum(sql<number>`CASE WHEN ${ahipRecordsTable.status} = 'passed' THEN 1 ELSE 0 END`) })
-        .from(ahipRecordsTable)
-        .innerJoin(agentsTable, eq(ahipRecordsTable.agentId, agentsTable.id))
-        .where(eq(agentsTable.orgId, authReq.orgId)),
+      // Shared AHIP definition (lib/agents/ahipCoverage.ts) for the current year.
+      getAhipCoverage(authReq.orgId, new Date().getFullYear()),
 
       // Licenses expiring this calendar month
       db.select({ cnt: count() }).from(stateLicensesTable)
@@ -203,8 +205,10 @@ router.get(
       // Pillars (25 pts each): active license, active cert, passed AHIP, no expiring license (<30 days)
       db.select({
         agentId: agentsTable.id,
-        hasActiveLicense: sql<number>`SUM(CASE WHEN ${stateLicensesTable.status} = 'active' THEN 1 ELSE 0 END)`,
-        expiringLicenses: sql<number>`SUM(CASE WHEN ${stateLicensesTable.status} = 'active' AND ${stateLicensesTable.expiryDate} <= NOW() + INTERVAL '30 days' THEN 1 ELSE 0 END)`,
+        // Shared definitions (lib/licenses/licenseStatus.ts).
+        hasActiveLicense: sql<number>`SUM(${activeLicenseFlagSql(execNow)})`,
+        // Expired, or active and expiring within 30 days.
+        expiringLicenses: sql<number>`SUM(CASE WHEN ${expiredLicenseWhere(execNow)} OR (${activeLicenseWhere(execNow)} AND ${stateLicensesTable.expiryDate} <= ${new Date(execNow.getTime() + 30 * 86_400_000)}) THEN 1 ELSE 0 END)`,
       }).from(agentsTable)
         .leftJoin(stateLicensesTable, eq(stateLicensesTable.agentId, agentsTable.id))
         .where(eq(agentsTable.orgId, authReq.orgId))
@@ -237,9 +241,9 @@ router.get(
     const lostCount = Number(dealsLost[0]?.cnt ?? 0);
     const winRate = (wonCount + lostCount) > 0 ? Math.round((wonCount / (wonCount + lostCount)) * 100) : 0;
 
-    const ahipTotal = Number(ahipStats[0]?.total ?? 0);
-    const ahipPassed = Number(ahipStats[0]?.passed ?? 0);
-    const ahipRate = ahipTotal > 0 ? Math.round((ahipPassed / ahipTotal) * 100) : 0;
+    const ahipTotal = ahipStats.agentsRequiringAhip;
+    const ahipPassed = ahipStats.complete;
+    const ahipRate = Math.round(ahipStats.completionRate);
 
     // Agency compliance score: 4-pillar average (25 pts each)
     // Pillar 1: hasActiveLicense  — at least 1 active state license

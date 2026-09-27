@@ -73,6 +73,9 @@ type CommissionStatement = {
   statementDate?: string | null;
   totalAmount: number | string;
   status: StatementStatus;
+  /** Shared derivation from the API: reconciled + variance ⇒ "reconciled_with_variance". */
+  displayStatus?: StatementStatus | "reconciled_with_variance";
+  variance?: number | null;
   lineItemCount?: number | null;
   matchedCount?: number | null;
   unmatchedCount?: number | null;
@@ -195,17 +198,19 @@ function StatCard({
   );
 }
 
-const STATUS_TONES: Record<StatementStatus, StatusTone> = {
+const STATUS_TONES: Record<StatementStatus | "reconciled_with_variance", StatusTone> = {
   pending: "warning",
   parsed: "info",
   reconciled: "success",
+  reconciled_with_variance: "warning",
   disputed: "danger",
 };
 
-const STATUS_HINTS: Record<StatementStatus, string> = {
+const STATUS_HINTS: Record<StatementStatus | "reconciled_with_variance", string> = {
   pending: "Uploaded — waiting to be read",
   parsed: "Read — ready to reconcile",
   reconciled: "Matched and paid out",
+  reconciled_with_variance: "Matched, but the lines don't add up to the carrier's total — needs review",
   disputed: "Flagged for follow-up",
 };
 
@@ -522,8 +527,8 @@ function StatementsTab({ onUpload }: { onUpload: () => void }) {
                       {fmtMoney(s.totalAmount)}
                     </TableCell>
                     <TableCell>
-                      <span title={STATUS_HINTS[s.status]}>
-                        <StatusPill status={s.status} tone={STATUS_TONES[s.status]} />
+                      <span title={STATUS_HINTS[s.displayStatus ?? s.status]}>
+                        <StatusPill status={s.displayStatus ?? s.status} tone={STATUS_TONES[s.displayStatus ?? s.status]} />
                       </span>
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">

@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { SensitiveValue, type SensitiveKind } from "@/components/shared";
 import { useGetCarriers } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,8 +43,8 @@ export function ReviewStep({
         <section>
           <h3 className="text-sm font-semibold mb-2">Profile</h3>
           <div className="rounded-lg border bg-muted/30 p-3 grid sm:grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
-            <Row label="SSN" value={profile?.ssn} />
-            <Row label="Date of birth" value={profile?.dob} />
+            <Row label="SSN" value={profile?.ssn} sensitive="ssn" />
+            <Row label="Date of birth" value={profile?.dob} sensitive="dob" />
             <Row label="Phone" value={profile?.phone} />
             <Row label="Email" value={profile?.email} />
             <Row
@@ -61,7 +62,7 @@ export function ReviewStep({
             />
             <Row label="Entity" value={profile?.entityType ?? "individual"} />
             {profile?.businessName && <Row label="Business" value={profile.businessName} />}
-            {profile?.ein && <Row label="EIN" value={profile.ein} />}
+            {profile?.ein && <Row label="EIN" value={profile.ein} sensitive="ein" />}
             <Row label="E&O carrier" value={profile?.eAndOCarrier} />
             <Row label="E&O policy" value={profile?.eAndOPolicyNumber} />
             <Row label="E&O expires" value={profile?.eAndOExpiresOn} />
@@ -132,19 +133,26 @@ function Row({
   label,
   value,
   wide,
+  sensitive,
 }: {
   label: string;
   value: string | null | undefined;
   wide?: boolean;
+  /** SSN / EIN / DOB: masked to the last 4 with a Reveal button. */
+  sensitive?: SensitiveKind;
 }) {
   return (
     <div
       className={wide ? "sm:col-span-2 grid grid-cols-[120px_1fr] gap-2" : "grid grid-cols-[120px_1fr] gap-2"}
     >
       <span className="text-muted-foreground text-xs">{label}</span>
-      <span className="text-xs font-medium break-words">
-        {value && String(value).trim().length > 0 ? value : "—"}
-      </span>
+      {sensitive ? (
+        <SensitiveValue kind={sensitive} label={label} value={value} className="text-xs font-medium" />
+      ) : (
+        <span className="text-xs font-medium break-words">
+          {value && String(value).trim().length > 0 ? value : "—"}
+        </span>
+      )}
     </div>
   );
 }

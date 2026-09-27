@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, gte, lte, inArray, count, sum, isNull } from "drizzle-orm";
+import { eq, and, gte, lte, inArray, count, sum, isNull, sql } from "drizzle-orm";
+import { activeLicenseFlagSql, activeLicenseWhere } from "../../lib/licenses/licenseStatus";
 import {
   db,
   agentsTable,
@@ -51,6 +52,9 @@ router.get(
 
     const agentIds = agents.map((a) => a.id);
     if (agentIds.length === 0) { res.json([]); return; }
+
+    const reportNow = new Date();
+    const in30Days = new Date(reportNow.getTime() + 30 * 86_400_000);
 
     // Parallel aggregation queries
     const [
@@ -145,15 +149,17 @@ router.get(
         ))
         .groupBy(contactsTable.assignedAgentId),
 
-      // License status per agent
+      // License counts per agent, using the shared active/expired definition
+      // (lib/licenses/licenseStatus.ts). "Expiring" = active and due to
+      // expire within 30 days.
       db.select({
         agentId: stateLicensesTable.agentId,
-        status: stateLicensesTable.status,
-        cnt: count(),
+        active: sql<number>`SUM(${activeLicenseFlagSql(reportNow)})::int`,
+        expiring: sql<number>`SUM(CASE WHEN ${activeLicenseWhere(reportNow)} AND ${stateLicensesTable.expiryDate} <= ${in30Days} THEN 1 ELSE 0 END)::int`,
       })
         .from(stateLicensesTable)
         .where(inArray(stateLicensesTable.agentId, agentIds))
-        .groupBy(stateLicensesTable.agentId, stateLicensesTable.status),
+        .groupBy(stateLicensesTable.agentId),
 
       // Certifications passed
       db.select({ agentId: carrierCertificationsTable.agentId, cnt: count() })
@@ -183,17 +189,12 @@ router.get(
     const enrollByAgent = new Map(enrollCounts.map((e) => [e.agentId, e]));
     const certByAgent = new Map(certifications.map((c) => [c.agentId, c]));
     const ahipByAgent = new Map(ahipRecords.map((r) => [r.agentId, r]));
-    // Bucket licenses by agent (multiple rows per agent — one per status)
-    const licensesByAgent = new Map<string, typeof licenses>();
-    for (const l of licenses) {
-      const arr = licensesByAgent.get(l.agentId);
-      if (arr) arr.push(l); else licensesByAgent.set(l.agentId, [l]);
-    }
+    const licensesByAgent = new Map(licenses.map((l) => [l.agentId, l]));
 
     const report = agents.map((agent) => {
-      const agentLicenses = licensesByAgent.get(agent.id) ?? [];
-      const activeLicenses = agentLicenses.filter((l) => l.status === "active").reduce((s, l) => s + Number(l.cnt), 0);
-      const expiringLicenses = agentLicenses.filter((l) => l.status === "pending").reduce((s, l) => s + Number(l.cnt), 0);
+      const agentLicenses = licensesByAgent.get(agent.id);
+      const activeLicenses = Number(agentLicenses?.active ?? 0);
+      const expiringLicenses = Number(agentLicenses?.expiring ?? 0);
       const ahip = ahipByAgent.get(agent.id);
 
       // Compliance score: 0–100

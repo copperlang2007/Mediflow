@@ -47,6 +47,36 @@ import {
   type NormalizedLineItem,
 } from "../lib/commissionParsers";
 import { reconcileStatement } from "../workers/reconcileCommissionStatement";
+import { can, type Role } from "../lib/permissions";
+import {
+  displayStatementStatus,
+  statementVariance,
+} from "../lib/commissions/statementStatus";
+
+/**
+ * Adds the shared review fields to a statement row: the variance between the
+ * carrier's total and the parsed lines, and the status to SHOW (a reconciled
+ * statement whose lines don't add up reads "reconciled_with_variance").
+ */
+function withStatementReview<
+  T extends {
+    status: string;
+    totalAmount: string | null;
+    lineItemCount?: number | null;
+    lineItemTotal?: string | null;
+  },
+>(row: T) {
+  const lineItemCount = Number(row.lineItemCount ?? 0);
+  const lineItemTotal = Number(Number(row.lineItemTotal ?? 0).toFixed(2));
+  const variance = statementVariance(row.totalAmount, lineItemTotal, lineItemCount);
+  return {
+    ...row,
+    lineItemCount,
+    lineItemTotal,
+    variance,
+    displayStatus: displayStatementStatus(row.status, variance),
+  };
+}
 
 const router: IRouter = Router();
 const upload = multer({
@@ -542,9 +572,29 @@ router.get(
     if (from) conditions.push(gte(commissionStatementsTable.statementDate, from));
     if (to) conditions.push(lte(commissionStatementsTable.statementDate, to));
 
+    // Per-statement line totals (org-scoped) so every row carries the same
+    // variance / displayStatus the detail and Reconciliation pages show.
+    const itemAgg = db
+      .select({
+        statementId: commissionLineItemsTable.statementId,
+        lineItemCount: sql<number>`count(*)::int`.as("line_item_count"),
+        lineItemTotal: sql<string>`coalesce(sum(${commissionLineItemsTable.commissionAmount}), 0)::text`.as(
+          "line_item_total",
+        ),
+      })
+      .from(commissionLineItemsTable)
+      .where(eq(commissionLineItemsTable.orgId, authReq.orgId))
+      .groupBy(commissionLineItemsTable.statementId)
+      .as("item_agg");
+
     // Carrier name joined in (org-scoped) so the list can show it.
     const rows = await db
-      .select({ ...getTableColumns(commissionStatementsTable), carrierName: carriersTable.name })
+      .select({
+        ...getTableColumns(commissionStatementsTable),
+        carrierName: carriersTable.name,
+        lineItemCount: itemAgg.lineItemCount,
+        lineItemTotal: itemAgg.lineItemTotal,
+      })
       .from(commissionStatementsTable)
       .leftJoin(
         carriersTable,
@@ -553,11 +603,12 @@ router.get(
           eq(carriersTable.orgId, authReq.orgId),
         ),
       )
+      .leftJoin(itemAgg, eq(itemAgg.statementId, commissionStatementsTable.id))
       .where(and(...conditions))
       .orderBy(desc(commissionStatementsTable.statementDate))
       .limit(safeLimit(req.query.limit))
       .offset(safeOffset(req.query.offset));
-    res.json(rows);
+    res.json(rows.map((r) => withStatementReview(r)));
   },
 );
 
@@ -594,6 +645,7 @@ router.get(
       .select({
         lineItemCount: sql<number>`count(*)::int`,
         unmatchedCount: sql<number>`count(*) FILTER (WHERE ${commissionLineItemsTable.matchStatus} = 'unmatched')::int`,
+        lineItemTotal: sql<string>`coalesce(sum(${commissionLineItemsTable.commissionAmount}), 0)::text`,
       })
       .from(commissionLineItemsTable)
       .where(
@@ -606,7 +658,11 @@ router.get(
     const unmatchedCount = Number(counts?.unmatchedCount ?? 0);
 
     res.json({
-      ...row.statement,
+      ...withStatementReview({
+        ...row.statement,
+        lineItemCount,
+        lineItemTotal: counts?.lineItemTotal ?? "0",
+      }),
       carrierName: row.carrierName ?? null,
       lineItemCount,
       // "manual" matches count as matched, same as the detail page's
@@ -634,14 +690,48 @@ router.get(
       conditions.push(eq(commissionLineItemsTable.matchStatus, matchStatus));
     }
 
+    // Names for matched rows so the table reads "Margaret Anderson" rather
+    // than "Member MBR-1000". Both joins are org-scoped. The client name is
+    // only returned to roles that may read contacts (contact:read); others
+    // get null and the page falls back to "Linked client". Member ids are
+    // never echoed in a name field.
+    const showContact = can(authReq.userRole as Role, "contact", "read");
     const rows = await db
-      .select()
+      .select({
+        item: commissionLineItemsTable,
+        contactFirstName: contactsTable.firstName,
+        contactLastName: contactsTable.lastName,
+        agentFirstName: agentsTable.firstName,
+        agentLastName: agentsTable.lastName,
+      })
       .from(commissionLineItemsTable)
+      .leftJoin(
+        contactsTable,
+        and(
+          eq(contactsTable.id, commissionLineItemsTable.contactId),
+          eq(contactsTable.orgId, authReq.orgId),
+        ),
+      )
+      .leftJoin(
+        agentsTable,
+        and(
+          eq(agentsTable.id, commissionLineItemsTable.writingAgentId),
+          eq(agentsTable.orgId, authReq.orgId),
+        ),
+      )
       .where(and(...conditions))
       .orderBy(asc(commissionLineItemsTable.createdAt))
       .limit(safeLimit(req.query.limit, 200, 1000))
       .offset(safeOffset(req.query.offset));
-    res.json(rows);
+    const fullName = (f: string | null, l: string | null): string | null =>
+      f || l ? `${f ?? ""} ${l ?? ""}`.trim() : null;
+    res.json(
+      rows.map((r) => ({
+        ...r.item,
+        contactName: showContact ? fullName(r.contactFirstName, r.contactLastName) : null,
+        writingAgentName: fullName(r.agentFirstName, r.agentLastName),
+      })),
+    );
   },
 );
 

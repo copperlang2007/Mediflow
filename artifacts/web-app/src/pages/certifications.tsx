@@ -44,7 +44,11 @@ export default function CertificationsPage() {
   const expiringCerts = certRenewals?.renewals.filter((r) => r.type === "certification") ?? [];
 
   const years = [currentYear + 1, currentYear, currentYear - 1].map(String);
-  const notDone = (ahip?.totalActiveAgents ?? 0) - (ahip?.passedCount ?? 0);
+  // Shared AHIP definition (API lib/agents/ahipCoverage.ts): agents who need
+  // AHIP are active + onboarding; complete = passed or waived. Renewals and
+  // the dashboard use the same numbers.
+  const needAhip = ahip?.agentsRequiringAhip ?? ahip?.totalActiveAgents ?? 0;
+  const notDone = needAhip - (ahip?.passedCount ?? 0);
 
   return (
     <PageShell>
@@ -66,20 +70,20 @@ export default function CertificationsPage() {
 
       <KpiGrid>
         <KpiCard
-          label="Active agents"
-          value={ahip?.totalActiveAgents ?? 0}
+          label="Agents who need AHIP"
+          value={ahip?.agentsRequiringAhip ?? ahip?.totalActiveAgents ?? 0}
           icon={Users}
           color="navy"
           loading={ahipLoading}
-          hint={`Need AHIP for ${year}`}
+          hint={`Active and onboarding agents, plan year ${year}`}
         />
         <KpiCard
-          label={`Passed AHIP ${year}`}
+          label={`AHIP complete ${year}`}
           value={ahip?.passedCount ?? 0}
           icon={ShieldCheck}
           color="green"
           loading={ahipLoading}
-          hint="Ready for this plan year"
+          hint="Passed or waived"
         />
         <KpiCard
           label="Completion rate"
@@ -95,7 +99,7 @@ export default function CertificationsPage() {
           icon={AlertTriangle}
           color="orange"
           loading={ahipLoading}
-          hint={notDone === 0 && (ahip?.totalActiveAgents ?? 0) > 0 ? "Everyone's done — nice" : "Nudge these agents"}
+          hint={notDone === 0 && needAhip > 0 ? "Everyone's done — nice" : "Nudge these agents"}
         />
       </KpiGrid>
 

@@ -43,6 +43,8 @@ import { PageShell, KpiGrid, TableFrame } from "@/components/ops";
 import { DollarSign, ListChecks, Link2, CalendarCheck, FileSearch, CheckCircle2 } from "lucide-react";
 
 type StatementStatus = "pending" | "parsed" | "reconciled" | "disputed";
+/** What to SHOW — from the API's shared derivation (lib/commissions/statementStatus.ts). */
+type StatementDisplayStatus = StatementStatus | "reconciled_with_variance";
 
 type CommissionStatement = {
   id: string;
@@ -55,8 +57,11 @@ type CommissionStatement = {
   lineItemCount?: number | null;
   matchedCount?: number | null;
   unmatchedCount?: number | null;
-  lastReconcileAt?: string | null;
   reconciledAt?: string | null;
+  lineItemTotal?: number | null;
+  /** Carrier total minus the parsed lines; null when there's nothing to compare. */
+  variance?: number | null;
+  displayStatus?: StatementDisplayStatus;
 };
 
 type LineItemMatchStatus = "matched" | "unmatched" | "manual";
@@ -70,6 +75,8 @@ type CommissionLineItem = {
   periodStart?: string | null;
   periodEnd?: string | null;
   premiumAmount?: number | string | null;
+  /** What the API actually returns (the column is `premium`). */
+  premium?: number | string | null;
   commissionAmount: number | string;
   type?: string | null;
   writingAgentId?: string | null;
@@ -97,10 +104,11 @@ const fmtMoney = (val: number | string | null | undefined): string => {
 const fmtDate = (d: string | null | undefined): string =>
   d ? format(new Date(d), "MMM d, yyyy") : "—";
 
-const STATUS_TONES: Record<StatementStatus, StatusTone> = {
+const STATUS_TONES: Record<StatementDisplayStatus, StatusTone> = {
   pending: "warning",
   parsed: "info",
   reconciled: "success",
+  reconciled_with_variance: "warning",
   disputed: "danger",
 };
 
@@ -365,6 +373,12 @@ export default function CommissionStatementPage() {
     );
   }
 
+  const hasVariance = statement.variance != null && Math.abs(statement.variance) >= 0.01;
+  // Never show a green "Reconciled" when the lines don't add up to the total.
+  const shownStatus: StatementDisplayStatus =
+    statement.displayStatus ??
+    (statement.status === "reconciled" && hasVariance ? "reconciled_with_variance" : statement.status);
+
   const FILTER_OPTIONS: Array<{ value: "all" | LineItemMatchStatus; label: string }> = [
     { value: "all", label: "All" },
     { value: "matched", label: "Matched" },
@@ -384,7 +398,11 @@ export default function CommissionStatementPage() {
         title={statement.carrierName ?? "Statement"}
         subtitle={`Covers ${fmtDate(statement.periodStart)} – ${fmtDate(statement.periodEnd)}`}
       >
-        <StatusPill status={statement.status} tone={STATUS_TONES[statement.status]} className="text-sm px-3 py-1" />
+        <StatusPill
+          status={shownStatus}
+          tone={STATUS_TONES[shownStatus]}
+          className="text-sm px-3 py-1"
+        />
         {statement.status === "parsed" && (
           <Button onClick={() => reconcile.mutate()} disabled={reconcile.isPending}>
             {reconcile.isPending ? "Reconciling…" : "Reconcile"}
@@ -410,10 +428,26 @@ export default function CommissionStatementPage() {
         />
         <KpiCard
           label="Last reconciled"
-          value={<span className="text-2xl">{fmtDate(statement.lastReconcileAt ?? statement.reconciledAt)}</span>}
+          value={
+            <span className="text-2xl">
+              {statement.reconciledAt
+                ? fmtDate(statement.reconciledAt)
+                : statement.status === "reconciled"
+                  ? "Not recorded"
+                  : "—"}
+            </span>
+          }
           icon={CalendarCheck}
           color="orange"
-          hint={statement.status === "reconciled" ? "Payouts are up to date" : "Not reconciled yet"}
+          hint={
+            statement.status !== "reconciled"
+              ? "Not reconciled yet"
+              : hasVariance
+                ? `Lines are ${fmtMoney(Math.abs(statement.variance ?? 0))} ${(statement.variance ?? 0) > 0 ? "short of" : "over"} the carrier total — needs review`
+                : statement.reconciledAt
+                  ? "Payouts are up to date"
+                  : "Reconciled before times were recorded"
+          }
         />
       </KpiGrid>
 
@@ -493,7 +527,7 @@ export default function CommissionStatementPage() {
                       {fmtDate(li.periodStart)} – {fmtDate(li.periodEnd)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {fmtMoney(li.premiumAmount)}
+                      {fmtMoney(li.premium ?? li.premiumAmount)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums font-semibold text-success">
                       {fmtMoney(li.commissionAmount)}

@@ -5452,6 +5452,10 @@ components:
           type: string
         planTier:
           type: string
+          description: >
+            The plan the product actually enforces (from the subscription /
+            entitlements — the same tier /billing/subscription reports), not
+            the legacy organizations.plan_tier column.
         logoUrl:
           type: ["string", "null"]
         createdAt:
@@ -5508,10 +5512,25 @@ components:
           type: integer
         openLeadsCount:
           type: integer
+          description: >
+            CRM contacts whose status is Lead (not deleted) — the same number
+            the Clients & Leads page shows. Not the inbound queue's `leads` table.
         unreadNotificationsCount:
           type: integer
         ahipCompletionRateCurrent:
           type: number
+          description: >
+            Percent of agents who need AHIP (status active or onboarding) with
+            a passed or waived record for the current year.
+        ahipCompleteCount:
+          type: integer
+        agentsRequiringAhip:
+          type: integer
+        licensesExpiredCount:
+          type: integer
+          description: >
+            Licenses past their expiry date (or stored as expired) for agents
+            still on the team (onboarding, active, suspended).
         totalContacts:
           type: integer
         agentsWithExpiringLicenses:
@@ -5571,6 +5590,9 @@ components:
           type: ["string", "null"]
         userFullName:
           type: ["string", "null"]
+        contactName:
+          type: ["string", "null"]
+          description: The client the activity is about; null unless the caller has contact:read.
         resourceType:
           type: ["string", "null"]
         resourceId:
@@ -5905,6 +5927,15 @@ components:
         status:
           type: string
           enum: [active, pending, expired, suspended, not_appointed]
+        effectiveStatus:
+          type: string
+          enum: [active, pending, expired, suspended, not_appointed]
+          description: >
+            The status to show and count. Same as `status`, except a license
+            whose expiry date has passed is always "expired". Active means
+            status active AND no expiry or expiry in the future — the shared
+            definition Licensing, the agent profile, Ready to Sell, the back
+            office and the dashboard all use.
         renewalSubmittedAt:
           type: ["string", "null"]
           format: date-time
@@ -6276,8 +6307,13 @@ components:
           type: integer
         totalActiveAgents:
           type: integer
+          description: Deprecated alias of agentsRequiringAhip.
+        agentsRequiringAhip:
+          type: integer
+          description: Agents whose status is active or onboarding.
         passedCount:
           type: integer
+          description: Of those, how many have a passed or waived AHIP record for the year.
         completionRate:
           type: number
         records:

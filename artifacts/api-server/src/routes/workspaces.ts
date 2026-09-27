@@ -28,6 +28,7 @@ import {
   organizationsTable,
   userInvitationsTable,
   usersTable,
+  subscriptionsTable,
 } from "@workspace/db";
 import {
   requireAuth,
@@ -37,7 +38,7 @@ import {
 import { requireMfa } from "../middlewares/requireMfa";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { lockOrgSeats, requireSeat } from "../lib/billing/seats";
-import { PlanLimitError, planLimitResponse } from "../lib/billing/entitlements";
+import { PlanLimitError, deriveEntitlements, planLimitResponse } from "../lib/billing/entitlements";
 import { isEmailConfigured } from "../lib/email";
 import {
   AppBaseUrlUnconfiguredError,
@@ -71,7 +72,7 @@ router.get(
   requireRole("super_admin"),
   // tenant-isolation-exempt: platform-owner view across every tenant, super_admin only.
   async (_req: Request, res: Response): Promise<void> => {
-    const [orgs, users, agents, contacts, invites] = await Promise.all([
+    const [orgs, users, agents, contacts, invites, subs] = await Promise.all([
       db
         .select({
           id: organizationsTable.id,
@@ -106,7 +107,11 @@ router.get(
           ),
         )
         .groupBy(userInvitationsTable.orgId),
+      db.select().from(subscriptionsTable),
     ]);
+    // Effective plan = what entitlements enforce (same as /billing and
+    // /organizations/me), not the legacy organizations.plan_tier column.
+    const subByOrg = new Map(subs.map((s) => [s.orgId, s]));
     const byOrg = (rows: Array<{ orgId: string; n: number }>) =>
       new Map(rows.map((r) => [r.orgId, Number(r.n)]));
     const u = byOrg(users);
@@ -116,6 +121,7 @@ router.get(
     res.json({
       agencies: orgs.map((o) => ({
         ...o,
+        planTier: deriveEntitlements(o.id, subByOrg.get(o.id) ?? null).tier,
         users: u.get(o.id) ?? 0,
         agents: a.get(o.id) ?? 0,
         clients: c.get(o.id) ?? 0,

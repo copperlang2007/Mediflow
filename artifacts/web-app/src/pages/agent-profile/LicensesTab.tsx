@@ -33,6 +33,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { LICENSE_STATUS_STYLES } from "./shared";
 import { EmptyState, StatusPill } from "@/components/shared";
+import { daysUntilExpiry, licenseEffectiveStatus } from "@/lib/licenses";
 
 export default function LicensesTab({ agentId }: { agentId: string }) {
   const qc = useQueryClient();
@@ -97,7 +98,7 @@ export default function LicensesTab({ agentId }: { agentId: string }) {
                 </div>
                 {lic.licenseNumber && <p className="text-xs text-muted-foreground mt-0.5">#{lic.licenseNumber}</p>}
                 {lic.expiryDate && (() => {
-                  const daysLeft = Math.ceil((new Date(lic.expiryDate).getTime() - Date.now()) / 86400000);
+                  const daysLeft = daysUntilExpiry(lic) ?? 0;
                   const color = daysLeft <= 0 ? "text-red-600 font-semibold" : daysLeft <= 30 ? "text-red-600" : daysLeft <= 60 ? "text-amber-600" : daysLeft <= 90 ? "text-amber-500" : "text-muted-foreground";
                   return (
                     <p className={cn("text-xs mt-0.5", color)}>
@@ -108,7 +109,9 @@ export default function LicensesTab({ agentId }: { agentId: string }) {
                   );
                 })()}
               </div>
-              <StatusPill status={lic.status} tone={lic.status === "not_appointed" ? "neutral" : undefined} />
+              {/* Shared definition: a license past its expiry reads "Expired"
+                  even if its stored status is still "active". */}
+              <StatusPill status={licenseEffectiveStatus(lic)} tone={lic.status === "not_appointed" ? "neutral" : undefined} />
               {lic.documentKey && (
                 <Button
                   size="sm"
