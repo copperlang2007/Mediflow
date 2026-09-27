@@ -104,6 +104,14 @@ describe("MFA required for admin roles (HIPAA technical safeguard)", () => {
     expect(res.body.message).toMatch(/multi-factor/i);
   });
 
+  it("accepts the Clerk template claim when it arrives as the string \"true\"", async () => {
+    const res = await request(app)
+      .post("/api/automations/rules")
+      .set({ ...withMfaAuth(adminWithMfa.id, true), "x-test-mfa-enrolled": "as-string" })
+      .send({ name: "String-claim rule", triggerType: "lead_created", actions: [{ type: "create_task", config: { title: "x" } }] });
+    expect(res.body.error).not.toBe("mfa_required");
+  });
+
   it("ignores MFA_REQUIRED=false in production: MFA is still enforced", async () => {
     process.env.MFA_REQUIRED = "false";
     try {
