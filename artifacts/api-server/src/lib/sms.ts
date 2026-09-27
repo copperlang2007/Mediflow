@@ -1,7 +1,6 @@
 import crypto from "crypto";
-import { eq } from "drizzle-orm";
-import { db, optOutsTable } from "@workspace/db";
 import { logger } from "./logger";
+import { isPhoneOptedOut } from "./compliance/consumerOutreach";
 
 export interface SendSmsOptions {
   to: string;
@@ -125,13 +124,9 @@ export async function sendSMS(
   body: string,
   agentId: string,
 ): Promise<SmsResult | SmsError> {
-  const [optOut] = await db
-    .select({ id: optOutsTable.id })
-    .from(optOutsTable)
-    .where(eq(optOutsTable.phone, to))
-    .limit(1);
-
-  if (optOut) {
+  // Format-independent match: a contact stored as "(512) 555-0100" must
+  // still hit the opt-out Twilio recorded as "+15125550100".
+  if (await isPhoneOptedOut(to)) {
     logger.warn({ to, agentId }, "SMS blocked: recipient has opted out");
     return { success: false, error: "Recipient has opted out of SMS" };
   }

@@ -13,6 +13,8 @@ export const orgSettingsTable = pgTable("org_settings", {
   ahipDeadlineDay: integer("ahip_deadline_day").notNull().default(7),
   ahipReminderEnabled: boolean("ahip_reminder_enabled").notNull().default(true),
   ahipReminderIntervalWeeks: integer("ahip_reminder_interval_weeks").notNull().default(2),
+  // Automated SMS only goes to contacts with a recorded TCPA consent (0049).
+  requireSmsConsent: boolean("require_sms_consent").notNull().default(true),
   sessionTimeoutMinutes: integer("session_timeout_minutes").notNull().default(30),
 });
 

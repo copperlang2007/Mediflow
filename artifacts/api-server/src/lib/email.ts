@@ -36,6 +36,8 @@ export interface SendEmailOptions {
   from?: string;
   replyTo?: string;
   tags?: Record<string, string>;
+  /** Extra MIME headers (e.g. List-Unsubscribe on consumer email). */
+  headers?: Record<string, string>;
   attachments?: EmailAttachment[];
 }
 
@@ -89,6 +91,7 @@ export async function sendEmail(
     html: opts.html,
     ...(opts.text ? { text: opts.text } : {}),
     ...(opts.replyTo ? { reply_to: opts.replyTo } : {}),
+    ...(opts.headers && Object.keys(opts.headers).length > 0 ? { headers: opts.headers } : {}),
     ...(opts.tags
       ? {
           tags: Object.entries(opts.tags).map(([k, v]) => ({

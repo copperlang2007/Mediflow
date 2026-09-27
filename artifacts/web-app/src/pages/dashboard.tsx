@@ -34,6 +34,7 @@ import { formatDistanceToNow, format } from "date-fns";
 import { useGetMe } from "@workspace/api-client-react";
 import { Link } from "wouter";
 import { UserPlus, PlusCircle, Settings, BookOpen } from "lucide-react";
+import { sellingPlanYear } from "@/lib/planYear";
 
 const STATUS_COLORS: Record<string, string> = {
   onboarding: "bg-amber-100 text-amber-800",
@@ -318,7 +319,7 @@ export default function Dashboard() {
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
               <Award className="h-4 w-4 text-primary" />
-              AHIP Completion ({new Date().getFullYear()})
+              AHIP Completion ({stats?.ahipPlanYear ?? sellingPlanYear()})
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-2">

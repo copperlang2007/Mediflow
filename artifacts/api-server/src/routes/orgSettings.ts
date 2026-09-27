@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
-import { db, orgSettingsTable } from "@workspace/db";
+import { db, orgSettingsTable, auditLogTable } from "@workspace/db";
 import {
   requireAuth,
   requirePermission,
@@ -18,6 +18,7 @@ const UpdateSettingsSchema = z.object({
   ahipDeadlineDay: z.number().int().min(1).max(31).optional(),
   ahipReminderEnabled: z.boolean().optional(),
   ahipReminderIntervalWeeks: z.number().int().min(1).max(52).optional(),
+  requireSmsConsent: z.boolean().optional(),
 });
 
 router.get(
@@ -43,6 +44,7 @@ router.get(
         ahipDeadlineDay: 7,
         ahipReminderEnabled: true,
         ahipReminderIntervalWeeks: 2,
+        requireSmsConsent: true,
       });
       return;
     }
@@ -66,6 +68,21 @@ router.put(
 
     const data = parsed.data;
 
+    // Turning off consent enforcement is a compliance-significant decision —
+    // record who did it and when.
+    if (data.requireSmsConsent !== undefined) {
+      await db.insert(auditLogTable).values({
+        id: randomUUID(),
+        orgId: authReq.orgId,
+        userId: authReq.userId,
+        userRole: authReq.userRole ?? null,
+        action: "update",
+        resourceType: "org_settings.require_sms_consent",
+        resourceId: authReq.orgId,
+        changes: { requireSmsConsent: data.requireSmsConsent },
+      });
+    }
+
     const [existing] = await db
       .select({ id: orgSettingsTable.id })
       .from(orgSettingsTable)
@@ -84,6 +101,7 @@ router.put(
           ahipDeadlineDay: data.ahipDeadlineDay ?? 7,
           ahipReminderEnabled: data.ahipReminderEnabled ?? true,
           ahipReminderIntervalWeeks: data.ahipReminderIntervalWeeks ?? 2,
+          requireSmsConsent: data.requireSmsConsent ?? true,
         })
         .returning();
       res.json(settings);
@@ -95,6 +113,7 @@ router.put(
       if (data.ahipDeadlineDay !== undefined) updates.ahipDeadlineDay = data.ahipDeadlineDay;
       if (data.ahipReminderEnabled !== undefined) updates.ahipReminderEnabled = data.ahipReminderEnabled;
       if (data.ahipReminderIntervalWeeks !== undefined) updates.ahipReminderIntervalWeeks = data.ahipReminderIntervalWeeks;
+      if (data.requireSmsConsent !== undefined) updates.requireSmsConsent = data.requireSmsConsent;
 
       const [settings] = await db
         .update(orgSettingsTable)

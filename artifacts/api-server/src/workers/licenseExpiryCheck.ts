@@ -1,12 +1,22 @@
 /**
  * License Expiry Check Worker.
  *
- * Runs daily via pg-boss. Finds active licenses expiring within 90 days,
- * deduplicates via license_renewal_alerts table, creates in-app notifications,
- * and enqueues reminder emails to BOTH the agent AND all compliance managers.
+ * Runs daily via pg-boss. Two jobs, in order:
+ *
+ *  1. Lapse sweep — any `active` license whose `expiry_date` has passed is
+ *     flipped to `expired`, audited, and reported to the org's compliance
+ *     roles. Without this a lapsed license stayed `active` forever: it kept
+ *     scoring as compliant and the upcoming-expiry alerts (which only look at
+ *     future dates) went silent the day it actually lapsed.
+ *  2. Upcoming expiries — active licenses expiring within 90 days, deduplicated
+ *     via license_renewal_alerts, with in-app notifications and emails to the
+ *     agent, their manager and all compliance roles.
+ *
+ * Only agents who can still sell (`onboarding` / `active`) are alerted;
+ * offboarded agents' licenses are still swept to `expired` for accuracy.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -15,6 +25,7 @@ import {
   usersTable,
   notificationsTable,
   licenseRenewalAlertsTable,
+  auditLogTable,
 } from "@workspace/db";
 import { type LicenseExpiryCheckPayload, enqueue, JOB_NAMES } from "../lib/jobs";
 import { licenseExpiryEmailHtml } from "../lib/email";
@@ -25,14 +36,128 @@ import { logger } from "../lib/logger";
 // e.g. 45 days → 60-day threshold (not 90).
 const ALERT_THRESHOLDS_DAYS = [7, 14, 30, 60, 90];
 
+/** Agent statuses whose credentials still matter for selling / alerts. */
+const ALERTABLE_AGENT_STATUSES = ["onboarding", "active"] as const;
+
+/**
+ * Flip every `active` license past its expiry date to `expired`, write one
+ * audit row per license, and notify compliance roles about lapses for agents
+ * who can still sell. Returns the number of licenses expired.
+ */
+export async function expireLapsedLicenses(
+  now: Date,
+  orgId?: string,
+): Promise<number> {
+  const lapsed = await db
+    .select({
+      licenseId: stateLicensesTable.id,
+      stateCode: stateLicensesTable.stateCode,
+      licenseType: stateLicensesTable.licenseType,
+      expiryDate: stateLicensesTable.expiryDate,
+      agentId: agentsTable.id,
+      agentStatus: agentsTable.status,
+      agentFirstName: agentsTable.firstName,
+      agentLastName: agentsTable.lastName,
+      orgId: agentsTable.orgId,
+    })
+    .from(stateLicensesTable)
+    .innerJoin(agentsTable, eq(stateLicensesTable.agentId, agentsTable.id))
+    .where(
+      and(
+        eq(stateLicensesTable.status, "active"),
+        lt(stateLicensesTable.expiryDate, now),
+        orgId ? eq(agentsTable.orgId, orgId) : undefined,
+      ),
+    );
+
+  if (lapsed.length === 0) return 0;
+
+  const adminsByOrg = new Map<string, string[]>();
+  for (const lic of lapsed) {
+    await db.transaction(async (tx) => {
+      // Re-check status inside the UPDATE so a concurrent renewal (status or
+      // expiry changed since the read) is never overwritten.
+      const updated = await tx
+        .update(stateLicensesTable)
+        .set({ status: "expired" })
+        .where(
+          and(
+            eq(stateLicensesTable.id, lic.licenseId),
+            eq(stateLicensesTable.status, "active"),
+            lt(stateLicensesTable.expiryDate, now),
+          ),
+        )
+        .returning({ id: stateLicensesTable.id });
+      if (updated.length === 0) return;
+
+      await tx.insert(auditLogTable).values({
+        id: randomUUID(),
+        orgId: lic.orgId,
+        userId: "system",
+        userRole: null,
+        action: "license_auto_expired",
+        resourceType: "license",
+        resourceId: lic.licenseId,
+        changes: {
+          agentId: lic.agentId,
+          stateCode: lic.stateCode,
+          licenseType: lic.licenseType,
+          expiryDate: lic.expiryDate?.toISOString() ?? null,
+          from: "active",
+          to: "expired",
+        },
+      });
+    });
+
+    if (!(ALERTABLE_AGENT_STATUSES as readonly string[]).includes(lic.agentStatus)) continue;
+
+    let adminIds = adminsByOrg.get(lic.orgId);
+    if (!adminIds) {
+      const admins = await db
+        .select({ id: usersTable.id })
+        .from(usersTable)
+        .where(
+          and(
+            eq(usersTable.orgId, lic.orgId),
+            inArray(usersTable.role, ["super_admin", "agency_admin", "compliance_manager"]),
+            eq(usersTable.isActive, true),
+          ),
+        );
+      adminIds = admins.map((a) => a.id);
+      adminsByOrg.set(lic.orgId, adminIds);
+    }
+    if (adminIds.length === 0) continue;
+
+    const notifs = adminIds.map((uid) => ({
+      id: randomUUID(),
+      orgId: lic.orgId,
+      userId: uid,
+      type: "license_lapsed",
+      title: `License lapsed — ${lic.stateCode}`,
+      body: `${lic.agentFirstName} ${lic.agentLastName}: ${lic.stateCode} ${lic.licenseType} expired ${lic.expiryDate?.toLocaleDateString() ?? ""}. The agent is no longer ready to sell in ${lic.stateCode}.`,
+      resourceType: "license",
+      resourceId: lic.licenseId,
+      priority: "high",
+    }));
+    await db.insert(notificationsTable).values(notifs).onConflictDoNothing();
+    broadcastToUsers(adminIds, { type: "notification", resourceType: "license", resourceId: lic.licenseId });
+  }
+
+  logger.info({ count: lapsed.length }, "License lapse sweep: expired lapsed licenses");
+  return lapsed.length;
+}
+
 export async function licenseExpiryCheckWorker(
   data: LicenseExpiryCheckPayload,
 ): Promise<void> {
   const now = new Date();
+
+  await expireLapsedLicenses(now, data.orgId);
   const in90 = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
 
   const baseConditions = [
     eq(stateLicensesTable.status, "active"),
+    inArray(agentsTable.status, [...ALERTABLE_AGENT_STATUSES]),
     sql`${stateLicensesTable.expiryDate} IS NOT NULL`,
     sql`${stateLicensesTable.expiryDate} > ${now}`,
     sql`${stateLicensesTable.expiryDate} <= ${in90}`,
@@ -90,6 +215,10 @@ export async function licenseExpiryCheckWorker(
 
     const pendingThresholds = crossedThresholds.filter((t) => !alreadySentSet.has(t));
     if (pendingThresholds.length === 0) continue;
+    // Only the most urgent unsent milestone produces an alert. A license first
+    // seen with 5 days left would otherwise send the 90/60/30/14/7 emails all
+    // at once; the wider milestones are recorded as covered by this one.
+    const alertThreshold = Math.min(...pendingThresholds);
 
     // Fetch org-level admins/compliance roles for oversight notifications
     const orgAdmins = await db
@@ -126,6 +255,7 @@ export async function licenseExpiryCheckWorker(
     orgAdmins.forEach((a) => { if (a.email) emailSet.add(a.email); });
 
     for (const threshold of pendingThresholds) {
+      const isAlert = threshold === alertThreshold;
       // Create in-app notifications for agent + manager + org admins
       const notifInserts = notifUserIds.map((uid) => ({
         id: randomUUID(),
@@ -140,7 +270,7 @@ export async function licenseExpiryCheckWorker(
       }));
 
       let firstNotifId: string | null = null;
-      if (notifInserts.length > 0) {
+      if (isAlert && notifInserts.length > 0) {
         firstNotifId = notifInserts[0].id;
         await db.insert(notificationsTable).values(notifInserts).onConflictDoNothing();
         broadcastToUsers(
@@ -160,7 +290,7 @@ export async function licenseExpiryCheckWorker(
 
       const emailRecipients = Array.from(emailSet);
 
-      if (emailRecipients.length > 0) {
+      if (isAlert && emailRecipients.length > 0) {
         await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
           to: emailRecipients,
           subject: `License expiring in ${daysUntilExpiry} days — ${license.stateCode} ${license.licenseType}`,

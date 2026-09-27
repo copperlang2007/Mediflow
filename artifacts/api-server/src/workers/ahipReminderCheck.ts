@@ -1,8 +1,9 @@
 /**
  * AHIP Reminder Check Worker.
  *
- * Runs monthly. Finds agents who have not completed AHIP for the current year
- * and sends reminder notifications + emails.
+ * Runs monthly. Finds agents who have not completed AHIP for the upcoming plan
+ * year (the AHIP season always certifies for next year's plans — see
+ * lib/compliance/planYear.ts) and sends reminder notifications + emails.
  */
 
 import { and, eq, not, exists, sql } from "drizzle-orm";
@@ -19,11 +20,12 @@ import { type AhipDeadlineCheckPayload, enqueue, JOB_NAMES } from "../lib/jobs";
 import { ahipReminderEmailHtml } from "../lib/email";
 import { broadcastToUsers } from "../lib/sseManager";
 import { logger } from "../lib/logger";
+import { ahipSeasonPlanYear } from "../lib/compliance/planYear";
 
 export async function ahipReminderCheckWorker(
   data: AhipDeadlineCheckPayload,
 ): Promise<void> {
-  const year = data.certificationYear ?? new Date().getFullYear();
+  const year = data.certificationYear ?? ahipSeasonPlanYear();
 
   const conditions = [
     eq(agentsTable.status, "active"),

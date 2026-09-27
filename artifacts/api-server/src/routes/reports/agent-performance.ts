@@ -3,8 +3,6 @@ import { eq, and, gte, lte, inArray, count, sum, isNull } from "drizzle-orm";
 import {
   db,
   agentsTable,
-  stateLicensesTable,
-  carrierCertificationsTable,
   ahipRecordsTable,
   contactsTable,
   dealsTable,
@@ -19,6 +17,8 @@ import {
   requireExportConfirm,
 } from "../../middlewares/requireAuth";
 import { parseRange, logExport } from "./shared";
+import { getAgentComplianceScores } from "../../lib/compliance/agentComplianceScore";
+import { sellingPlanYear } from "../../lib/compliance/planYear";
 
 const router: IRouter = Router();
 
@@ -62,9 +62,8 @@ router.get(
       emailPerAgent,
       dealsCounts,
       enrollCounts,
-      licenses,
-      certifications,
       ahipRecords,
+      complianceScores,
     ] = await Promise.all([
       // Contacts assigned to each agent (exclude soft-deleted)
       db.select({ agentId: contactsTable.assignedAgentId, cnt: count() })
@@ -145,32 +144,16 @@ router.get(
         ))
         .groupBy(contactsTable.assignedAgentId),
 
-      // License status per agent
-      db.select({
-        agentId: stateLicensesTable.agentId,
-        status: stateLicensesTable.status,
-        cnt: count(),
-      })
-        .from(stateLicensesTable)
-        .where(inArray(stateLicensesTable.agentId, agentIds))
-        .groupBy(stateLicensesTable.agentId, stateLicensesTable.status),
-
-      // Certifications passed
-      db.select({ agentId: carrierCertificationsTable.agentId, cnt: count() })
-        .from(carrierCertificationsTable)
-        .where(and(
-          inArray(carrierCertificationsTable.agentId, agentIds),
-          eq(carrierCertificationsTable.status, "passed"),
-        ))
-        .groupBy(carrierCertificationsTable.agentId),
-
-      // AHIP current year
+      // AHIP for the plan year being sold (same year the score uses)
       db.select({ agentId: ahipRecordsTable.agentId, status: ahipRecordsTable.status })
         .from(ahipRecordsTable)
         .where(and(
           inArray(ahipRecordsTable.agentId, agentIds),
-          eq(ahipRecordsTable.certificationYear, new Date().getFullYear()),
+          eq(ahipRecordsTable.certificationYear, sellingPlanYear()),
         )),
+
+      // Canonical compliance score (lib/compliance/agentComplianceScore.ts)
+      getAgentComplianceScores({ orgId: authReq.orgId, agentIds }),
     ]);
 
     // Build Map-based lookups once (O(N)) instead of .find() per agent (O(N*M)).
@@ -181,27 +164,12 @@ router.get(
     const emailByAgent = new Map(emailPerAgent.map((e) => [e.agentId, e]));
     const dealsByAgent = new Map(dealsCounts.map((d) => [d.agentId, d]));
     const enrollByAgent = new Map(enrollCounts.map((e) => [e.agentId, e]));
-    const certByAgent = new Map(certifications.map((c) => [c.agentId, c]));
     const ahipByAgent = new Map(ahipRecords.map((r) => [r.agentId, r]));
-    // Bucket licenses by agent (multiple rows per agent — one per status)
-    const licensesByAgent = new Map<string, typeof licenses>();
-    for (const l of licenses) {
-      const arr = licensesByAgent.get(l.agentId);
-      if (arr) arr.push(l); else licensesByAgent.set(l.agentId, [l]);
-    }
+    const scoreByAgent = new Map(complianceScores.map((c) => [c.agentId, c]));
 
     const report = agents.map((agent) => {
-      const agentLicenses = licensesByAgent.get(agent.id) ?? [];
-      const activeLicenses = agentLicenses.filter((l) => l.status === "active").reduce((s, l) => s + Number(l.cnt), 0);
-      const expiringLicenses = agentLicenses.filter((l) => l.status === "pending").reduce((s, l) => s + Number(l.cnt), 0);
+      const score = scoreByAgent.get(agent.id);
       const ahip = ahipByAgent.get(agent.id);
-
-      // Compliance score: 0–100
-      const hasActiveLicense = activeLicenses > 0 ? 25 : 0;
-      const hasCert = Number(certByAgent.get(agent.id)?.cnt ?? 0) > 0 ? 25 : 0;
-      const hasAhip = ahip?.status === "passed" ? 25 : 0;
-      const noExpiring = expiringLicenses === 0 ? 25 : 0;
-      const complianceScore = hasActiveLicense + hasCert + hasAhip + noExpiring;
 
       // call_log activities are authored by user_id; fall back to agent.id
       const calls = callCountsByAuthor.get(agent.userId) ?? callCountsByAuthor.get(agent.id);
@@ -219,10 +187,10 @@ router.get(
         dealsWon: Number(dealsRow?.cnt ?? 0),
         dealValueWon: Number(dealsRow?.totalValue ?? 0),
         enrolledContacts: Number(enrollByAgent.get(agent.id)?.cnt ?? 0),
-        complianceScore,
-        licensesActive: activeLicenses,
-        licensesExpiring: expiringLicenses,
-        certificationsPassed: Number(certByAgent.get(agent.id)?.cnt ?? 0),
+        complianceScore: Math.round(score?.totalScore ?? 0),
+        licensesActive: score?.activeLicenses ?? 0,
+        licensesExpiring: score?.licensesExpiringSoon ?? 0,
+        certificationsPassed: score?.activeCertifications ?? 0,
         ahipStatus: ahip?.status ?? "not_started",
       };
     });

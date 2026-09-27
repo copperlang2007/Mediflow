@@ -4886,6 +4886,10 @@ components:
           type: integer
         ahipCompletionRateCurrent:
           type: number
+          description: Share of active agents with a passed/waived AHIP for ahipPlanYear.
+        ahipPlanYear:
+          type: integer
+          description: Plan year being sold today — the calendar year through Sept 30, the next year from Oct 1.
         totalContacts:
           type: integer
         agentsWithExpiringLicenses:
@@ -5156,6 +5160,9 @@ components:
       properties:
         agentId:
           type: string
+        planYear:
+          type: integer
+          description: Plan year the AHIP and carrier certifications were evaluated for.
         totalScore:
           type: number
         licenseScore:
@@ -5924,6 +5931,9 @@ components:
           type: integer
           minimum: 1
           maximum: 52
+        requireSmsConsent:
+          type: boolean
+          description: When true, automated SMS is only sent to contacts with a recorded TCPA consent.
       required:
         - orgId
         - ahipSeasonOpenMonth
@@ -5958,6 +5968,8 @@ components:
           type: integer
           minimum: 1
           maximum: 52
+        requireSmsConsent:
+          type: boolean
 
     BulkUpdateTechStackBody:
       type: object
@@ -6532,6 +6544,15 @@ components:
           type: boolean
         optOutEmail:
           type: boolean
+        tcpaConsentAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the contact gave prior express written consent to automated texts.
+        tcpaConsentSource:
+          type: string
+          nullable: true
+          description: Where the consent was captured (form URL, recorded call id, paper form reference).
         tags:
           type: array
           items:
@@ -6581,6 +6602,8 @@ components:
           type: array
           items: { type: string }
         assignedAgentId: { type: string, nullable: true }
+        tcpaConsentAt: { type: string, format: date-time, nullable: true }
+        tcpaConsentSource: { type: string, nullable: true }
       required: [firstName, lastName]
 
     UpdateContactBody:
@@ -6610,6 +6633,8 @@ components:
           type: array
           items: { type: string }
         assignedAgentId: { type: string, nullable: true }
+        tcpaConsentAt: { type: string, format: date-time, nullable: true }
+        tcpaConsentSource: { type: string, nullable: true }
 
     ContactListResponse:
       type: object
@@ -7556,7 +7581,11 @@ components:
       type: object
       properties:
         recordType: { type: string }
-        retentionDays: { type: integer }
+        retentionDays:
+          type: integer
+          minimum: 3650
+          maximum: 36500
+          description: At least 3650 days — CMS requires MA/Part D records be kept 10 years.
         isEnabled: { type: boolean }
       required: [recordType, retentionDays, isEnabled]
 

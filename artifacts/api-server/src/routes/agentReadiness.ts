@@ -50,10 +50,11 @@ router.get(
     }
 
     const now = new Date();
-    const certificationYear =
-      parsed.data.certificationYear ?? now.getUTCFullYear();
-
-    const overview = await getOrgReadiness(authReq.orgId, certificationYear, now);
+    const overview = await getOrgReadiness(
+      authReq.orgId,
+      parsed.data.certificationYear,
+      now,
+    );
 
     res.json({
       data: overview.agents,

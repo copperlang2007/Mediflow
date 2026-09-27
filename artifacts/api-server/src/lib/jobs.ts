@@ -44,6 +44,7 @@
 
 import { PgBoss, type Job, type Queue, type WorkHandler } from "pg-boss";
 import { logger } from "./logger";
+import type { ConsumerContext } from "./compliance/consumerOutreach";
 import { captureWorkerError } from "./sentry";
 import { jobEnqueueTotal, jobDeadLetterTotal } from "./metrics";
 
@@ -268,6 +269,13 @@ export interface SendScheduledEmailPayload {
   text?: string;
   replyTo?: string;
   tags?: Record<string, string>;
+  /**
+   * Set whenever the recipient is a contact (consumer). The job is then
+   * re-checked against opt-outs at send time and sent to the contact's current
+   * address; automated sends also get unsubscribe links. Omit for internal /
+   * system mail to staff.
+   */
+  consumer?: ConsumerContext;
 }
 
 export interface SendScheduledSmsPayload {
@@ -275,6 +283,8 @@ export interface SendScheduledSmsPayload {
   body: string;
   agentId?: string;
   mediaUrl?: string[];
+  /** Consumer context — see SendScheduledEmailPayload.consumer. */
+  consumer?: ConsumerContext;
 }
 
 export interface ReconcileCommissionStatementPayload extends Record<string, unknown> {
@@ -542,20 +552,14 @@ export async function startWorkers(): Promise<void> {
     offboardingPdfHandler,
   );
 
+  // Consumer-targeted jobs (payload.consumer) pass the compliance gate at
+  // send time — see lib/compliance/consumerDelivery.ts.
   const emailHandler: WorkHandler<SendScheduledEmailPayload> = async (
     jobs: Job<SendScheduledEmailPayload>[],
   ) => {
-    const { sendEmail } = await import("./email");
+    const { deliverScheduledEmail } = await import("./compliance/consumerDelivery");
     for (const job of jobs) {
-      const toArray = Array.isArray(job.data.to) ? job.data.to : [job.data.to];
-      await sendEmail({
-        to: toArray.map((email: string) => ({ email })),
-        subject: job.data.subject,
-        html: job.data.html,
-        text: job.data.text,
-        replyTo: job.data.replyTo,
-        tags: job.data.tags,
-      });
+      await deliverScheduledEmail(job.data);
     }
   };
   // Transactional email — high volume, provider handles its own rate limiting.
@@ -568,9 +572,11 @@ export async function startWorkers(): Promise<void> {
   const smsHandler: WorkHandler<SendScheduledSmsPayload> = async (
     jobs: Job<SendScheduledSmsPayload>[],
   ) => {
-    const { sendSMS } = await import("./sms");
+    const { deliverScheduledSms } = await import("./compliance/consumerDelivery");
     for (const job of jobs) {
-      await sendSMS(job.data.to, job.data.body, job.data.agentId ?? "system");
+      await deliverScheduledSms(job.data, async (data, startAfter) => {
+        await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { ...data }, { startAfter });
+      });
     }
   };
   // SMS — outreach-rate sensitive, carriers throttle aggressively.

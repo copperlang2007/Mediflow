@@ -9,7 +9,7 @@
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, isNotNull } from "drizzle-orm";
+import { eq, and, isNotNull, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -18,6 +18,7 @@ import {
   messageThreadsTable,
   messagesTable,
   agentsTable,
+  auditLogTable,
 } from "@workspace/db";
 import {
   validateTwilioWebhookSignature,
@@ -26,6 +27,7 @@ import {
 } from "../lib/sms";
 import { broadcastToUser } from "../lib/sseManager";
 import { logger } from "../lib/logger";
+import { phoneMatchKey, phoneMatchKeySql } from "../lib/compliance/phone";
 
 const router: IRouter = Router();
 
@@ -88,41 +90,47 @@ router.post(
         // dedup itself is enforced by the partial unique index
         // `opt_outs_org_phone_channel_unique` (migration 0013) — the
         // conflict target below tells Postgres to use it.
+        const phoneKey = phoneMatchKey(from);
+        // Match on the last 10 digits, not exact equality: contacts are stored
+        // however they were typed, Twilio reports E.164. An exact match missed
+        // every contact saved as "(512) 555-0100" — and then no opt-out was
+        // recorded at all.
         await db.transaction(async (tx) => {
-          // Set flag on contact record (idempotent on retries)
-          await tx
-            .update(contactsTable)
-            .set({ optOutSms: true })
-            .where(eq(contactsTable.phone, from));
+          // Flag EVERY matching contact, in every org (idempotent on retries).
+          const matched = phoneKey
+            ? await tx
+                .update(contactsTable)
+                .set({ optOutSms: true })
+                .where(sql`${phoneMatchKeySql(contactsTable.phone)} = ${phoneKey}`)
+                .returning({ id: contactsTable.id, orgId: contactsTable.orgId })
+            : [];
 
-          // Record in opt_outs log (find orgId via contact)
-          const [contact] = await tx
-            .select({ orgId: contactsTable.orgId })
-            .from(contactsTable)
-            .where(eq(contactsTable.phone, from))
-            .limit(1);
-
-          if (contact) {
-            // Use the (org_id, phone, channel) unique index as the
-            // conflict target. Without an explicit target, drizzle would
-            // fall back to the PK (`id`), which is a random UUID and
-            // never collides — so concurrent STOPs would each insert a
-            // distinct audit row.
+          // One opt_outs row per org that knows this number. The
+          // (org_id, phone, channel) unique index is the conflict target so
+          // concurrent STOPs collapse to a single row per org.
+          const orgIds = [...new Set(matched.map((c) => c.orgId))];
+          for (const orgId of orgIds) {
             await tx
               .insert(optOutsTable)
-              .values({
-                id: randomUUID(),
-                orgId: contact.orgId,
-                phone: from,
-                channel: "sms",
-              })
+              .values({ id: randomUUID(), orgId, phone: from, channel: "sms" })
               .onConflictDoNothing({
-                target: [
-                  optOutsTable.orgId,
-                  optOutsTable.phone,
-                  optOutsTable.channel,
-                ],
+                target: [optOutsTable.orgId, optOutsTable.phone, optOutsTable.channel],
               });
+          }
+          for (const c of matched) {
+            await tx.insert(auditLogTable).values({
+              id: randomUUID(),
+              orgId: c.orgId,
+              userId: null,
+              userRole: null,
+              action: "sms_opt_out",
+              resourceType: "contact",
+              resourceId: c.id,
+              changes: { optOutSms: true, via: "inbound_keyword", messageSid: messageSid ?? null },
+            });
+          }
+          if (matched.length === 0) {
+            logger.warn({ messageSid }, "SMS opt-out from a number with no matching contact — nothing to flag");
           }
         });
 
@@ -137,10 +145,34 @@ router.post(
 
       // --- Opt-in ---
       if (isOptIn) {
-        await db
-          .update(contactsTable)
-          .set({ optOutSms: false })
-          .where(eq(contactsTable.phone, from));
+        const phoneKey = phoneMatchKey(from);
+        if (phoneKey) {
+          // A re-opt-in lifts the block everywhere it was recorded. The
+          // opt_outs rows are removed so sends resume; the history survives in
+          // the immutable audit log (sms_opt_out / sms_opt_in rows).
+          await db.transaction(async (tx) => {
+            const matched = await tx
+              .update(contactsTable)
+              .set({ optOutSms: false })
+              .where(sql`${phoneMatchKeySql(contactsTable.phone)} = ${phoneKey}`)
+              .returning({ id: contactsTable.id, orgId: contactsTable.orgId });
+            await tx
+              .delete(optOutsTable)
+              .where(and(eq(optOutsTable.channel, "sms"), sql`${phoneMatchKeySql(optOutsTable.phone)} = ${phoneKey}`));
+            for (const c of matched) {
+              await tx.insert(auditLogTable).values({
+                id: randomUUID(),
+                orgId: c.orgId,
+                userId: null,
+                userRole: null,
+                action: "sms_opt_in",
+                resourceType: "contact",
+                resourceId: c.id,
+                changes: { optOutSms: false, via: "inbound_keyword", messageSid: messageSid ?? null },
+              });
+            }
+          });
+        }
 
         logger.info({ from }, "Contact re-opted in to SMS");
         res
