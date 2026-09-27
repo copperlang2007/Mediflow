@@ -72,3 +72,24 @@ unmapped EnrollHere field can be spotted and added.
   `scripts/deploy/gcp-bootstrap.sh` once so the `mediflow-enrollhere-webhook-secret`
   Secret Manager placeholder exists; the deploy workflow then syncs and mounts it.
 - **Render:** set `ENROLLHERE_WEBHOOK_SECRET` in the service's environment.
+
+## Policy events (`PE_POLICY_CREATED`, `PE_POLICY_UPDATED`, …)
+
+Mapped from a real delivery (see `artifacts/api-server/src/__tests__/fixtures/enrollhere-policy-created.json`, fake values).
+
+| agencyBRIDGE | EnrollHere field |
+|---|---|
+| Contact name, email, phone | `policy.enrollment.consumer` (fallback `policy.lead`) |
+| Address | `consumer.address.line1/city/state/zip/county` |
+| Date of birth | `consumer.birthDate.date` |
+| Medicare ID (encrypted) | `consumer.medicare.number` / `enrollment.medicareInfo.number` |
+| Assigned agent | `policy.agent.email` |
+| Enrollment: carrier, plan, plan type, SNP | `enrollment.carrier.name`, `enrollment.plan.id/name/planType/snp` |
+| Effective / signature date | `enrollment.details.effectiveDate` / `signatureDate` |
+| Status | `policy.manualStatus` → `automaticStatus` → `details.policyStatus` (`POL_INFORCE` = active + effectuated) |
+| Policy number | `policy.identifiers.bySource.policyId.ids[0]` |
+| Application key | Sunfire code `identifiers.bySource.sunfire.ids[0]`, else `policy:<policy.id>` |
+
+The full payload (minus a relay's `headers` wrapper) is stored encrypted and versioned in `enrollment_application_versions`; an identical redelivery adds no version. Health answers (`medicareInfo.chf/copd/cvd/diabetes/…`) and any race/ethnicity fields are **never** promoted to plain columns and never feed routing, scoring or AI. They are visible only in the contact's **Applications → Full application** view, which is limited to super admins, agency admins and compliance managers, and writes an `audit_log` entry (`view_full_application`) before any data is returned.
+
+Today EnrollHere delivers these to a GoHighLevel workflow. To send them here as well, add this endpoint as a second webhook in EnrollHere, with the `X-Webhook-Secret` header.

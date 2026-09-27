@@ -36,12 +36,13 @@ import {
   StickyNote, PhoneCall, Activity as ActivityIcon, CheckSquare, FolderOpen,
   Workflow, Heart, Calendar,
   Shield, DollarSign, Clock, Edit, User, MapPin, Sparkles, Loader2,
-  Phone, AlertTriangle, ListChecks,
+  Phone, AlertTriangle, ListChecks, FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import CreateLeadDialog from "@/pages/crm/CreateLeadDialog";
+import ApplicationsTab from "@/pages/crm/ApplicationsTab";
 import {
   useContactCallSummaries,
   type CallSummary,
@@ -963,12 +964,14 @@ export default function ContactDetailPage() {
           <TabsTrigger value="deals"><DollarSign className="h-4 w-4 mr-1" />Deals</TabsTrigger>
           <TabsTrigger value="tasks"><CheckSquare className="h-4 w-4 mr-1" />Tasks</TabsTrigger>
           <TabsTrigger value="sequences"><Workflow className="h-4 w-4 mr-1" />Sequences</TabsTrigger>
+          <TabsTrigger value="applications"><FileText className="h-4 w-4 mr-1" />Applications</TabsTrigger>
         </TabsList>
         <TabsContent value="timeline"><TimelineTab contactId={id} /></TabsContent>
         <TabsContent value="call-summaries"><CallSummariesTab contactId={id} /></TabsContent>
         <TabsContent value="deals"><DealsTab contactId={id} /></TabsContent>
         <TabsContent value="tasks"><TasksTab contactId={id} /></TabsContent>
         <TabsContent value="sequences"><SequencesTab contactId={id} /></TabsContent>
+        <TabsContent value="applications"><ApplicationsTab contactId={id} /></TabsContent>
       </Tabs>
 
       {/* Modals */}

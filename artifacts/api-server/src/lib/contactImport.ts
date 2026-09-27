@@ -863,7 +863,7 @@ export async function fillBlanks(
  * re-check-then-insert, so concurrent imports (the CSV worker runs two at a
  * time per instance, across instances) cannot both create the same carrier.
  */
-async function resolveCarrier(
+export async function resolveCarrier(
   tx: Tx,
   orgId: string,
   name: string,

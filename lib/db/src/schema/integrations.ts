@@ -1,9 +1,14 @@
 /**
  * Inbound third-party integrations (EnrollHere webhooks, GoHighLevel feed).
  */
-import { pgTable, text, timestamp, integer, jsonb, index, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, jsonb, index, unique, date, customType } from "drizzle-orm/pg-core";
 import { organizationsTable } from "./core";
 import { contactsTable, activitiesTable } from "./crm";
+import { enrollmentsTable } from "./enrollments";
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => "bytea",
+});
 
 /**
  * One row per inbound webhook event, keyed by the sender's own event/call id.
@@ -97,3 +102,71 @@ export const ghlSyncStateTable = pgTable("ghl_sync_state", {
 });
 
 export type GhlSyncState = typeof ghlSyncStateTable.$inferSelect;
+
+/**
+ * A full enrollment application (EnrollHere / Sunfire), one per
+ * (org, source, applicationKey). The key is the Sunfire confirmation code, or
+ * the EnrollHere policy id when there is none.
+ *
+ * Only non-sensitive fields are promoted to plain columns (plan, carrier,
+ * dates, status, agent). The complete payload lives only in
+ * `enrollmentApplicationVersionsTable`, AES-GCM encrypted: it holds health
+ * answers and possibly race/ethnicity, which must never feed routing,
+ * scoring or AI. The Medicare and Medicaid numbers are encrypted columns.
+ */
+export const enrollmentApplicationsTable = pgTable(
+  "enrollment_applications",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull().references(() => organizationsTable.id),
+    source: text("source").notNull(),
+    applicationKey: text("application_key").notNull(),
+    confirmationCode: text("confirmation_code"),
+    externalPolicyId: text("external_policy_id"),
+    contactId: text("contact_id").references(() => contactsTable.id, { onDelete: "set null" }),
+    enrollmentId: text("enrollment_id").references(() => enrollmentsTable.id, { onDelete: "set null" }),
+    currentVersion: integer("current_version").notNull().default(1),
+    lastEventType: text("last_event_type"),
+    carrierName: text("carrier_name"),
+    planId: text("plan_id"),
+    planName: text("plan_name"),
+    planType: text("plan_type"),
+    snpType: text("snp_type"),
+    policyStatus: text("policy_status"),
+    effectiveDate: date("effective_date"),
+    signatureDate: date("signature_date"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    agentEmail: text("agent_email"),
+    agentNpn: text("agent_npn"),
+    medicareIdEncrypted: bytea("medicare_id_encrypted"),
+    medicareIdHash: bytea("medicare_id_hash"),
+    medicaidNumberEncrypted: bytea("medicaid_number_encrypted"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+  },
+  (t) => [
+    unique("enrollment_applications_org_source_key").on(t.orgId, t.source, t.applicationKey),
+    index("enrollment_applications_org_contact_idx").on(t.orgId, t.contactId),
+  ],
+);
+
+/** Every distinct version of an application's payload, encrypted. */
+export const enrollmentApplicationVersionsTable = pgTable(
+  "enrollment_application_versions",
+  {
+    id: text("id").primaryKey(),
+    applicationId: text("application_id").notNull().references(() => enrollmentApplicationsTable.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    eventType: text("event_type"),
+    payloadEncrypted: bytea("payload_encrypted").notNull(),
+    /** HMAC of the canonical payload: identical redeliveries don't add a version. */
+    payloadHmac: bytea("payload_hmac").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("enrollment_application_versions_app_version_key").on(t.applicationId, t.version),
+    unique("enrollment_application_versions_app_hmac_key").on(t.applicationId, t.payloadHmac),
+  ],
+);
+
+export type EnrollmentApplication = typeof enrollmentApplicationsTable.$inferSelect;

@@ -27,6 +27,11 @@
  * Idempotent: the event is keyed on the sender's call/event id (or a hash of
  * the body when none is sent), so a redelivery returns 200 without logging the
  * call twice.
+ *
+ * Policy events (`event: "PE_…"` with a `policy` object) have a known shape
+ * and take their own path (lib/integrations/enrollhere/policyEvent.ts): the
+ * beneficiary is upserted, the enrollment is written, and the full
+ * application is stored encrypted and versioned (applicationStore.ts).
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import crypto, { randomUUID } from "crypto";
@@ -44,6 +49,8 @@ import { loadAgentsByEmail, upsertContact } from "../lib/contactImport";
 import { normalizePhone } from "../lib/csvImport";
 import { logger } from "../lib/logger";
 import { captureWorkerError } from "../lib/sentry";
+import { isPolicyEvent, parsePolicyEvent } from "../lib/integrations/enrollhere/policyEvent";
+import { storeApplication, upsertPolicyEnrollment } from "../lib/integrations/enrollhere/applicationStore";
 
 const router: IRouter = Router();
 const SOURCE = "enrollhere";
@@ -120,8 +127,9 @@ const STARTED_KEYS = ["started_at", "start_time", "call_start", "call_started_at
 const VOLATILE_KEYS = new Set([
   "timestamp", "sent_at", "delivered_at", "delivery_id", "webhook_id", "attempt",
   "attempt_number", "retry", "retry_count", "nonce", "received_at", "now", "request_id", "created_at",
-  // A whole block of delivery/transport details (e.g. { delivery: { id, attempt } }).
-  "delivery",
+  // A whole block of delivery/transport details (e.g. { delivery: { id, attempt } }),
+  // and a relay's copy of the request headers (GoHighLevel adds `headers`).
+  "delivery", "headers",
 ]);
 
 /** Scalar fields at the top of the body (and of `data`), by normalized key. */
@@ -193,6 +201,11 @@ router.post(
 
     if (typeof req.body !== "object" || req.body === null || Array.isArray(req.body)) {
       res.status(400).json({ error: "Expected a JSON object body" });
+      return;
+    }
+
+    if (isPolicyEvent(req.body)) {
+      await handlePolicyEvent(req, res, orgId);
       return;
     }
 
@@ -336,5 +349,101 @@ router.post(
     }
   },
 );
+
+/** Content hash of the body minus delivery metadata: the idempotency key. */
+function bodyHash(body: Record<string, unknown>): string {
+  return `sha256:${crypto.createHash("sha256").update(canonicalJson(stableForHash(body) as never)).digest("hex")}`;
+}
+
+async function handlePolicyEvent(req: RawBodyRequest, res: Response, orgId: string): Promise<void> {
+  const body = req.body as Record<string, unknown>;
+  const parsed = parsePolicyEvent(body);
+  const keys = payloadKeyPaths(body);
+  // A policy event has no per-delivery id (its top-level id is the policy's),
+  // so the content hash is the key: a retry dedupes, an update is new.
+  const externalId = bodyHash(body);
+
+  const interpreted = interpretPayloadContact(parsed.contactFlat);
+  const contact = interpreted.contact;
+  if (!contact) {
+    const reason = interpreted.issues.find((i) => i.severity === "error")?.message ?? "Contact could not be read";
+    logger.warn({ orgId, keys, eventType: parsed.eventType }, "EnrollHere webhook: policy event has no usable contact");
+    res.status(422).json({ error: reason, fieldsReceived: keys });
+    return;
+  }
+
+  try {
+    const result = await db.transaction(async (tx) => {
+      const eventRowId = randomUUID();
+      const [claimed] = await tx.insert(integrationEventsTable).values({
+        id: eventRowId, orgId, source: SOURCE, externalId, eventType: parsed.eventType, payloadKeys: keys,
+      }).onConflictDoNothing().returning({ id: integrationEventsTable.id });
+      if (!claimed) return { duplicate: true as const };
+
+      const agentId = contact.assignedAgentEmail
+        ? (await loadAgentsByEmail(orgId, tx, contact.assignedAgentEmail)).get(contact.assignedAgentEmail) ?? null
+        : null;
+      const agentUserId = agentId
+        ? (await tx.select({ userId: agentsTable.userId }).from(agentsTable).where(eq(agentsTable.id, agentId)).limit(1))[0]?.userId ?? null
+        : null;
+      if (!contact.leadSource) contact.leadSource = "EnrollHere";
+
+      const { contactId, created, matchedOn, warnings: mergeWarnings } = await upsertContact(tx, orgId, contact, agentId);
+      const enrollmentId = await upsertPolicyEnrollment(tx, orgId, contactId, agentId, parsed);
+      const stored = await storeApplication(tx, orgId, parsed, { contactId, enrollmentId });
+
+      const label = parsed.eventType.replace(/^PE_/, "").replace(/_/g, " ").toLowerCase();
+      const summary = [
+        `EnrollHere: ${label}`,
+        parsed.planName ? `— ${parsed.planName}` : null,
+        parsed.effectiveDate ? `, effective ${parsed.effectiveDate}` : null,
+        parsed.policyStatus ? ` (${parsed.policyStatus.replace(/^POL_/, "").replace(/_/g, " ").toLowerCase()})` : null,
+      ].filter(Boolean).join("");
+
+      const activityId = randomUUID();
+      await tx.insert(activitiesTable).values({
+        id: activityId,
+        orgId,
+        contactId,
+        agentId,
+        createdBy: agentUserId,
+        type: "enrollment",
+        body: summary,
+        metadata: {
+          source: SOURCE,
+          externalId,
+          eventType: parsed.eventType,
+          enrollmentId,
+          applicationId: stored?.applicationId ?? null,
+          applicationVersion: stored?.version ?? null,
+        },
+      });
+      await tx.update(integrationEventsTable).set({ contactId, activityId })
+        .where(eq(integrationEventsTable.id, eventRowId));
+      return { duplicate: false as const, contactId, created, matchedOn, enrollmentId, stored, activityId, mergeWarnings };
+    });
+
+    if (result.duplicate) {
+      res.status(200).json({ ok: true, duplicate: true });
+      return;
+    }
+    logger.info({ orgId, contactId: result.contactId, enrollmentId: result.enrollmentId, eventType: parsed.eventType }, "EnrollHere webhook: policy recorded");
+    res.status(200).json({
+      ok: true,
+      duplicate: false,
+      contactId: result.contactId,
+      contactCreated: result.created,
+      enrollmentId: result.enrollmentId,
+      applicationId: result.stored?.applicationId ?? null,
+      applicationVersion: result.stored?.version ?? null,
+      activityId: result.activityId,
+      warnings: [...interpreted.issues.map((i) => i.message), ...result.mergeWarnings.map((w) => w.message)],
+    });
+  } catch (err) {
+    logger.error({ err, orgId }, "EnrollHere webhook: failed to process policy event");
+    captureWorkerError(err, { worker: "enrollhere-webhook", orgId });
+    res.status(500).json({ error: "Failed to process event" });
+  }
+}
 
 export default router;
