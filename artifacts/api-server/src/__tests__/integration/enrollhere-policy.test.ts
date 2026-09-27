@@ -470,8 +470,7 @@ describe("EnrollHere policy events", () => {
     first.policy.id = "policy-slot2-a";
     first.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF11000001"];
     delete first.policy.identifiers.bySource.sunfire;
-    Object.assign(first.policy.enrollment.consumer, { firstName: "Drew", email: "drew@example.com", phone: "+15553331111" });
-    first.policy.lead = undefined;
+    otherPerson(first, "Drew", "drew@example.com", "+15553331111");
     const a = await post(first);
     const second = JSON.parse(JSON.stringify(first));
     second.policy.id = "policy-slot2-b";
@@ -484,6 +483,14 @@ describe("EnrollHere policy events", () => {
     await post(again);
     const [e] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.id, a.body.enrollmentId));
     expect(e).toMatchObject({ status: "active", effectuated: true });
+    // The owning policy's own termination still ends the shared coverage
+    // (the other policy isn't in force).
+    const ended = JSON.parse(JSON.stringify(first));
+    ended.event = "PE_POLICY_UPDATED";
+    ended.policy.manualStatus = "POL_TERMINATED";
+    await post(ended);
+    const [e2] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.id, a.body.enrollmentId));
+    expect(e2).toMatchObject({ status: "terminated", effectuated: false });
   });
 
   it("health flags without a number don't clear the Medicare number", async () => {

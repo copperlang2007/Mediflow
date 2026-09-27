@@ -49,6 +49,15 @@ export async function upsertPolicyEnrollment(
   // The policy's own enrollment, found through its stored application: an
   // update lands there even when the carrier, plan type or plan year changed.
   const prior = await priorEnrollmentFor(tx, orgId, contactId, p.policyId);
+  if (prior?.shared) {
+    // Another policy shares this row: never move it, and a policy that isn't
+    // in force doesn't end coverage another sharing policy still reports.
+    if (p.policyStatus && (effectuated || !prior.othersInForce)) {
+      await tx.update(enrollmentsTable).set({ status, effectuated }).where(eq(enrollmentsTable.id, prior.id));
+      await syncContactCoverageProjection(contactId, orgId, tx);
+    }
+    return prior.id;
+  }
   if (prior) {
     const target = { carrierId: carrierId ?? prior.carrierId, planYear, planType: p.planType };
     const [clash] = await tx.select({ id: enrollmentsTable.id }).from(enrollmentsTable).where(and(
@@ -157,9 +166,9 @@ export async function upsertPolicyEnrollment(
 
 /**
  * The enrollment an earlier delivery of this policy created, if it's still this
- * contact's and this policy's alone. A row another policy's application also
- * points at (two policies in one coverage slot) is not "ours" to move or
- * restatus freely: that case goes through the slot path and its guard.
+ * contact's. `shared` when another policy's application also points at it (two
+ * policies in one coverage slot); `othersInForce` when one of those reports
+ * coverage in force.
  */
 async function priorEnrollmentFor(tx: Tx, orgId: string, contactId: string, policyId: string | null) {
   if (!policyId) return null;
@@ -173,12 +182,16 @@ async function priorEnrollmentFor(tx: Tx, orgId: string, contactId: string, poli
       eq(enrollmentsTable.contactId, contactId),
     )).limit(1);
   if (!row) return null;
-  const [shared] = await tx.select({ id: enrollmentApplicationsTable.id }).from(enrollmentApplicationsTable)
+  const others = await tx.select({ policyStatus: enrollmentApplicationsTable.policyStatus }).from(enrollmentApplicationsTable)
     .where(and(
       eq(enrollmentApplicationsTable.enrollmentId, row.id),
       ne(enrollmentApplicationsTable.externalPolicyId, policyId),
-    )).limit(1);
-  return shared ? null : row;
+    ));
+  return {
+    ...row,
+    shared: others.length > 0,
+    othersInForce: others.some((o) => mapPolicyStatus(o.policyStatus).effectuated),
+  };
 }
 
 export interface StoredApplication {
@@ -224,7 +237,6 @@ export async function storeApplication(
       id: enrollmentApplicationsTable.id,
       key: enrollmentApplicationsTable.applicationKey,
       policyId: enrollmentApplicationsTable.externalPolicyId,
-      contactId: enrollmentApplicationsTable.contactId,
     })
       .from(enrollmentApplicationsTable)
       .where(and(
@@ -238,37 +250,12 @@ export async function storeApplication(
     // collision (vendor-side), even for the same person: merging would
     // overwrite that record's policy id and cross two policies' histories.
     // Keep this policy on its own fallback key and flag it.
-    if (coded && coded.policyId && coded.policyId !== p.policyId) {
+    if (coded && coded.policyId !== p.policyId) {
       logger.warn({ orgId, applicationId: coded.id }, "EnrollHere: Sunfire code already used by another policy; kept separate");
       applicationKey = fallbackKey;
     } else if (codeless && !coded) {
       await tx.update(enrollmentApplicationsTable).set({ applicationKey: p.confirmationCode })
         .where(eq(enrollmentApplicationsTable.id, codeless.id));
-    } else if (codeless && coded && codeless.contactId && coded.contactId && codeless.contactId !== coded.contactId) {
-      logger.warn({ orgId, codelessId: codeless.id, codedId: coded.id }, "EnrollHere: code-less and coded records belong to different contacts; not folding");
-      applicationKey = fallbackKey;
-    } else if (codeless && coded) {
-      const v = enrollmentApplicationVersionsTable;
-      // Payloads the coded record already has are dropped; the rest are
-      // appended after its latest version, keeping their order.
-      await tx.execute(sql`
-        DELETE FROM enrollment_application_versions d
-        WHERE d.application_id = ${codeless.id}
-          AND EXISTS (SELECT 1 FROM enrollment_application_versions k
-                      WHERE k.application_id = ${coded.id} AND k.payload_hmac = d.payload_hmac)`);
-      const [{ top } = { top: null }] = await tx.select({ top: max(v.version) }).from(v).where(eq(v.applicationId, coded.id));
-      await tx.execute(sql`
-        UPDATE enrollment_application_versions u SET application_id = ${coded.id}, version = r.n + ${top ?? 0}
-        FROM (SELECT id, row_number() OVER (ORDER BY version) AS n
-              FROM enrollment_application_versions WHERE application_id = ${codeless.id}) r
-        WHERE u.id = r.id`);
-      await tx.delete(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, codeless.id));
-      // Timeline entries that pointed at the removed record now point at the kept one.
-      await tx.execute(sql`
-        UPDATE activities SET metadata = jsonb_set(metadata, '{applicationId}', to_jsonb(${coded.id}::text))
-        WHERE org_id = ${orgId} AND metadata->>'applicationId' = ${codeless.id}`);
-      const [{ newTop } = { newTop: null }] = await tx.select({ newTop: max(v.version) }).from(v).where(eq(v.applicationId, coded.id));
-      if (newTop) await tx.update(enrollmentApplicationsTable).set({ currentVersion: newTop }).where(eq(enrollmentApplicationsTable.id, coded.id));
     }
   }
 
