@@ -367,6 +367,39 @@ describe("EnrollHere policy events", () => {
     expect(versions.map((v) => v.version).sort()).toEqual([1, 2, 3]);
   });
 
+  it("an update with no status leaves the enrollment's status alone", async () => {
+    const [before] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.contactId, contactId));
+    const noStatus = sample();
+    noStatus.event = "PE_POLICY_UPDATED";
+    noStatus.policy.agent = { ...noStatus.policy.agent, npn: "99999999" };
+    delete noStatus.policy.manualStatus;
+    delete noStatus.policy.automaticStatus;
+    delete noStatus.policy.enrollment.details.policyStatus;
+    const res = await post(noStatus);
+    expect(res.status).toBe(200);
+    const [after] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.id, res.body.enrollmentId));
+    expect(after).toMatchObject({ status: before!.status, effectuated: before!.effectuated });
+  });
+
+  it("never merges a Sunfire code shared by another person's policy", async () => {
+    const mk = (id: string, first: string, email: string, phone: string) => {
+      const b = sample();
+      b.policy.id = id;
+      b.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF30000001"];
+      delete b.policy.identifiers.bySource.sunfire;
+      Object.assign(b.policy.enrollment.consumer, { firstName: first, lastName: "Other", email, phone, medicare: {} });
+      b.policy.enrollment.medicareInfo.number = "";
+      b.policy.lead = undefined;
+      return b;
+    };
+    const a = await post(mk("policy-collide-a", "Quinn", "quinn@example.com", "+15556660001"));
+    const b = await post(mk("policy-collide-b", "Riley", "riley@example.com", "+15556660002"));
+    expect(b.body.contactId).not.toBe(a.body.contactId);
+    expect(b.body.applicationId).not.toBe(a.body.applicationId);
+    const [appA] = await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, a.body.applicationId));
+    expect(appA).toMatchObject({ externalPolicyId: "policy-collide-a", contactId: a.body.contactId, currentVersion: 1 });
+  });
+
   it("a deleted contact's application can't be opened, and a purge removes it", async () => {
     await tdb.update(contactsTable).set({ deletedAt: new Date() }).where(eq(contactsTable.id, contactId));
     const res = await request(app).get(`/api/applications/${applicationId}/full`).set(withAuth(admin.id));

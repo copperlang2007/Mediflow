@@ -24,6 +24,7 @@ import { canonicalJson } from "../payload";
 import { resolveCarrier, type Tx } from "../../contactImport";
 import { syncContactCoverageProjection } from "../../../routes/enrollments";
 import { mapPolicyStatus, type ParsedPolicyEvent } from "./policyEvent";
+import { logger } from "../../logger";
 
 export const APPLICATION_SOURCE = "enrollhere";
 
@@ -60,8 +61,7 @@ export async function upsertPolicyEnrollment(
     if (!clash) {
       await tx.update(enrollmentsTable).set({
         ...target,
-        status,
-        effectuated,
+        ...(p.policyStatus ? { status, effectuated } : {}),
         effectiveDate: p.effectiveDate,
         planId: sql`coalesce(${enrollmentsTable.planId}, ${p.planId})`,
         planName: sql`coalesce(${enrollmentsTable.planName}, ${p.planName})`,
@@ -106,7 +106,8 @@ export async function upsertPolicyEnrollment(
       eq(enrollmentsTable.effectuated, true),
       ne(enrollmentApplicationsTable.externalPolicyId, p.policyId),
     )).limit(1) : [];
-  const keepStatus = !!ownedByOther && !effectuated;
+  // An update that carries no status at all leaves the status alone.
+  const keepStatus = !p.policyStatus || (!!ownedByOther && !effectuated);
 
   const [row] = await tx.insert(enrollmentsTable).values({
     id: randomUUID(),
@@ -196,7 +197,12 @@ export async function storeApplication(
   // under another EnrollHere policy id), fold the code-less history into it.
   if (p.confirmationCode && p.policyId) {
     const fallbackKey = `policy:${p.policyId}`;
-    const rows = await tx.select({ id: enrollmentApplicationsTable.id, key: enrollmentApplicationsTable.applicationKey })
+    const rows = await tx.select({
+      id: enrollmentApplicationsTable.id,
+      key: enrollmentApplicationsTable.applicationKey,
+      policyId: enrollmentApplicationsTable.externalPolicyId,
+      contactId: enrollmentApplicationsTable.contactId,
+    })
       .from(enrollmentApplicationsTable)
       .where(and(
         eq(enrollmentApplicationsTable.orgId, orgId),
@@ -205,7 +211,13 @@ export async function storeApplication(
       ));
     const codeless = rows.find((r) => r.key === fallbackKey);
     const coded = rows.find((r) => r.key === p.confirmationCode);
-    if (codeless && !coded) {
+    // A record holding this code for another policy AND another person is a
+    // vendor-side code collision, not the same application: never merge PHI
+    // across people. Keep this policy on its own fallback key.
+    if (coded && coded.policyId !== p.policyId && coded.contactId !== links.contactId) {
+      logger.warn({ orgId, applicationId: coded.id }, "EnrollHere: Sunfire code already used by another person's policy; kept separate");
+      applicationKey = fallbackKey;
+    } else if (codeless && !coded) {
       await tx.update(enrollmentApplicationsTable).set({ applicationKey: p.confirmationCode })
         .where(eq(enrollmentApplicationsTable.id, codeless.id));
     } else if (codeless && coded) {

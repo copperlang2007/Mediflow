@@ -35,7 +35,7 @@
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import crypto, { randomUUID } from "crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   db,
   activitiesTable,
@@ -390,6 +390,10 @@ async function handlePolicyEvent(req: RawBodyRequest, res: Response, orgId: stri
         id: eventRowId, orgId, source: SOURCE, externalId, eventType: parsed.eventType, payloadKeys: keys,
       }).onConflictDoNothing().returning({ id: integrationEventsTable.id });
       if (!claimed) return { duplicate: true as const };
+      // One policy event per org at a time, for the whole write (contact,
+      // enrollment, application). The same key upsertContact takes, so the
+      // linked-policy path, which skips upsertContact, is serialized too.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`contact-upsert:${orgId}`}, 0))`);
 
       const agentId = contact.assignedAgentEmail
         ? (await loadAgentsByEmail(orgId, tx, contact.assignedAgentEmail)).get(contact.assignedAgentEmail) ?? null
