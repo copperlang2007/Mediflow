@@ -52,6 +52,7 @@ import {
 } from "@workspace/db/schema";
 import { bootTestDb, shutdownTestDb } from "../helpers/testApp";
 import { seedOrg, seedAgent, type TestDb } from "../helpers/testDb";
+import { CMS_RECORD_RETENTION_DAYS } from "../../lib/compliance/retention";
 
 let retentionEnforcementWorker: typeof import("../../workers/retentionEnforcement").retentionEnforcementWorker;
 let db: TestDb;
@@ -112,19 +113,19 @@ beforeEach(async () => {
 
 describe("retention-review task dedup (HIPAA)", () => {
   it("two agents with identical names in the same org each get their own review task", async () => {
-    await enableAgentRetention(orgId, 30);
+    await enableAgentRetention(orgId, CMS_RECORD_RETENTION_DAYS);
 
     const a = await seedAgedAgent({
       orgId,
       firstName: "John",
       lastName: "Smith",
-      ageDays: 60,
+      ageDays: CMS_RECORD_RETENTION_DAYS + 30,
     });
     const b = await seedAgedAgent({
       orgId,
       firstName: "John",
       lastName: "Smith",
-      ageDays: 60,
+      ageDays: CMS_RECORD_RETENTION_DAYS + 30,
     });
 
     expect(a.id).not.toBe(b.id);
@@ -160,12 +161,12 @@ describe("retention-review task dedup (HIPAA)", () => {
   });
 
   it("worker is idempotent — a second run does not create duplicate tasks", async () => {
-    await enableAgentRetention(orgId, 30);
+    await enableAgentRetention(orgId, CMS_RECORD_RETENTION_DAYS);
     await seedAgedAgent({
       orgId,
       firstName: "Alice",
       lastName: "Nguyen",
-      ageDays: 90,
+      ageDays: CMS_RECORD_RETENTION_DAYS + 60,
     });
 
     await retentionEnforcementWorker();
@@ -180,18 +181,18 @@ describe("retention-review task dedup (HIPAA)", () => {
   });
 
   it("agents with distinct names each get their own task (no regression)", async () => {
-    await enableAgentRetention(orgId, 30);
+    await enableAgentRetention(orgId, CMS_RECORD_RETENTION_DAYS);
     const a = await seedAgedAgent({
       orgId,
       firstName: "Alice",
       lastName: "Nguyen",
-      ageDays: 60,
+      ageDays: CMS_RECORD_RETENTION_DAYS + 30,
     });
     const b = await seedAgedAgent({
       orgId,
       firstName: "Bob",
       lastName: "Tran",
-      ageDays: 60,
+      ageDays: CMS_RECORD_RETENTION_DAYS + 30,
     });
 
     await retentionEnforcementWorker();
@@ -225,7 +226,7 @@ describe("retention-review task dedup (HIPAA)", () => {
       orgId,
       firstName: "Carol",
       lastName: "Lopez",
-      ageDays: 60,
+      ageDays: CMS_RECORD_RETENTION_DAYS + 30,
     });
 
     const k1 = `agent:${a.id}:soft-delete-review`;

@@ -89,9 +89,23 @@ const CreateContactSchema = z.object({
   status: z.enum(["lead", "prospect", "enrolled", "retained", "lost", "do_not_contact"]).optional(),
   tags: z.string().array().optional(),
   assignedAgentId: z.string().optional().nullable(),
+  // TCPA prior express written consent to automated texts. A consent time
+  // must come with where it was captured so it can be produced on audit.
+  tcpaConsentAt: z.string().datetime({ offset: true }).optional().nullable(),
+  tcpaConsentSource: z.string().trim().min(1).max(500).optional().nullable(),
 });
 
 const UpdateContactSchema = CreateContactSchema.partial();
+
+/** Error message when a consent record is incomplete or implausible, else null. */
+function consentError(d: { tcpaConsentAt?: string | null; tcpaConsentSource?: string | null }): string | null {
+  if (!d.tcpaConsentAt) return null;
+  if (!d.tcpaConsentSource) return "tcpaConsentSource is required when tcpaConsentAt is set";
+  if (new Date(d.tcpaConsentAt).getTime() > Date.now() + 5 * 60 * 1000) {
+    return "tcpaConsentAt cannot be in the future";
+  }
+  return null;
+}
 
 // GET /contacts
 router.get(
@@ -170,6 +184,8 @@ router.post(
       return;
     }
     const d = parsed.data;
+    const consentErr = consentError(d);
+    if (consentErr) { res.status(400).json({ error: consentErr }); return; }
     // M1 — reject an assignedAgentId that doesn't belong to the caller's org.
     if (d.assignedAgentId && !(await isAgentInOrg(d.assignedAgentId, authReq.orgId))) {
       res.status(400).json({ error: "Assigned agent not found" });
@@ -206,6 +222,8 @@ router.post(
       status: d.status ?? "lead",
       tags: d.tags ?? [],
       assignedAgentId: d.assignedAgentId ?? null,
+      tcpaConsentAt: d.tcpaConsentAt ? new Date(d.tcpaConsentAt) : null,
+      tcpaConsentSource: d.tcpaConsentAt ? d.tcpaConsentSource ?? null : null,
     }).returning();
 
     enqueue(JOB_NAMES.RUN_AUTOMATION_RULES, {
@@ -272,6 +290,8 @@ router.patch(
     const parsed = UpdateContactSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: "Invalid request body", details: parsed.error.issues }); return; }
     const d = parsed.data;
+    const consentErr = consentError(d);
+    if (consentErr) { res.status(400).json({ error: consentErr }); return; }
 
     // M1 — reject an assignedAgentId that doesn't belong to the caller's org.
     if (d.assignedAgentId && !(await isAgentInOrg(d.assignedAgentId, authReq.orgId))) {
@@ -300,6 +320,14 @@ router.patch(
     if (d.currentPlanType !== undefined) updates.currentPlanType = d.currentPlanType;
     if (d.currentCarrierId !== undefined) updates.currentCarrierId = d.currentCarrierId;
     if (d.planYear !== undefined) updates.planYear = d.planYear;
+    if (d.tcpaConsentAt !== undefined) {
+      // Clearing the time clears the source with it; a record is all or nothing.
+      updates.tcpaConsentAt = d.tcpaConsentAt ? new Date(d.tcpaConsentAt) : null;
+      updates.tcpaConsentSource = d.tcpaConsentAt ? d.tcpaConsentSource ?? null : null;
+    } else if (d.tcpaConsentSource !== undefined) {
+      res.status(400).json({ error: "Set tcpaConsentAt together with tcpaConsentSource" });
+      return;
+    }
     if (d.county !== undefined) updates.county = d.county;
     if (d.stateCode !== undefined) updates.stateCode = d.stateCode;
     if (d.zipCode !== undefined) updates.zipCode = d.zipCode;
@@ -452,7 +480,12 @@ router.post(
       toAddress: contact.phone,
     });
 
-    await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { to: contact.phone, body: parsed.data.body, agentId: authReq.userId });
+    await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, {
+      to: contact.phone,
+      body: parsed.data.body,
+      agentId: authReq.userId,
+      consumer: { orgId: authReq.orgId, contactId: contact.id, automated: false },
+    });
 
     // Log to activity timeline
     await db.insert(activitiesTable).values({ id: randomUUID(), orgId: authReq.orgId, contactId: id, type: "sms", body: parsed.data.body, createdBy: authReq.userId });
@@ -500,7 +533,13 @@ router.post(
       toAddress: contact.email,
     });
 
-    await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, { to: contact.email, subject: parsed.data.subject, html: parsed.data.body, text: parsed.data.bodyText });
+    await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
+      to: contact.email,
+      subject: parsed.data.subject,
+      html: parsed.data.body,
+      text: parsed.data.bodyText,
+      consumer: { orgId: authReq.orgId, contactId: contact.id, automated: false },
+    });
 
     // Log to activity timeline
     await db.insert(activitiesTable).values({ id: randomUUID(), orgId: authReq.orgId, contactId: id, type: "email", body: parsed.data.subject, metadata: { subject: parsed.data.subject }, createdBy: authReq.userId });

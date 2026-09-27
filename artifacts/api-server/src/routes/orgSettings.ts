@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
-import { db, orgSettingsTable } from "@workspace/db";
+import { db, orgSettingsTable, auditLogTable } from "@workspace/db";
 import {
   requireAuth,
   requirePermission,
@@ -18,6 +18,7 @@ const UpdateSettingsSchema = z.object({
   ahipDeadlineDay: z.number().int().min(1).max(31).optional(),
   ahipReminderEnabled: z.boolean().optional(),
   ahipReminderIntervalWeeks: z.number().int().min(1).max(52).optional(),
+  requireSmsConsent: z.boolean().optional(),
 });
 
 router.get(
@@ -43,6 +44,7 @@ router.get(
         ahipDeadlineDay: 7,
         ahipReminderEnabled: true,
         ahipReminderIntervalWeeks: 2,
+        requireSmsConsent: true,
       });
       return;
     }
@@ -66,43 +68,61 @@ router.put(
 
     const data = parsed.data;
 
-    const [existing] = await db
-      .select({ id: orgSettingsTable.id })
-      .from(orgSettingsTable)
-      .where(eq(orgSettingsTable.orgId, authReq.orgId))
-      .limit(1);
+    // Turning consent enforcement off is a compliance-significant decision:
+    // the setting and its audit row (with the prior value) commit together.
+    const settings = await db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select({ id: orgSettingsTable.id, requireSmsConsent: orgSettingsTable.requireSmsConsent })
+        .from(orgSettingsTable)
+        .where(eq(orgSettingsTable.orgId, authReq.orgId))
+        .limit(1);
 
-    if (!existing) {
-      const [settings] = await db
-        .insert(orgSettingsTable)
-        .values({
+      let saved;
+      if (!existing) {
+        [saved] = await tx
+          .insert(orgSettingsTable)
+          .values({
+            id: randomUUID(),
+            orgId: authReq.orgId,
+            ahipSeasonOpenMonth: data.ahipSeasonOpenMonth ?? 7,
+            ahipSeasonOpenDay: data.ahipSeasonOpenDay ?? 1,
+            ahipDeadlineMonth: data.ahipDeadlineMonth ?? 12,
+            ahipDeadlineDay: data.ahipDeadlineDay ?? 7,
+            ahipReminderEnabled: data.ahipReminderEnabled ?? true,
+            ahipReminderIntervalWeeks: data.ahipReminderIntervalWeeks ?? 2,
+            requireSmsConsent: data.requireSmsConsent ?? true,
+          })
+          .returning();
+      } else {
+        const updates: Record<string, unknown> = {};
+        if (data.ahipSeasonOpenMonth !== undefined) updates.ahipSeasonOpenMonth = data.ahipSeasonOpenMonth;
+        if (data.ahipSeasonOpenDay !== undefined) updates.ahipSeasonOpenDay = data.ahipSeasonOpenDay;
+        if (data.ahipDeadlineMonth !== undefined) updates.ahipDeadlineMonth = data.ahipDeadlineMonth;
+        if (data.ahipDeadlineDay !== undefined) updates.ahipDeadlineDay = data.ahipDeadlineDay;
+        if (data.ahipReminderEnabled !== undefined) updates.ahipReminderEnabled = data.ahipReminderEnabled;
+        if (data.ahipReminderIntervalWeeks !== undefined) updates.ahipReminderIntervalWeeks = data.ahipReminderIntervalWeeks;
+        if (data.requireSmsConsent !== undefined) updates.requireSmsConsent = data.requireSmsConsent;
+        [saved] = Object.keys(updates).length
+          ? await tx.update(orgSettingsTable).set(updates).where(eq(orgSettingsTable.orgId, authReq.orgId)).returning()
+          : await tx.select().from(orgSettingsTable).where(eq(orgSettingsTable.orgId, authReq.orgId)).limit(1);
+      }
+
+      const before = existing?.requireSmsConsent ?? true;
+      if (data.requireSmsConsent !== undefined && data.requireSmsConsent !== before) {
+        await tx.insert(auditLogTable).values({
           id: randomUUID(),
           orgId: authReq.orgId,
-          ahipSeasonOpenMonth: data.ahipSeasonOpenMonth ?? 7,
-          ahipSeasonOpenDay: data.ahipSeasonOpenDay ?? 1,
-          ahipDeadlineMonth: data.ahipDeadlineMonth ?? 12,
-          ahipDeadlineDay: data.ahipDeadlineDay ?? 7,
-          ahipReminderEnabled: data.ahipReminderEnabled ?? true,
-          ahipReminderIntervalWeeks: data.ahipReminderIntervalWeeks ?? 2,
-        })
-        .returning();
-      res.json(settings);
-    } else {
-      const updates: Record<string, unknown> = {};
-      if (data.ahipSeasonOpenMonth !== undefined) updates.ahipSeasonOpenMonth = data.ahipSeasonOpenMonth;
-      if (data.ahipSeasonOpenDay !== undefined) updates.ahipSeasonOpenDay = data.ahipSeasonOpenDay;
-      if (data.ahipDeadlineMonth !== undefined) updates.ahipDeadlineMonth = data.ahipDeadlineMonth;
-      if (data.ahipDeadlineDay !== undefined) updates.ahipDeadlineDay = data.ahipDeadlineDay;
-      if (data.ahipReminderEnabled !== undefined) updates.ahipReminderEnabled = data.ahipReminderEnabled;
-      if (data.ahipReminderIntervalWeeks !== undefined) updates.ahipReminderIntervalWeeks = data.ahipReminderIntervalWeeks;
-
-      const [settings] = await db
-        .update(orgSettingsTable)
-        .set(updates)
-        .where(eq(orgSettingsTable.orgId, authReq.orgId))
-        .returning();
-      res.json(settings);
-    }
+          userId: authReq.userId,
+          userRole: authReq.userRole ?? null,
+          action: "update",
+          resourceType: "org_settings.require_sms_consent",
+          resourceId: authReq.orgId,
+          changes: { requireSmsConsent: { from: before, to: data.requireSmsConsent } },
+        });
+      }
+      return saved;
+    });
+    res.json(settings);
   },
 );
 

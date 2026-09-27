@@ -19,6 +19,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, agentsTable } from "@workspace/db";
+import { sellingPlanYear } from "../lib/compliance/planYear";
 import {
   requireAuth,
   requirePermission,
@@ -142,7 +143,7 @@ router.get(
       total: agents.length,
       stateCode,
       carrierId: carrier.carrierId,
-      certificationYear: certificationYear ?? new Date().getUTCFullYear(),
+      certificationYear: certificationYear ?? sellingPlanYear(),
       availableOnly: Boolean(availableOnly),
     });
   },

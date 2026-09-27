@@ -109,8 +109,10 @@ export default function PipelineTab() {
   };
 
   const moveStage = async (dealId: string, stageId: string) => {
-    await updateDeal({ id: dealId, data: { stageId } satisfies UpdateDealBody });
-    void qc.invalidateQueries({ queryKey: getGetDealsQueryKey() });
+    try {
+      await updateDeal({ id: dealId, data: { stageId } satisfies UpdateDealBody });
+      void qc.invalidateQueries({ queryKey: getGetDealsQueryKey() });
+    } catch { toast.error("Failed to move deal"); }
   };
 
   if (pipelinesLoading) return <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-40 rounded-xl" />)}</div>;

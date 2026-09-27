@@ -1,0 +1,386 @@
+/**
+ * Integration test: compliance metrics an oversight reviewer relies on.
+ *
+ *   - One compliance score: the agent profile endpoint, the Agent Performance
+ *     report and the Executive report agree, a license past its expiry date
+ *     does not count, and only plan-year AHIP / certs count.
+ *   - The lapse sweep flips expired-by-date licenses to `expired` and audits it.
+ *   - Retention policies cannot be set below the CMS 10-year floor.
+ *   - The public unsubscribe link: GET never changes state; POST opts out and
+ *     audits; forged tokens are rejected.
+ *   - STOP / START match a contact whatever format its phone was saved in.
+ *   - The weekly report body is computed and deterministic.
+ */
+import { vi, describe, it, expect, beforeAll, afterAll } from "vitest";
+
+const { dbF, clerkF, jobsF, smsF, sseF } = vi.hoisted(() => ({
+  dbF: async (): Promise<Record<string, unknown>> => {
+    const { dbMockFactory } = await import("../helpers/testApp");
+    return dbMockFactory();
+  },
+  clerkF: async (): Promise<Record<string, unknown>> => {
+    const { clerkMockFactory } = await import("../helpers/testApp");
+    return clerkMockFactory();
+  },
+  jobsF: async (): Promise<Record<string, unknown>> => {
+    const { jobsMockFactory } = await import("../helpers/testApp");
+    return jobsMockFactory();
+  },
+  smsF: async (): Promise<Record<string, unknown>> => {
+    const actual = await import("../../lib/sms");
+    return { ...actual, validateTwilioWebhookSignature: (): boolean => true };
+  },
+  sseF: async (): Promise<Record<string, unknown>> => {
+    const actual = await import("../../lib/sseManager");
+    return { ...actual, broadcastToUser: vi.fn(), broadcastToUsers: vi.fn() };
+  },
+}));
+vi.mock("@workspace/db", dbF);
+vi.mock("@clerk/express", clerkF);
+vi.mock("../../lib/jobs", jobsF);
+vi.mock("../../lib/sms", smsF);
+vi.mock("../../lib/sseManager", sseF);
+
+import { randomUUID } from "node:crypto";
+import { and, eq } from "drizzle-orm";
+import {
+  agentsTable,
+  ahipRecordsTable,
+  auditLogTable,
+  carrierCertificationsTable,
+  carriersTable,
+  contactsTable,
+  dataRetentionPoliciesTable,
+  enrollmentsTable,
+  optOutsTable,
+  stateLicensesTable,
+} from "@workspace/db/schema";
+import { bootTestDb, shutdownTestDb, withAuth, withMfaAuth } from "../helpers/testApp";
+import { seedAgent, seedContact, seedOrg, seedUser, type TestDb } from "../helpers/testDb";
+import { sellingPlanYear } from "../../lib/compliance/planYear";
+import { CMS_RECORD_RETENTION_DAYS } from "../../lib/compliance/retention";
+import { signUnsubscribeToken } from "../../lib/compliance/unsubscribe";
+import type { Express } from "express";
+
+const PLAN_YEAR = sellingPlanYear();
+const DAY = 86_400_000;
+
+let app: Express;
+let request: typeof import("supertest");
+let db: TestDb;
+let org: { id: string };
+let admin: { id: string };
+let carrierId: string;
+
+beforeAll(async () => {
+  const handle = await bootTestDb();
+  db = handle.db;
+  app = (await import("../../app")).default;
+  request = ((await import("supertest")) as unknown as { default: typeof import("supertest") }).default;
+
+  org = await seedOrg(db, { id: `org-cm-${randomUUID().slice(0, 8)}` });
+  admin = await seedUser(db, { orgId: org.id, role: "agency_admin" });
+  carrierId = `carrier-${randomUUID()}`;
+  await db.insert(carriersTable).values({ id: carrierId, orgId: org.id, name: "Humana" });
+});
+
+afterAll(async () => {
+  await shutdownTestDb();
+});
+
+async function activeAgent(name: string): Promise<string> {
+  const a = await seedAgent(db, { orgId: org.id, firstName: name, lastName: "Tester" });
+  await db.update(agentsTable).set({ status: "active", npn: "1234567" }).where(eq(agentsTable.id, a.id));
+  return a.id;
+}
+
+describe("one compliance score across every surface", () => {
+  let agentId: string;
+  let lapsedLicenseId: string;
+
+  beforeAll(async () => {
+    agentId = await activeAgent("Scored");
+    lapsedLicenseId = `lic-${randomUUID()}`;
+    await db.insert(stateLicensesTable).values([
+      // Still marked active, but its expiry date has passed.
+      { id: lapsedLicenseId, agentId, stateCode: "FL", licenseType: "Health", status: "active", expiryDate: new Date(Date.now() - 3 * DAY) },
+      { id: `lic-${randomUUID()}`, agentId, stateCode: "GA", licenseType: "Health", status: "active", expiryDate: new Date(Date.now() + 400 * DAY) },
+    ]);
+    await db.insert(carrierCertificationsTable).values({
+      id: `cert-${randomUUID()}`, agentId, carrierId, certificationYear: PLAN_YEAR, status: "passed",
+    });
+    // A certification for an old plan year does not count toward — or against — this year.
+    await db.insert(carrierCertificationsTable).values({
+      id: `cert-${randomUUID()}`, agentId, carrierId, certificationYear: PLAN_YEAR - 3, status: "failed",
+    });
+    await db.insert(ahipRecordsTable).values({
+      id: `ahip-${randomUUID()}`, agentId, certificationYear: PLAN_YEAR, status: "passed",
+    });
+
+    // A second active agent whose only AHIP is years old.
+    const stale = await activeAgent("Stale");
+    await db.insert(stateLicensesTable).values({
+      id: `lic-${randomUUID()}`, agentId: stale, stateCode: "TX", licenseType: "Health", status: "active", expiryDate: new Date(Date.now() + 400 * DAY),
+    });
+    await db.insert(ahipRecordsTable).values({
+      id: `ahip-${randomUUID()}`, agentId: stale, certificationYear: PLAN_YEAR - 2, status: "passed",
+    });
+  });
+
+  it("does not count a license past its expiry date, and scores plan-year credentials only", async () => {
+    const res = await request(app).get(`/api/agents/${agentId}/compliance-score`).set(withAuth(admin.id));
+    expect(res.status).toBe(200);
+    // Licensing 1 of 2 → 20; plan-year certs 1 of 1 → 30; AHIP → 20; no onboarding → 0.
+    expect(res.body.licenseScore).toBe(50);
+    expect(res.body.certificationScore).toBe(100);
+    expect(res.body.ahipCompleted).toBe(true);
+    expect(res.body.totalScore).toBe(70);
+    expect(res.body.planYear).toBe(PLAN_YEAR);
+  });
+
+  it("reports the same score in the Agent Performance report", async () => {
+    const res = await request(app).get(`/api/reports/agent-performance?agentId=${agentId}`).set(withAuth(admin.id));
+    expect(res.status).toBe(200);
+    const row = res.body.find((r: { agentId: string }) => r.agentId === agentId);
+    expect(row.complianceScore).toBe(70);
+    expect(row.licensesActive).toBe(1);
+    expect(row.ahipStatus).toBe("passed");
+  });
+
+  it("computes executive AHIP completion over active agents for the plan year", async () => {
+    const res = await request(app).get("/api/reports/executive").set(withAuth(admin.id));
+    expect(res.status).toBe(200);
+    const c = res.body.compliance;
+    expect(c.ahipPlanYear).toBe(PLAN_YEAR);
+    expect(c.ahipTotal).toBe(2);
+    expect(c.ahipPassed).toBe(1);
+    expect(c.ahipRate).toBe(50);
+    // Scored agent 70; stale agent: licensing 40, nothing else → 40. Mean 55.
+    expect(c.agencyComplianceScore).toBe(55);
+  });
+
+  it("the lapse sweep expires the license and audits it without changing the score", async () => {
+    const { expireLapsedLicenses } = await import("../../workers/licenseExpiryCheck");
+    const count = await expireLapsedLicenses(new Date(), org.id);
+    expect(count).toBeGreaterThanOrEqual(1);
+
+    const [lic] = await db.select({ status: stateLicensesTable.status }).from(stateLicensesTable).where(eq(stateLicensesTable.id, lapsedLicenseId));
+    expect(lic.status).toBe("expired");
+    const audit = await db
+      .select()
+      .from(auditLogTable)
+      .where(and(eq(auditLogTable.resourceId, lapsedLicenseId), eq(auditLogTable.action, "license_auto_expired")));
+    expect(audit).toHaveLength(1);
+
+    // Re-running is a no-op.
+    expect(await expireLapsedLicenses(new Date(), org.id)).toBe(0);
+  });
+});
+
+describe("retention floor", () => {
+  it("rejects a policy shorter than 10 years and accepts one at the floor", async () => {
+    const short = await request(app)
+      .put("/api/admin/data-retention")
+      .set(withMfaAuth(admin.id, true))
+      .send({ recordType: "contacts", retentionDays: 1825, isEnabled: true });
+    expect(short.status).toBe(400);
+    expect(short.body.error).toMatch(/3650 days/);
+
+    const ok = await request(app)
+      .put("/api/admin/data-retention")
+      .set(withMfaAuth(admin.id, true))
+      .send({ recordType: "contacts", retentionDays: CMS_RECORD_RETENTION_DAYS, isEnabled: true });
+    expect(ok.status).toBe(200);
+  });
+});
+
+describe("public unsubscribe link", () => {
+  it("GET shows a confirmation without opting out; POST opts out and audits", async () => {
+    const contact = await seedContact(db, { orgId: org.id, email: "member@example.com" });
+    const token = signUnsubscribeToken({ orgId: org.id, contactId: contact.id });
+
+    const page = await request(app).get(`/api/public/unsubscribe?t=${encodeURIComponent(token)}`);
+    expect(page.status).toBe(200);
+    expect(page.text).toContain("<form");
+    let [row] = await db.select({ optOutEmail: contactsTable.optOutEmail }).from(contactsTable).where(eq(contactsTable.id, contact.id));
+    expect(row.optOutEmail).toBe(false);
+
+    const done = await request(app)
+      .post(`/api/public/unsubscribe?t=${encodeURIComponent(token)}`)
+      .type("form")
+      .send({ "List-Unsubscribe": "One-Click" });
+    expect(done.status).toBe(200);
+    [row] = await db.select({ optOutEmail: contactsTable.optOutEmail }).from(contactsTable).where(eq(contactsTable.id, contact.id));
+    expect(row.optOutEmail).toBe(true);
+
+    const log = await db.select().from(optOutsTable).where(and(eq(optOutsTable.orgId, org.id), eq(optOutsTable.channel, "email")));
+    expect(log.some((l) => l.email === "member@example.com")).toBe(true);
+    const audit = await db.select().from(auditLogTable).where(and(eq(auditLogTable.resourceId, contact.id), eq(auditLogTable.action, "email_unsubscribe")));
+    expect(audit).toHaveLength(1);
+
+    // A repeat click, retry or mail-client prefetch records nothing new.
+    const again = await request(app)
+      .post(`/api/public/unsubscribe?t=${encodeURIComponent(token)}`)
+      .type("form")
+      .send({ "List-Unsubscribe": "One-Click" });
+    expect(again.status).toBe(200);
+    const logAfter = await db.select().from(optOutsTable).where(and(eq(optOutsTable.orgId, org.id), eq(optOutsTable.email, "member@example.com")));
+    expect(logAfter).toHaveLength(1);
+    const auditAfter = await db.select().from(auditLogTable).where(and(eq(auditLogTable.resourceId, contact.id), eq(auditLogTable.action, "email_unsubscribe")));
+    expect(auditAfter).toHaveLength(1);
+  });
+
+  it("rejects a forged token", async () => {
+    const res = await request(app).post("/api/public/unsubscribe?t=not.a-real-token");
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("STOP / START phone matching", () => {
+  function inbound(from: string, body: string): Record<string, string> {
+    return { From: from, To: "+15555550000", Body: body, MessageSid: `SM${randomUUID().replace(/-/g, "")}`, AccountSid: "ACtest" };
+  }
+
+  it("honours STOP for a contact saved as (512) 555-0177 and lifts it on START", async () => {
+    const contact = await seedContact(db, { orgId: org.id });
+    await db.update(contactsTable).set({ phone: "(512) 555-0177" }).where(eq(contactsTable.id, contact.id));
+
+    const stop = await request(app).post("/webhooks/twilio/sms").type("form").set("x-twilio-signature", "x").send(inbound("+15125550177", "STOP"));
+    expect(stop.status).toBe(200);
+    // Twilio retry of the same STOP: nothing new to flip, so no second audit row.
+    const retry = await request(app).post("/webhooks/twilio/sms").type("form").set("x-twilio-signature", "x").send(inbound("+15125550177", "STOP"));
+    expect(retry.status).toBe(200);
+    let [row] = await db.select({ optOutSms: contactsTable.optOutSms }).from(contactsTable).where(eq(contactsTable.id, contact.id));
+    expect(row.optOutSms).toBe(true);
+    let log = await db.select().from(optOutsTable).where(and(eq(optOutsTable.orgId, org.id), eq(optOutsTable.phone, "+15125550177")));
+    expect(log).toHaveLength(1);
+
+    const start = await request(app).post("/webhooks/twilio/sms").type("form").set("x-twilio-signature", "x").send(inbound("+15125550177", "START"));
+    expect(start.status).toBe(200);
+    [row] = await db.select({ optOutSms: contactsTable.optOutSms }).from(contactsTable).where(eq(contactsTable.id, contact.id));
+    expect(row.optOutSms).toBe(false);
+    log = await db.select().from(optOutsTable).where(and(eq(optOutsTable.orgId, org.id), eq(optOutsTable.phone, "+15125550177")));
+    expect(log).toHaveLength(0);
+
+    const history = await db.select({ action: auditLogTable.action }).from(auditLogTable).where(eq(auditLogTable.resourceId, contact.id));
+    expect(history.map((h) => h.action).sort()).toEqual(["sms_opt_in", "sms_opt_out"]);
+  });
+});
+
+describe("START only reverses keyword opt-outs", () => {
+  function inbound(from: string, body: string): Record<string, string> {
+    return { From: from, To: "+15555550000", Body: body, MessageSid: `SM${randomUUID().replace(/-/g, "")}`, AccountSid: "ACtest" };
+  }
+
+  it("does not lift an opt-out another org recorded some other way", async () => {
+    const orgB = await seedOrg(db, { id: `org-cm-b-${randomUUID().slice(0, 8)}` });
+    const contact = await seedContact(db, { orgId: orgB.id });
+    // Opted out by the agency (e.g. GHL DND) — never texted STOP.
+    await db.update(contactsTable).set({ phone: "512-555-0188", optOutSms: true }).where(eq(contactsTable.id, contact.id));
+
+    const start = await request(app).post("/webhooks/twilio/sms").type("form").set("x-twilio-signature", "x").send(inbound("+15125550188", "START"));
+    expect(start.status).toBe(200);
+    const [row] = await db.select({ optOutSms: contactsTable.optOutSms }).from(contactsTable).where(eq(contactsTable.id, contact.id));
+    expect(row.optOutSms).toBe(true);
+  });
+
+  it("does not delete an sms opt-out log row that a STOP did not create", async () => {
+    const orgC = await seedOrg(db, { id: `org-cm-c-${randomUUID().slice(0, 8)}` });
+    const contact = await seedContact(db, { orgId: orgC.id });
+    await db.update(contactsTable).set({ phone: "512-555-0189", optOutSms: true }).where(eq(contactsTable.id, contact.id));
+    await db.insert(optOutsTable).values({ id: randomUUID(), orgId: orgC.id, phone: "5125550189", channel: "sms", source: "agent" });
+
+    const start = await request(app).post("/webhooks/twilio/sms").type("form").set("x-twilio-signature", "x").send(inbound("+15125550189", "START"));
+    expect(start.status).toBe(200);
+    const log = await db.select().from(optOutsTable).where(eq(optOutsTable.orgId, orgC.id));
+    expect(log).toHaveLength(1);
+    const [row] = await db.select({ optOutSms: contactsTable.optOutSms }).from(contactsTable).where(eq(contactsTable.id, contact.id));
+    expect(row.optOutSms).toBe(true);
+  });
+});
+
+describe("retention sweep and ended enrollments", () => {
+  it("keeps members with open or recently-touched enrollments, releases long-ended ones", async () => {
+    const retOrg = await seedOrg(db, { id: `org-cm-ret-${randomUUID().slice(0, 8)}` });
+    await db.insert(dataRetentionPoliciesTable).values({
+      id: randomUUID(), orgId: retOrg.id, recordType: "contacts", retentionDays: CMS_RECORD_RETENTION_DAYS, isEnabled: true,
+    });
+    const old = new Date(Date.now() - (CMS_RECORD_RETENTION_DAYS + 400) * DAY);
+    const mk = async (name: string) => {
+      const c = await seedContact(db, { orgId: retOrg.id, firstName: name, status: "lost" });
+      await db.update(contactsTable).set({ createdAt: old }).where(eq(contactsTable.id, c.id));
+      return c.id;
+    };
+    const enroll = async (contactId: string, status: "active" | "terminated", updatedAt: Date) => {
+      await db.insert(enrollmentsTable).values({
+        id: randomUUID(), orgId: retOrg.id, contactId, planType: "MA", planYear: 2014,
+        effectiveDate: "2014-01-01", status, updatedAt,
+      });
+    };
+    const longEnded = await mk("LongEnded");
+    await enroll(longEnded, "terminated", old); // no disenrolled date, untouched for 11 years
+    const recentlyTouched = await mk("RecentlyTouched");
+    await enroll(recentlyTouched, "terminated", new Date()); // end date unknown, touched recently
+    const stillActive = await mk("StillActive");
+    await enroll(stillActive, "active", old);
+    // A current member whose enrollment row is missing is still a member.
+    const retainedNoRow = await mk("RetainedNoRow");
+    await db.update(contactsTable).set({ status: "retained" }).where(eq(contactsTable.id, retainedNoRow));
+
+    const { retentionEnforcementWorker } = await import("../../workers/retentionEnforcement");
+    await retentionEnforcementWorker();
+
+    const deleted = async (id: string) =>
+      (await db.select({ d: contactsTable.deletedAt }).from(contactsTable).where(eq(contactsTable.id, id)))[0].d !== null;
+    expect(await deleted(longEnded)).toBe(true);
+    expect(await deleted(recentlyTouched)).toBe(false);
+    expect(await deleted(stillActive)).toBe(false);
+    expect(await deleted(retainedNoRow)).toBe(false);
+  });
+});
+
+describe("weekly compliance report body", () => {
+  it("strips headings, rules and quotes from AI commentary", async () => {
+    const { sanitizeCommentary } = await import("../../workers/weeklyComplianceReport");
+    const out = sanitizeCommentary("## Executive summary\nAll good.\n---\n> quoted\n  ### Actions\n- item one");
+    expect(out).toBe("Executive summary\nAll good.\n\nquoted\nActions\n- item one");
+    expect(out.split("\n").some((l) => /^\s*#/.test(l))).toBe(false);
+  });
+
+  it("is computed from the data and lists gaps per agent", async () => {
+    const { buildWeeklyComplianceMarkdown } = await import("../../workers/weeklyComplianceReport");
+    const base = {
+      planYear: 2027,
+      totalScore: 100, licenseScore: 100, certificationScore: 100, ahipScore: 100, onboardingScore: 100,
+      activeLicenses: 1, totalLicenses: 1, licensesExpiringSoon: 0,
+      activeCertifications: 1, totalCertifications: 1, ahipCompleted: true,
+      onboardingCompletedItems: 1, onboardingTotalItems: 1, onboardingComplete: true,
+    };
+    const now = new Date("2026-10-05T12:00:00Z");
+    const input = {
+      reportDate: "2026-10-05",
+      now,
+      planYear: 2027,
+      agents: [
+        { name: "Good Agent", status: "active", npn: "1", overdueTasks: 0, score: { ...base, agentId: "a1" } },
+        {
+          name: "Gap Agent", status: "active", npn: null, overdueTasks: 2,
+          score: { ...base, agentId: "a2", totalScore: 60, ahipScore: 0, ahipCompleted: false },
+        },
+      ],
+      expiringLicenses: [{ agentName: "Good Agent", label: "FL Health", expiryDate: new Date("2026-10-20T00:00:00Z") }],
+      expiringCerts: [],
+      complaints: { open: 3, overdue: 1, critical: 0 },
+      openCallComplianceFindings: 4,
+    };
+    const md = buildWeeklyComplianceMarkdown(input);
+    expect(md).toBe(buildWeeklyComplianceMarkdown(input));
+    expect(md).toContain("Agency compliance score (active agents): 80/100");
+    expect(md).toContain("Active agents with 2027 AHIP: 1 of 2");
+    expect(md).toContain("- Gap Agent (active) — score 60/100 — no 2027 AHIP; NPN missing; 2 overdue tasks");
+    expect(md).toContain("- Good Agent — FL Health — expires 2026-10-20 (15 days)");
+    expect(md).toContain("Open complaints: 3 (1 past resolution due date, 0 critical)");
+    expect(md).toContain("Open call-compliance findings from the dialer: 4");
+    expect(md).toMatch(/## Agents in good standing\nGood Agent/);
+  });
+});

@@ -10,6 +10,7 @@ import { Award, ShieldCheck, CheckCircle, XCircle, Clock, AlertTriangle } from "
 import { cn } from "@/lib/utils";
 import { useLocation } from "wouter";
 import { format } from "date-fns";
+import { sellingPlanYear } from "@/lib/planYear";
 
 const CERT_STATUS_STYLES: Record<string, string> = {
   passed: "bg-green-100 text-green-800",
@@ -28,7 +29,7 @@ const CERT_CELL_STYLES: Record<string, string> = {
 };
 
 export default function CertificationsPage() {
-  const currentYear = new Date().getFullYear();
+  const currentYear = sellingPlanYear();
   const [year, setYear] = useState(String(currentYear));
   const [view, setView] = useState<"ahip" | "carriers">("ahip");
   const [, navigate] = useLocation();

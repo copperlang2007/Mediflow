@@ -283,7 +283,9 @@ export async function sendSequenceStepWorker(
         // primary guard; this is defense in depth.
         await enqueue(
           JOB_NAMES.SEND_SCHEDULED_EMAIL,
-          { to, subject, html },
+          // `consumer` re-checks opt-out at send time and adds the
+          // unsubscribe link (lib/compliance/consumerDelivery.ts).
+          { to, subject, html, consumer: { orgId: contact.orgId, contactId, automated: true } },
           { singletonKey: `seq:${enrollment.id}:${stepIndex}` },
         );
         logger.info({ contactId, stepIndex, stepId: step.id }, "Sequence email step enqueued");
@@ -302,7 +304,9 @@ export async function sendSequenceStepWorker(
         const body = String(cfg.body ?? `Hi ${contactName}, this is a message from your Medicare advisor.`);
         await enqueue(
           JOB_NAMES.SEND_SCHEDULED_SMS,
-          { to, body },
+          // `consumer` enforces opt-out, TCPA consent and texting hours at
+          // send time (lib/compliance/consumerDelivery.ts).
+          { to, body, consumer: { orgId: contact.orgId, contactId, automated: true } },
           { singletonKey: `seq:${enrollment.id}:${stepIndex}` },
         );
         logger.info({ contactId, stepIndex, stepId: step.id }, "Sequence SMS step enqueued");

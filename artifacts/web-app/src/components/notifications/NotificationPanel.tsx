@@ -75,7 +75,9 @@ export default function NotificationPanel({ onClose }: Props) {
   const [, setLocation] = useLocation();
 
   const { data: notifications = [] } = useGetNotifications({});
-  const markAllRead = useMarkAllNotificationsRead();
+  const markAllRead = useMarkAllNotificationsRead({
+    mutation: { meta: { toastOnError: true } },
+  });
   const markOneRead = useMarkNotificationRead();
 
   const invalidate = () => {
