@@ -191,6 +191,22 @@ describe("audience preview", () => {
     expect(sms.body).toEqual({ matched: 5, eligible: 2, optedOut: 2, missingAddress: 1 });
   });
 
+  it("matches the STOP list on the E.164 form of a formatted contact phone", async () => {
+    const tag = `e164-${randomUUID().slice(0, 6)}`;
+    const digits = `${Math.floor(1000000 + Math.random() * 8999999)}`;
+    await contact(org.id, { tags: [tag] });
+    await contact(org.id, { tags: [tag], phone: `(555) ${digits.slice(0, 3)}-${digits.slice(3)}` });
+    await contact(org.id, { tags: [tag], phone: `1-555-${digits.slice(0, 3)}-${digits.slice(3)} ext. 12` });
+    // Recorded by the STOP webhook in Twilio's E.164 form, under another org.
+    await testDb.insert(optOutsTable).values({ id: randomUUID(), orgId: otherOrg.id, phone: `+1555${digits}`, channel: "sms" });
+
+    const sms = await request(app)
+      .post("/api/campaigns/audience/preview")
+      .set(withAuth(admin.id))
+      .send({ channel: "sms", audience: { tags: [tag] } });
+    expect(sms.body).toEqual({ matched: 3, eligible: 1, optedOut: 2, missingAddress: 0 });
+  });
+
   it("filters by birthday month and state and rejects unknown filter keys", async () => {
     const tag = `bday-${randomUUID().slice(0, 6)}`;
     await contact(org.id, { tags: [tag], dob: new Date("1955-03-10T12:00:00Z"), stateCode: "FL" });
@@ -334,6 +350,35 @@ describe("send fan-out", () => {
     await worker({ campaignId: id2, orgId: org.id }, noon);
     expect(sentSms).toHaveLength(2);
     expect(sentSms[1]!.Body).not.toMatch(/Reply STOP/);
+  });
+});
+
+describe("send-time STOP re-check", () => {
+  it("skips a recipient whose formatted number was STOPped (any org) after the snapshot", async () => {
+    const tag = `stop-${randomUUID().slice(0, 6)}`;
+    const digits = `${Math.floor(1000000 + Math.random() * 8999999)}`;
+    const cid = await contact(org.id, { tags: [tag], stateCode: "CA", phone: `(555) ${digits.slice(0, 3)}-${digits.slice(3)}` });
+    const c = await request(app)
+      .post("/api/campaigns")
+      .set(withAuth(admin.id))
+      .send({ channel: "sms", name: `Stop ${tag}`, body: "Hi {{first_name}}", audience: { tags: [tag] } });
+    expect(c.status).toBe(201);
+    expect((await request(app).post(`/api/campaigns/${c.body.id}/send`).set(withAuth(admin.id)).send({})).status).toBe(200);
+
+    // Quiet hours: the run snapshots the audience but sends nothing.
+    const night = { sleep: async () => undefined, now: () => new Date("2027-03-11T06:00:00Z") };
+    await worker({ campaignId: c.body.id, orgId: org.id }, night);
+    const [queued] = await testDb.select().from(campaignRecipientsTable).where(eq(campaignRecipientsTable.campaignId, c.body.id));
+    expect(queued!.status).toBe("queued");
+
+    // STOP arrives (E.164, recorded under another org — shared Twilio number).
+    await testDb.insert(optOutsTable).values({ id: randomUUID(), orgId: otherOrg.id, phone: `+1555${digits}`, channel: "sms" });
+    const before = sentSms.length;
+    const noon = { sleep: async () => undefined, now: () => new Date("2027-03-11T18:00:00Z") };
+    await worker({ campaignId: c.body.id, orgId: org.id }, noon);
+    expect(sentSms.length).toBe(before);
+    const [r] = await testDb.select().from(campaignRecipientsTable).where(eq(campaignRecipientsTable.contactId, cid));
+    expect(r!.status).toBe("skipped_opt_out");
   });
 });
 

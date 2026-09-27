@@ -13,16 +13,18 @@
  *    suppression list (`opt_outs` channel=email — covers duplicates of the
  *    same person under another contact row);
  *  - sms:   `contacts.opt_out_sms`, or the number is on the STOP list
- *    (`opt_outs` channel=sms). The STOP list is matched on phone across all
- *    orgs because every org sends from the same Twilio number, and a STOP to
- *    that number must silence it for everyone — the same rule the existing
- *    `sendSMS()` guard applies.
+ *    (`opt_outs` channel=sms), matched on the stored number and its E.164
+ *    form (phoneE164Sql in lib/csvImport.ts). The STOP list is matched on
+ *    phone across all orgs because every org sends from the same Twilio
+ *    number, and a STOP to that number must silence it for everyone — the
+ *    same rule the existing `sendSMS()` guard applies.
  *
  * Health conditions and race are never filterable here.
  */
 import { sql, type SQL } from "drizzle-orm";
 import type { CampaignAudience } from "@workspace/db";
 import { z } from "zod";
+import { phoneE164Sql } from "../csvImport";
 
 export const CONTACT_STATUSES = [
   "lead",
@@ -100,13 +102,17 @@ export function hasAddress(channel: Channel): SQL {
     : sql`(c.phone IS NOT NULL AND btrim(c.phone) <> '')`;
 }
 
+/** `c.phone` in E.164 form — STOP rows are stored as Twilio sends them. */
+const CONTACT_PHONE_E164 = phoneE164Sql(sql`c.phone`);
+
 export function isOptedOut(orgId: string, channel: Channel): SQL {
   return channel === "email"
     ? sql`(c.opt_out_email = true OR EXISTS (SELECT 1 FROM opt_outs o
         WHERE o.org_id = ${orgId} AND o.channel = 'email' AND o.email IS NOT NULL
           AND lower(o.email) = lower(c.email)))`
     : sql`(c.opt_out_sms = true OR EXISTS (SELECT 1 FROM opt_outs o
-        WHERE o.channel = 'sms' AND o.phone IS NOT NULL AND o.phone = c.phone))`;
+        WHERE o.channel = 'sms' AND o.phone IS NOT NULL
+          AND o.phone IN (c.phone, ${CONTACT_PHONE_E164})))`;
 }
 
 type Executor = { execute: (q: SQL) => Promise<unknown> };

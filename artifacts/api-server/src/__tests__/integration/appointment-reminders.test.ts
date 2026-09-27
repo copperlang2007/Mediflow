@@ -19,7 +19,18 @@ const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
   },
   jobsF: async (): Promise<Record<string, unknown>> => {
     const { jobsMockFactory } = await import("../helpers/testApp");
-    return jobsMockFactory();
+    const base = jobsMockFactory();
+    const baseEnqueue = base.enqueue as (name: string, data: unknown) => Promise<string>;
+    return {
+      ...base,
+      // Tests flip this to simulate pg-boss being unavailable.
+      enqueue: async (name: string, data: unknown): Promise<string> => {
+        if ((globalThis as { __FAIL_ENQUEUE__?: boolean }).__FAIL_ENQUEUE__) {
+          throw new Error("queue unavailable");
+        }
+        return baseEnqueue(name, data);
+      },
+    };
   },
 }));
 
@@ -155,6 +166,67 @@ describe("appointment reminders", () => {
     await worker(NOON_NY);
     expect(jobsTo(c.phone!)).toHaveLength(0);
     expect(jobsTo(c.email!)).toHaveLength(1);
+  });
+
+  it("matches the STOP list on the E.164 form of a formatted contact phone", async () => {
+    const digits = `${Math.floor(1000000 + Math.random() * 8999999)}`;
+    const c = await contact({ phone: `(555) ${digits.slice(0, 3)}-${digits.slice(3)}` });
+    await testDb.insert(optOutsTable).values({ id: randomUUID(), orgId: org.id, phone: `+1555${digits}`, channel: "sms" });
+    await appt(c.id, new Date(NOON_NY.getTime() + 4 * 3600_000));
+    await worker(NOON_NY);
+    expect(jobsTo(c.phone!)).toHaveLength(0);
+    expect(jobsTo(c.email!)).toHaveLength(1);
+  });
+
+  it("honours a STOP recorded under another org (shared Twilio number)", async () => {
+    const other = await seedOrg(testDb, { name: "Other STOP Org" });
+    const c = await contact({});
+    await testDb.insert(optOutsTable).values({ id: randomUUID(), orgId: other.id, phone: c.phone, channel: "sms" });
+    await appt(c.id, new Date(NOON_NY.getTime() + 4 * 3600_000));
+    await worker(NOON_NY);
+    expect(jobsTo(c.phone!)).toHaveLength(0);
+    expect(jobsTo(c.email!)).toHaveLength(1);
+  });
+
+  it("only suppresses the channel the opt-out was recorded for, and email only in its own org", async () => {
+    const other = await seedOrg(testDb, { name: "Other Email Org" });
+    const c = await contact({});
+    // An email-channel row carrying the phone must not silence SMS…
+    await testDb.insert(optOutsTable).values({ id: randomUUID(), orgId: org.id, phone: c.phone, email: null, channel: "email" });
+    // …and another org's email suppression must not silence this org's email.
+    await testDb.insert(optOutsTable).values({ id: randomUUID(), orgId: other.id, email: c.email, channel: "email" });
+    await appt(c.id, new Date(NOON_NY.getTime() + 4 * 3600_000));
+    await worker(NOON_NY);
+    expect(jobsTo(c.phone!)).toHaveLength(1);
+    expect(jobsTo(c.email!)).toHaveLength(1);
+  });
+
+  it("honours the org's email suppression list case-insensitively", async () => {
+    const c = await contact({});
+    await testDb.insert(optOutsTable).values({ id: randomUUID(), orgId: org.id, email: c.email!.toUpperCase(), channel: "email" });
+    await appt(c.id, new Date(NOON_NY.getTime() + 4 * 3600_000));
+    await worker(NOON_NY);
+    expect(jobsTo(c.phone!)).toHaveLength(1);
+    expect(jobsTo(c.email!)).toHaveLength(0);
+  });
+
+  it("releases the claim when enqueue fails so the next sweep retries", async () => {
+    const c = await contact({});
+    const id = await appt(c.id, new Date(NOON_NY.getTime() + 5 * 3600_000));
+    (globalThis as { __FAIL_ENQUEUE__?: boolean }).__FAIL_ENQUEUE__ = true;
+    try {
+      await worker(NOON_NY);
+    } finally {
+      (globalThis as { __FAIL_ENQUEUE__?: boolean }).__FAIL_ENQUEUE__ = false;
+    }
+    const [row] = await testDb.select().from(appointmentsTable).where(eq(appointmentsTable.id, id));
+    expect(row.reminderSentAt).toBeNull();
+
+    await worker(NOON_NY);
+    expect(jobsTo(c.phone!)).toHaveLength(1);
+    expect(jobsTo(c.email!)).toHaveLength(1);
+    const [after] = await testDb.select().from(appointmentsTable).where(eq(appointmentsTable.id, id));
+    expect(after.reminderSentAt).not.toBeNull();
   });
 
   it("defers outside calling hours instead of texting at night", async () => {

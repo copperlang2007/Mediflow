@@ -22,6 +22,7 @@
  *   - semicolon / tab / pipe delimited files → delimiter auto-detected
  *   - duplicate or blank header names → made unique, no column is dropped
  */
+import { sql, type SQL, type SQLWrapper } from "drizzle-orm";
 
 export type CsvIssueSeverity = "error" | "warning";
 
@@ -421,6 +422,31 @@ export function normalizeStateCode(raw: string): string | null {
 /** The number as stored plus its E.164 form, for opt-out / DNC lookups. */
 export function phoneVariants(raw: string): string[] {
   return [...new Set([raw, normalizePhone(raw)].filter((v): v is string => !!v))];
+}
+
+/**
+ * SQL twin of `normalizePhone()` over a phone column: a 10-digit or
+ * 1-prefixed 11-digit US number (after dropping a trailing extension) becomes
+ * E.164; anything else is kept as stored (trimmed). Lets a query match a
+ * contact stored as "(512) 555-0100" against Twilio's "+15125550100".
+ */
+export function phoneE164Sql(col: SQLWrapper): SQL {
+  const digits = sql`regexp_replace(regexp_replace(${col}, '\\s*(x|ext\\.?|extension)\\s*\\d+\\s*$', '', 'i'), '\\D', '', 'g')`;
+  return sql`(CASE
+    WHEN length(${digits}) = 10 THEN '+1' || ${digits}
+    WHEN length(${digits}) = 11 AND left(${digits}, 1) = '1' THEN '+' || ${digits}
+    ELSE btrim(${col}) END)`;
+}
+
+/**
+ * `col` holds the same number as `raw`, in either its stored or E.164 form.
+ * The first disjunct can use an index on `col`; the second is a scan, so keep
+ * this to low-volume paths (STOP/START keywords).
+ */
+export function phoneMatchesSql(col: SQLWrapper, raw: string): SQL {
+  const variants = phoneVariants(raw);
+  const list = sql.join(variants.map((v) => sql`${v}`), sql`, `);
+  return sql`(${col} IN (${list}) OR ${phoneE164Sql(col)} IN (${list}))`;
 }
 
 export function normalizePhone(raw: string): string | null {

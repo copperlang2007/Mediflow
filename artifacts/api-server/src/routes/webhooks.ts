@@ -27,6 +27,7 @@ import {
 } from "../lib/sms";
 import { broadcastToUser } from "../lib/sseManager";
 import { logger } from "../lib/logger";
+import { phoneMatchesSql } from "../lib/csvImport";
 
 const router: IRouter = Router();
 
@@ -91,16 +92,18 @@ router.post(
         // conflict target below tells Postgres to use it.
         await db.transaction(async (tx) => {
           // Set flag on contact record (idempotent on retries)
+          // phoneMatchesSql: a contact stored formatted ("(512) 555-0100")
+          // is the same number as Twilio's E.164 `From`.
           await tx
             .update(contactsTable)
             .set({ optOutSms: true })
-            .where(eq(contactsTable.phone, from));
+            .where(phoneMatchesSql(contactsTable.phone, from));
 
           // Record in opt_outs log (find orgId via contact)
           const [contact] = await tx
             .select({ orgId: contactsTable.orgId })
             .from(contactsTable)
-            .where(eq(contactsTable.phone, from))
+            .where(phoneMatchesSql(contactsTable.phone, from))
             .limit(1);
 
           if (contact) {
@@ -141,14 +144,21 @@ router.post(
         // START comes from the consumer's own phone, so it lifts the SMS block
         // everywhere it was recorded: the contact flag and the opt_outs rows
         // that sendSMS() and campaigns check. Each lifted row is audited.
+        //
+        // Deliberately NOT scoped to one org: every agency texts from the
+        // same shared Twilio number, so a STOP to it is enforced across all
+        // orgs (sendSMS(), campaign and reminder suppression match opt_outs
+        // by phone only). START to that same number is the symmetric
+        // re-subscribe. Matched on phone variants so a contact stored
+        // formatted ("(512) 555-0100") is re-subscribed too.
         await db.transaction(async (tx) => {
           await tx
             .update(contactsTable)
             .set({ optOutSms: false })
-            .where(eq(contactsTable.phone, from));
+            .where(phoneMatchesSql(contactsTable.phone, from));
           const lifted = await tx
             .delete(optOutsTable)
-            .where(and(eq(optOutsTable.phone, from), eq(optOutsTable.channel, "sms")))
+            .where(and(phoneMatchesSql(optOutsTable.phone, from), eq(optOutsTable.channel, "sms")))
             .returning({ orgId: optOutsTable.orgId, optedOutAt: optOutsTable.optedOutAt });
           for (const row of lifted) {
             await tx.insert(auditLogTable).values({

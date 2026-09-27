@@ -315,4 +315,37 @@ describe("Twilio inbound SMS — START lifts the opt-out", () => {
     const result = await sendSMS(phone, "hello", "agent-x");
     expect(result).not.toMatchObject({ error: "Recipient has opted out of SMS" });
   });
+
+  it("STOP/START from Twilio's E.164 From reach a contact stored formatted, across orgs", async () => {
+    const orgA = await seedOrg(db, { id: `org-${randomUUID().slice(0, 8)}` });
+    const orgB = await seedOrg(db, { id: `org-${randomUUID().slice(0, 8)}` });
+    const digits = `${Math.floor(Math.random() * 9000000 + 1000000)}`;
+    const e164 = `+1555${digits}`;
+    const formatted = `(555) ${digits.slice(0, 3)}-${digits.slice(3)}`;
+    const a = await seedContact(db, { orgId: orgA.id });
+    const b = await seedContact(db, { orgId: orgB.id });
+    await db.update(contactsTable).set({ phone: formatted }).where(eq(contactsTable.id, a.id));
+    await db.update(contactsTable).set({ phone: e164 }).where(eq(contactsTable.id, b.id));
+
+    expect((await postStop(e164)).status).toBe(200);
+    const [stoppedA] = await db.select().from(contactsTable).where(eq(contactsTable.id, a.id));
+    expect(stoppedA?.optOutSms).toBe(true);
+    // A STOP row recorded under the other org too (shared number).
+    await db.insert(optOutsTable).values({ id: randomUUID(), orgId: orgB.id, phone: e164, channel: "sms" }).onConflictDoNothing();
+
+    const res = await request(app)
+      .post("/webhooks/twilio/sms")
+      .type("form")
+      .set("x-twilio-signature", "dummy")
+      .send({ ...twilioStopPayload(e164), Body: "START" });
+    expect(res.status).toBe(200);
+
+    const [ca] = await db.select().from(contactsTable).where(eq(contactsTable.id, a.id));
+    const [cb] = await db.select().from(contactsTable).where(eq(contactsTable.id, b.id));
+    expect(ca?.optOutSms).toBe(false);
+    expect(cb?.optOutSms).toBe(false);
+    const left = await db.select().from(optOutsTable)
+      .where(and(eq(optOutsTable.phone, e164), eq(optOutsTable.channel, "sms")));
+    expect(left).toHaveLength(0);
+  });
 });

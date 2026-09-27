@@ -44,6 +44,7 @@ import { logger } from "../lib/logger";
 import { sendEmail, isEmailConfigured } from "../lib/email";
 import { sendSms, isConfigured as isSmsConfigured } from "../lib/sms";
 import { materializeRecipients } from "../lib/campaigns/audience";
+import { phoneVariants } from "../lib/csvImport";
 import {
   applyMergeFields,
   emailFooterHtml,
@@ -252,9 +253,15 @@ export async function campaignSendWorker(
     else if (channel === "email" && c.optOutEmail) skipReason = "Opted out before send";
     else if (channel === "sms" && c.optOutSms) skipReason = "Opted out before send";
     else {
+      // SMS: matched on phone across ALL orgs (no org_id predicate) on
+      // purpose — every agency sends from the same shared Twilio number, so a
+      // STOP to that number must stop every text from it. Mirrors sendSMS()
+      // in lib/sms.ts. phoneVariants() covers a contact stored formatted
+      // ("(512) 555-0100") vs the E.164 form Twilio records on STOP.
+      // Email suppression stays org-scoped.
       const optQ =
         channel === "sms"
-          ? and(eq(optOutsTable.channel, "sms"), eq(optOutsTable.phone, address))
+          ? and(eq(optOutsTable.channel, "sms"), inArray(optOutsTable.phone, phoneVariants(address)))
           : and(
               eq(optOutsTable.orgId, campaign.orgId),
               eq(optOutsTable.channel, "email"),

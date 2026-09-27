@@ -22,7 +22,7 @@
  * Content is deliberately PHI-free: no notes, no plan or health details —
  * just who, when and where.
  */
-import { and, eq, gt, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import {
   db,
   agentsTable,
@@ -35,6 +35,7 @@ import {
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { isWithinCallingHours, resolveTimezone } from "../lib/dialer/preclearance";
 import { logger } from "../lib/logger";
+import { phoneVariants } from "../lib/csvImport";
 
 export const REMINDER_LEAD_MS = 24 * 60 * 60 * 1000;
 /** Inside this window a deferred SMS would arrive too late — send email only. */
@@ -145,22 +146,38 @@ export async function appointmentRemindersWorker(
   for (const r of rows) {
     summary.considered += 1;
 
-    // STOP list: a keyword reply lands in opt_outs even when the contact row
-    // was never updated (e.g. the number is on another record).
+    // Suppression lists, checked before the claim so an opted-out channel is
+    // never counted as "sent".
+    //  - SMS: the STOP list is matched on phone across ALL orgs (no org_id
+    //    predicate) on purpose — every agency sends from the same shared
+    //    Twilio number, so a STOP to that number must stop every text from it
+    //    (mirrors sendSMS() in lib/sms.ts). phoneVariants() covers a contact
+    //    stored formatted vs the E.164 form Twilio records on STOP.
+    //  - Email: the org's own suppression list (contact.optOutEmail is
+    //    checked separately below).
     let stopListedSms = false;
     let stopListedEmail = false;
-    if (r.phone || r.email) {
-      const conds = [];
-      if (r.phone) conds.push(eq(optOutsTable.phone, r.phone));
-      if (r.email) conds.push(eq(optOutsTable.email, r.email));
-      const hits = await db
-        .select({ phone: optOutsTable.phone, email: optOutsTable.email, channel: optOutsTable.channel })
+    if (r.phone) {
+      const [hit] = await db
+        .select({ id: optOutsTable.id })
         .from(optOutsTable)
-        .where(or(...conds));
-      for (const h of hits) {
-        if (r.phone && h.phone === r.phone) stopListedSms = true;
-        if (r.email && h.email === r.email && h.channel === "email") stopListedEmail = true;
-      }
+        .where(and(eq(optOutsTable.channel, "sms"), inArray(optOutsTable.phone, phoneVariants(r.phone))))
+        .limit(1);
+      stopListedSms = Boolean(hit);
+    }
+    if (r.email && !r.optOutEmail) {
+      const [hit] = await db
+        .select({ id: optOutsTable.id })
+        .from(optOutsTable)
+        .where(
+          and(
+            eq(optOutsTable.orgId, r.orgId),
+            eq(optOutsTable.channel, "email"),
+            sql`lower(${optOutsTable.email}) = lower(${r.email})`,
+          ),
+        )
+        .limit(1);
+      stopListedEmail = Boolean(hit);
     }
 
     const tz = resolveTimezone(r.stateCode ?? undefined, undefined);
@@ -208,33 +225,60 @@ export async function appointmentRemindersWorker(
     const where = LOCATION_LABEL[r.locationType] ?? "";
     const link = r.locationType === "video" && r.meetingUrl ? ` Join: ${r.meetingUrl}` : "";
 
-    if (sendSms) {
-      await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, {
-        to: r.phone!,
-        body: `${brand}: reminder of your appointment${withWhom} on ${when} ${where}.${link} Reply STOP to opt out.`,
-      });
-      summary.smsQueued += 1;
-    }
-    if (sendEmail) {
-      const detail =
-        r.locationType === "video" && r.meetingUrl
-          ? `<p>Join link: <a href="${escapeHtml(r.meetingUrl)}">${escapeHtml(r.meetingUrl)}</a></p>`
-          : r.locationDetail
-            ? `<p>Where: ${escapeHtml(r.locationDetail)}</p>`
-            : "";
-      await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
-        to: r.email!,
-        subject: `Reminder: your appointment on ${when}`,
-        html:
-          `<p>Hi ${escapeHtml(r.contactFirstName)},</p>` +
-          `<p>This is a reminder of your appointment${escapeHtml(withWhom)} on <strong>${escapeHtml(when)}</strong> ${escapeHtml(where)}.</p>` +
-          detail +
-          `<p>If you need to reschedule, just reply to this email.</p>` +
-          `<p>— ${escapeHtml(brand)}</p>`,
-        tags: { type: "appointment_reminder" },
-        ...(r.emailFromName ? { fromName: r.emailFromName } : {}),
-      });
-      summary.emailQueued += 1;
+    // The claim was taken before enqueueing. If an enqueue throws, release it
+    // (only the claim this sweep made — matched on the exact timestamp we
+    // wrote) so the next sweep retries. If one channel was already queued the
+    // claim is kept: re-running would send that channel twice.
+    let enqueued = 0;
+    try {
+      if (sendSms) {
+        await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, {
+          to: r.phone!,
+          body: `${brand}: reminder of your appointment${withWhom} on ${when} ${where}.${link} Reply STOP to opt out.`,
+        });
+        summary.smsQueued += 1;
+        enqueued += 1;
+      }
+      if (sendEmail) {
+        const detail =
+          r.locationType === "video" && r.meetingUrl
+            ? `<p>Join link: <a href="${escapeHtml(r.meetingUrl)}">${escapeHtml(r.meetingUrl)}</a></p>`
+            : r.locationDetail
+              ? `<p>Where: ${escapeHtml(r.locationDetail)}</p>`
+              : "";
+        await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
+          to: r.email!,
+          subject: `Reminder: your appointment on ${when}`,
+          html:
+            `<p>Hi ${escapeHtml(r.contactFirstName)},</p>` +
+            `<p>This is a reminder of your appointment${escapeHtml(withWhom)} on <strong>${escapeHtml(when)}</strong> ${escapeHtml(where)}.</p>` +
+            detail +
+            `<p>If you need to reschedule, just reply to this email.</p>` +
+            `<p>— ${escapeHtml(brand)}</p>`,
+          tags: { type: "appointment_reminder" },
+          ...(r.emailFromName ? { fromName: r.emailFromName } : {}),
+        });
+        summary.emailQueued += 1;
+        enqueued += 1;
+      }
+    } catch (err) {
+      if (enqueued === 0) {
+        await db
+          .update(appointmentsTable)
+          .set({ reminderSentAt: null })
+          .where(
+            and(
+              eq(appointmentsTable.id, r.id),
+              eq(appointmentsTable.orgId, r.orgId),
+              eq(appointmentsTable.reminderSentAt, now),
+            ),
+          );
+      }
+      logger.error(
+        { err, appointmentId: r.id, orgId: r.orgId, released: enqueued === 0 },
+        "Appointment reminder enqueue failed",
+      );
+      continue;
     }
     summary.sent += 1;
   }
