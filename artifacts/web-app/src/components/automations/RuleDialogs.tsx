@@ -40,7 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { StatusPill } from "@/components/shared";
+import { AgentPicker, PipelineStagePicker, SequencePicker, StatusPill, UserPicker } from "@/components/shared";
 import { ACTIONS, TRIGGERS, TRIGGER_BY_VALUE, ruleSentence } from "./workflowCopy";
 
 const CONDITION_FIELDS = [
@@ -81,7 +81,19 @@ function ActionConfigEditor({ action, onChange }: { action: AutomationAction; on
 
   switch (action.type) {
     case "create_task":
-      return <div className="mt-2 space-y-2">{field("title", "Task title")}{field("agentId", "Assign to agent ID (optional)")}{field("dueDate", "Due date (optional)", "date")}</div>;
+      return (
+        <div className="mt-2 space-y-2">
+          {field("title", "Task title")}
+          <AgentPicker
+            aria-label="Assign to agent"
+            value={(action.config.agentId as string) ?? ""}
+            onChange={(v) => update("agentId", v)}
+            noneLabel="The client's or record's own agent"
+            placeholder="Assign to agent (optional)"
+          />
+          {field("dueDate", "Due date (optional)", "date")}
+        </div>
+      );
     case "send_email":
       return <div className="mt-2 space-y-2">{field("to", "To email")}{field("subject", "Subject")}{field("html", "Message")}</div>;
     case "send_sms":
@@ -100,9 +112,23 @@ function ActionConfigEditor({ action, onChange }: { action: AutomationAction; on
         </div>
       );
     case "enroll_sequence":
-      return <div className="mt-2">{field("sequenceId", "Sequence ID")}</div>;
+      return (
+        <SequencePicker
+          className="mt-2"
+          aria-label="Sequence"
+          value={(action.config.sequenceId as string) ?? ""}
+          onChange={(v) => update("sequenceId", v)}
+        />
+      );
     case "change_deal_stage":
-      return <div className="mt-2">{field("stageId", "Pipeline stage ID")}</div>;
+      return (
+        <PipelineStagePicker
+          className="mt-2"
+          aria-label="Pipeline stage"
+          value={(action.config.stageId as string) ?? ""}
+          onChange={(v) => update("stageId", v)}
+        />
+      );
     case "create_appointment":
       return (
         <div className="mt-2 space-y-2">
@@ -124,7 +150,17 @@ function ActionConfigEditor({ action, onChange }: { action: AutomationAction; on
         </div>
       );
     case "send_notification":
-      return <div className="mt-2 space-y-2">{field("message", "Alert message")}{field("userId", "User ID (blank = all admins)")}</div>;
+      return (
+        <div className="mt-2 space-y-2">
+          {field("message", "Alert message")}
+          <UserPicker
+            aria-label="Who gets the alert"
+            value={(action.config.userId as string) ?? ""}
+            onChange={(v) => update("userId", v)}
+            noneLabel="All admins"
+          />
+        </div>
+      );
     default:
       return null;
   }

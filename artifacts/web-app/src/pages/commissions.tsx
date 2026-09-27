@@ -53,9 +53,10 @@ import {
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState, type StatusTone } from "@/components/shared";
+import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState, AgentPicker, type StatusTone } from "@/components/shared";
 import { PageShell, KpiGrid, TableFrame, FilterBar } from "@/components/ops";
 import { CheckCircle2, Wallet, Clock, Users, Network, FileSpreadsheet } from "lucide-react";
+import { useProductName } from "@/lib/branding/BrandingProvider";
 
 // ---------------------------------------------------------------------------
 // Types — local mirror of #39's response shapes (until codegen reruns).
@@ -94,7 +95,7 @@ type CommissionSchedule = {
 };
 
 const SCHEDULE_PLAN_TYPES: { value: string; label: string }[] = [
-  { value: "MAPD", label: "Medicare Advantage + drug (MAPD)" },
+  { value: "MAPD", label: "MA + drug (MAPD)" },
   { value: "MA", label: "Medicare Advantage (MA)" },
   { value: "PDP", label: "Drug plan (PDP)" },
   { value: "supp", label: "Medicare Supplement" },
@@ -418,6 +419,7 @@ function PaginationBar({
 // ---------------------------------------------------------------------------
 
 function StatementsTab({ onUpload }: { onUpload: () => void }) {
+  const productName = useProductName();
   const [, navigate] = useLocation();
   const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -488,7 +490,7 @@ function StatementsTab({ onUpload }: { onUpload: () => void }) {
           title={statusFilter === "all" ? "No statements yet" : "No statements with this status"}
           description={
             statusFilter === "all"
-              ? "Upload a carrier commission statement and Mediflow will read it, match each line to a client and agent, and work out payouts."
+              ? `Upload a carrier commission statement and ${productName} will read it, match each line to a client and agent, and work out payouts.`
               : "Try another status, or show all statements."
           }
           action={statusFilter === "all" ? { label: "Upload statement", onClick: onUpload } : { label: "Show all", onClick: () => setStatusFilter("all") }}
@@ -574,6 +576,7 @@ function StatementsTab({ onUpload }: { onUpload: () => void }) {
 // ---------------------------------------------------------------------------
 
 function SchedulesTab() {
+  const productName = useProductName();
   const qc = useQueryClient();
   const { data: carriers } = useGetCarriers();
   const [yearFilter, setYearFilter] = useState<string>(String(new Date().getFullYear()));
@@ -663,7 +666,7 @@ function SchedulesTab() {
         <EmptyState
           icon={DollarSign}
           title="No rate cards for this filter"
-          description="Add a carrier's rate card so Mediflow knows what to expect each month and can flag a payment that never arrives."
+          description={`Add a carrier's rate card so ${productName} knows what to expect each month and can flag a payment that never arrives.`}
           action={{ label: "New schedule", onClick: () => setAddOpen(true) }}
         />
       ) : (
@@ -823,11 +826,13 @@ function HierarchiesTab() {
       icon={Network}
     >
       <FilterBar>
-        <Input
-          placeholder="Filter by agent ID"
-          className="w-64 h-9"
+        <AgentPicker
+          aria-label="Filter by agent"
+          className="w-full sm:w-64"
+          triggerClassName="h-9 text-sm"
           value={agentFilter}
-          onChange={(e) => { setAgentFilter(e.target.value); setPage(1); }}
+          onChange={(v) => { setAgentFilter(v); setPage(1); }}
+          noneLabel="All agents"
         />
         <div className="flex-1" />
         <Button size="sm" onClick={() => setAddOpen(true)}>
@@ -884,12 +889,24 @@ function HierarchiesTab() {
           <DialogHeader><DialogTitle>New commission hierarchy</DialogTitle></DialogHeader>
           <form onSubmit={(e) => { e.preventDefault(); create.mutate(); }} className="space-y-3">
             <div className="space-y-1.5">
-              <Label>Writing agent ID *</Label>
-              <Input value={form.writingAgentId} onChange={(e) => setForm((p) => ({ ...p, writingAgentId: e.target.value }))} required />
+              <Label>Writing agent *</Label>
+              <AgentPicker
+                aria-label="Writing agent"
+                triggerClassName="h-9 text-sm"
+                value={form.writingAgentId}
+                onChange={(v) => setForm((p) => ({ ...p, writingAgentId: v }))}
+                placeholder="Who wrote the business"
+              />
             </div>
             <div className="space-y-1.5">
-              <Label>Upline agent ID *</Label>
-              <Input value={form.uplineAgentId} onChange={(e) => setForm((p) => ({ ...p, uplineAgentId: e.target.value }))} required />
+              <Label>Upline agent *</Label>
+              <AgentPicker
+                aria-label="Upline agent"
+                triggerClassName="h-9 text-sm"
+                value={form.uplineAgentId}
+                onChange={(v) => setForm((p) => ({ ...p, uplineAgentId: v }))}
+                placeholder="Who earns the override"
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Split % *</Label>
