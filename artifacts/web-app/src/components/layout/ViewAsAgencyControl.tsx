@@ -18,7 +18,7 @@ export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
   useEffect(() => {
     if (!enabled) return;
     void apiFetch<{ agencies: Agency[] }>("/api/admin/agencies")
-      .then((result) => { setAgencies(result.agencies); setError(null); })
+      .then((result) => { setAgencies(result.agencies); setError(null); setMfaRequired(false); })
       .catch((cause: { status?: number; data?: { error?: string } }) => {
         setAgencies([]);
         const needsMfa = cause.status === 403 && cause.data?.error === "mfa_required";
