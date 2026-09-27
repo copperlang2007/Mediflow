@@ -32,6 +32,8 @@ import { and, eq } from "drizzle-orm";
 import {
   agentCommissionPayoutsTable,
   auditLogTable,
+  carriersTable,
+  commissionStatementsTable,
   missedPaymentAlertsTable,
 } from "@workspace/db/schema";
 import { bootTestDb, shutdownTestDb, withAuth } from "../helpers/testApp";
@@ -205,6 +207,32 @@ describe("POST /api/commissions/missed-payments/:id/resolve", () => {
       .set(withAuth(admin.id))
       .send({ note: "x".repeat(2001) });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /api/commissions/statements", () => {
+  it("includes the carrier name for each statement, org-scoped", async () => {
+    const carrierId = `carrier-${randomUUID()}`;
+    await testDb.insert(carriersTable).values({ id: carrierId, orgId: org.id, name: "Wellcare", isActive: true });
+    const stmtId = `stmt-${randomUUID()}`;
+    await testDb.insert(commissionStatementsTable).values({
+      id: stmtId,
+      orgId: org.id,
+      carrierId,
+      statementDate: "2025-04-15",
+      periodStart: "2025-04-01",
+      periodEnd: "2025-04-30",
+      totalAmount: "10.00",
+      currency: "USD",
+      source: "csv_upload",
+      status: "parsed",
+    });
+    const res = await request(app).get("/api/commissions/statements").set(withAuth(admin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.find((s: { id: string }) => s.id === stmtId)?.carrierName).toBe("Wellcare");
+
+    const other = await request(app).get("/api/commissions/statements").set(withAuth(otherAdmin.id));
+    expect(other.body.some((s: { id: string }) => s.id === stmtId)).toBe(false);
   });
 });
 
