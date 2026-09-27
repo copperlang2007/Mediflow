@@ -192,6 +192,7 @@ describe("EnrollHere policy events", () => {
     noMbi.policy.manualStatus = "POL_CANCELLED";
     noMbi.policy.enrollment.consumer.medicare = {};
     noMbi.policy.enrollment.medicareInfo.number = "";
+    noMbi.policy.lead.medicare = {};
     const res = await post(noMbi);
     expect(res.body).toMatchObject({ applicationId, applicationVersion: 3 });
     const [a] = await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, applicationId));
@@ -204,6 +205,27 @@ describe("EnrollHere policy events", () => {
     expect(v1.body).toMatchObject({ version: 1, medicareId: "1EG4TE5MK72" });
   });
 
+  it("re-keys a code-less application when the Sunfire code arrives, keeping one history", async () => {
+    const first = sample();
+    first.policy.id = "policy-late-code";
+    delete first.policy.enrollment.identifiers.bySource.sunfire;
+    delete first.policy.identifiers.bySource.sunfire;
+    const created = await post(first);
+    expect(created.status).toBe(200);
+
+    const later = sample();
+    later.event = "PE_POLICY_UPDATED";
+    later.policy.id = "policy-late-code";
+    later.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF99990000"];
+    delete later.policy.identifiers.bySource.sunfire;
+    const res = await post(later);
+    expect(res.body).toMatchObject({ applicationId: created.body.applicationId, applicationVersion: 2 });
+    const [a] = await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, created.body.applicationId));
+    expect(a).toMatchObject({ applicationKey: "SF99990000", confirmationCode: "SF99990000", currentVersion: 2 });
+    expect(await tdb.select().from(enrollmentApplicationsTable)
+      .where(eq(enrollmentApplicationsTable.externalPolicyId, "policy-late-code"))).toHaveLength(1);
+  });
+
   it("a deleted contact's application can't be opened, and a purge removes it", async () => {
     await tdb.update(contactsTable).set({ deletedAt: new Date() }).where(eq(contactsTable.id, contactId));
     const res = await request(app).get(`/api/applications/${applicationId}/full`).set(withAuth(admin.id));
@@ -213,5 +235,35 @@ describe("EnrollHere policy events", () => {
     await tdb.delete(contactsTable).where(eq(contactsTable.id, contactId));
     expect(await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, applicationId))).toHaveLength(0);
     expect(await tdb.select().from(enrollmentApplicationVersionsTable).where(eq(enrollmentApplicationVersionsTable.applicationId, applicationId))).toHaveLength(0);
+  });
+});
+
+describe("policy event parsing", () => {
+  it("never counts a negative status as active coverage", async () => {
+    const { mapPolicyStatus } = await import("../../lib/integrations/enrollhere/policyEvent");
+    for (const s of ["POL_INACTIVE", "POL_NOT_INFORCE", "NON_EFFECTUATED", "POL_NOT_ACTIVE"]) {
+      expect(mapPolicyStatus(s)).toEqual({ status: "pending", effectuated: false });
+    }
+    expect(mapPolicyStatus("POL_INFORCE")).toEqual({ status: "active", effectuated: true });
+    expect(mapPolicyStatus("POL_IN_FORCE")).toEqual({ status: "active", effectuated: true });
+  });
+
+  it("treats an impossible calendar date as absent", async () => {
+    const { policyDate } = await import("../../lib/integrations/enrollhere/policyEvent");
+    expect(policyDate({ date: "2026-02-30T12:00:00.000Z" })).toBeNull();
+    expect(policyDate({ date: "2026-99-01" })).toBeNull();
+    expect(policyDate({ date: "2026-01-01T12:00:00.000Z" })).toBe("2026-01-01");
+  });
+
+  it("fills missing person fields from the lead when the consumer is empty or partial", async () => {
+    const { parsePolicyEvent } = await import("../../lib/integrations/enrollhere/policyEvent");
+    const body = sample();
+    const consumer = body.policy.enrollment.consumer;
+    body.policy.lead = { ...consumer, email: "lead@example.com" };
+    body.policy.enrollment.consumer = { firstName: "Casey" };
+    const p = parsePolicyEvent(body);
+    expect(p.contactFlat).toMatchObject({ first_name: "Casey", last_name: "Johnson", email: "lead@example.com", dob: "1955-04-12", city: "Beverly Hills" });
+    body.policy.enrollment.consumer = {};
+    expect(parsePolicyEvent(body).contactFlat.first_name).toBe("Alex");
   });
 });

@@ -94,9 +94,21 @@ export async function storeApplication(
   const applicationKey = p.confirmationCode ?? (p.policyId ? `policy:${p.policyId}` : null);
   if (!applicationKey) return null;
 
-  // Serialize writers for one application so two deliveries can't both take
-  // version N+1.
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`enrollment-app:${orgId}:${applicationKey}`}, 0))`);
+  // Serialize writers for one policy so two deliveries can't both take
+  // version N+1. Locked on the policy id when there is one, so a delivery that
+  // first carries the confirmation code still serializes with earlier ones.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`enrollment-app:${orgId}:${p.policyId ?? applicationKey}`}, 0))`);
+
+  // The policy was first stored without a Sunfire code: re-key that record so
+  // its history continues on one application instead of splitting in two.
+  if (p.confirmationCode && p.policyId) {
+    await tx.execute(sql`
+      UPDATE enrollment_applications SET application_key = ${p.confirmationCode}
+      WHERE org_id = ${orgId} AND source = ${APPLICATION_SOURCE} AND application_key = ${`policy:${p.policyId}`}
+        AND NOT EXISTS (
+          SELECT 1 FROM enrollment_applications
+          WHERE org_id = ${orgId} AND source = ${APPLICATION_SOURCE} AND application_key = ${p.confirmationCode})`);
+  }
 
   const mbi = p.medicareNumber ? encryptMedicareId(p.medicareNumber) : null;
   const medicaid = p.medicaidNumber ? encryptPii(p.medicaidNumber).encrypted : null;

@@ -21,6 +21,7 @@ import {
   enrollmentApplicationVersionsTable,
   decryptPii,
 } from "@workspace/db";
+import { requireMfa } from "../middlewares/requireMfa";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { PHI_PRIVILEGED_ROLES } from "../lib/permissions";
 import { isPolicyEvent, parsePolicyEvent } from "../lib/integrations/enrollhere/policyEvent";
@@ -68,6 +69,8 @@ router.get(
 router.get(
   "/applications/:id/full",
   requireAuth,
+  // Privileged roles must have a second factor to decrypt a full application.
+  requireMfa,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     if (!PHI_PRIVILEGED_ROLES.has(authReq.userRole)) {

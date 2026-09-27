@@ -35,8 +35,10 @@ const at = (o: unknown, ...path: string[]): unknown => {
 export function policyDate(v: unknown): string | null {
   const raw = isObj(v) ? str(v.date) : str(v);
   if (!raw) return null;
+  // Both paths validate the calendar date: an impossible value (2026-02-30)
+  // is treated as absent rather than failing the whole event in Postgres.
   const iso = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  return iso ? iso[1]! : parseFlexibleDate(raw, "past");
+  return parseFlexibleDate(iso ? iso[1]! : raw, "past");
 }
 
 function policyInstant(v: unknown): Date | null {
@@ -55,6 +57,9 @@ export type EnrollmentStatus = "pending" | "active" | "terminated" | "cancelled"
 /** EnrollHere policy status (`POL_INFORCE`, `POL_SUBMITTED`, …) → our enrollment status. */
 export function mapPolicyStatus(raw: string | null): { status: EnrollmentStatus; effectuated: boolean } {
   const s = (raw ?? "").toUpperCase();
+  // Negative forms (POL_INACTIVE, POL_NOT_INFORCE, NON_EFFECTUATED) contain the
+  // positive words; never let them count as active coverage.
+  if (/(^|_)(NOT|NON|IN)_?(ACTIVE|INFORCE|IN_FORCE|EFFECTUATED)/.test(s)) return { status: "pending", effectuated: false };
   if (/INFORCE|IN_FORCE|ACTIVE|EFFECTUATED/.test(s)) return { status: "active", effectuated: true };
   if (/CANCEL|WITHDRAW|RESCIND/.test(s)) return { status: "cancelled", effectuated: false };
   if (/TERMINAT|DISENROLL|LAPSE/.test(s)) return { status: "terminated", effectuated: false };
@@ -96,8 +101,16 @@ function firstId(o: unknown, ...path: string[]): string | null {
 export function parsePolicyEvent(body: Obj): ParsedPolicyEvent {
   const policy = body.policy as Obj;
   const enrollment = isObj(policy.enrollment) ? policy.enrollment : {};
-  const person = isObj(enrollment.consumer) ? enrollment.consumer : isObj(policy.lead) ? policy.lead : {};
-  const address = isObj(person.address) ? person.address : {};
+  // The consumer is preferred, field by field, with the lead filling anything
+  // the consumer lacks (it can arrive empty or partial).
+  const people = [enrollment.consumer, policy.lead].filter(isObj);
+  const fromPerson = (...path: string[]): unknown => {
+    for (const person of people) {
+      const v = at(person, ...path);
+      if (str(v) !== null || (isObj(v) && str(v.date) !== null)) return v;
+    }
+    return undefined;
+  };
   const plan = isObj(enrollment.plan) ? enrollment.plan : {};
   const details = isObj(enrollment.details) ? enrollment.details : {};
   const agent = isObj(policy.agent) ? policy.agent : isObj(enrollment.agent) ? enrollment.agent : {};
@@ -107,23 +120,23 @@ export function parsePolicyEvent(body: Obj): ParsedPolicyEvent {
   const policyNumber = firstId(policy, "identifiers", "bySource", "policyId", "ids")
     ?? firstId(enrollment, "identifiers", "bySource", "policyId", "ids");
 
-  const medicareRaw = str(at(person, "medicare", "number")) ?? str(at(enrollment, "medicareInfo", "number"));
+  const medicareRaw = str(fromPerson("medicare", "number")) ?? str(at(enrollment, "medicareInfo", "number"));
   const medicareNumber = medicareRaw ? canonicalMbi(medicareRaw) : null;
   const medicaidNumber = str(at(enrollment, "medicaidInfo", "number")) ?? str(at(enrollment, "medicaidInfo", "id"))
-    ?? str(at(person, "medicaid", "number"));
+    ?? str(fromPerson("medicaid", "number"));
 
   const contactFlat: Record<string, string> = {};
   const put = (k: string, v: string | null) => { if (v) contactFlat[k] = v; };
-  put("first_name", str(person.firstName));
-  put("last_name", str(person.lastName));
-  put("email", str(person.email));
-  put("phone", str(person.phone));
-  put("address1", str(address.line1));
-  put("city", str(address.city));
-  put("state", str(address.state));
-  put("zip", str(address.zip));
-  put("county", str(address.county));
-  put("dob", policyDate(person.birthDate));
+  put("first_name", str(fromPerson("firstName")));
+  put("last_name", str(fromPerson("lastName")));
+  put("email", str(fromPerson("email")));
+  put("phone", str(fromPerson("phone")));
+  put("address1", str(fromPerson("address", "line1")));
+  put("city", str(fromPerson("address", "city")));
+  put("state", str(fromPerson("address", "state")));
+  put("zip", str(fromPerson("address", "zip")));
+  put("county", str(fromPerson("address", "county")));
+  put("dob", policyDate(fromPerson("birthDate")));
   if (medicareNumber) put("medicare_id", medicareNumber);
   put("assigned_agent_email", str(agent.email));
 
