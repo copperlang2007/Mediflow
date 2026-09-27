@@ -229,6 +229,16 @@ describe("PATCH /onboarding/:agentId/profile", () => {
     expect(decryptSsn(buf)).toBe("987654321");
   });
 
+  it("keeps DOB unchanged when a PATCH omits it (the wizard never re-sends it)", async () => {
+    const res = await request(app)
+      .patch(`/api/onboarding/${agent.id}/profile`)
+      .set(withAuth(admin.id))
+      .send({ homeCity: "Orlando" });
+    expect(res.status).toBe(200);
+    expect(res.body.profile.homeCity).toBe("Orlando");
+    expect(res.body.profile.dob).toBe("1972-03-15");
+  });
+
   it("masks SSN/DOB in API response for non-privileged role", async () => {
     const res = await request(app)
       .get(`/api/onboarding/${agent.id}`)

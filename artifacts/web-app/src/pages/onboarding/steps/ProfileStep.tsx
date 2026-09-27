@@ -19,6 +19,7 @@ import {
   usePatchOnboardingProfile,
 } from "@/lib/onboarding/api";
 import { US_STATES } from "@/lib/onboarding/states";
+import { SensitiveValue } from "@/components/shared";
 
 /**
  * Client-side validation. Mirrors `ProfilePatchSchema` in routes/onboarding.ts.
@@ -64,15 +65,16 @@ export const __ProfileFormSchema = ProfileFormSchema;
 
 type FormState = z.infer<typeof ProfileFormSchema>;
 
-function profileToForm(p: AgentContractingProfile | null): FormState {
+// Exported for unit tests.
+export function profileToForm(p: AgentContractingProfile | null): FormState {
   return {
-    // SSN/EIN are NEVER pre-populated — not the masked sentinel (which the
+    // SSN/EIN/DOB are NEVER pre-populated — not the masked sentinel (which the
     // user might accidentally submit) and not the plaintext privileged roles
-    // receive (which would sit in a visible input). The placeholder says
-    // "On file — leave blank to keep"; SSN/EIN must not be re-rendered after
-    // submission.
+    // receive (which would sit in a visible input). SSN/EIN say "On file —
+    // leave blank to keep"; DOB shows the masked value with a "Change" action
+    // that opens an empty input. None is re-rendered after submission.
     ssn: "",
-    dob: p?.dob ?? "",
+    dob: "",
     homeAddressLine1: p?.homeAddressLine1 ?? "",
     homeAddressLine2: p?.homeAddressLine2 ?? "",
     homeCity: p?.homeCity ?? "",
@@ -106,7 +108,8 @@ export function formToPatch(form: FormState, existing: AgentContractingProfile |
   if (form.businessEin && form.businessEin !== existing?.ein) {
     patch.businessEin = form.businessEin;
   }
-  if (form.dob) patch.dob = form.dob;
+  // Blank = unchanged: the PATCH treats an omitted dob as "keep".
+  if (form.dob && form.dob !== existing?.dob) patch.dob = form.dob;
   if (form.homeAddressLine1) patch.homeAddressLine1 = form.homeAddressLine1;
   if (form.homeAddressLine2) patch.homeAddressLine2 = form.homeAddressLine2;
   if (form.homeCity) patch.homeCity = form.homeCity;
@@ -191,6 +194,8 @@ export function ProfileStep({
 
   const ssnIsOnFile = profile?.ssn != null;
   const einIsOnFile = profile?.ein != null;
+  const dobOnFile = profile?.dob ?? null;
+  const [changingDob, setChangingDob] = useState(false);
 
   return (
     <Card data-testid="profile-step">
@@ -216,12 +221,27 @@ export function ProfileStep({
               />
             </Field>
             <Field label="Date of birth" error={errors.dob}>
-              <Input
-                type="date"
-                value={form.dob}
-                onChange={(e) => set("dob", e.target.value)}
-                data-testid="input-dob"
-              />
+              {dobOnFile && !changingDob ? (
+                <div className="flex h-9 items-center gap-2">
+                  <SensitiveValue kind="dob" label="date of birth" value={dobOnFile} className="text-sm" />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setChangingDob(true)}
+                    data-testid="change-dob"
+                  >
+                    Change
+                  </Button>
+                </div>
+              ) : (
+                <Input
+                  type="date"
+                  value={form.dob}
+                  onChange={(e) => set("dob", e.target.value)}
+                  data-testid="input-dob"
+                />
+              )}
             </Field>
           </div>
         </section>

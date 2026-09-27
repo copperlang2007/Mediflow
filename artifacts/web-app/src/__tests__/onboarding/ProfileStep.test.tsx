@@ -9,14 +9,54 @@
  * before it ever leaves the browser, and formToPatch decides what we PATCH
  * to the server (the masking rules around SSN/EIN in particular).
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import {
   __ProfileFormSchema,
   formToPatch,
+  profileToForm,
+  ProfileStep,
 } from "@/pages/onboarding/steps/ProfileStep";
 import type { AgentContractingProfile } from "@/lib/onboarding/api";
 
+vi.mock("@/lib/onboarding/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/onboarding/api")>();
+  return {
+    ...actual,
+    usePatchOnboardingProfile: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  };
+});
+
 type FormState = ReturnType<typeof __ProfileFormSchema.parse>;
+
+function profileWith(over: Partial<AgentContractingProfile>): AgentContractingProfile {
+  return {
+    orgId: "o",
+    agentId: "a",
+    ssn: null,
+    ein: null,
+    dob: null,
+    homeAddressLine1: null,
+    homeAddressLine2: null,
+    homeCity: null,
+    homeState: null,
+    homeZip: null,
+    mailingSameAsHome: null,
+    mailingAddressLine1: null,
+    mailingAddressLine2: null,
+    mailingCity: null,
+    mailingState: null,
+    mailingZip: null,
+    phone: null,
+    email: null,
+    entityType: null,
+    businessName: null,
+    eAndOCarrier: null,
+    eAndOPolicyNumber: null,
+    eAndOExpiresOn: null,
+    ...over,
+  };
+}
 
 function blankForm(): FormState {
   return {
@@ -175,5 +215,37 @@ describe("formToPatch", () => {
     expect(patch.eAndOCarrier).toBe("Acme Insurance");
     expect(patch.eAndOPolicyNumber).toBe("POL-9");
     expect(patch.eAndOExpiresOn).toBe("2027-12-31");
+  });
+});
+
+describe("DOB is treated like SSN/EIN", () => {
+  it("is never pre-filled into the form from the profile", () => {
+    expect(profileToForm(profileWith({ dob: "1985-11-04" })).dob).toBe("");
+  });
+
+  it("is omitted from the PATCH (unchanged) unless a new one is entered", () => {
+    const existing = profileWith({ dob: "1985-11-04" });
+    expect(formToPatch(blankForm(), existing).dob).toBeUndefined();
+    expect(formToPatch({ ...blankForm(), dob: "1985-11-04" }, existing).dob).toBeUndefined();
+    expect(formToPatch({ ...blankForm(), dob: "1986-01-02" }, existing).dob).toBe("1986-01-02");
+  });
+
+  it("renders a masked DOB with a Change action that opens an empty input", () => {
+    render(
+      <ProfileStep agentId="a" profile={profileWith({ dob: "1985-11-04" })} onContinue={() => undefined} />,
+    );
+    expect(screen.queryByTestId("input-dob")).toBeNull();
+    expect(screen.getByTestId("sensitive-dob").textContent).toBe("1985-••-••");
+    expect(document.body.innerHTML).not.toContain("1985-11-04");
+
+    fireEvent.click(screen.getByTestId("change-dob"));
+    const input = screen.getByTestId("input-dob") as HTMLInputElement;
+    expect(input.value).toBe("");
+  });
+
+  it("shows the date input directly when no DOB is on file", () => {
+    render(<ProfileStep agentId="a" profile={profileWith({})} onContinue={() => undefined} />);
+    expect(screen.getByTestId("input-dob")).toBeTruthy();
+    expect(screen.queryByTestId("change-dob")).toBeNull();
   });
 });
