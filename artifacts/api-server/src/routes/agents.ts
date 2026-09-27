@@ -18,7 +18,6 @@ import {
 } from "../middlewares/requireAuth";
 import { enforceCapacity } from "../middlewares/requirePlan";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
-
 import { randomUUID } from "crypto";
 import { createChecklistRun } from "./checklists";
 import { safeLimit, safeOffset } from "../lib/listGuards";
@@ -81,7 +80,6 @@ const router: IRouter = Router();
 
 router.use(
   routerAuditMiddleware(router, "agent", undefined, {
-
     includeReads: true,
     getResourceId: (req) => {
       const raw = req.params.id;

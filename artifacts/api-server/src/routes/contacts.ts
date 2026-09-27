@@ -27,7 +27,6 @@ import {
 } from "../middlewares/requireAuth";
 import { enforceCapacity } from "../middlewares/requirePlan";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
-
 import { logExport } from "./reports/shared";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
@@ -59,7 +58,6 @@ const ContactStatusSchema = z.enum(contactStatusEnum.enumValues);
 
 router.use(
   routerAuditMiddleware(router, "contact", undefined, {
-
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.id;

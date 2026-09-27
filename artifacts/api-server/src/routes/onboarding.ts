@@ -63,7 +63,6 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { auditMiddleware, routerAuditMiddleware } from "../middlewares/auditMiddleware";
-
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import { PHI_PRIVILEGED_ROLES, type Role } from "../lib/permissions";
 import {
@@ -89,7 +88,6 @@ const router: IRouter = Router();
 
 router.use(
   routerAuditMiddleware(router, "agent_onboarding", undefined, {
-
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.agentId;

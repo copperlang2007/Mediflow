@@ -15,14 +15,12 @@ import {
 import { sellingPlanYear } from "../lib/compliance/planYear";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
-
 import { safeLimit } from "../lib/listGuards";
 
 const router: IRouter = Router();
 
 // Group-level audit: all dashboard reads are logged (HIPAA activity reporting).
 router.use(routerAuditMiddleware(router, "dashboard", undefined, { includeReads: true }));
-
 
 router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read"), async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthenticatedRequest;

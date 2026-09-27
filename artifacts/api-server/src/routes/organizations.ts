@@ -9,7 +9,6 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
-
 import { requireMfa } from "../middlewares/requireMfa";
 
 const UpdateOrgSchema = z.object({
@@ -20,7 +19,6 @@ const UpdateOrgSchema = z.object({
 const router: IRouter = Router();
 
 router.use(routerAuditMiddleware(router, "org", undefined, { includeReads: true }));
-
 
 router.get(
   "/admin/agencies",
