@@ -257,6 +257,18 @@ describe("BrandingProvider", () => {
     expect(css).not.toContain("--sidebar:");
   });
 
+  it("only overrides dark-mode tokens with an accent that stays readable", async () => {
+    const { brandingVars } = await import("@/lib/branding/BrandingProvider");
+    const { contrastRatio } = await import("@/lib/branding/rules");
+    // A dark accent would vanish on the navy page: dark mode keeps the default blue.
+    expect(brandingVars(resolveBranding({ accentColor: "#28507f" }), "dark")).toEqual({});
+    // A light accent is used, and its button text clears WCAG AA.
+    const vars = brandingVars(resolveBranding({ accentColor: "#8cc4ff" }), "dark");
+    expect(vars["--primary"]).toBe(hexToHslTriplet("#8cc4ff"));
+    const fg = vars["--primary-foreground"] === hexToHslTriplet("#ffffff") ? "#ffffff" : "#0b1220";
+    expect(contrastRatio("#8cc4ff", fg)).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("grades contrast like the server", () => {
     expect(contrastLevel("#0f1b3d").level).toBe("good");
     expect(contrastLevel("#e0701a").level).toBe("large-only");
