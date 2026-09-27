@@ -90,6 +90,23 @@ function mailbox(v: string): string {
  * opted out of the channel. Sends to other recipients (e.g. an internal
  * "new lead" alert to the agency inbox) are not the contact's to block.
  */
+/** True when `email` is exactly a user's or agent's address in this org. */
+async function isOrgStaffEmail(orgId: string, email: string): Promise<boolean> {
+  const e = email.trim().toLowerCase();
+  const [user] = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(and(eq(usersTable.orgId, orgId), sql`lower(${usersTable.email}) = ${e}`))
+    .limit(1);
+  if (user) return true;
+  const [agent] = await db
+    .select({ id: agentsTable.id })
+    .from(agentsTable)
+    .where(and(eq(agentsTable.orgId, orgId), sql`lower(${agentsTable.email}) = ${e}`))
+    .limit(1);
+  return !!agent;
+}
+
 async function recipientOptedOut(
   orgId: string,
   contactId: string | null,
@@ -108,7 +125,15 @@ async function recipientOptedOut(
     .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId)));
   if (!c) return false;
   if (channel === "email") {
-    return c.optOutEmail && !!c.email && mailbox(c.email) === mailbox(to);
+    if (!c.optOutEmail || !c.email) return false;
+    const exact = (v: string) => v.trim().toLowerCase();
+    if (exact(c.email) === exact(to)) return true;
+    if (mailbox(c.email) !== mailbox(to)) return false;
+    // A variant of the contact's address ("+tag", Gmail dots) is treated as
+    // the contact — unless it is exactly the agency's own staff address, so
+    // an internal alert to office@ isn't dropped because a client opted out
+    // as office+x@.
+    return !(await isOrgStaffEmail(orgId, to));
   }
   return c.optOutSms && !!c.phone && digits(c.phone) === digits(to);
 }

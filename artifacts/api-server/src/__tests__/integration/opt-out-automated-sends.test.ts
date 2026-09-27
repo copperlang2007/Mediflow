@@ -40,7 +40,7 @@ import {
   getEnqueuedJobs,
   clearEnqueuedJobs,
 } from "../helpers/testApp";
-import { seedOrg, seedContact, seedAutomationRule } from "../helpers/testDb";
+import { seedOrg, seedUser, seedContact, seedAutomationRule } from "../helpers/testDb";
 import type { TestDbHandle } from "../helpers/testDb";
 
 let handle: TestDbHandle;
@@ -196,5 +196,24 @@ describe("automation send actions on a contact", () => {
       orgId: org.id, trigger: "custom_optout_variants", resourceType: "contact", resourceId: c.id,
     });
     expect(jobs("send-scheduled-email")).toHaveLength(0);
+  });
+
+  it("still alerts the agency's own inbox when an opted-out client's address is a variant of it", async () => {
+    const staffEmail = `office-${randomUUID().slice(0, 6)}@agency.example`;
+    await seedUser(handle.db, { orgId: org.id, email: staffEmail, role: "agency_admin" });
+    const c = await contactWith({ optOutEmail: true });
+    await handle.db.update(contactsTable)
+      .set({ email: staffEmail.replace("@", "+something@") })
+      .where(eq(contactsTable.id, c.id));
+    await seedAutomationRule(handle.db, {
+      orgId: org.id,
+      triggerType: "custom_optout_staff",
+      conditions: [],
+      actions: [{ type: "send_email", config: { to: staffEmail, subject: "New lead", html: "<p>New</p>" } }],
+    });
+    await runAutomationRulesWorker({
+      orgId: org.id, trigger: "custom_optout_staff", resourceType: "contact", resourceId: c.id,
+    });
+    expect(jobs("send-scheduled-email")).toHaveLength(1);
   });
 });
