@@ -1,6 +1,6 @@
 /**
  * Knowledge Base — short reference articles an agency writes for its staff
- * (plan rules, carrier quirks, internal how-tos). Migration 0050.
+ * (plan rules, carrier quirks, internal how-tos). Migration 0053.
  *
  * Articles are org-scoped and must never hold client data (PHI). Active
  * articles that match a question are passed to the AI assistant as clearly

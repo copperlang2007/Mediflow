@@ -28,8 +28,8 @@
  * path — only the opaque `contactRef`, phone, state and product line.
  */
 import { randomUUID } from "crypto";
-import { and, eq, inArray } from "drizzle-orm";
-import { phoneVariants } from "../csvImport";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { phoneMatchKey, phoneMatchKeySql } from "../compliance/phone";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import {
   db as defaultDb,
@@ -39,6 +39,7 @@ import {
   carrierCertificationsTable,
   ahipRecordsTable,
 } from "@workspace/db";
+import { sellingPlanYear } from "../compliance/planYear";
 import type { IssueTicketInput, PreclearanceDecision } from "./issuance";
 
 /** Machine-readable preclearance failure reasons. */
@@ -326,16 +327,18 @@ async function checkConsentAndDnc(
   }
 
   // DNC list: any opt-out row for this phone in the org (any channel).
-  if (opts.phone) {
+  const phoneKey = phoneMatchKey(opts.phone);
+  if (phoneKey) {
     const optOut = await db
       .select({ id: optOutsTable.id })
       .from(optOutsTable)
       .where(
         and(
           eq(optOutsTable.orgId, opts.orgId),
-          // Match the E.164 form too: STOPs are stored as Twilio sends them
-          // ("+13105550101") while contacts may hold "(310) 555-0101".
-          inArray(optOutsTable.phone, phoneVariants(opts.phone)),
+          // Last-10-digit match (lib/compliance/phone.ts): STOPs are stored
+          // as Twilio sends them ("+13105550101") while contacts may hold
+          // "(310) 555-0101".
+          sql`${phoneMatchKeySql(optOutsTable.phone)} = ${phoneKey}`,
         ),
       )
       .limit(1);
@@ -375,7 +378,7 @@ export async function runPreclearance(
   const failures: PreclearanceFailure[] = [];
 
   const productLine: ProductLine = input.productLine ?? "MAPD";
-  const planYear = input.planYear ?? now.getUTCFullYear();
+  const planYear = input.planYear ?? sellingPlanYear(now);
 
   // 1) Agent eligibility (§2).
   await checkAgentEligibility(

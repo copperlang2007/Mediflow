@@ -50,13 +50,25 @@ import { logger } from "../lib/logger";
 import { isEmailConfigured } from "../lib/email";
 import { isConfigured as isSmsConfigured } from "../lib/sms";
 import { AudienceSchema, previewAudience } from "../lib/campaigns/audience";
-import { loadSenderSettings, senderIdentity } from "../lib/campaigns/service";
-import { publicBaseUrl, unsubscribeSecret } from "../lib/campaigns/unsubscribeToken";
+import {
+  configuredPublicBaseUrl,
+  loadSenderSettings,
+  senderIdentity,
+  unsubscribeLinksAvailable,
+} from "../lib/campaigns/service";
 import { resendWebhookSecret } from "../lib/campaigns/svix";
-import { isValidTimeZone } from "../lib/campaigns/quietHours";
 import { MERGE_FIELDS, smsSegments } from "../lib/campaigns/render";
 
 const router: IRouter = Router();
+
+function isValidTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const ChannelSchema = z.enum(["email", "sms"]);
 
@@ -98,11 +110,11 @@ async function audit(
 /** Config state the UI uses to decide between real numbers and setup notes. */
 async function configState(orgId: string) {
   const settings = await loadSenderSettings(orgId);
-  const base = publicBaseUrl();
+  const base = configuredPublicBaseUrl();
   return {
     email: {
       sendingConfigured: isEmailConfigured(),
-      unsubscribeConfigured: Boolean(unsubscribeSecret() && base),
+      unsubscribeConfigured: unsubscribeLinksAvailable(),
       senderAddressConfigured: Boolean(senderIdentity(settings)),
       trackingConfigured: Boolean(resendWebhookSecret()),
       webhookPath: "/api/campaigns/v1/webhooks/resend",
@@ -780,7 +792,7 @@ router.post(
         return;
       }
       if (!cfg.email.unsubscribeConfigured) {
-        res.status(409).json({ code: "unsubscribe_not_configured", error: "Unsubscribe links aren't set up yet (CAMPAIGN_UNSUBSCRIBE_SECRET and APP_BASE_URL)." });
+        res.status(409).json({ code: "unsubscribe_not_configured", error: "Unsubscribe links aren't set up yet (PHI_HMAC_KEY and APP_BASE_URL)." });
         return;
       }
     } else if (!cfg.sms.sendingConfigured) {

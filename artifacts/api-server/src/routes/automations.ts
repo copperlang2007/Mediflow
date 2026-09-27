@@ -14,7 +14,6 @@ import {
 } from "../middlewares/requireAuth";
 import { requireMfa } from "../middlewares/requireMfa";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
-
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 
@@ -22,7 +21,6 @@ const router: IRouter = Router();
 
 router.use(
   routerAuditMiddleware(router, "automation", undefined, {
-
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.id;

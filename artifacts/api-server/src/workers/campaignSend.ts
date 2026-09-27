@@ -18,15 +18,20 @@
  * claimed-but-unfinished by a crashed run are closed out as `failed` with an
  * explanatory error rather than being re-sent.
  *
- * Compliance at send time (re-checked per recipient, not only at snapshot):
- *   - email/SMS opt-out flags and the suppression / STOP lists;
- *   - email: CAN-SPAM footer (agency name + physical address), a signed
- *     per-recipient unsubscribe link, `List-Unsubscribe` +
- *     `List-Unsubscribe-Post: List-Unsubscribe=One-Click` headers;
- *   - SMS: "Reply STOP to opt out." on the contact's first campaign SMS, and
- *     TCPA quiet hours (8am–9pm in the contact's local time, from their state,
- *     else the org's default time zone). Out-of-window recipients stay
- *     queued and the job re-enqueues itself for the next window.
+ * Compliance at send time (re-checked per recipient, not only at snapshot)
+ * goes through the ONE consumer outreach gate (lib/compliance/
+ * consumerOutreach.ts, automated = true), the same gate sequences and
+ * automation rules use:
+ *   - deleted / do-not-contact contacts, opt-out flags and the opt_outs
+ *     suppression / STOP lists (phone matched on its last 10 digits);
+ *   - SMS: TCPA prior express written consent when the org requires it, and
+ *     the recipient's legal texting window (federal 8am–9pm plus narrower
+ *     state windows). Out-of-window recipients stay queued and the job
+ *     re-enqueues itself for the earliest window;
+ *   - email: the shared signed unsubscribe link (lib/compliance/
+ *     unsubscribe.ts) in a CAN-SPAM footer with the agency's physical
+ *     address, plus `List-Unsubscribe` + `List-Unsubscribe-Post` headers.
+ * SMS also gets "Reply STOP to opt out." on the contact's first campaign SMS.
  */
 import { and, eq, inArray, isNull, lt, ne, sql, isNotNull } from "drizzle-orm";
 import {
@@ -36,7 +41,6 @@ import {
   campaignsTable,
   carriersTable,
   contactsTable,
-  optOutsTable,
   type Campaign,
 } from "@workspace/db";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
@@ -44,25 +48,31 @@ import { logger } from "../lib/logger";
 import { sendEmail, isEmailConfigured } from "../lib/email";
 import { sendSms, isConfigured as isSmsConfigured } from "../lib/sms";
 import { materializeRecipients } from "../lib/campaigns/audience";
-import { phoneVariants } from "../lib/csvImport";
 import {
   applyMergeFields,
   emailFooterHtml,
   emailFooterText,
   htmlToText,
-  listUnsubscribeHeaders,
   withStopLine,
   wrapEmailHtml,
   type MergeContext,
 } from "../lib/campaigns/render";
 import {
+  campaignUnsubscribeUrl,
+  configuredPublicBaseUrl,
   loadSenderSettings,
   recordOutboundMessage,
   refreshCampaignCounts,
   senderIdentity,
+  unsubscribeLinksAvailable,
 } from "../lib/campaigns/service";
-import { unsubscribeUrl, unsubscribeSecret, publicBaseUrl } from "../lib/campaigns/unsubscribeToken";
-import { isWithinSendWindow, nextSendWindowStart, timeZoneForState } from "../lib/campaigns/quietHours";
+import {
+  evaluateConsumerEmail,
+  evaluateConsumerSms,
+  type BlockReason,
+  type ConsumerContext,
+} from "../lib/compliance/consumerOutreach";
+import { unsubscribeHeaders } from "../lib/compliance/unsubscribe";
 
 export interface CampaignSendPayload extends Record<string, unknown> {
   campaignId: string;
@@ -93,9 +103,25 @@ function safeDisplayName(name: string): string {
 
 export function twilioStatusCallbackUrl(): string | undefined {
   if (!process.env.TWILIO_AUTH_TOKEN) return undefined;
-  const host = process.env.TWILIO_WEBHOOK_PUBLIC_HOST?.trim() || publicBaseUrl();
+  const host = process.env.TWILIO_WEBHOOK_PUBLIC_HOST?.trim() || configuredPublicBaseUrl();
   if (!host) return undefined;
   return `${host.replace(/\/+$/, "")}/api/campaigns/v1/webhooks/twilio-status`;
+}
+
+/** Recipient outcome for a consumer-gate block. */
+function skipFor(reason: BlockReason): { status: "skipped_opt_out" | "failed"; error: string } {
+  switch (reason) {
+    case "opted_out":
+      return { status: "skipped_opt_out", error: "Opted out before send" };
+    case "no_tcpa_consent":
+      return { status: "failed", error: "No TCPA consent on file" };
+    case "no_destination":
+      return { status: "failed", error: "Contact no longer has an address" };
+    case "unsubscribe_unavailable":
+      return { status: "failed", error: "Unsubscribe link unavailable" };
+    default:
+      return { status: "failed", error: "Contact no longer eligible" };
+  }
 }
 
 async function failAllQueued(campaignId: string, error: string): Promise<void> {
@@ -159,8 +185,8 @@ export async function campaignSendWorker(
   if (channel === "email") {
     if (!isEmailConfigured()) blocker = "Email sending is not configured (RESEND_API_KEY)";
     else if (!senderIdentity(settings)) blocker = "No physical mailing address in campaign settings (CAN-SPAM)";
-    else if (!unsubscribeSecret() || !publicBaseUrl())
-      blocker = "Unsubscribe links are not configured (CAMPAIGN_UNSUBSCRIBE_SECRET / APP_BASE_URL)";
+    else if (!unsubscribeLinksAvailable())
+      blocker = "Unsubscribe links are not configured (PHI_HMAC_KEY / APP_BASE_URL)";
   } else if (!isSmsConfigured()) {
     blocker = "SMS sending is not configured (Twilio)";
   }
@@ -178,13 +204,6 @@ export async function campaignSendWorker(
       contactId: contactsTable.id,
       firstName: contactsTable.firstName,
       lastName: contactsTable.lastName,
-      email: contactsTable.email,
-      phone: contactsTable.phone,
-      stateCode: contactsTable.stateCode,
-      optOutEmail: contactsTable.optOutEmail,
-      optOutSms: contactsTable.optOutSms,
-      deletedAt: contactsTable.deletedAt,
-      contactStatus: contactsTable.status,
       assignedAgentId: contactsTable.assignedAgentId,
       currentPlanType: contactsTable.currentPlanType,
       currentCarrierId: contactsTable.currentCarrierId,
@@ -245,36 +264,32 @@ export async function campaignSendWorker(
       }
     }
 
-    // Send-time opt-out / eligibility re-check.
-    const address = (channel === "email" ? c.email : c.phone)?.trim() ?? "";
-    let skipReason: string | null = null;
-    if (c.deletedAt || c.contactStatus === "do_not_contact") skipReason = "Contact no longer eligible";
-    else if (!address) skipReason = "Contact no longer has an address";
-    else if (channel === "email" && c.optOutEmail) skipReason = "Opted out before send";
-    else if (channel === "sms" && c.optOutSms) skipReason = "Opted out before send";
-    else {
-      // SMS: matched on phone across ALL orgs (no org_id predicate) on
-      // purpose — every agency sends from the same shared Twilio number, so a
-      // STOP to that number must stop every text from it. Mirrors sendSMS()
-      // in lib/sms.ts. phoneVariants() covers a contact stored formatted
-      // ("(512) 555-0100") vs the E.164 form Twilio records on STOP.
-      // Email suppression stays org-scoped.
-      const optQ =
-        channel === "sms"
-          ? and(eq(optOutsTable.channel, "sms"), inArray(optOutsTable.phone, phoneVariants(address)))
-          : and(
-              eq(optOutsTable.orgId, campaign.orgId),
-              eq(optOutsTable.channel, "email"),
-              sql`lower(${optOutsTable.email}) = lower(${address})`,
-            );
-      const [hit] = await db.select({ id: optOutsTable.id }).from(optOutsTable).where(optQ).limit(1);
-      if (hit) skipReason = "Opted out before send";
+    // Send-time eligibility: the shared consumer outreach gate.
+    const consumer: ConsumerContext = { orgId: campaign.orgId, contactId: c.contactId, automated: true };
+    let address = "";
+    let unsubscribeBase: string | null = null;
+    let skip: { status: "skipped_opt_out" | "failed"; error: string } | null = null;
+    if (channel === "email") {
+      const decision = await evaluateConsumerEmail(consumer);
+      if (decision.action === "block") skip = skipFor(decision.reason);
+      else if (!decision.unsubscribeUrl) skip = skipFor("unsubscribe_unavailable");
+      else {
+        address = decision.to.trim();
+        unsubscribeBase = decision.unsubscribeUrl;
+      }
+    } else {
+      const decision = await evaluateConsumerSms(consumer, now());
+      if (decision.action === "block") skip = skipFor(decision.reason);
+      else if (decision.action === "defer") {
+        // Outside the recipient's legal texting window: stays queued.
+        if (!deferredUntil || decision.until < deferredUntil) deferredUntil = decision.until;
+        continue;
+      } else address = decision.to.trim();
     }
-    if (skipReason) {
-      const isOptOut = skipReason.startsWith("Opted out");
+    if (skip) {
       await db
         .update(campaignRecipientsTable)
-        .set({ status: isOptOut ? "skipped_opt_out" : "failed", error: skipReason, claimedAt: now() })
+        .set({ status: skip.status, error: skip.error, claimedAt: now() })
         .where(
           and(
             eq(campaignRecipientsTable.id, c.recipientId),
@@ -283,17 +298,6 @@ export async function campaignSendWorker(
           ),
         );
       continue;
-    }
-
-    // TCPA quiet hours.
-    if (channel === "sms") {
-      const tz = timeZoneForState(c.stateCode, settings.defaultTimeZone);
-      const at = now();
-      if (!isWithinSendWindow(at, tz)) {
-        const next = nextSendWindowStart(at, tz);
-        if (!deferredUntil || next < deferredUntil) deferredUntil = next;
-        continue;
-      }
     }
 
     // Claim — the per-recipient idempotency guard.
@@ -328,7 +332,7 @@ export async function campaignSendWorker(
 
     try {
       if (channel === "email") {
-        const href = unsubscribeUrl({ kind: "r", id: c.recipientId })!;
+        const href = campaignUnsubscribeUrl(unsubscribeBase!, c.recipientId);
         subject = applyMergeFields(campaign.subject ?? "", ctx, { html: false });
         const bodyHtml = applyMergeFields(campaign.body ?? "", ctx, { html: true });
         const html = wrapEmailHtml(bodyHtml, emailFooterHtml(sender!, href));
@@ -341,7 +345,7 @@ export async function campaignSendWorker(
           html,
           text,
           replyTo: settings.replyToEmail ?? undefined,
-          headers: listUnsubscribeHeaders(href),
+          headers: unsubscribeHeaders(href),
           tags: { campaign_id: campaign.id, recipient_id: c.recipientId },
         });
         if (res.success) {

@@ -1,9 +1,8 @@
 /**
  * Automated sends must respect a contact's channel opt-out flags.
  *
- * Before this fix the sequence email step ignored `optOutEmail`, and the
- * automation-rule send_email / send_sms actions ignored both flags when the
- * rule fired on a contact (CAN-SPAM / TCPA exposure).
+ * Before this fix the sequence email step ignored `optOutEmail` (CAN-SPAM
+ * exposure).
  */
 import { vi, describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 
@@ -40,13 +39,12 @@ import {
   getEnqueuedJobs,
   clearEnqueuedJobs,
 } from "../helpers/testApp";
-import { seedOrg, seedContact, seedAutomationRule } from "../helpers/testDb";
+import { seedOrg, seedContact } from "../helpers/testDb";
 import type { TestDbHandle } from "../helpers/testDb";
 
 let handle: TestDbHandle;
 let org: { id: string };
 let sendSequenceStepWorker: typeof import("../../workers/sendSequenceStep").sendSequenceStepWorker;
-let runAutomationRulesWorker: typeof import("../../workers/runAutomationRules").runAutomationRulesWorker;
 
 async function contactWith(flags: { optOutEmail?: boolean; optOutSms?: boolean }) {
   const c = await seedContact(handle.db, { orgId: org.id, firstName: `Opt-${randomUUID().slice(0, 6)}` });
@@ -83,7 +81,6 @@ const jobs = (name: string) => getEnqueuedJobs().filter((j) => j.name === name);
 beforeAll(async () => {
   handle = await bootTestDb();
   ({ sendSequenceStepWorker } = await import("../../workers/sendSequenceStep"));
-  ({ runAutomationRulesWorker } = await import("../../workers/runAutomationRules"));
   org = await seedOrg(handle.db, { id: "opt-out-org" });
 });
 
@@ -109,92 +106,5 @@ describe("sequence email step", () => {
   });
 });
 
-describe("automation send actions on a contact", () => {
-  async function fire(contactId: string, trigger: string) {
-    await seedAutomationRule(handle.db, {
-      orgId: org.id,
-      triggerType: trigger,
-      conditions: [],
-      actions: [
-        { type: "send_email", config: { subject: "Hello", html: "<p>Hello</p>" } },
-        { type: "send_sms", config: { body: "Hello" } },
-      ],
-    });
-    await runAutomationRulesWorker({ orgId: org.id, trigger, resourceType: "contact", resourceId: contactId });
-  }
-
-  it("sends email and SMS when the contact has not opted out", async () => {
-    const c = await contactWith({});
-    await fire(c.id, "custom_optout_a");
-    expect(jobs("send-scheduled-email")).toHaveLength(1);
-    expect(jobs("send-scheduled-sms")).toHaveLength(1);
-  });
-
-  it("skips only the channel the contact opted out of", async () => {
-    const emailOut = await contactWith({ optOutEmail: true });
-    await fire(emailOut.id, "custom_optout_b");
-    expect(jobs("send-scheduled-email")).toHaveLength(0);
-    expect(jobs("send-scheduled-sms")).toHaveLength(1);
-
-    clearEnqueuedJobs();
-    const smsOut = await contactWith({ optOutSms: true });
-    await fire(smsOut.id, "custom_optout_c");
-    expect(jobs("send-scheduled-email")).toHaveLength(1);
-    expect(jobs("send-scheduled-sms")).toHaveLength(0);
-  });
-
-  it("blocks sends to an opted-out contact on non-contact triggers that carry contactId", async () => {
-    const c = await contactWith({ optOutEmail: true, optOutSms: true });
-    await seedAutomationRule(handle.db, {
-      orgId: org.id,
-      triggerType: "custom_optout_lead",
-      conditions: [],
-      actions: [
-        { type: "send_email", config: { to: `${c.id}@EXAMPLE.com`, subject: "Hi", html: "<p>Hi</p>" } },
-        { type: "send_sms", config: { to: "(555) 555-0123", body: "Hi" } },
-      ],
-    });
-    await runAutomationRulesWorker({
-      orgId: org.id, trigger: "custom_optout_lead", resourceType: "lead",
-      resourceId: `lead-${randomUUID()}`, context: { contactId: c.id },
-    });
-    expect(jobs("send-scheduled-email")).toHaveLength(0);
-    expect(jobs("send-scheduled-sms")).toHaveLength(0);
-  });
-
-  it("still sends internal alerts to other recipients about an opted-out contact", async () => {
-    const c = await contactWith({ optOutEmail: true, optOutSms: true });
-    await seedAutomationRule(handle.db, {
-      orgId: org.id,
-      triggerType: "custom_optout_internal",
-      conditions: [],
-      actions: [
-        { type: "send_email", config: { to: "office@agency.example", subject: "New lead", html: "<p>New</p>" } },
-        { type: "send_sms", config: { to: "+15555550999", body: "New lead" } },
-      ],
-    });
-    await runAutomationRulesWorker({
-      orgId: org.id, trigger: "custom_optout_internal", resourceType: "contact", resourceId: c.id,
-    });
-    expect(jobs("send-scheduled-email")).toHaveLength(1);
-    expect(jobs("send-scheduled-sms")).toHaveLength(1);
-  });
-
-  it("treats plus-tag and Gmail dot variants as the opted-out contact's address", async () => {
-    const c = await contactWith({ optOutEmail: true });
-    await handle.db.update(contactsTable).set({ email: "John.Smith@gmail.com" }).where(eq(contactsTable.id, c.id));
-    await seedAutomationRule(handle.db, {
-      orgId: org.id,
-      triggerType: "custom_optout_variants",
-      conditions: [],
-      actions: [
-        { type: "send_email", config: { to: "johnsmith+news@googlemail.com", subject: "Hi", html: "<p>Hi</p>" } },
-        { type: "send_email", config: { to: "john.smith+promo@gmail.com", subject: "Hi", html: "<p>Hi</p>" } },
-      ],
-    });
-    await runAutomationRulesWorker({
-      orgId: org.id, trigger: "custom_optout_variants", resourceType: "contact", resourceId: c.id,
-    });
-    expect(jobs("send-scheduled-email")).toHaveLength(0);
-  });
-});
+// Automation-rule sends are gated at send time by the consumer outreach gate;
+// see automation-consumer-outreach.test.ts and consumer-outreach-gate.test.ts.

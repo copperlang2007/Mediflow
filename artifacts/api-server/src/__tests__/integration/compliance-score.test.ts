@@ -1,7 +1,7 @@
 /**
- * computeComplianceScore(): licenses are judged against the supplied `now`
- * snapshot (not the wall clock), and AHIP counts as complete for the shared
- * complete statuses (passed or waived — lib/agents/ahipCoverage.ts).
+ * getAgentComplianceScores() (lib/compliance/agentComplianceScore.ts):
+ * licenses are judged against the supplied `now` snapshot (not the wall
+ * clock), and AHIP counts as complete for passed or waived.
  */
 import { vi, describe, it, expect, beforeAll, afterAll } from "vitest";
 
@@ -25,13 +25,19 @@ import { bootTestDb, shutdownTestDb } from "../helpers/testApp";
 import { seedOrg, seedAgent, type TestDb } from "../helpers/testDb";
 
 let testDb: TestDb;
-let compute: typeof import("../../lib/agents/complianceScore").computeComplianceScore;
+let compute: (agentId: string, orgId: string, now: Date) => Promise<
+  import("../../lib/compliance/agentComplianceScore").AgentComplianceScore
+>;
 let org: { id: string };
 
 beforeAll(async () => {
   const handle = await bootTestDb();
   testDb = handle.db;
-  compute = (await import("../../lib/agents/complianceScore")).computeComplianceScore;
+  const { getAgentComplianceScores } = await import("../../lib/compliance/agentComplianceScore");
+  compute = async (agentId, orgId, now) => {
+    const [score] = await getAgentComplianceScores({ orgId, agentIds: [agentId], now });
+    return score;
+  };
   org = await seedOrg(testDb, { name: "Compliance Score Org" });
 });
 
@@ -39,7 +45,7 @@ afterAll(async () => {
   await shutdownTestDb();
 });
 
-describe("computeComplianceScore", () => {
+describe("getAgentComplianceScores", () => {
   it("judges license expiry against the supplied now, not the wall clock", async () => {
     const agent = await seedAgent(testDb, { orgId: org.id });
     await testDb.insert(stateLicensesTable).values({

@@ -4,15 +4,19 @@
  * Runs every 15 minutes (lib/jobs.ts). For each confirmed/pending appointment
  * starting within the next 24 hours that has a contact and has not been
  * reminded yet, it sends ONE reminder through the existing senders
- * (SEND_SCHEDULED_SMS / SEND_SCHEDULED_EMAIL jobs), respecting:
+ * (SEND_SCHEDULED_SMS / SEND_SCHEDULED_EMAIL jobs). Channel choice uses the
+ * ONE consumer outreach gate (lib/compliance/consumerOutreach.ts, automated),
+ * and the jobs carry the same `consumer` context so the gate re-checks at
+ * send time (lib/compliance/consumerDelivery.ts):
  *
- *   - the contact's own opt-outs (`opt_out_sms`, `opt_out_email`);
- *   - the STOP list (`opt_outs` table) — the SMS worker re-checks it too;
- *   - TCPA calling hours (08:00–21:00 in the contact's timezone, the same
- *     window and state→timezone map the dialer uses). A text is never sent
- *     outside that window: the reminder is deferred to a later sweep, unless
- *     the appointment is under 2 hours away, in which case only email goes.
- *     If the contact's timezone cannot be determined, no SMS is sent at all.
+ *   - opt-outs: contact flags, do-not-contact, and the `opt_outs` lists
+ *     (phone matched on its last 10 digits);
+ *   - SMS: TCPA consent when the org requires it, and the recipient's legal
+ *     texting window (federal 8am–9pm plus narrower state windows). A text is
+ *     never sent outside that window: the reminder is deferred to a later
+ *     sweep, unless the appointment is under 2 hours away, in which case
+ *     only email goes;
+ *   - email: carries the shared unsubscribe link (CAN-SPAM).
  *
  * Idempotency: the reminder is claimed with a conditional
  * `UPDATE … SET reminder_sent_at = now() WHERE reminder_sent_at IS NULL`, so
@@ -22,20 +26,23 @@
  * Content is deliberately PHI-free: no notes, no plan or health details —
  * just who, when and where.
  */
-import { and, eq, gt, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lte } from "drizzle-orm";
 import {
   db,
   agentsTable,
   appointmentsTable,
   contactsTable,
-  optOutsTable,
   orgBrandingTable,
   organizationsTable,
 } from "@workspace/db";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
-import { isWithinCallingHours, resolveTimezone } from "../lib/dialer/preclearance";
+import { resolveTimezone } from "../lib/dialer/preclearance";
 import { logger } from "../lib/logger";
-import { phoneVariants } from "../lib/csvImport";
+import {
+  evaluateConsumerEmail,
+  evaluateConsumerSms,
+  type ConsumerContext,
+} from "../lib/compliance/consumerOutreach";
 
 export const REMINDER_LEAD_MS = 24 * 60 * 60 * 1000;
 /** Inside this window a deferred SMS would arrive too late — send email only. */
@@ -97,6 +104,7 @@ export async function appointmentRemindersWorker(
     .select({
       id: appointmentsTable.id,
       orgId: appointmentsTable.orgId,
+      contactId: contactsTable.id,
       startsAt: appointmentsTable.startsAt,
       locationType: appointmentsTable.locationType,
       locationDetail: appointmentsTable.locationDetail,
@@ -104,8 +112,6 @@ export async function appointmentRemindersWorker(
       contactFirstName: contactsTable.firstName,
       phone: contactsTable.phone,
       email: contactsTable.email,
-      optOutSms: contactsTable.optOutSms,
-      optOutEmail: contactsTable.optOutEmail,
       stateCode: contactsTable.stateCode,
       agentFirstName: agentsTable.firstName,
       agentLastName: agentsTable.lastName,
@@ -146,48 +152,20 @@ export async function appointmentRemindersWorker(
   for (const r of rows) {
     summary.considered += 1;
 
-    // Suppression lists, checked before the claim so an opted-out channel is
-    // never counted as "sent".
-    //  - SMS: the STOP list is matched on phone across ALL orgs (no org_id
-    //    predicate) on purpose — every agency sends from the same shared
-    //    Twilio number, so a STOP to that number must stop every text from it
-    //    (mirrors sendSMS() in lib/sms.ts). phoneVariants() covers a contact
-    //    stored formatted vs the E.164 form Twilio records on STOP.
-    //  - Email: the org's own suppression list (contact.optOutEmail is
-    //    checked separately below).
-    let stopListedSms = false;
-    let stopListedEmail = false;
-    if (r.phone) {
-      const [hit] = await db
-        .select({ id: optOutsTable.id })
-        .from(optOutsTable)
-        .where(and(eq(optOutsTable.channel, "sms"), inArray(optOutsTable.phone, phoneVariants(r.phone))))
-        .limit(1);
-      stopListedSms = Boolean(hit);
-    }
-    if (r.email && !r.optOutEmail) {
-      const [hit] = await db
-        .select({ id: optOutsTable.id })
-        .from(optOutsTable)
-        .where(
-          and(
-            eq(optOutsTable.orgId, r.orgId),
-            eq(optOutsTable.channel, "email"),
-            sql`lower(${optOutsTable.email}) = lower(${r.email})`,
-          ),
-        )
-        .limit(1);
-      stopListedEmail = Boolean(hit);
-    }
-
-    const tz = resolveTimezone(r.stateCode ?? undefined, undefined);
-    const smsAllowed = Boolean(r.phone) && !r.optOutSms && !stopListedSms && tz !== null;
-    const emailAllowed = Boolean(r.email) && !r.optOutEmail && !stopListedEmail;
-    const inHours = tz ? isWithinCallingHours(now, tz) : false;
+    // Channel decisions from the shared consumer gate, taken before the
+    // claim so a blocked channel is never counted as "sent".
+    const consumer: ConsumerContext = { orgId: r.orgId, contactId: r.contactId, automated: true };
+    const smsDecision = await evaluateConsumerSms(consumer, now);
+    const emailDecision = await evaluateConsumerEmail(consumer);
+    const smsAllowed = smsDecision.action !== "block";
+    const emailAllowed = emailDecision.action === "send";
+    const inHours = smsDecision.action === "send";
     const msUntil = r.startsAt.getTime() - now.getTime();
+    // Time zone only for rendering the appointment time.
+    const tz = resolveTimezone(r.stateCode ?? undefined, undefined);
 
     if (smsAllowed && !inHours && msUntil > SMS_DEFER_LIMIT_MS) {
-      // Wait for the calling window rather than text at night.
+      // Wait for the texting window rather than text at night.
       summary.deferred += 1;
       continue;
     }
@@ -213,7 +191,7 @@ export async function appointmentRemindersWorker(
       summary.noChannel += 1;
       logger.info(
         { appointmentId: r.id, orgId: r.orgId },
-        "Appointment reminder skipped — no permitted channel (opt-out, STOP list, calling hours or missing contact details)",
+        "Appointment reminder skipped — no permitted channel (opt-out, STOP list, consent, texting hours or missing contact details)",
       );
       continue;
     }
@@ -235,6 +213,7 @@ export async function appointmentRemindersWorker(
         await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, {
           to: r.phone!,
           body: `${brand}: reminder of your appointment${withWhom} on ${when} ${where}.${link} Reply STOP to opt out.`,
+          consumer,
         });
         summary.smsQueued += 1;
         enqueued += 1;
@@ -257,6 +236,7 @@ export async function appointmentRemindersWorker(
             `<p>— ${escapeHtml(brand)}</p>`,
           tags: { type: "appointment_reminder" },
           ...(r.emailFromName ? { fromName: r.emailFromName } : {}),
+          consumer,
         });
         summary.emailQueued += 1;
         enqueued += 1;

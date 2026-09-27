@@ -94,7 +94,7 @@ export function SettingsDialog({
             <Input id="set-reply" type="email" value={replyTo} onChange={(e) => setReplyTo(e.target.value)} disabled={!canEdit} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="set-tz">Default time zone for text quiet hours</Label>
+            <Label htmlFor="set-tz">Default time zone (reference only; texting hours follow each client&apos;s state)</Label>
             <select
               id="set-tz"
               className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"

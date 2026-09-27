@@ -7,7 +7,6 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
-
 import {
   addSseSubscriber,
   removeSseSubscriber,
@@ -19,7 +18,6 @@ const router: IRouter = Router();
 
 router.use(
   routerAuditMiddleware(router, "notification", undefined, {
-
     includeReads: true,
     getResourceId: (req) => {
       const raw = req.params.id;

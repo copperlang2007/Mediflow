@@ -207,7 +207,7 @@ export const GetDashboardStatsResponse = zod.object({
   ahipCompletionRateCurrent: zod
     .number()
     .describe(
-      "Percent of agents who need AHIP (status active or onboarding) with a passed or waived record for the current year.\n",
+      "Percent of agents who need AHIP (status active or onboarding) with a passed or waived record for ahipPlanYear.\n",
     ),
   ahipCompleteCount: zod.number().int().optional(),
   agentsRequiringAhip: zod.number().int().optional(),
@@ -217,6 +217,13 @@ export const GetDashboardStatsResponse = zod.object({
     .optional()
     .describe(
       "Licenses past their expiry date (or stored as expired) for agents still on the team (onboarding, active, suspended).\n",
+    ),
+  ahipPlanYear: zod
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "Plan year being sold today — the calendar year through Sept 30, the next year from Oct 1.",
     ),
   totalContacts: zod.number().int(),
   agentsWithExpiringLicenses: zod.array(
@@ -523,6 +530,13 @@ export const GetAgentComplianceScoreParams = zod.object({
 
 export const GetAgentComplianceScoreResponse = zod.object({
   agentId: zod.string(),
+  planYear: zod
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "Plan year the AHIP and carrier certifications were evaluated for.",
+    ),
   totalScore: zod.number(),
   licenseScore: zod.number(),
   certificationScore: zod.number(),
@@ -2272,6 +2286,12 @@ export const GetOrgSettingsResponse = zod.object({
     .int()
     .min(1)
     .max(getOrgSettingsResponseAhipReminderIntervalWeeksMax),
+  requireSmsConsent: zod
+    .boolean()
+    .optional()
+    .describe(
+      "When true, automated SMS is only sent to contacts with a recorded TCPA consent.",
+    ),
 });
 
 /**
@@ -2319,6 +2339,7 @@ export const UpdateOrgSettingsBody = zod.object({
     .min(1)
     .max(updateOrgSettingsBodyAhipReminderIntervalWeeksMax)
     .optional(),
+  requireSmsConsent: zod.boolean().optional(),
 });
 
 export const updateOrgSettingsResponseAhipSeasonOpenMonthMax = 12;
@@ -2360,6 +2381,12 @@ export const UpdateOrgSettingsResponse = zod.object({
     .int()
     .min(1)
     .max(updateOrgSettingsResponseAhipReminderIntervalWeeksMax),
+  requireSmsConsent: zod
+    .boolean()
+    .optional()
+    .describe(
+      "When true, automated SMS is only sent to contacts with a recorded TCPA consent.",
+    ),
 });
 
 /**
@@ -2415,6 +2442,18 @@ export const GetContactsResponse = zod.object({
       ]),
       optOutSms: zod.boolean(),
       optOutEmail: zod.boolean(),
+      tcpaConsentAt: zod.coerce
+        .date()
+        .nullish()
+        .describe(
+          "When the contact gave prior express written consent to automated texts.",
+        ),
+      tcpaConsentSource: zod
+        .string()
+        .nullish()
+        .describe(
+          "Where the consent was captured (form URL, recorded call id, paper form reference).",
+        ),
       tags: zod.array(zod.string()).nullish(),
       createdAt: zod.coerce.date(),
       updatedAt: zod.coerce.date(),
@@ -2447,6 +2486,8 @@ export const CreateContactBody = zod.object({
   status: zod.string().optional(),
   tags: zod.array(zod.string()).optional(),
   assignedAgentId: zod.string().nullish(),
+  tcpaConsentAt: zod.coerce.date().nullish(),
+  tcpaConsentSource: zod.string().nullish(),
 });
 
 export const CreateContactResponse = zod.object({
@@ -2480,6 +2521,18 @@ export const CreateContactResponse = zod.object({
   ]),
   optOutSms: zod.boolean(),
   optOutEmail: zod.boolean(),
+  tcpaConsentAt: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "When the contact gave prior express written consent to automated texts.",
+    ),
+  tcpaConsentSource: zod
+    .string()
+    .nullish()
+    .describe(
+      "Where the consent was captured (form URL, recorded call id, paper form reference).",
+    ),
   tags: zod.array(zod.string()).nullish(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
@@ -2542,6 +2595,18 @@ export const GetContactResponse = zod.object({
   ]),
   optOutSms: zod.boolean(),
   optOutEmail: zod.boolean(),
+  tcpaConsentAt: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "When the contact gave prior express written consent to automated texts.",
+    ),
+  tcpaConsentSource: zod
+    .string()
+    .nullish()
+    .describe(
+      "Where the consent was captured (form URL, recorded call id, paper form reference).",
+    ),
   tags: zod.array(zod.string()).nullish(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
@@ -2575,6 +2640,8 @@ export const UpdateContactBody = zod.object({
   status: zod.string().optional(),
   tags: zod.array(zod.string()).optional(),
   assignedAgentId: zod.string().nullish(),
+  tcpaConsentAt: zod.coerce.date().nullish(),
+  tcpaConsentSource: zod.string().nullish(),
 });
 
 export const UpdateContactResponse = zod.object({
@@ -2608,6 +2675,18 @@ export const UpdateContactResponse = zod.object({
   ]),
   optOutSms: zod.boolean(),
   optOutEmail: zod.boolean(),
+  tcpaConsentAt: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "When the contact gave prior express written consent to automated texts.",
+    ),
+  tcpaConsentSource: zod
+    .string()
+    .nullish()
+    .describe(
+      "Where the consent was captured (form URL, recorded call id, paper form reference).",
+    ),
   tags: zod.array(zod.string()).nullish(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
@@ -3873,6 +3952,18 @@ export const GetRetentionBirthdaysResponseItem = zod.object({
   ]),
   optOutSms: zod.boolean(),
   optOutEmail: zod.boolean(),
+  tcpaConsentAt: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "When the contact gave prior express written consent to automated texts.",
+    ),
+  tcpaConsentSource: zod
+    .string()
+    .nullish()
+    .describe(
+      "Where the consent was captured (form URL, recorded call id, paper form reference).",
+    ),
   tags: zod.array(zod.string()).nullish(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
@@ -3924,6 +4015,18 @@ export const GetRetentionAnniversariesResponseItem = zod.object({
   ]),
   optOutSms: zod.boolean(),
   optOutEmail: zod.boolean(),
+  tcpaConsentAt: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "When the contact gave prior express written consent to automated texts.",
+    ),
+  tcpaConsentSource: zod
+    .string()
+    .nullish()
+    .describe(
+      "Where the consent was captured (form URL, recorded call id, paper form reference).",
+    ),
   tags: zod.array(zod.string()).nullish(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
@@ -3972,6 +4075,18 @@ export const GetRetentionAepResponseItem = zod.object({
   ]),
   optOutSms: zod.boolean(),
   optOutEmail: zod.boolean(),
+  tcpaConsentAt: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "When the contact gave prior express written consent to automated texts.",
+    ),
+  tcpaConsentSource: zod
+    .string()
+    .nullish()
+    .describe(
+      "Where the consent was captured (form URL, recorded call id, paper form reference).",
+    ),
   tags: zod.array(zod.string()).nullish(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
@@ -4018,6 +4133,18 @@ export const GetRetentionAtRiskResponseItem = zod.object({
   ]),
   optOutSms: zod.boolean(),
   optOutEmail: zod.boolean(),
+  tcpaConsentAt: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "When the contact gave prior express written consent to automated texts.",
+    ),
+  tcpaConsentSource: zod
+    .string()
+    .nullish()
+    .describe(
+      "Where the consent was captured (form URL, recorded call id, paper form reference).",
+    ),
   tags: zod.array(zod.string()).nullish(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
@@ -4835,9 +4962,19 @@ export const GetDataRetentionPoliciesResponse = zod.array(
 /**
  * @summary Update a data retention policy
  */
+export const updateDataRetentionPolicyBodyRetentionDaysMin = 3650;
+export const updateDataRetentionPolicyBodyRetentionDaysMax = 36500;
+
 export const UpdateDataRetentionPolicyBody = zod.object({
   recordType: zod.string(),
-  retentionDays: zod.number().int(),
+  retentionDays: zod
+    .number()
+    .int()
+    .min(updateDataRetentionPolicyBodyRetentionDaysMin)
+    .max(updateDataRetentionPolicyBodyRetentionDaysMax)
+    .describe(
+      "At least 3650 days — CMS requires MA\/Part D records be kept 10 years.",
+    ),
   isEnabled: zod.boolean(),
 });
 
@@ -6855,24 +6992,6 @@ export const CancelCampaignResponse = zod.object({
   skippedCount: zod.number().int().optional(),
   unsubscribedCount: zod.number().int().optional(),
 });
-
-/**
- * @summary Public unsubscribe confirmation page (HMAC-signed token, rate-limited)
- */
-export const CampaignUnsubscribePageParams = zod.object({
-  token: zod.coerce.string(),
-});
-
-export const CampaignUnsubscribePageResponse = zod.unknown();
-
-/**
- * @summary Unsubscribe (form button or RFC 8058 List-Unsubscribe=One-Click)
- */
-export const CampaignUnsubscribeParams = zod.object({
-  token: zod.coerce.string(),
-});
-
-export const CampaignUnsubscribeResponse = zod.unknown();
 
 /**
  * @summary Resend delivery/open/click/bounce/complaint events (svix signature, RESEND_WEBHOOK_SECRET)

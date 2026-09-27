@@ -804,7 +804,7 @@ function ExecutiveTab() {
           <StatCard title="Active Agents" value={data.agents.active} icon={<Users className="h-5 w-5 text-accent" />} />
           <StatCard title="In Onboarding" value={data.agents.onboarding} icon={<Activity className="h-5 w-5 text-warning" />} />
           <StatCard title="Members" value={data.members.enrolled.toLocaleString()} subtitle="Enrolled + retained clients" icon={<ShieldCheck className="h-5 w-5 text-success" />} />
-          <StatCard title="AHIP Complete" value={`${data.compliance.ahipRate}%`} subtitle={`${data.compliance.ahipPassed} of ${data.compliance.ahipTotal} active + onboarding agents`} icon={<CheckCircle2 className="h-5 w-5 text-navy-700 dark:text-accent" />} />
+          <StatCard title={`${data.compliance.ahipPlanYear ?? ""} AHIP Complete`.trim()} value={`${data.compliance.ahipRate}%`} subtitle={`${data.compliance.ahipPassed} of ${data.compliance.ahipTotal} active agents`} icon={<CheckCircle2 className="h-5 w-5 text-navy-700 dark:text-accent" />} />
         </div>
       </div>
 
@@ -976,7 +976,7 @@ type ExecutiveReport = {
   deals: { won: number; lost: number; winRate: number; wonValue: number; activePipelineValue: number };
   members: { enrolled: number };
   communications: { outbound: number };
-  compliance: { ahipRate: number; ahipPassed: number; ahipTotal: number };
+  compliance: { ahipPlanYear: number | null; ahipRate: number; ahipPassed: number; ahipTotal: number };
 };
 
 // ─── Main Reports Page ────────────────────────────────────────────────────────

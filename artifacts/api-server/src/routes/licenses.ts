@@ -9,7 +9,6 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
-
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import { withEffectiveStatus } from "../lib/licenses/licenseStatus";
 
@@ -37,7 +36,6 @@ const UpdateLicenseSchema = z.object({
 
 router.use(
   routerAuditMiddleware(router, "agent", undefined, {
-
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.lid ?? req.params.id;

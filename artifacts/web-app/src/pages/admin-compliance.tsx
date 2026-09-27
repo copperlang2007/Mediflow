@@ -588,7 +588,7 @@ function SecurityConfigTab() {
       {/* Data Retention */}
       <SectionCard
         title="Data retention"
-        description="How long each kind of record is kept. HIPAA requires at least 6 years (2,190 days) for required documentation."
+        description={`How long each kind of record is kept. CMS requires Medicare Advantage and Part D records to be kept for 10 years (${CMS_RETENTION_DAYS.toLocaleString()} days), so no policy can delete sooner.`}
         icon={Database}
       >
           <div className="divide-y divide-border rounded-lg border border-border px-4">
@@ -598,28 +598,29 @@ function SecurityConfigTab() {
                   <p className="font-medium text-sm">{RETENTION_LABELS[policy.recordType] ?? policy.recordType}</p>
                   <p className="text-xs text-muted-foreground">
                     {policy.retentionDays} days ({Math.round(policy.retentionDays / 365 * 10) / 10} years)
-                    {policy.retentionDays < 2190 && <StatusPill tone="warning" className="ml-2">Below HIPAA minimum</StatusPill>}
+                    {policy.retentionDays < CMS_RETENTION_DAYS && (
+                      <StatusPill tone="warning" className="ml-2">Below the CMS 10-year minimum — enforced as 10 years</StatusPill>
+                    )}
                   </p>
                 </div>
                 <div className="flex items-center gap-4">
                   <Select
-                    value={String(policy.retentionDays)}
+                    value={String(Math.max(policy.retentionDays, CMS_RETENTION_DAYS))}
                     onValueChange={(v) => updateRetentionMut.mutate({ recordType: policy.recordType, retentionDays: parseInt(v), isEnabled: policy.isEnabled })}
                   >
                     <SelectTrigger className="w-36">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="1825">5 years</SelectItem>
-                      <SelectItem value="2190">6 years (HIPAA min)</SelectItem>
-                      <SelectItem value="2555">7 years</SelectItem>
-                      <SelectItem value="3650">10 years</SelectItem>
+                      <SelectItem value="3650">10 years (CMS min)</SelectItem>
+                      <SelectItem value="4380">12 years</SelectItem>
+                      <SelectItem value="5475">15 years</SelectItem>
                     </SelectContent>
                   </Select>
                   <div className="flex items-center gap-2">
                     <Switch
                       checked={policy.isEnabled}
-                      onCheckedChange={(checked) => updateRetentionMut.mutate({ recordType: policy.recordType, retentionDays: policy.retentionDays, isEnabled: checked })}
+                      onCheckedChange={(checked) => updateRetentionMut.mutate({ recordType: policy.recordType, retentionDays: Math.max(policy.retentionDays, CMS_RETENTION_DAYS), isEnabled: checked })}
                     />
                     <Label className="text-xs text-muted-foreground">Auto-delete</Label>
                   </div>
@@ -1031,6 +1032,9 @@ type AuditLogResponse = { entries: AuditEntry[]; total: number; limit: number; o
 type UserRow = { id: string; email: string; fullName: string; role: string; isActive: boolean; lastLoginAt: string | null; createdAt: string };
 type LoginEvent = { id: string; email: string | null; userId: string | null; success: boolean; ipAddress: string | null; failureReason: string | null; createdAt: string };
 type LoginHistoryResponse = { events: LoginEvent[]; total: number };
+/** CMS 10-year record retention floor — mirrors the server's CMS_RECORD_RETENTION_DAYS. */
+const CMS_RETENTION_DAYS = 3650;
+
 type RetentionPolicy = { id: string | null; orgId: string; recordType: string; retentionDays: number; isEnabled: boolean };
 type BaaStatus = "pass" | "warn" | "partial" | "fail";
 type BaaControl = { id: string; label: string; status: BaaStatus; note?: string; evidenceUrl?: string };

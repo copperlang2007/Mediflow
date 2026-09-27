@@ -53,8 +53,10 @@ import type { TestDb } from "../helpers/testDb";
 import type { AgentLeaderboardEntry } from "../../lib/agents/leaderboard";
 
 import type { Express } from "express";
+import { sellingPlanYear } from "../../lib/compliance/planYear";
 
-const YEAR = new Date().getUTCFullYear();
+// Credentials must be for the plan year being sold (flips to next year on Oct 1).
+const YEAR = sellingPlanYear();
 const FUTURE = new Date(`${YEAR + 1}-01-01T00:00:00Z`);
 
 let app: Express;

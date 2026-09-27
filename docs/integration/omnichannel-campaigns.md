@@ -13,7 +13,7 @@ tracking") and the API refuses to send — nothing is faked.
 | `RESEND_API_KEY` | Sending email | Already used for system email. |
 | `EMAIL_FROM_ADDRESS` | Sending email | Must be on a domain verified in Resend. The display name is the agency name from campaign settings. |
 | `APP_BASE_URL` | Unsubscribe links, SMS status callbacks | Public origin of the app, e.g. `https://app.example.com` (no trailing slash). Already used for invitation links. |
-| `CAMPAIGN_UNSUBSCRIBE_SECRET` | Email campaigns (required) | Random string, **at least 32 characters** (`openssl rand -hex 32`). Signs every unsubscribe link. Rotating it breaks links in email already sent, so rotate only if it leaks. |
+| `PHI_HMAC_KEY` | Email campaigns (required in production) | Already required in production. The shared unsubscribe links (`lib/compliance/unsubscribe.ts`) are signed with a key derived from it. |
 | `RESEND_WEBHOOK_SECRET` | Email tracking (delivered / opened / clicked / bounced / complaints) | The `whsec_…` signing secret Resend shows for the webhook endpoint. If unset, the webhook endpoint rejects every call (503) and the page shows "Connect tracking" instead of rates. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | Sending SMS | Already used by the SMS inbox. The auth token also validates status callbacks. |
 | `TWILIO_WEBHOOK_PUBLIC_HOST` | SMS tracking | Optional; falls back to `APP_BASE_URL`. Must match the host Twilio calls exactly, or signatures fail. |
@@ -30,8 +30,9 @@ On the page, open **Settings** (top right) and fill in:
 - **Mailing address** — a valid physical postal address. **CAN-SPAM requires
   it in every marketing email**; email campaigns cannot be sent until it is set.
 - **Reply-to email** (optional).
-- **Default time zone** — used for SMS quiet hours when a client has no state
-  on file.
+- **Default time zone** — kept for reference only. Texting hours now come from
+  the shared consumer outreach gate (see below), which holds a client with no
+  state on file to the window in every continental US time zone.
 
 Only super admins and agency admins can change these, send, schedule or cancel
 a campaign, or re-subscribe someone to email. Agent support staff can build
@@ -64,28 +65,34 @@ SMS has no open tracking.
 
 **Email (CAN-SPAM / RFC 8058)**
 
-- Footer with agency name, mailing address and a per-recipient **unsubscribe
-  link**. The link carries an HMAC-signed token (no email address in it, not
-  guessable); invalid links all get the same generic page.
+- Footer with agency name, mailing address and an **unsubscribe link**. The
+  link is the app-wide CAN-SPAM link (`lib/compliance/unsubscribe.ts`): an
+  HMAC-signed org + contact token, plus the campaign recipient id (`r`) so the
+  unsubscribe is credited to the campaign.
 - `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
   headers, so Gmail/Yahoo show their native unsubscribe button.
-- The public unsubscribe endpoint (`/api/campaigns/v1/unsubscribe/<token>`)
-  needs no login, is rate-limited per IP, sets the contact's email opt-out,
+- The shared public unsubscribe endpoint (`/api/public/unsubscribe?t=…`,
+  `routes/unsubscribe.ts`) needs no login, sets the contact's email opt-out,
   adds the address to the agency's email suppression list and writes an audit
-  entry.
-- Drip-sequence emails get the same footer and headers once the settings above
-  are in place.
+  entry. A Resend spam complaint is treated the same way.
+- Drip-sequence and automation emails carry the same link through the shared
+  consumer outreach gate (`lib/compliance/consumerDelivery.ts`).
 
 **SMS (TCPA)**
 
-- Only contacts with a phone number who have not opted out are texted. The
-  STOP list is checked for every recipient right before sending.
+- Every recipient is re-checked right before sending by the shared consumer
+  outreach gate (`lib/compliance/consumerOutreach.ts`), the same one sequences
+  and automation rules use: opt-out flags, do-not-contact, and the STOP list
+  (matched on the last 10 digits of the number).
+- **TCPA consent**: when the agency requires consent (Settings → Texting
+  compliance, on by default), only contacts with a recorded consent date and
+  source are texted; others are recorded as "No TCPA consent on file".
 - The first campaign text a client receives ends with "Reply STOP to opt out."
-- **Quiet hours**: texts go out only between 8am and 9pm in the client's local
-  time, worked out from the state on their contact record (states spanning two
-  zones use the zone most residents are in). Clients with no state use the
-  agency's default time zone. Recipients outside the window wait for the next
-  window automatically.
+- **Texting hours**: the federal 8am–9pm window at the client's location, or a
+  narrower state window where state law sets one (FL, MD, OK, WA, TX),
+  checked in every time zone the client's state spans. Clients with no state
+  must be inside the window in every continental US zone. Recipients outside
+  the window wait for the next window automatically.
 - Opt-outs are never reversed from the UI. A client who replied STOP is
   re-subscribed only by texting START (handled by the existing inbound SMS
   webhook).
@@ -115,8 +122,9 @@ message also appears on the client's timeline (message threads).
 |---|---|
 | "Email sending isn't set up yet" | `RESEND_API_KEY` missing. |
 | "Add your agency's mailing address…" | Settings → Mailing address is empty. |
-| "Unsubscribe links aren't set up yet" | `CAMPAIGN_UNSUBSCRIBE_SECRET` (≥ 32 chars) or `APP_BASE_URL` missing. |
+| "Unsubscribe links aren't set up yet" | `PHI_HMAC_KEY` (32 bytes, base64) or `APP_BASE_URL` missing. |
 | Tracking tab says "Connect tracking" | `RESEND_WEBHOOK_SECRET` (email) or `TWILIO_AUTH_TOKEN` + public host (SMS) missing. |
 | Resend webhook deliveries fail with 401 | Wrong secret, or a proxy is rewriting the JSON body. |
 | Twilio callbacks rejected with 403 | `TWILIO_WEBHOOK_PUBLIC_HOST` / `APP_BASE_URL` does not match the URL Twilio calls. |
-| SMS campaign stuck in "Sending" overnight | Quiet hours — it resumes at 8am in each recipient's time zone. |
+| SMS campaign stuck in "Sending" overnight | Texting hours — it resumes when each recipient's window opens. |
+| SMS recipients "No TCPA consent on file" | The contact has no consent date + source and the agency requires consent. |

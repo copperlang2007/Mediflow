@@ -1,5 +1,5 @@
 /**
- * Knowledge Base (stage 2, migration 0050):
+ * Knowledge Base (stage 2, migration 0053):
  *   - CRUD routes: auth, role permissions (owners write, all staff read),
  *     org scoping on every verb.
  *   - AI context: matching ACTIVE articles from the caller's own org are

@@ -39,6 +39,7 @@ import { resolveTimezone } from "../lib/dialer/preclearance";
 import { type RunAutomationRulesPayload, enqueue, JOB_NAMES } from "../lib/jobs";
 import { logger } from "../lib/logger";
 import { captureWorkerError } from "../lib/sentry";
+import { phoneMatchKey, phoneMatchKeySql } from "../lib/compliance/phone";
 import {
   evaluateConditions,
   renderConfig,
@@ -64,62 +65,84 @@ interface AutomationAction {
 // ---- Action execution ----
 
 /**
- * The contact a rule fired about: the resource itself for contact triggers,
- * otherwise the contactId the trigger carries (lead_created,
- * deal_stage_changed, ...). Same convention as change_contact_status.
+ * The consumer contact an action targets, when there is one: the resource
+ * itself for contact triggers, or the linked contact a lead_* trigger puts in
+ * its context.
  */
-function relatedContactId(
+function consumerContactFor(
   resourceType: string,
-  resourceId: string | undefined,
+  resourceId: string | null | undefined,
   context: Record<string, unknown>,
 ): string | null {
   if (resourceType === "contact" && resourceId) return resourceId;
   return typeof context.contactId === "string" ? context.contactId : null;
 }
 
-const digits = (v: string) => v.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+type ExplicitRecipient =
+  | { kind: "internal" }
+  | { kind: "consumer"; contactId: string }
+  | { kind: "unknown" };
 
 /**
- * Canonical mailbox for opt-out matching: case-insensitive, "+tag" dropped,
- * and dots ignored for Gmail. Errs toward treating variants as the same
- * person, so a hand-typed variant can't slip past an opt-out.
+ * Classify an explicit `to` from a rule's config. `to` is templated, so it can
+ * resolve to a consumer's own address (`{{email}}`, `{{phone}}`): it counts as
+ * an internal notification only when it belongs to this org's staff (an active
+ * user or an agent). A consumer address is routed through the outreach gate as
+ * that contact; anything else is not sent.
  */
-function mailbox(v: string): string {
-  const e = v.trim().toLowerCase();
-  const at = e.lastIndexOf("@");
-  if (at < 1) return e;
-  const domain = e.slice(at + 1);
-  let local = e.slice(0, at).split("+")[0] ?? "";
-  if (domain === "gmail.com" || domain === "googlemail.com") local = local.replace(/\./g, "");
-  return `${local}@${domain === "googlemail.com" ? "gmail.com" : domain}`;
-}
-
-/**
- * True when `to` is the related contact's own address and that contact has
- * opted out of the channel. Sends to other recipients (e.g. an internal
- * "new lead" alert to the agency inbox) are not the contact's to block.
- */
-async function recipientOptedOut(
+async function classifyExplicitRecipient(
   orgId: string,
-  contactId: string | null,
   channel: "email" | "sms",
   to: string,
-): Promise<boolean> {
-  if (!contactId) return false;
-  const [c] = await db
-    .select({
-      email: contactsTable.email,
-      phone: contactsTable.phone,
-      optOutEmail: contactsTable.optOutEmail,
-      optOutSms: contactsTable.optOutSms,
-    })
-    .from(contactsTable)
-    .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId)));
-  if (!c) return false;
+): Promise<ExplicitRecipient> {
   if (channel === "email") {
-    return c.optOutEmail && !!c.email && mailbox(c.email) === mailbox(to);
+    const address = to.trim().toLowerCase();
+    const [user] = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(and(eq(usersTable.orgId, orgId), eq(usersTable.isActive, true), sql`lower(${usersTable.email}) = ${address}`))
+      .limit(1);
+    if (user) return { kind: "internal" };
+    const [agent] = await db
+      .select({ id: agentsTable.id })
+      .from(agentsTable)
+      .where(and(eq(agentsTable.orgId, orgId), sql`lower(${agentsTable.email}) = ${address}`))
+      .limit(1);
+    if (agent) return { kind: "internal" };
+    const [contact] = await db
+      .select({ id: contactsTable.id })
+      .from(contactsTable)
+      .where(
+        and(
+          eq(contactsTable.orgId, orgId),
+          sql`${contactsTable.deletedAt} IS NULL`,
+          sql`lower(${contactsTable.email}) = ${address}`,
+        ),
+      )
+      .limit(1);
+    return contact ? { kind: "consumer", contactId: contact.id } : { kind: "unknown" };
   }
-  return c.optOutSms && !!c.phone && digits(c.phone) === digits(to);
+
+  const key = phoneMatchKey(to);
+  if (!key) return { kind: "unknown" };
+  const [agent] = await db
+    .select({ id: agentsTable.id })
+    .from(agentsTable)
+    .where(and(eq(agentsTable.orgId, orgId), sql`${phoneMatchKeySql(agentsTable.phone)} = ${key}`))
+    .limit(1);
+  if (agent) return { kind: "internal" };
+  const [contact] = await db
+    .select({ id: contactsTable.id })
+    .from(contactsTable)
+    .where(
+      and(
+        eq(contactsTable.orgId, orgId),
+        sql`${contactsTable.deletedAt} IS NULL`,
+        sql`${phoneMatchKeySql(contactsTable.phone)} = ${key}`,
+      ),
+    )
+    .limit(1);
+  return contact ? { kind: "consumer", contactId: contact.id } : { kind: "unknown" };
 }
 
 async function executeAction(
@@ -247,76 +270,97 @@ async function executeAction(
         subject: string;
         html: string;
       };
-      // Resolve `to` from the action config first; fall back to the resource's
-      // own email so a rule like "send email" on a contact_created trigger
-      // doesn't need to know the contact's address.
-      let resolvedTo = to;
-      if (!resolvedTo) {
-        if (typeof context.email === "string") {
-          resolvedTo = context.email;
-        } else if (resourceType === "contact" && resourceId) {
-          const [c] = await db
-            .select({ email: contactsTable.email })
-            .from(contactsTable)
-            .where(and(eq(contactsTable.id, resourceId), eq(contactsTable.orgId, orgId)));
-          if (c?.email) resolvedTo = c.email;
-        } else if (resourceType === "agent" && resourceId) {
-          const [a] = await db
-            .select({ email: agentsTable.email })
-            .from(agentsTable)
-            .where(and(eq(agentsTable.id, resourceId), eq(agentsTable.orgId, orgId)));
-          if (a?.email) resolvedTo = a.email;
-        }
-      }
-      if (resolvedTo && (await recipientOptedOut(
-        orgId, relatedContactId(resourceType, resourceId, context), "email", resolvedTo,
-      ))) {
-        logger.info({ action: "send_email", resourceType, resourceId }, "send_email skipped — contact opted out of email");
+      if (!subject || !html) {
+        logger.warn({ action: "send_email", resourceType, resourceId }, "send_email skipped — missing subject/html");
         break;
       }
-      if (resolvedTo && subject && html) {
+      // An explicit `to` goes out as an internal notification only when it is
+      // a staff address; a consumer's address is gated as that contact.
+      // Without one, the email goes to the resource itself: an agent
+      // (internal) or a consumer contact, gated at send time.
+      if (to) {
+        const recipient = await classifyExplicitRecipient(orgId, "email", to);
+        if (recipient.kind === "internal") {
+          await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, { to, subject, html });
+        } else if (recipient.kind === "consumer") {
+          await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
+            to: "",
+            subject,
+            html,
+            consumer: { orgId, contactId: recipient.contactId, automated: true },
+          });
+        } else {
+          logger.warn(
+            { action: "send_email", resourceType, resourceId },
+            "send_email skipped — explicit recipient is neither staff nor a contact in this org",
+          );
+        }
+        break;
+      }
+      const consumerContactId = consumerContactFor(resourceType, resourceId, context);
+      if (consumerContactId) {
         await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
-          to: resolvedTo,
+          to: typeof context.email === "string" ? context.email : "",
           subject,
           html,
+          consumer: { orgId, contactId: consumerContactId, automated: true },
         });
-      } else {
-        logger.warn(
-          { action: "send_email", resourceType, resourceId, hasTo: !!resolvedTo },
-          "send_email skipped — missing recipient/subject/html after resolution",
-        );
+        break;
       }
+      if (resourceType === "agent" && resourceId) {
+        const [a] = await db
+          .select({ email: agentsTable.email })
+          .from(agentsTable)
+          .where(and(eq(agentsTable.id, resourceId), eq(agentsTable.orgId, orgId)));
+        if (a?.email) {
+          await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, { to: a.email, subject, html });
+          break;
+        }
+      }
+      logger.warn(
+        { action: "send_email", resourceType, resourceId },
+        "send_email skipped — no agent or contact recipient (consumer email requires a contact so opt-outs can be enforced)",
+      );
       break;
     }
 
     case "send_sms": {
       const { to, body } = config as { to?: string; body: string };
-      let resolvedTo = to;
-      if (!resolvedTo) {
-        if (typeof context.phone === "string") {
-          resolvedTo = context.phone;
-        } else if (resourceType === "contact" && resourceId) {
-          const [c] = await db
-            .select({ phone: contactsTable.phone })
-            .from(contactsTable)
-            .where(and(eq(contactsTable.id, resourceId), eq(contactsTable.orgId, orgId)));
-          if (c?.phone) resolvedTo = c.phone;
-        }
-      }
-      if (resolvedTo && (await recipientOptedOut(
-        orgId, relatedContactId(resourceType, resourceId, context), "sms", resolvedTo,
-      ))) {
-        logger.info({ action: "send_sms", resourceType, resourceId }, "send_sms skipped — contact opted out of SMS");
+      if (!body) {
+        logger.warn({ action: "send_sms", resourceType, resourceId }, "send_sms skipped — missing body");
         break;
       }
-      if (resolvedTo && body) {
-        await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { to: resolvedTo, body });
-      } else {
-        logger.warn(
-          { action: "send_sms", resourceType, resourceId, hasTo: !!resolvedTo },
-          "send_sms skipped — missing recipient/body after resolution",
-        );
+      if (to) {
+        const recipient = await classifyExplicitRecipient(orgId, "sms", to);
+        if (recipient.kind === "internal") {
+          await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { to, body });
+        } else if (recipient.kind === "consumer") {
+          await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, {
+            to: "",
+            body,
+            consumer: { orgId, contactId: recipient.contactId, automated: true },
+          });
+        } else {
+          logger.warn(
+            { action: "send_sms", resourceType, resourceId },
+            "send_sms skipped — explicit recipient is neither staff nor a contact in this org",
+          );
+        }
+        break;
       }
+      const consumerContactId = consumerContactFor(resourceType, resourceId, context);
+      if (consumerContactId) {
+        await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, {
+          to: typeof context.phone === "string" ? context.phone : "",
+          body,
+          consumer: { orgId, contactId: consumerContactId, automated: true },
+        });
+        break;
+      }
+      logger.warn(
+        { action: "send_sms", resourceType, resourceId },
+        "send_sms skipped — no contact recipient (consumer SMS requires a contact so opt-out, consent and texting hours can be enforced)",
+      );
       break;
     }
 

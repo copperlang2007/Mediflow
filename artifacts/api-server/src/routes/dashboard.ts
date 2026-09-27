@@ -10,9 +10,9 @@ import {
   activitiesTable,
   usersTable,
 } from "@workspace/db";
+import { sellingPlanYear } from "../lib/compliance/planYear";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
-
 import { safeLimit } from "../lib/listGuards";
 import { can, type Role } from "../lib/permissions";
 import { leadContactsWhere } from "../lib/metrics/leads";
@@ -24,7 +24,6 @@ const router: IRouter = Router();
 // Group-level audit: all dashboard reads are logged (HIPAA activity reporting).
 router.use(routerAuditMiddleware(router, "dashboard", undefined, { includeReads: true }));
 
-
 router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read"), async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthenticatedRequest;
   const orgId = authReq.orgId;
@@ -33,7 +32,7 @@ router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read
   const in30 = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
   const in60 = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
   const in90 = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
-  const currentYear = now.getFullYear();
+  const planYear = sellingPlanYear(now);
 
   const [
     allAgents,
@@ -123,7 +122,9 @@ router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read
           isNull(notificationsTable.readAt)
         )
       ),
-    getAhipCoverage(orgId, currentYear),
+    // Shared AHIP definition (lib/agents/ahipCoverage.ts) for the plan year
+    // being sold (lib/compliance/planYear.ts), the year the score uses.
+    getAhipCoverage(orgId, planYear),
     db
       .select({ id: contactsTable.id })
       .from(contactsTable)
@@ -209,6 +210,7 @@ router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read
     ahipCompleteCount: ahipCoverage.complete,
     agentsRequiringAhip: ahipCoverage.agentsRequiringAhip,
     licensesExpiredCount: Number(expiredLicenses[0]?.n ?? 0),
+    ahipPlanYear: planYear,
     totalContacts: totalContacts.length,
     agentsWithExpiringLicenses,
   });

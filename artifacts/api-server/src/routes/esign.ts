@@ -29,7 +29,6 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
-
 import {
   EnvelopeNotFoundError,
   EnvelopeStateError,
@@ -44,7 +43,6 @@ const router: IRouter = Router();
 
 router.use(
   routerAuditMiddleware(router, "esign", undefined, {
-
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.envelopeId;

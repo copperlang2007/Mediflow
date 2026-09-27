@@ -4,8 +4,10 @@
  *
  * Covers: audience exclusion of opt-outs + STOP list, org scoping,
  * permissions (sends are admin-only), idempotent fan-out (claim-before-send,
- * concurrent workers), unsubscribe token validation, webhook signature
- * rejection, and the email-only confirmed re-opt-in.
+ * concurrent workers), the shared consumer outreach gate (TCPA consent,
+ * texting hours, STOP list), campaign unsubscribes through the shared
+ * CAN-SPAM endpoint (routes/unsubscribe.ts), webhook signature rejection,
+ * and the email-only confirmed re-opt-in.
  */
 import { vi, describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 
@@ -54,7 +56,6 @@ import { seedOrg, seedUser } from "../helpers/testDb";
 import type { TestDb } from "../helpers/testDb";
 import type { Express } from "express";
 
-const SECRET = "test-unsubscribe-secret-0123456789abcdef";
 const WHSEC = `whsec_${Buffer.from("resend-webhook-signing-key").toString("base64")}`;
 const TWILIO_TOKEN = "twilio-test-auth-token";
 const PUBLIC_HOST = "https://app.test.example";
@@ -63,7 +64,6 @@ let app: Express;
 let request: typeof import("supertest");
 let testDb: TestDb;
 let worker: typeof import("../../workers/campaignSend").campaignSendWorker;
-let tokens: typeof import("../../lib/campaigns/unsubscribeToken");
 let svix: typeof import("../../lib/campaigns/svix");
 
 let org: { id: string };
@@ -110,6 +110,9 @@ async function contact(
     phone: `+1555${Math.floor(1000000 + Math.random() * 8999999)}`,
     status: "enrolled",
     stateCode: "TX",
+    // Documented TCPA consent (when + where) so automated SMS may go out.
+    tcpaConsentAt: new Date("2026-01-05T15:00:00Z"),
+    tcpaConsentSource: "web form https://example.test/consent",
     ...over,
   });
   return id;
@@ -118,7 +121,6 @@ async function contact(
 beforeAll(async () => {
   const handle = await bootTestDb();
   testDb = handle.db;
-  process.env.CAMPAIGN_UNSUBSCRIBE_SECRET = SECRET;
   process.env.APP_BASE_URL = PUBLIC_HOST;
   process.env.RESEND_API_KEY = "re_test_key";
   process.env.TWILIO_ACCOUNT_SID = "ACtest";
@@ -130,7 +132,6 @@ beforeAll(async () => {
   app = (await import("../../app")).default;
   request = ((await import("supertest")) as any).default;
   worker = (await import("../../workers/campaignSend")).campaignSendWorker;
-  tokens = await import("../../lib/campaigns/unsubscribeToken");
   svix = await import("../../lib/campaigns/svix");
 
   org = await seedOrg(testDb, { id: "camp-org", name: "Sunrise Medicare Agency" });
@@ -191,12 +192,12 @@ describe("audience preview", () => {
     expect(sms.body).toEqual({ matched: 5, eligible: 2, optedOut: 2, missingAddress: 1 });
   });
 
-  it("matches the STOP list on the E.164 form of a formatted contact phone", async () => {
+  it("matches the STOP list on the last 10 digits of a formatted contact phone", async () => {
     const tag = `e164-${randomUUID().slice(0, 6)}`;
     const digits = `${Math.floor(1000000 + Math.random() * 8999999)}`;
     await contact(org.id, { tags: [tag] });
     await contact(org.id, { tags: [tag], phone: `(555) ${digits.slice(0, 3)}-${digits.slice(3)}` });
-    await contact(org.id, { tags: [tag], phone: `1-555-${digits.slice(0, 3)}-${digits.slice(3)} ext. 12` });
+    await contact(org.id, { tags: [tag], phone: `1-555-${digits.slice(0, 3)}-${digits.slice(3)}` });
     // Recorded by the STOP webhook in Twilio's E.164 form, under another org.
     await testDb.insert(optOutsTable).values({ id: randomUUID(), orgId: otherOrg.id, phone: `+1555${digits}`, channel: "sms" });
 
@@ -309,7 +310,8 @@ describe("send fan-out", () => {
     // CAN-SPAM: headers, footer with address, signed link.
     const mail = sentEmails[0]!;
     expect(mail.headers?.["List-Unsubscribe-Post"]).toBe("List-Unsubscribe=One-Click");
-    expect(mail.headers?.["List-Unsubscribe"]).toMatch(/^<https:\/\/app\.test\.example\/api\/campaigns\/v1\/unsubscribe\/.+>$/);
+    // The shared CAN-SPAM link (routes/unsubscribe.ts) plus the recipient id.
+    expect(mail.headers?.["List-Unsubscribe"]).toMatch(/^<https:\/\/app\.test\.example\/api\/public\/unsubscribe\?t=[^&>]+&r=[^&>]+>$/);
     expect(mail.html).toContain("100 Main St, Austin, TX 78701");
     expect(mail.subject).toMatch(/^Hello (Ana|Ben)$/);
 
@@ -382,51 +384,98 @@ describe("send-time STOP re-check", () => {
   });
 });
 
-describe("unsubscribe endpoint", () => {
-  it("rejects forged, tampered and malformed tokens with one generic response", async () => {
-    const forged = tokens.signUnsubscribeToken({ kind: "c", id: "anything" }, "some-other-secret-that-is-long-enough-000");
-    for (const t of [forged!, "not-a-token", `${forged!.split(".")[0]}.AAAA`]) {
-      const res = await request(app).post(`/api/campaigns/v1/unsubscribe/${t}`).send({});
-      expect(res.status).toBe(400);
-      expect(res.text).toContain("This link isn");
-    }
-    // Valid signature for an id that doesn't exist: same page (no enumeration).
-    const unknown = tokens.signUnsubscribeToken({ kind: "r", id: randomUUID() });
-    const res = await request(app).get(`/api/campaigns/v1/unsubscribe/${unknown}`);
-    expect(res.status).toBe(400);
-    expect(res.text).toContain("This link isn");
+describe("TCPA consent", () => {
+  it("does not text a contact with no documented consent", async () => {
+    const tag = `tcpa-${randomUUID().slice(0, 6)}`;
+    const ok = await contact(org.id, { tags: [tag], stateCode: "CA" });
+    const noConsent = await contact(org.id, { tags: [tag], stateCode: "CA", tcpaConsentAt: null, tcpaConsentSource: null });
+    const c = await request(app)
+      .post("/api/campaigns")
+      .set(withAuth(admin.id))
+      .send({ channel: "sms", name: `Consent ${tag}`, body: "Hi {{first_name}}", audience: { tags: [tag] } });
+    expect((await request(app).post(`/api/campaigns/${c.body.id}/send`).set(withAuth(admin.id)).send({})).status).toBe(200);
+    const before = sentSms.length;
+    await worker({ campaignId: c.body.id, orgId: org.id }, { sleep: async () => undefined, now: () => new Date("2027-03-10T18:00:00Z") });
+    expect(sentSms.length).toBe(before + 1);
+    const recips = await testDb.select().from(campaignRecipientsTable).where(eq(campaignRecipientsTable.campaignId, c.body.id));
+    const byContact = Object.fromEntries(recips.map((r) => [r.contactId, r]));
+    expect(byContact[ok]!.status).toBe("sent");
+    expect(byContact[noConsent]!.status).toBe("failed");
+    expect(byContact[noConsent]!.error).toBe("No TCPA consent on file");
   });
+});
 
-  it("one-click POST opts the contact out, suppresses the address and audits it", async () => {
-    const cid = await contact(org.id);
-    const t = tokens.signUnsubscribeToken({ kind: "c", id: cid })!;
-    const page = await request(app).get(`/api/campaigns/v1/unsubscribe/${t}`);
+describe("campaign unsubscribe (shared endpoint)", () => {
+  it("one-click POST opts the contact out and credits the campaign, once", async () => {
+    const tag = `unsub-${randomUUID().slice(0, 6)}`;
+    const cid = await contact(org.id, { tags: [tag] });
+    const c = await request(app)
+      .post("/api/campaigns")
+      .set(withAuth(admin.id))
+      .send({ channel: "email", name: `Unsub ${tag}`, subject: "Hello", body: "<p>Hi</p>", audience: { tags: [tag] } });
+    expect((await request(app).post(`/api/campaigns/${c.body.id}/send`).set(withAuth(admin.id)).send({})).status).toBe(200);
+    await worker({ campaignId: c.body.id, orgId: org.id }, { sleep: async () => undefined });
+    const mail = sentEmails.at(-1)!;
+    const link = mail.headers!["List-Unsubscribe"]!.slice(1, -1);
+    const path = link.replace(PUBLIC_HOST, "");
+
+    const page = await request(app).get(path);
     expect(page.status).toBe(200);
-    expect(page.text).toContain("Sunrise Medicare Agency");
+    // The confirmation form keeps the campaign recipient id.
+    expect(page.text).toContain("&amp;r=");
 
-    const res = await request(app)
-      .post(`/api/campaigns/v1/unsubscribe/${t}`)
-      .type("form")
-      .send("List-Unsubscribe=One-Click");
+    const res = await request(app).post(path).type("form").send("List-Unsubscribe=One-Click");
     expect(res.status).toBe(200);
-    const [c] = await testDb.select().from(contactsTable).where(eq(contactsTable.id, cid));
-    expect(c!.optOutEmail).toBe(true);
+    const [ct] = await testDb.select().from(contactsTable).where(eq(contactsTable.id, cid));
+    expect(ct!.optOutEmail).toBe(true);
     const sup = await testDb
       .select()
       .from(optOutsTable)
-      .where(and(eq(optOutsTable.orgId, org.id), eq(optOutsTable.email, c!.email!.toLowerCase())));
+      .where(and(eq(optOutsTable.orgId, org.id), eq(optOutsTable.channel, "email"), eq(optOutsTable.email, ct!.email!)));
     expect(sup).toHaveLength(1);
+    expect(sup[0]!.source).toBe("unsubscribe_link");
     const audit = await testDb
       .select()
       .from(auditLogTable)
       .where(and(eq(auditLogTable.resourceId, cid), eq(auditLogTable.action, "email_unsubscribe")));
     expect(audit).toHaveLength(1);
+    const [rec] = await testDb.select().from(campaignRecipientsTable).where(eq(campaignRecipientsTable.contactId, cid));
+    expect(rec!.unsubscribedAt).not.toBeNull();
+    const [camp] = await testDb.select().from(campaignsTable).where(eq(campaignsTable.id, c.body.id));
+    expect(camp!.unsubscribedCount).toBe(1);
 
-    // Idempotent.
-    await request(app).post(`/api/campaigns/v1/unsubscribe/${t}`).type("form").send("List-Unsubscribe=One-Click");
+    // Idempotent: a repeat click records nothing new.
+    await request(app).post(path).type("form").send("List-Unsubscribe=One-Click");
     expect(
-      await testDb.select().from(optOutsTable).where(and(eq(optOutsTable.orgId, org.id), eq(optOutsTable.email, c!.email!.toLowerCase()))),
+      await testDb
+        .select()
+        .from(auditLogTable)
+        .where(and(eq(auditLogTable.resourceId, cid), eq(auditLogTable.action, "email_unsubscribe"))),
     ).toHaveLength(1);
+  });
+
+  it("ignores an r that belongs to a different contact", async () => {
+    const tag = `unsub2-${randomUUID().slice(0, 6)}`;
+    const a1 = await contact(org.id, { tags: [tag], firstName: "Ann" });
+    const b1 = await contact(org.id, { tags: [tag], firstName: "Bob" });
+    const c = await request(app)
+      .post("/api/campaigns")
+      .set(withAuth(admin.id))
+      .send({ channel: "email", name: `Unsub2 ${tag}`, subject: "Hello", body: "<p>Hi</p>", audience: { tags: [tag] } });
+    await request(app).post(`/api/campaigns/${c.body.id}/send`).set(withAuth(admin.id)).send({});
+    await worker({ campaignId: c.body.id, orgId: org.id }, { sleep: async () => undefined });
+    const recips = await testDb.select().from(campaignRecipientsTable).where(eq(campaignRecipientsTable.campaignId, c.body.id));
+    const bobRec = recips.find((r) => r.contactId === b1)!;
+    const { unsubscribeUrl } = await import("../../lib/compliance/unsubscribe");
+    const annLink = unsubscribeUrl({ orgId: org.id, contactId: a1 })!;
+    await request(app)
+      .post(`${annLink.replace(PUBLIC_HOST, "")}&r=${bobRec.id}`)
+      .type("form")
+      .send("List-Unsubscribe=One-Click");
+    const [bobAfter] = await testDb.select().from(campaignRecipientsTable).where(eq(campaignRecipientsTable.id, bobRec.id));
+    expect(bobAfter!.unsubscribedAt).toBeNull();
+    const [bob] = await testDb.select().from(contactsTable).where(eq(contactsTable.id, b1));
+    expect(bob!.optOutEmail).toBe(false);
   });
 });
 

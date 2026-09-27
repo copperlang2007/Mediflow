@@ -1,5 +1,5 @@
 /**
- * Knowledge Base articles (stage 2, migration 0050).
+ * Knowledge Base articles (stage 2, migration 0053).
  *
  *   GET    /kb/articles        — list (search, category, includeInactive)
  *   GET    /kb/articles/:id    — one article

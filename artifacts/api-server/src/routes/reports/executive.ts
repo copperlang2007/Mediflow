@@ -1,11 +1,9 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, gte, lte, sql, count, sum, isNull, inArray } from "drizzle-orm";
+import { eq, and, gte, lte, count, sum, isNull, inArray } from "drizzle-orm";
 import {
   db,
   agentsTable,
   stateLicensesTable,
-  carrierCertificationsTable,
-  ahipRecordsTable,
   contactsTable,
   dealsTable,
   messagesTable,
@@ -18,8 +16,27 @@ import {
   requireExportConfirm,
 } from "../../middlewares/requireAuth";
 import { parseRange, logExport } from "./shared";
-import { getAhipCoverage } from "../../lib/agents/ahipCoverage";
-import { activeLicenseFlagSql, activeLicenseWhere, expiredLicenseWhere } from "../../lib/licenses/licenseStatus";
+import {
+  agencyComplianceScore,
+  getAgentComplianceScores,
+  type AgentComplianceScore,
+} from "../../lib/compliance/agentComplianceScore";
+
+/**
+ * AHIP completion across ACTIVE agents for the plan year being sold: the
+ * denominator is every active agent (not every AHIP row), so an agent with no
+ * record counts as not certified instead of silently dropping out.
+ */
+function ahipStatsFromScores(scores: AgentComplianceScore[]) {
+  const total = scores.length;
+  const passed = scores.filter((s) => s.ahipCompleted).length;
+  return {
+    planYear: scores[0]?.planYear ?? null,
+    total,
+    passed,
+    rate: total > 0 ? Math.round((passed / total) * 100) : 0,
+  };
+}
 
 const router: IRouter = Router();
 
@@ -70,8 +87,7 @@ router.get(
       db.select({ val: sum(dealsTable.valueEst) }).from(dealsTable).where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "open"))),
       db.select({ cnt: count() }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.status, ["enrolled", "retained"]), isNull(contactsTable.deletedAt))),
       db.select({ cnt: count() }).from(messagesTable).innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id)).where(and(eq(messageThreadsTable.orgId, authReq.orgId), eq(messagesTable.direction, "outbound"), gte(messagesTable.createdAt, start), lte(messagesTable.createdAt, end))),
-      // Shared AHIP definition (lib/agents/ahipCoverage.ts) for the current year.
-      getAhipCoverage(authReq.orgId, new Date().getFullYear()),
+      getAgentComplianceScores({ orgId: authReq.orgId, statuses: ["active"] }),
     ]);
 
     const wonCount = Number(dealsWon[0]?.cnt ?? 0);
@@ -80,8 +96,7 @@ router.get(
     const leadsTotal = Number(totalLeads[0]?.cnt ?? 0);
     const leadsPrior = Number(priorLeads[0]?.cnt ?? 0);
     const leadsChangePct = leadsPrior > 0 ? Math.round(((leadsTotal - leadsPrior) / leadsPrior) * 100) : null;
-    const ahipTotal = ahipStats.agentsRequiringAhip;
-    const ahipPassed = ahipStats.complete;
+    const ahip = ahipStatsFromScores(ahipStats);
 
     const rows: (string | number | null)[][] = [
       ["Metric", "Value"],
@@ -99,9 +114,11 @@ router.get(
       ["Active Pipeline Value ($)", Number(activePipeline[0]?.val ?? 0)],
       ["Members (enrolled + retained)", Number(enrolledMembers[0]?.cnt ?? 0)],
       ["Outbound Messages", Number(commsVolume[0]?.cnt ?? 0)],
-      ["AHIP Complete (passed or waived)", ahipPassed],
-      ["Agents Needing AHIP (active + onboarding)", ahipTotal],
-      ["AHIP Pass Rate", ahipTotal > 0 ? Math.round((ahipPassed / ahipTotal) * 100) + "%" : "N/A"],
+      ["AHIP Plan Year", ahip.planYear ?? "N/A"],
+      ["Active Agents AHIP-Certified", ahip.passed],
+      ["Active Agents", ahip.total],
+      ["AHIP Completion Rate", ahip.total > 0 ? ahip.rate + "%" : "N/A"],
+      ["Agency Compliance Score", agencyComplianceScore(ahipStats)],
     ];
 
     const csv = rows.map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -155,11 +172,8 @@ router.get(
       activePipeline,
       enrolledMembers,
       commsVolume,
-      ahipStats,
+      activeAgentScores,
       licensesExpiringThisMonth,
-      agentLicenseScores,
-      agentCertScores,
-      agentAhipScores,
     ] = await Promise.all([
       db.select({ cnt: count() }).from(agentsTable)
         .where(and(eq(agentsTable.orgId, authReq.orgId), eq(agentsTable.status, "active"))),
@@ -189,48 +203,21 @@ router.get(
         .innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id))
         .where(and(eq(messageThreadsTable.orgId, authReq.orgId), eq(messagesTable.direction, "outbound"), gte(messagesTable.createdAt, start), lte(messagesTable.createdAt, end))),
 
-      // Shared AHIP definition (lib/agents/ahipCoverage.ts) for the current year.
-      getAhipCoverage(authReq.orgId, new Date().getFullYear()),
+      // Canonical per-agent compliance scores for ACTIVE agents — the AHIP
+      // rate and the agency score both derive from this one read.
+      getAgentComplianceScores({ orgId: authReq.orgId, statuses: ["active"] }),
 
       // Licenses expiring this calendar month
       db.select({ cnt: count() }).from(stateLicensesTable)
         .innerJoin(agentsTable, eq(stateLicensesTable.agentId, agentsTable.id))
         .where(and(
           eq(agentsTable.orgId, authReq.orgId),
+          eq(agentsTable.status, "active"),
+          eq(stateLicensesTable.status, "active"),
           gte(stateLicensesTable.expiryDate, monthStart),
           lte(stateLicensesTable.expiryDate, monthEnd),
         )),
 
-      // Per-agent 4-pillar compliance scores for agency aggregate
-      // Pillars (25 pts each): active license, active cert, passed AHIP, no expiring license (<30 days)
-      db.select({
-        agentId: agentsTable.id,
-        // Shared definitions (lib/licenses/licenseStatus.ts).
-        hasActiveLicense: sql<number>`SUM(${activeLicenseFlagSql(execNow)})`,
-        // Expired, or active and expiring within 30 days.
-        expiringLicenses: sql<number>`SUM(CASE WHEN ${expiredLicenseWhere(execNow)} OR (${activeLicenseWhere(execNow)} AND ${stateLicensesTable.expiryDate} <= ${new Date(execNow.getTime() + 30 * 86_400_000)}) THEN 1 ELSE 0 END)`,
-      }).from(agentsTable)
-        .leftJoin(stateLicensesTable, eq(stateLicensesTable.agentId, agentsTable.id))
-        .where(eq(agentsTable.orgId, authReq.orgId))
-        .groupBy(agentsTable.id),
-
-      // Per-agent: has at least one passed/active certification
-      db.select({
-        agentId: carrierCertificationsTable.agentId,
-        activeCerts: sql<number>`COUNT(*)`,
-      }).from(carrierCertificationsTable)
-        .innerJoin(agentsTable, eq(carrierCertificationsTable.agentId, agentsTable.id))
-        .where(and(eq(agentsTable.orgId, authReq.orgId), eq(carrierCertificationsTable.status, "passed")))
-        .groupBy(carrierCertificationsTable.agentId),
-
-      // Per-agent: has at least one passed AHIP record
-      db.select({
-        agentId: ahipRecordsTable.agentId,
-        passedAhip: sql<number>`COUNT(*)`,
-      }).from(ahipRecordsTable)
-        .innerJoin(agentsTable, eq(ahipRecordsTable.agentId, agentsTable.id))
-        .where(and(eq(agentsTable.orgId, authReq.orgId), eq(ahipRecordsTable.status, "passed")))
-        .groupBy(ahipRecordsTable.agentId),
     ]);
 
     const leadsTotal = Number(totalLeads[0]?.cnt ?? 0);
@@ -241,29 +228,7 @@ router.get(
     const lostCount = Number(dealsLost[0]?.cnt ?? 0);
     const winRate = (wonCount + lostCount) > 0 ? Math.round((wonCount / (wonCount + lostCount)) * 100) : 0;
 
-    const ahipTotal = ahipStats.agentsRequiringAhip;
-    const ahipPassed = ahipStats.complete;
-    const ahipRate = Math.round(ahipStats.completionRate);
-
-    // Agency compliance score: 4-pillar average (25 pts each)
-    // Pillar 1: hasActiveLicense  — at least 1 active state license
-    // Pillar 2: hasCert           — at least 1 active carrier certification
-    // Pillar 3: hasAhip           — at least 1 passed AHIP record
-    // Pillar 4: noExpiringLicense — no active licenses expiring within 30 days
-    const certByAgent = new Map(agentCertScores.map((r) => [r.agentId, Number(r.activeCerts)]));
-    const ahipByAgent = new Map(agentAhipScores.map((r) => [r.agentId, Number(r.passedAhip)]));
-
-    const agencyComplianceScore = agentLicenseScores.length > 0
-      ? Math.round(
-          agentLicenseScores.reduce((acc, a) => {
-            const hasLic  = Number(a.hasActiveLicense) > 0 ? 25 : 0;
-            const hasCert = (certByAgent.get(a.agentId) ?? 0) > 0 ? 25 : 0;
-            const hasAhip = (ahipByAgent.get(a.agentId) ?? 0) > 0 ? 25 : 0;
-            const noExp   = Number(a.expiringLicenses) === 0 ? 25 : 0;
-            return acc + hasLic + hasCert + hasAhip + noExp;
-          }, 0) / agentLicenseScores.length
-        )
-      : 0;
+    const ahip = ahipStatsFromScores(activeAgentScores);
 
     const result = {
       periodStart: start.toISOString(),
@@ -291,13 +256,14 @@ router.get(
         outbound: Number(commsVolume[0]?.cnt ?? 0),
       },
       compliance: {
-        ahipRate,
-        ahipPassed,
-        ahipTotal,
+        ahipPlanYear: ahip.planYear,
+        ahipRate: ahip.rate,
+        ahipPassed: ahip.passed,
+        ahipTotal: ahip.total,
         licensesExpiringThisMonth: Number(licensesExpiringThisMonth[0]?.cnt ?? 0),
         aepEligibleContacts: inAep ? Number(enrolledMembers[0]?.cnt ?? 0) : 0,
         oepEligibleContacts: inOep ? Number(enrolledMembers[0]?.cnt ?? 0) : 0,
-        agencyComplianceScore,
+        agencyComplianceScore: agencyComplianceScore(activeAgentScores),
       },
     };
     setCachedReport(execCacheKey, result);

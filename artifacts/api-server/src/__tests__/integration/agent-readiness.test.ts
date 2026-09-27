@@ -45,6 +45,7 @@ import type { TestDb } from "../helpers/testDb";
 import type { AgentReadiness } from "../../lib/agents/readiness";
 
 import type { Express } from "express";
+import { sellingPlanYear } from "../../lib/compliance/planYear";
 
 const YEAR = 2026;
 const OTHER_YEAR = 2025;
@@ -274,10 +275,10 @@ describe("GET /agents/readiness — certificationYear filter", () => {
     expect(res.body.readyCount).toBe(0);
   });
 
-  it("defaults certificationYear to the current UTC year when omitted", async () => {
+  it("defaults certificationYear to the plan year being sold when omitted", async () => {
     const res = await readiness();
     expect(res.status).toBe(200);
-    expect(res.body.certificationYear).toBe(new Date().getUTCFullYear());
+    expect(res.body.certificationYear).toBe(sellingPlanYear());
   });
 });
 

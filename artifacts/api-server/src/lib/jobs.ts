@@ -46,6 +46,8 @@
 
 import { PgBoss, type Job, type Queue, type WorkHandler } from "pg-boss";
 import { logger } from "./logger";
+import { deferredJobId } from "./jobIds";
+import type { ConsumerContext } from "./compliance/consumerOutreach";
 import { captureWorkerError } from "./sentry";
 import { jobEnqueueTotal, jobDeadLetterTotal } from "./metrics";
 
@@ -276,19 +278,15 @@ export interface SendScheduledEmailPayload {
   text?: string;
   replyTo?: string;
   tags?: Record<string, string>;
-  /** e.g. List-Unsubscribe headers on drip-sequence marketing email. */
-  headers?: Record<string, string>;
+  /**
+   * Set whenever the recipient is a contact (consumer). The job is then
+   * re-checked against opt-outs at send time and sent to the contact's current
+   * address; automated sends also get unsubscribe links. Omit for internal /
+   * system mail to staff.
+   */
+  consumer?: ConsumerContext;
   /** Display name for the From header (agency white-label email_from_name). */
   fromName?: string;
-}
-
-/** `"Name <addr>"` using the configured sender address, or undefined for the default. */
-export function fromHeaderFor(fromName: string | undefined): string | undefined {
-  const clean = fromName?.replace(/[<>"\\\r\n]/g, "").trim();
-  if (!clean) return undefined;
-  const configured = process.env.EMAIL_FROM_ADDRESS ?? "noreply@mediflow.app";
-  const address = configured.match(/<([^>]+)>/)?.[1] ?? configured;
-  return `${clean} <${address}>`;
 }
 
 export interface SendScheduledSmsPayload {
@@ -296,6 +294,8 @@ export interface SendScheduledSmsPayload {
   body: string;
   agentId?: string;
   mediaUrl?: string[];
+  /** Consumer context — see SendScheduledEmailPayload.consumer. */
+  consumer?: ConsumerContext;
 }
 
 export interface ReconcileCommissionStatementPayload extends Record<string, unknown> {
@@ -566,22 +566,14 @@ export async function startWorkers(): Promise<void> {
     offboardingPdfHandler,
   );
 
+  // Consumer-targeted jobs (payload.consumer) pass the compliance gate at
+  // send time — see lib/compliance/consumerDelivery.ts.
   const emailHandler: WorkHandler<SendScheduledEmailPayload> = async (
     jobs: Job<SendScheduledEmailPayload>[],
   ) => {
-    const { sendEmail } = await import("./email");
+    const { deliverScheduledEmail } = await import("./compliance/consumerDelivery");
     for (const job of jobs) {
-      const toArray = Array.isArray(job.data.to) ? job.data.to : [job.data.to];
-      await sendEmail({
-        to: toArray.map((email: string) => ({ email })),
-        subject: job.data.subject,
-        html: job.data.html,
-        text: job.data.text,
-        replyTo: job.data.replyTo,
-        tags: job.data.tags,
-        from: fromHeaderFor(job.data.fromName),
-        headers: job.data.headers,
-      });
+      await deliverScheduledEmail(job.data);
     }
   };
   // Transactional email — high volume, provider handles its own rate limiting.
@@ -594,9 +586,27 @@ export async function startWorkers(): Promise<void> {
   const smsHandler: WorkHandler<SendScheduledSmsPayload> = async (
     jobs: Job<SendScheduledSmsPayload>[],
   ) => {
-    const { sendSMS } = await import("./sms");
+    const { deliverScheduledSms } = await import("./compliance/consumerDelivery");
     for (const job of jobs) {
-      await sendSMS(job.data.to, job.data.body, job.data.agentId ?? "system");
+      await deliverScheduledSms(job.data, async (data, startAfter) => {
+        // Deterministic id derived from this job: if this handler is retried
+        // after the deferral was already enqueued, the second insert collides
+        // on the id and is dropped (send resolves null), so the text is never
+        // queued twice. A queue error is NOT swallowed here (unlike
+        // enqueue()): it fails this job so pg-boss retries it instead of the
+        // text being silently lost.
+        try {
+          const boss = await getQueue();
+          await boss.send(JOB_NAMES.SEND_SCHEDULED_SMS, { ...data }, {
+            startAfter,
+            id: deferredJobId(job.id),
+          });
+          jobEnqueueTotal.inc({ queue: JOB_NAMES.SEND_SCHEDULED_SMS, outcome: "accepted" });
+        } catch (err) {
+          jobEnqueueTotal.inc({ queue: JOB_NAMES.SEND_SCHEDULED_SMS, outcome: "failed" });
+          throw err;
+        }
+      });
     }
   };
   // SMS — outreach-rate sensitive, carriers throttle aggressively.

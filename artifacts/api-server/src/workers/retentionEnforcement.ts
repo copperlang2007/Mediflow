@@ -3,6 +3,10 @@
  *
  * Runs daily at 02:00 UTC via pg-boss schedule.
  *
+ * Every window is clamped to the CMS 10-year record-retention floor
+ * (lib/compliance/retention.ts). Contacts are only eligible once they are not
+ * a current member and any enrollment ended more than the window ago.
+ *
  * For each organisation with an enabled data retention policy:
  *  1. Soft-delete active records whose createdAt has passed the retention window
  *     and create a "retention_review" task so an admin can confirm hard-deletion.
@@ -27,6 +31,7 @@ import {
   taskInstancesTable,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { effectiveRetentionDays } from "../lib/compliance/retention";
 
 /**
  * Build the deterministic dedup key for a retention review task.
@@ -133,7 +138,10 @@ async function runOrgSweep(
     for (const policy of policies) {
       if (!SUPPORTED_RECORD_TYPES.includes(policy.recordType as SupportedRecordType)) continue;
 
-      const cutoff = new Date(Date.now() - policy.retentionDays * 24 * 60 * 60 * 1000);
+      // Never below the CMS 10-year floor, even if a legacy policy row was
+      // saved with a shorter window before the floor was enforced.
+      const retentionDays = effectiveRetentionDays(policy.retentionDays);
+      const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
 
       if (policy.recordType === "contacts") {
         // Phase 1: soft-delete active contacts past retention window
@@ -145,6 +153,24 @@ async function runOrgSweep(
               eq(contactsTable.orgId, org.id),
               isNull(contactsTable.deletedAt),
               lt(contactsTable.createdAt, cutoff),
+              // A member's record is retained for the full window after their
+              // coverage relationship ends, not after the contact row was
+              // created: skip current members (enrolled / retained, even if
+              // their enrollment row is missing), any active/pending enrollment,
+              // and any ended enrollment that ended inside the window. An
+              // ended enrollment with no end date on file (e.g. rows
+              // backfilled by migration 0040) is measured from its last
+              // update — the latest date we know it was still on the books —
+              // so it is kept at least a full window, never forever.
+              sql`${contactsTable.status} NOT IN ('enrolled', 'retained')`,
+              sql`NOT EXISTS (
+                SELECT 1 FROM enrollments e
+                WHERE e.contact_id = ${contactsTable.id}
+                  AND (
+                    e.status IN ('active', 'pending')
+                    OR COALESCE(e.disenrolled_date::timestamptz, e.updated_at) > ${cutoff}
+                  )
+              )`,
             ),
           );
 
@@ -160,7 +186,7 @@ async function runOrgSweep(
               id: randomUUID(),
               orgId: org.id,
               title: `Retention review: contact ${contact.firstName} ${contact.lastName}`,
-              description: `Contact soft-deleted by automated retention policy (${policy.retentionDays} days). Review and confirm hard delete or restore.`,
+              description: `Contact soft-deleted by automated retention policy (${retentionDays} days). Review and confirm hard delete or restore.`,
               status: "open",
               priority: "medium",
               dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
@@ -179,7 +205,7 @@ async function runOrgSweep(
             action: "retention_soft_delete",
             resourceType: "contact",
             resourceId: contact.id,
-            changes: { retentionDays: policy.retentionDays, cutoff: cutoff.toISOString() },
+            changes: { retentionDays: retentionDays, cutoff: cutoff.toISOString() },
           });
 
           totalSoftDeleted++;
@@ -211,7 +237,7 @@ async function runOrgSweep(
               id: randomUUID(),
               orgId: org.id,
               title: taskTitle,
-              description: `Contact was soft-deleted and has now exceeded the ${policy.retentionDays}-day retention window. Approve permanent deletion via Admin > Compliance > Data Retention.`,
+              description: `Contact was soft-deleted and has now exceeded the ${retentionDays}-day retention window. Approve permanent deletion via Admin > Compliance > Data Retention.`,
               status: "open",
               priority: "high",
               dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
@@ -233,7 +259,7 @@ async function runOrgSweep(
             action: "retention_hard_delete_review_created",
             resourceType: "contact",
             resourceId: contact.id,
-            changes: { retentionDays: policy.retentionDays, deletedAt: contact.deletedAt?.toISOString() },
+            changes: { retentionDays: retentionDays, deletedAt: contact.deletedAt?.toISOString() },
           });
 
           totalHardDeleteTasksCreated++;
@@ -265,7 +291,7 @@ async function runOrgSweep(
               id: randomUUID(),
               orgId: org.id,
               title: `Retention review: deal "${deal.title}"`,
-              description: `Deal soft-deleted by automated retention policy (${policy.retentionDays} days). Review and confirm hard delete or restore.`,
+              description: `Deal soft-deleted by automated retention policy (${retentionDays} days). Review and confirm hard delete or restore.`,
               status: "open",
               priority: "medium",
               dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
@@ -284,7 +310,7 @@ async function runOrgSweep(
             action: "retention_soft_delete",
             resourceType: "deal",
             resourceId: deal.id,
-            changes: { retentionDays: policy.retentionDays, cutoff: cutoff.toISOString() },
+            changes: { retentionDays: retentionDays, cutoff: cutoff.toISOString() },
           });
 
           totalSoftDeleted++;
@@ -313,7 +339,7 @@ async function runOrgSweep(
               id: randomUUID(),
               orgId: org.id,
               title: taskTitle,
-              description: `Deal was soft-deleted and has now exceeded the ${policy.retentionDays}-day retention window. Approve permanent deletion via Admin > Compliance > Data Retention.`,
+              description: `Deal was soft-deleted and has now exceeded the ${retentionDays}-day retention window. Approve permanent deletion via Admin > Compliance > Data Retention.`,
               status: "open",
               priority: "high",
               dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
@@ -335,7 +361,7 @@ async function runOrgSweep(
             action: "retention_hard_delete_review_created",
             resourceType: "deal",
             resourceId: deal.id,
-            changes: { retentionDays: policy.retentionDays, deletedAt: deal.deletedAt?.toISOString() },
+            changes: { retentionDays: retentionDays, deletedAt: deal.deletedAt?.toISOString() },
           });
 
           totalHardDeleteTasksCreated++;
@@ -368,7 +394,7 @@ async function runOrgSweep(
               id: randomUUID(),
               orgId: org.id,
               title: taskTitle,
-              description: `Agent record has existed for more than ${policy.retentionDays} days. Review per data retention policy and determine if the record should be purged, anonymised, or retained.`,
+              description: `Agent record has existed for more than ${retentionDays} days. Review per data retention policy and determine if the record should be purged, anonymised, or retained.`,
               status: "open",
               priority: "medium",
               dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
@@ -390,7 +416,7 @@ async function runOrgSweep(
             action: "retention_review_created",
             resourceType: "agent",
             resourceId: agent.id,
-            changes: { retentionDays: policy.retentionDays, cutoff: cutoff.toISOString() },
+            changes: { retentionDays: retentionDays, cutoff: cutoff.toISOString() },
           });
 
           totalHardDeleteTasksCreated++;
@@ -416,7 +442,7 @@ async function runOrgSweep(
               id: randomUUID(),
               orgId: org.id,
               title: taskTitle,
-              description: `Communication thread has exceeded the ${policy.retentionDays}-day retention window. Review and purge if required by policy.`,
+              description: `Communication thread has exceeded the ${retentionDays}-day retention window. Review and purge if required by policy.`,
               status: "open",
               priority: "medium",
               dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
@@ -438,7 +464,7 @@ async function runOrgSweep(
             action: "retention_review_created",
             resourceType: "communication",
             resourceId: thread.id,
-            changes: { retentionDays: policy.retentionDays, cutoff: cutoff.toISOString() },
+            changes: { retentionDays: retentionDays, cutoff: cutoff.toISOString() },
           });
 
           totalHardDeleteTasksCreated++;
@@ -464,7 +490,7 @@ async function runOrgSweep(
               id: randomUUID(),
               orgId: org.id,
               title: taskTitle,
-              description: `Document "${doc.name}" (${doc.category}) has exceeded the ${policy.retentionDays}-day retention window. Review and purge if required by policy.`,
+              description: `Document "${doc.name}" (${doc.category}) has exceeded the ${retentionDays}-day retention window. Review and purge if required by policy.`,
               status: "open",
               priority: "medium",
               dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
@@ -486,7 +512,7 @@ async function runOrgSweep(
             action: "retention_review_created",
             resourceType: "document",
             resourceId: doc.id,
-            changes: { retentionDays: policy.retentionDays, cutoff: cutoff.toISOString() },
+            changes: { retentionDays: retentionDays, cutoff: cutoff.toISOString() },
           });
 
           totalHardDeleteTasksCreated++;
@@ -505,7 +531,7 @@ async function runOrgSweep(
 
         const rowsOverWindow = Number(auditCount?.cnt ?? 0);
         if (rowsOverWindow > 0) {
-          const taskTitle = `Audit log retention review: ${rowsOverWindow} records past ${policy.retentionDays}-day window`;
+          const taskTitle = `Audit log retention review: ${rowsOverWindow} records past ${retentionDays}-day window`;
           // Audit log review is rolled up per org (one task per org), so the
           // entity id in the dedup key is the org id itself.
           const key = retentionReviewKey("audit_log", org.id, "review");
@@ -516,7 +542,7 @@ async function runOrgSweep(
               id: randomUUID(),
               orgId: org.id,
               title: taskTitle,
-              description: `There are ${rowsOverWindow} audit log records older than ${policy.retentionDays} days. Export and archive before any permanent deletion. Do NOT delete without a documented, approved archival process.`,
+              description: `There are ${rowsOverWindow} audit log records older than ${retentionDays} days. Export and archive before any permanent deletion. Do NOT delete without a documented, approved archival process.`,
               status: "open",
               priority: "high",
               dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),

@@ -13,14 +13,17 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { PDFDocument, StandardFonts } from "pdf-lib";
+import forge from "node-forge";
+import { extractSignature } from "@signpdf/utils";
 
 import {
   pkiSignPdf,
   verifyPdfSignature,
+  extractCmsWithPadding,
+  parseDerPrefix,
   loadEsignSigningCreds,
   assertEsignSigningCredsAreProd,
   resetEsignSigningCredsCacheForTests,
-  derPrefix,
 } from "../pkiSigner";
 
 async function buildPdf(): Promise<Buffer> {
@@ -68,13 +71,32 @@ describe("pkiSigner round-trip", () => {
     expect(signed.subarray(0, 4).toString()).toBe("%PDF");
 
     const verdict = verifyPdfSignature(signed);
-    // This assertion has flaked rarely in CI (~1 in a few hundred full-suite
-    // runs; never reproduced in 12 isolated runs). Surface WHICH verify
-    // branch failed so the next occurrence is diagnosable instead of an
-    // opaque `expected false to be true`.
+    // Surface WHICH verify branch failed so a failure is diagnosable instead
+    // of an opaque `expected false to be true`.
     expect(verdict.valid, `verify failed with reason: ${verdict.reason}`).toBe(true);
     expect(verdict.signerCN).toContain("DEV ONLY");
   });
+
+  it("verifies a signature whose CMS blob ends in a 0x00 byte", async () => {
+    // Regression: extractSignature strips trailing "00" hex pairs as
+    // placeholder padding, which also dropped a real trailing 0x00 of the
+    // CMS (~1 in 256 signatures), so valid PDFs failed as tampered — the
+    // rare CI flake in the round-trip test above. Vary signingTime until the
+    // CMS ends in 0x00 (expected within a few hundred tries).
+    const unsigned = await buildPdf();
+    let hit: Buffer | null = null;
+    for (let i = 0; i < 4000 && !hit; i++) {
+      const signed = await pkiSignPdf(unsigned, {
+        signingTime: new Date(Date.UTC(2026, 0, 1) + i * 1000),
+      });
+      const cms = extractCmsWithPadding(signed, extractSignature(signed).ByteRange);
+      const derLength = forge.asn1.toDer(parseDerPrefix(cms)).length();
+      if (cms.charCodeAt(derLength - 1) === 0) hit = signed;
+    }
+    expect(hit, "no trailing-zero signature found in 4000 tries").not.toBeNull();
+    const verdict = verifyPdfSignature(hit!);
+    expect(verdict.valid, `verify failed with reason: ${verdict.reason}`).toBe(true);
+  }, 120_000);
 
   it("rejects a PDF with a flipped byte (tamper detection)", async () => {
     const signed = await pkiSignPdf(await buildPdf());
@@ -241,26 +263,5 @@ describe("pkiSigner production boot guard", () => {
       expect(msg).not.toContain("SECRETKEYBYTES-DO-NOT-LEAK");
       expect(msg).not.toContain("BEGIN PRIVATE KEY");
     }
-  });
-});
-
-describe("derPrefix (signature window parsing)", () => {
-  it("keeps a trailing 0x00 that belongs to the DER blob and drops the padding", () => {
-    // SEQUENCE of 3 bytes whose last content byte is 0x00, then zero padding —
-    // exactly the shape @signpdf's trailing-"00" trim used to truncate.
-    const blob = Buffer.from([0x30, 0x03, 0x02, 0x01, 0x00]);
-    const window = Buffer.concat([blob, Buffer.alloc(16)]);
-    expect(derPrefix(window)).toEqual(blob);
-  });
-
-  it("reads long-form lengths", () => {
-    const content = Buffer.alloc(300, 0x00);
-    const blob = Buffer.concat([Buffer.from([0x30, 0x82, 0x01, 0x2c]), content]);
-    expect(derPrefix(Buffer.concat([blob, Buffer.alloc(8)])).length).toBe(blob.length);
-  });
-
-  it("rejects a header that is not a SEQUENCE or overruns the window", () => {
-    expect(() => derPrefix(Buffer.from([0x04, 0x01, 0x00]))).toThrow();
-    expect(() => derPrefix(Buffer.from([0x30, 0x10, 0x00]))).toThrow();
   });
 });

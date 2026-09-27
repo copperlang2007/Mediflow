@@ -377,6 +377,29 @@ export async function processMondayImport(jobId: string, orgId: string, rows: Re
   if (done.length === 0) logger.warn({ jobId }, "imports: job was failed by cleanup before it finished; left as failed");
 }
 
+type LicenseStatus = "active" | "expired" | "pending" | "suspended" | "not_appointed";
+
+/**
+ * Map a free-text license status from a Monday.com export onto our enum.
+ * Anything we can't positively identify imports as `pending` (needs review),
+ * never `active` — an unknown or blank status must not be counted as a
+ * compliant, sellable license. An `active` license whose expiry date is
+ * already past imports as `expired`.
+ */
+export function mapImportedLicenseStatus(raw: string, expiry: Date | null): LicenseStatus {
+  const v = raw.trim().toLowerCase();
+  let status: LicenseStatus;
+  if (v === "active" || v === "current" || v === "valid") status = "active";
+  else if (["expired", "cancelled", "canceled", "lapsed", "inactive", "terminated"].includes(v)) status = "expired";
+  else if (v === "suspended" || v === "revoked") status = "suspended";
+  else if (v === "not appointed" || v === "not_appointed") status = "not_appointed";
+  else status = "pending";
+  if (status === "active" && expiry && !isNaN(expiry.getTime()) && expiry.getTime() < Date.now()) {
+    status = "expired";
+  }
+  return status;
+}
+
 async function importMondayAgentRelations(get: (f: string) => string, orgId: string, agentId: string) {
   // State license import
   const licenseState = get("licenseState").toUpperCase();
@@ -387,7 +410,7 @@ async function importMondayAgentRelations(get: (f: string) => string, orgId: str
 
   if (licenseState && US_STATES.has(licenseState)) {
     const licenseExpiry = licenseExpiryRaw ? new Date(licenseExpiryRaw) : null;
-    const licenseStatus = ["active", "expired", "pending", "cancelled"].includes(licenseStatusRaw) ? licenseStatusRaw : "active";
+    const licenseStatus = mapImportedLicenseStatus(licenseStatusRaw, licenseExpiry);
     // Upsert by (agentId, stateCode, licenseType)
     const [existingLic] = await db.select({ id: stateLicensesTable.id })
       .from(stateLicensesTable)
@@ -400,7 +423,7 @@ async function importMondayAgentRelations(get: (f: string) => string, orgId: str
         stateCode: licenseState,
         licenseType,
         licenseNumber: licenseNumber ?? undefined,
-        status: licenseStatus as "active" | "expired" | "pending" | "suspended" | "not_appointed",
+        status: licenseStatus,
         expiryDate: licenseExpiry && !isNaN(licenseExpiry.getTime()) ? licenseExpiry : undefined,
       });
     }

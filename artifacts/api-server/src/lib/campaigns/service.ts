@@ -1,6 +1,7 @@
 /**
- * Shared campaign data operations used by the routes, the send worker and the
- * public webhook/unsubscribe endpoints.
+ * Shared campaign data operations used by the routes, the send worker, the
+ * provider webhooks and the shared email unsubscribe endpoint
+ * (routes/unsubscribe.ts).
  */
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
@@ -18,8 +19,7 @@ import {
 } from "@workspace/db";
 import { logger } from "../logger";
 import type { SenderIdentity } from "./render";
-import { emailFooterHtml, listUnsubscribeHeaders } from "./render";
-import { unsubscribeUrl } from "./unsubscribeToken";
+import { unsubscribeUrl } from "../compliance/unsubscribe";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type Db = typeof db | Tx;
@@ -53,6 +53,28 @@ export async function loadSenderSettings(orgId: string): Promise<OrgSenderSettin
 export function senderIdentity(s: OrgSenderSettings): SenderIdentity | null {
   if (!s.physicalAddress) return null;
   return { agencyName: s.agencyName, physicalAddress: s.physicalAddress };
+}
+
+/** Configured public base URL (APP_BASE_URL) for provider callbacks, or null. */
+export function configuredPublicBaseUrl(): string | null {
+  const raw = process.env.APP_BASE_URL?.trim();
+  return raw ? raw.replace(/\/+$/, "") : null;
+}
+
+/**
+ * True when this deployment can build the shared CAN-SPAM unsubscribe link
+ * (lib/compliance/unsubscribe.ts: PHI_HMAC_KEY + APP_BASE_URL in production).
+ */
+export function unsubscribeLinksAvailable(): boolean {
+  return unsubscribeUrl({ orgId: "config-probe", contactId: "config-probe" }) !== null;
+}
+
+/**
+ * The shared unsubscribe link for one campaign email: the signed org+contact
+ * link, plus `r` so routes/unsubscribe.ts credits the campaign.
+ */
+export function campaignUnsubscribeUrl(base: string, recipientId: string): string {
+  return `${base}&r=${encodeURIComponent(recipientId)}`;
 }
 
 /** Recompute the counts cache on `campaigns` from `campaign_recipients`. */
@@ -157,15 +179,47 @@ export async function recordOutboundMessage(opts: {
 }
 
 /**
- * Apply an email unsubscribe for one contact: flag the contact, add the
- * address to the org's email suppression list (`opt_outs`), stamp the
- * campaign recipient (if any) and write an audit entry. Idempotent.
+ * Attribute an email unsubscribe to the campaign email that carried the link.
+ *
+ * The unsubscribe itself (contact flag, `opt_outs` row, audit entry) is done
+ * by the shared CAN-SPAM endpoint (routes/unsubscribe.ts) from its signed
+ * org+contact token. Campaign links add the recipient row id as `r` so the
+ * campaign's "unsubscribed" count stays accurate. `r` is not signed, so it is
+ * only honoured for a recipient row belonging to the contact the signed token
+ * names — it can pick which of that contact's own campaign emails is
+ * credited, nothing else. Idempotent.
  */
-export async function applyEmailUnsubscribe(opts: {
+export async function attributeCampaignUnsubscribe(opts: {
+  orgId: string;
+  contactId: string;
+  recipientId: string;
+}): Promise<void> {
+  const [rec] = await db
+    .update(campaignRecipientsTable)
+    .set({ unsubscribedAt: new Date() })
+    .where(
+      and(
+        eq(campaignRecipientsTable.id, opts.recipientId),
+        eq(campaignRecipientsTable.orgId, opts.orgId),
+        eq(campaignRecipientsTable.contactId, opts.contactId),
+        sql`${campaignRecipientsTable.unsubscribedAt} IS NULL`,
+      ),
+    )
+    .returning({ campaignId: campaignRecipientsTable.campaignId });
+  if (rec) await refreshCampaignCounts(rec.campaignId);
+}
+
+/**
+ * A spam complaint reported by the email provider (Resend webhook) is treated
+ * as an unsubscribe (CAN-SPAM best practice): flag the contact, add the
+ * address to the org's email suppression list (`opt_outs`, source
+ * 'complaint'), stamp the campaign recipient and write an audit entry.
+ * Idempotent. Link / one-click unsubscribes go through routes/unsubscribe.ts.
+ */
+export async function applyEmailComplaint(opts: {
   orgId: string;
   contactId: string;
   recipientId?: string | null;
-  source: "unsubscribe_link" | "one_click" | "complaint";
 }): Promise<void> {
   const [contact] = await db
     .select({ id: contactsTable.id, email: contactsTable.email, optOutEmail: contactsTable.optOutEmail })
@@ -201,6 +255,7 @@ export async function applyEmailUnsubscribe(opts: {
           orgId: opts.orgId,
           email,
           channel: "email",
+          source: "complaint",
         });
       }
     }
@@ -229,27 +284,10 @@ export async function applyEmailUnsubscribe(opts: {
         action: "email_unsubscribe",
         resourceType: "contact",
         resourceId: contact.id,
-        changes: { optOutEmail: { from: false, to: true }, source: opts.source, recipientId: opts.recipientId ?? null },
+        changes: { optOutEmail: true, via: "complaint", recipientId: opts.recipientId ?? null },
       });
     }
   });
   if (campaignId) await refreshCampaignCounts(campaignId);
-  logger.info({ orgId: opts.orgId, source: opts.source }, "Email unsubscribe applied");
-}
-
-/**
- * Unsubscribe footer + headers for a drip-sequence email to one contact.
- * Returns null when the org has no physical address on file or the
- * unsubscribe signing secret / APP_BASE_URL are not configured — the caller
- * then sends exactly as before.
- */
-export async function sequenceEmailCompliance(
-  orgId: string,
-  contactId: string,
-): Promise<{ footerHtml: string; headers: Record<string, string> } | null> {
-  const href = unsubscribeUrl({ kind: "c", id: contactId });
-  if (!href) return null;
-  const sender = senderIdentity(await loadSenderSettings(orgId));
-  if (!sender) return null;
-  return { footerHtml: emailFooterHtml(sender, href), headers: listUnsubscribeHeaders(href) };
+  logger.info({ orgId: opts.orgId }, "Email complaint applied as unsubscribe");
 }

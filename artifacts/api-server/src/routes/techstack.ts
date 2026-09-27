@@ -16,7 +16,6 @@ import {
 } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 
-
 const router: IRouter = Router();
 
 const CreateAccountSchema = z.object({
@@ -57,7 +56,6 @@ const UpdatePlatformReqSchema = z.object({
 
 router.use(
   routerAuditMiddleware(router, "agent", undefined, {
-
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.aid ?? req.params.id;

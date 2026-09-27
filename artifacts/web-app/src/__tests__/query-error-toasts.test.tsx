@@ -49,13 +49,13 @@ describe("query error toasts", () => {
 });
 
 describe("mutation error toasts", () => {
-  function failMutation(err: Error) {
+  function failMutation(err: Error, meta?: { toastOnError?: boolean }) {
     const cache = queryClient.getMutationCache();
-    const mutation = cache.build(queryClient, { mutationFn: async () => { throw err; } });
+    const mutation = cache.build(queryClient, { mutationFn: async () => { throw err; }, meta });
     return mutation.execute(undefined).catch(() => undefined);
   }
 
-  it("stays quiet when the page already showed its own error", async () => {
+  it("stays quiet unless the mutation opts in with toastOnError", async () => {
     vi.useFakeTimers();
     await failMutation(new HttpError(500));
     // the page's catch block
@@ -65,9 +65,9 @@ describe("mutation error toasts", () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it("falls back to a shared message when the page didn't", async () => {
+  it("uses the shared plain-language message for a mutation that opts in", async () => {
     vi.useFakeTimers();
-    await failMutation(new HttpError(403));
+    await failMutation(new HttpError(403), { toastOnError: true });
     vi.advanceTimersByTime(100);
     vi.useRealTimers();
     expect(errorSpy).toHaveBeenCalledWith(

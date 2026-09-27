@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Settings, User, Building2, Shield, CalendarClock, Copy } from "lucide-react";
+import { Settings, User, Building2, Shield, CalendarClock, Copy, MessageSquareWarning } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
@@ -184,6 +184,56 @@ const ADMIN_LINKS = [
   { href: "/data-migration", label: "Import & Migration", text: "Bring in agents and clients", icon: ArrowLeftRight },
   { href: "/admin/health", label: "System Health", text: "Background jobs and integrations", icon: Activity },
 ];
+/**
+ * TCPA consent enforcement for automated texts. On by default; turning it off
+ * lets sequences and automation rules text contacts with no recorded consent,
+ * so the switch asks for confirmation and the change is audited server-side.
+ */
+function TextingConsentCard() {
+  const qc = useQueryClient();
+  const { data: settings, isLoading } = useGetOrgSettings();
+  const { mutateAsync: save, isPending } = useUpdateOrgSettings();
+  const enforced = settings?.requireSmsConsent ?? true;
+
+  const setEnforced = async (next: boolean) => {
+    if (!next && !window.confirm(
+      "Automated texts will go to contacts with no recorded TCPA consent. Only turn this off if consent is captured and tracked outside agencyBRIDGE. Continue?",
+    )) {
+      return;
+    }
+    try {
+      await save({ data: { requireSmsConsent: next } });
+      void qc.invalidateQueries({ queryKey: getGetOrgSettingsQueryKey() });
+      toast.success(next ? "Consent is now required for automated texts" : "Consent requirement turned off");
+    } catch {
+      toast.error("Failed to save setting");
+    }
+  };
+
+  return (
+    <SectionCard title="Texting compliance" icon={MessageSquareWarning}>
+        {isLoading ? (
+          <Skeleton className="h-10 w-full" />
+        ) : (
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium">Require TCPA consent for automated texts</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Sequences and automation rules only text contacts with a recorded consent date and source.
+                Opt-outs and recipients' local texting hours are always enforced.
+              </p>
+            </div>
+            <Switch
+              checked={enforced}
+              disabled={isPending}
+              onCheckedChange={(v) => void setEnforced(v)}
+              aria-label="Require TCPA consent for automated texts"
+            />
+          </div>
+        )}
+    </SectionCard>
+  );
+}
 
 export default function SettingsPage() {
   const { user: clerkUser } = useUser();
@@ -275,6 +325,8 @@ export default function SettingsPage() {
             </div>
           ) : null}
       </SectionCard>
+
+      <TextingConsentCard />
 
       {/* Security */}
       <SectionCard title="Sign-in & security" icon={Shield}>

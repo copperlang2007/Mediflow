@@ -9,7 +9,6 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
-
 import { seedDefaultCarriers } from "../lib/carrierSeed";
 
 // TODO(day-6-followup): no dedicated frontend admin page exists for managing
@@ -58,7 +57,6 @@ const UpdateCarrierSchema = z.object({
 
 router.use(
   routerAuditMiddleware(router, "agent", undefined, {
-
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.id;

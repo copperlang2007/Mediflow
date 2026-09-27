@@ -1,5 +1,38 @@
-import { QueryClient, QueryCache, MutationCache } from "@tanstack/react-query";
+import { QueryClient, QueryCache, MutationCache, type Query } from "@tanstack/react-query";
 import { toast } from "sonner";
+
+// Typed `meta` for every query/mutation in the app.
+//   Queries — silent: true: never toast this failure globally. Use for
+//   ambient or optional queries (nav badges, breadcrumb lookups, background
+//   polls) whose failure the user didn't ask about and can't act on.
+//   Mutations — toastOnError: true: opt in to the global error toast, for a
+//   mutation that doesn't report its own failure.
+declare module "@tanstack/react-query" {
+  interface Register {
+    queryMeta: Record<string, unknown> & { silent?: boolean };
+    mutationMeta: Record<string, unknown> & { toastOnError?: boolean };
+  }
+}
+
+type AnyQuery = Query<unknown, unknown, unknown, readonly unknown[]>;
+
+// `query.meta` belongs to the shared cache entry, so whichever component
+// set options last would decide for everyone. Read each observer's own
+// options instead: a query is silent only if every component watching it
+// asked for silence, so an ambient silent poll can't mute a page's errors.
+const isLoudObserver = (o: AnyQuery["observers"][number]) => o.options.meta?.silent !== true;
+
+// Queries whose in-flight fetch had a non-silent watcher at some point
+// (maintained by the cache subscription below). Checked first so a page
+// that navigates away mid-request still gets its failure toasted, even if
+// only a silent observer (e.g. the nav badge) remains when it settles.
+const loudFetches = new WeakSet<AnyQuery>();
+
+function isSilent(query: AnyQuery): boolean {
+  if (loudFetches.has(query)) return false;
+  if (query.observers.length === 0) return query.meta?.silent === true;
+  return !query.observers.some(isLoudObserver);
+}
 
 function toMessage(error: unknown): string {
   if (typeof error === "object" && error !== null && "message" in error) {
@@ -49,34 +82,34 @@ export function notifyQueryError(error: unknown): void {
 export const queryClient = new QueryClient({
   queryCache: new QueryCache({
     onError: (error, query) => {
-      if (query.meta?.silent) return;
-      notifyQueryError(error);
+      if (isSilent(query)) return;
+      // 401 / 403 / 5xx / 404 get the plain-language handling (one fixed id
+      // per kind). Anything else: one toast per query, so a polling query
+      // that keeps failing replaces its own toast instead of stacking.
+      const status = statusOf(error);
+      if (status === 404 || status === 401 || status === 403 || (status !== undefined && status >= 500)) {
+        notifyQueryError(error);
+        return;
+      }
+      toast.error(toMessage(error), { id: `query:${query.queryHash}` });
     },
   }),
   mutationCache: new MutationCache({
     onError: (error, _variables, _context, mutation) => {
-      if (mutation.meta?.silent) return;
-      // Most pages catch their own save errors and say what failed ("Failed
-      // to create contact"). Their catch runs right after this hook, so wait
-      // a moment and only show the shared message when the page didn't.
-      const seen = toast.getHistory().length;
-      setTimeout(() => {
-        const pageToasted = toast
-          .getHistory()
-          .slice(seen)
-          .some((t) => "type" in t && t.type === "error");
-        if (pageToasted) return;
-        const status = statusOf(error);
-        if (status === 403) {
-          toast.error("You don't have permission to do that.", { id: "mutation-error-403" });
-        } else if (status === 401) {
-          toast.error("Your session has ended. Please sign in again.", { id: "query-error-401" });
-        } else if (status !== undefined && status >= 500) {
-          toast.error("Something went wrong saving that. Please try again.", { id: "mutation-error-5xx" });
-        } else {
-          toast.error(toMessage(error));
-        }
-      }, 50);
+      // Opt-in: nearly every mutation call site already reports its own
+      // failure (a friendly toast in onError/catch, or inline form state),
+      // so a global raw-error toast would double up on each of them.
+      if (mutation.meta?.toastOnError !== true) return;
+      const status = statusOf(error);
+      if (status === 403) {
+        toast.error("You don't have permission to do that.", { id: "mutation-error-403" });
+      } else if (status === 401) {
+        toast.error("Your session has ended. Please sign in again.", { id: "query-error-401" });
+      } else if (status !== undefined && status >= 500) {
+        toast.error("Something went wrong saving that. Please try again.", { id: "mutation-error-5xx" });
+      } else {
+        toast.error(toMessage(error));
+      }
     },
   }),
   defaultOptions: {
@@ -89,4 +122,19 @@ export const queryClient = new QueryClient({
       },
     },
   },
+});
+
+queryClient.getQueryCache().subscribe((event) => {
+  if (event.type === "updated" && event.action.type === "fetch") {
+    // New fetch: loud iff someone non-silent is watching as it starts.
+    if (event.query.observers.some(isLoudObserver)) loudFetches.add(event.query);
+    else loudFetches.delete(event.query);
+  } else if (
+    event.type === "observerAdded" &&
+    event.query.state.fetchStatus === "fetching" &&
+    isLoudObserver(event.observer)
+  ) {
+    // A loud component joined a fetch that was already in flight.
+    loudFetches.add(event.query);
+  }
 });

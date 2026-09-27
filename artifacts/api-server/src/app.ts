@@ -17,6 +17,7 @@ import webhooksRouter from "./routes/webhooks";
 import stripeWebhookRouter from "./routes/stripeWebhook";
 import dialerEventsRouter from "./routes/dialerEvents";
 import queuePublicRouter from "./routes/queuePublic";
+import unsubscribeRouter from "./routes/unsubscribe";
 import enrollhereWebhookRouter from "./routes/enrollhereWebhook";
 import campaignsPublicRouter from "./routes/campaignsPublic";
 import { logger } from "./lib/logger";
@@ -334,11 +335,15 @@ app.use(queuePublicRouter);
 // X-MB-Signature HMAC. See routes/enrollhereWebhook.ts.
 app.use(enrollhereWebhookRouter);
 
-// Omnichannel campaigns: public unsubscribe page/one-click endpoint and the
-// Resend (svix-signed) / Twilio (X-Twilio-Signature) delivery webhooks. Same
-// posture as the receivers above: no Clerk session, trust from a signature.
-// See routes/campaignsPublic.ts.
+// Omnichannel campaigns: Resend (svix-signed) / Twilio (X-Twilio-Signature)
+// delivery webhooks. Same posture as the receivers above: no Clerk session,
+// trust from a signature. Campaign email unsubscribes go through the shared
+// endpoint below. See routes/campaignsPublic.ts.
 app.use(campaignsPublicRouter);
+
+// Public email unsubscribe (CAN-SPAM opt-out). Trust comes from the signed
+// token in the link, not a Clerk session. See routes/unsubscribe.ts.
+app.use(unsubscribeRouter);
 
 /**
  * GET /version — release identity for monitoring probes.

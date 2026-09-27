@@ -36,12 +36,9 @@ export interface SendEmailOptions {
   from?: string;
   replyTo?: string;
   tags?: Record<string, string>;
-  attachments?: EmailAttachment[];
-  /**
-   * Extra RFC 5322 headers (e.g. `List-Unsubscribe` and
-   * `List-Unsubscribe-Post` on marketing email). Passed to Resend as-is.
-   */
+  /** Extra MIME headers (e.g. List-Unsubscribe on consumer email). */
   headers?: Record<string, string>;
+  attachments?: EmailAttachment[];
 }
 
 export interface EmailResult {
@@ -94,9 +91,7 @@ export async function sendEmail(
     html: opts.html,
     ...(opts.text ? { text: opts.text } : {}),
     ...(opts.replyTo ? { reply_to: opts.replyTo } : {}),
-    ...(opts.headers && Object.keys(opts.headers).length > 0
-      ? { headers: opts.headers }
-      : {}),
+    ...(opts.headers && Object.keys(opts.headers).length > 0 ? { headers: opts.headers } : {}),
     ...(opts.tags
       ? {
           tags: Object.entries(opts.tags).map(([k, v]) => ({
@@ -394,4 +389,13 @@ export function invitationEmailHtml(opts: {
 <p style="color:#475569;margin:0 0 20px">Accepting adds your account to their agency. You'll sign in with this email address.</p>
 <a href="${href}" style="display:inline-block;background:#1d4ed8;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px">Accept Invitation</a>
 <p style="color:#94a3b8;font-size:12px;margin:20px 0 0">This invitation expires in ${days} days. If you weren't expecting it, you can safely ignore this email — nothing happens until you accept.</p>`);
+}
+
+/** `"Name <addr>"` using the configured sender address, or undefined for the default. */
+export function fromHeaderFor(fromName: string | undefined): string | undefined {
+  const clean = fromName?.replace(/[<>"\\\r\n]/g, "").trim();
+  if (!clean) return undefined;
+  const configured = process.env.EMAIL_FROM_ADDRESS ?? "noreply@mediflow.app";
+  const address = configured.match(/<([^>]+)>/)?.[1] ?? configured;
+  return `${clean} <${address}>`;
 }

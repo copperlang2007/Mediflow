@@ -29,6 +29,7 @@ import { ShieldCheck, Plus } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/shared";
+import { sellingPlanYear } from "@/lib/planYear";
 
 export default function AhipTab({ agentId }: { agentId: string }) {
   const qc = useQueryClient();
@@ -36,7 +37,7 @@ export default function AhipTab({ agentId }: { agentId: string }) {
   const { mutateAsync: createAhip } = useCreateAgentAhip();
   const { mutateAsync: updateAhip } = useUpdateAgentAhip();
   const [addOpen, setAddOpen] = useState(false);
-  const currentYear = new Date().getFullYear();
+  const currentYear = sellingPlanYear();
   const [form, setForm] = useState({ certificationYear: String(currentYear), status: "not_started" as string, score: "" });
 
   const handleAdd = async (e: React.FormEvent) => {

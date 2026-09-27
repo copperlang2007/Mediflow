@@ -115,11 +115,20 @@ router.post(
     if (thread.channel === "sms") {
       if (!contact.phone) { res.status(400).json({ error: "Contact has no phone number" }); return; }
       if (contact.optOutSms) { res.status(400).json({ error: "Contact has opted out of SMS" }); return; }
-      await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { to: contact.phone, body: parsed.data.body });
+      await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, {
+        to: contact.phone,
+        body: parsed.data.body,
+        consumer: { orgId: authReq.orgId, contactId: contact.id, automated: false },
+      });
     } else {
       if (!contact.email) { res.status(400).json({ error: "Contact has no email" }); return; }
       if (contact.optOutEmail) { res.status(400).json({ error: "Contact has opted out of email" }); return; }
-      await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, { to: contact.email, subject: parsed.data.subject ?? "(no subject)", html: `<p>${parsed.data.body.replace(/\n/g, "<br>")}</p>` });
+      await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
+        to: contact.email,
+        subject: parsed.data.subject ?? "(no subject)",
+        html: `<p>${parsed.data.body.replace(/\n/g, "<br>")}</p>`,
+        consumer: { orgId: authReq.orgId, contactId: contact.id, automated: false },
+      });
     }
 
     const msgId = randomUUID();

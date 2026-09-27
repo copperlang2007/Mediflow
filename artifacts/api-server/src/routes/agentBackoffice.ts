@@ -37,7 +37,7 @@ import {
 } from "../middlewares/requireAuth";
 import { withEffectiveStatus } from "../lib/licenses/licenseStatus";
 import { getOrgReadiness } from "../lib/agents/readiness";
-import { computeComplianceScore } from "../lib/agents/complianceScore";
+import { getAgentComplianceScores } from "../lib/compliance/agentComplianceScore";
 
 const router: IRouter = Router();
 
@@ -69,8 +69,13 @@ async function buildBackoffice(agent: AgentRow, orgId: string) {
   const now = new Date();
   const [readiness, score, ahip, licenses, certifications, portals, tasks, documents, runs] =
     await Promise.all([
-      getOrgReadiness(orgId, now.getUTCFullYear(), now),
-      computeComplianceScore(agent.id, orgId, now),
+      // Plan year being sold (lib/compliance/planYear.ts), same as the score.
+      getOrgReadiness(orgId, undefined, now),
+      // The one compliance score (lib/compliance/agentComplianceScore.ts).
+      getAgentComplianceScores({ orgId, agentIds: [agent.id], now }).then(([s]) => {
+        const { licensesExpiringSoon: _soon, ...rest } = s;
+        return rest;
+      }),
       db
         .select({
           id: ahipRecordsTable.id,

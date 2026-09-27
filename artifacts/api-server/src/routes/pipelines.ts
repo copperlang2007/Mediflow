@@ -17,7 +17,6 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
-
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import { logger } from "../lib/logger";
@@ -27,7 +26,6 @@ const router: IRouter = Router();
 
 router.use(
   routerAuditMiddleware(router, "deal", undefined, {
-
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.id;

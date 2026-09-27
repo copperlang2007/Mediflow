@@ -27,7 +27,6 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
-
 import {
   getSeatUsage,
   requireSeat,
@@ -147,7 +146,6 @@ const router: IRouter = Router();
 
 router.use(
   routerAuditMiddleware(router, "invitation", undefined, {
-
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.id;

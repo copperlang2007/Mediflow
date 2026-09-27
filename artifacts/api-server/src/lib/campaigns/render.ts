@@ -83,13 +83,6 @@ export function emailFooterText(sender: SenderIdentity, unsubscribeHref: string)
   return `\n\n--\nYou are receiving this email from ${sender.agencyName}.\n${sender.physicalAddress}\nUnsubscribe: ${unsubscribeHref}`;
 }
 
-export function listUnsubscribeHeaders(unsubscribeHref: string): Record<string, string> {
-  return {
-    "List-Unsubscribe": `<${unsubscribeHref}>`,
-    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-  };
-}
-
 export function wrapEmailHtml(bodyHtml: string, footerHtml: string): string {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>

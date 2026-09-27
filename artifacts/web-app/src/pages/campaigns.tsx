@@ -114,7 +114,7 @@ function SetupNotice({ channel, config, canManage, onOpenSettings }: {
     }
     if (!config.email.unsubscribeConfigured) {
       missing.push("turn on the unsubscribe link every marketing email must include");
-      technical.push("Unsubscribe links: set CAMPAIGN_UNSUBSCRIBE_SECRET and APP_BASE_URL on the server.");
+      technical.push("Unsubscribe links: set PHI_HMAC_KEY and APP_BASE_URL on the server.");
     }
     if (!config.email.senderAddressConfigured) missing.push("add your agency's mailing address in Settings");
   } else if (!config.sms.sendingConfigured) {

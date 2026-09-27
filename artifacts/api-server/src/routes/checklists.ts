@@ -17,7 +17,6 @@ import {
 } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 
-
 const router: IRouter = Router();
 
 export const ONBOARDING_ITEMS = [
@@ -114,7 +113,6 @@ export async function createChecklistRun(
 
 router.use(
   routerAuditMiddleware(router, "task_instance", undefined, {
-
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.runId ?? req.params.id;

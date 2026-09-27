@@ -9,7 +9,6 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
-
 import { type Role } from "../lib/permissions";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import {
@@ -58,7 +57,6 @@ const router: IRouter = Router();
 // Group-level audit: covers reads and writes on user resources automatically.
 router.use(
   routerAuditMiddleware(router, "user", undefined, {
-
     includeReads: true,
     getResourceId: (req) => {
       const raw = req.params.userId ?? req.params.id;

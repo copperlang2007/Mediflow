@@ -10,6 +10,7 @@ import { useLocation } from "wouter";
 import { format } from "date-fns";
 import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState, type StatusTone } from "@/components/shared";
 import { PageShell, KpiGrid } from "@/components/ops";
+import { sellingPlanYear } from "@/lib/planYear";
 
 const CERT_TONES: Record<string, StatusTone> = {
   passed: "success",
@@ -33,7 +34,7 @@ const humanCert = (s: string) => {
 };
 
 export default function CertificationsPage() {
-  const currentYear = new Date().getFullYear();
+  const currentYear = sellingPlanYear();
   const [year, setYear] = useState(String(currentYear));
   const [view, setView] = useState<"ahip" | "carriers">("ahip");
   const [, navigate] = useLocation();

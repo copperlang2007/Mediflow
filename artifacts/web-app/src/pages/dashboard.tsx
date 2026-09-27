@@ -58,6 +58,7 @@ import { KpiCard, MiniStat } from "@/components/shared/KpiCard";
 import { SectionCard } from "@/components/shared/SectionCard";
 import { StatusPill } from "@/components/shared/StatusPill";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { sellingPlanYear } from "@/lib/planYear";
 import { visibleNavGroups, type Role } from "@/components/layout/nav-config";
 
 /*
@@ -392,7 +393,7 @@ export default function Dashboard() {
           href={linkIf("/licensing")}
         />
         <MiniStat
-          label={`AHIP complete (${now.getFullYear()})`}
+          label={`AHIP complete (${stats?.ahipPlanYear ?? sellingPlanYear()})`}
           value={`${stats?.ahipCompletionRateCurrent ?? 0}%`}
           icon={Award}
           loading={statsLoading}
@@ -568,8 +569,8 @@ export default function Dashboard() {
         </SectionCard>
 
         <SectionCard
-          title={`AHIP ${now.getFullYear()}`}
-          description="Active and onboarding agents with AHIP passed (or waived) this year"
+          title={`AHIP ${stats?.ahipPlanYear ?? sellingPlanYear()}`}
+          description="Active and onboarding agents with AHIP passed (or waived) for the plan year being sold"
           icon={Award}
         >
           {statsLoading ? (
