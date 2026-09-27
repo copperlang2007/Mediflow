@@ -273,10 +273,14 @@ export default function SettingsPage() {
                       size="sm"
                       variant="outline"
                       className="h-7 px-2"
-                      onClick={() => {
-                        navigator.clipboard.writeText(org.id)
-                          .then(() => toast.success("Agency ID copied"))
-                          .catch(() => toast.error("Could not copy. Select the ID and copy it instead."));
+onClick={() => {
+                        try {
+                          void navigator.clipboard.writeText(org.id)
+                            .then(() => toast.success("Agency ID copied"))
+                            .catch(() => toast.error("Could not copy. Select the ID and copy it instead."));
+                        } catch {
+                          toast.error("Could not copy. Select the ID and copy it instead.");
+                        }
                       }}
                     >
                       <Copy className="h-3.5 w-3.5 mr-1" /> Copy
