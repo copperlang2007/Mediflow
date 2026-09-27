@@ -4,6 +4,7 @@ import { Search, User, ArrowRight } from "lucide-react";
 import { useGetContacts, getGetContactsQueryKey } from "@workspace/api-client-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { formatPhone } from "@/lib/phone";
 
 /**
  * Top-bar search. Types-ahead against the existing contacts search endpoint
@@ -101,7 +102,7 @@ export function GlobalSearch({ className }: { className?: string }) {
                         {c.firstName} {c.lastName}
                       </span>
                       <span className="block truncate text-xs text-muted-foreground">
-                        {[c.email, c.phone].filter(Boolean).join(" · ") || "No email or phone on file"}
+                        {[c.email, formatPhone(c.phone)].filter(Boolean).join(" · ") || "No email or phone on file"}
                       </span>
                     </span>
                   </button>

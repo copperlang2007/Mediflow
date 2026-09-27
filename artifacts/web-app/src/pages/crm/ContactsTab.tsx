@@ -24,6 +24,7 @@ import { format } from "date-fns";
 import { EmptyState, KpiCard, StatusPill } from "@/components/shared";
 import { PLAN_TYPE_LABELS } from "./shared";
 import { ContactAvatar, ListCard, Th } from "./ui";
+import { formatPhone } from "@/lib/phone";
 
 /**
  * Head-count for one contact status. Asks the list endpoint for a single row
@@ -242,7 +243,7 @@ export default function ContactsTab() {
                       ) : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-4 py-3 hidden md:table-cell whitespace-nowrap text-muted-foreground">
-                      {c.phone ? <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 shrink-0" />{c.phone}</span> : "—"}
+                      {c.phone ? <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 shrink-0" />{formatPhone(c.phone)}</span> : "—"}
                     </td>
                     <td className="px-4 py-3 hidden xl:table-cell text-muted-foreground whitespace-nowrap">{c.leadSource ?? "—"}</td>
                     <td className="px-4 py-3 hidden xl:table-cell text-muted-foreground whitespace-nowrap">{format(new Date(c.createdAt), "MMM d, yyyy")}</td>

@@ -40,6 +40,7 @@ import { CheckCircle2, AlertCircle, LayoutGrid, List } from "lucide-react";
 import type { Agent } from "@workspace/api-client-react";
 import { EmptyState, PageHeader, StatusPill } from "@/components/shared";
 import { cn } from "@/lib/utils";
+import { formatPhone } from "@/lib/phone";
 
 const STATUS_STYLES: Record<string, string> = {
   onboarding: "bg-amber-100 text-amber-800 border-amber-200",
@@ -441,7 +442,7 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
                 <span className="font-medium">{form.email}</span>
                 {form.phone && <>
                   <span className="text-muted-foreground">Phone</span>
-                  <span className="font-medium">{form.phone}</span>
+                  <span className="font-medium">{formatPhone(form.phone)}</span>
                 </>}
                 {form.npn && <>
                   <span className="text-muted-foreground">NPN</span>

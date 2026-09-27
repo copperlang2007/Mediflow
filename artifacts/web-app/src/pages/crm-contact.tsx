@@ -50,6 +50,7 @@ import {
   type CallSummary,
   type SuggestedDisposition,
 } from "@/lib/crm/callSummaries";
+import { formatPhone } from "@/lib/phone";
 
 // ──────────────────────────────────────────────
 // Helpers
@@ -883,7 +884,7 @@ export default function ContactDetailPage() {
         ["First name", c.firstName],
         ["Last name", c.lastName],
         ["Email", c.email],
-        ["Phone", c.phone],
+        ["Phone", c.phone ? formatPhone(c.phone) : c.phone],
         ["Preferred language", c.preferredLanguage],
         ["SMS preference", c.optOutSms ? "Opted out" : "Not opted out"],
         ["Email preference", c.optOutEmail ? "Opted out" : "Not opted out"],
@@ -948,7 +949,7 @@ export default function ContactDetailPage() {
                   )}
                   {c.phone && (
                     <a href={`tel:${c.phone}`} className="inline-flex items-center gap-1.5 whitespace-nowrap hover:text-foreground">
-                      <Phone className="h-4 w-4 shrink-0" />{c.phone}
+                      <Phone className="h-4 w-4 shrink-0" />{formatPhone(c.phone)}
                     </a>
                   )}
                   {c.medicareId && (
