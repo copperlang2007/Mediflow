@@ -253,23 +253,28 @@ export interface VerifyResult {
 }
 
 /**
- * The leading DER element of `bytes` (a SEQUENCE), dropping any padding after
- * it. Throws when the header is malformed or declares more bytes than exist.
+ * Binary string of the raw /Contents signature window (between the `<` and
+ * `>` that sit in the ByteRange gap), zero padding included.
+ * Exported for tests.
  */
-export function derPrefix(bytes: Buffer): Buffer {
-  if (bytes.length < 2 || bytes[0] !== 0x30) throw new Error("signature is not a DER SEQUENCE");
-  let length = bytes[1];
-  let offset = 2;
-  if (length & 0x80) {
-    const n = length & 0x7f;
-    if (n < 1 || n > 4 || bytes.length < 2 + n) throw new Error("unsupported DER length");
-    length = 0;
-    for (let i = 0; i < n; i++) length = length * 256 + bytes[2 + i];
-    offset = 2 + n;
-  }
-  const total = offset + length;
-  if (total > bytes.length) throw new Error("DER length exceeds the /Contents window");
-  return bytes.subarray(0, total);
+export function extractCmsWithPadding(pdfBuffer: Buffer, byteRange: number[]): string {
+  const hex = pdfBuffer
+    .subarray(byteRange[0] + byteRange[1] + 1, byteRange[2] - 1)
+    .toString("latin1");
+  return Buffer.from(hex, "hex").toString("binary");
+}
+
+/**
+ * Parse the DER value at the start of `binary`, ignoring trailing bytes
+ * (the /Contents zero padding). node-forge >= 1.3 supports `parseAllBytes`,
+ * but @types/node-forge only declares the legacy boolean `strict` argument.
+ */
+export function parseDerPrefix(binary: string): forge.asn1.Asn1 {
+  const fromDer = forge.asn1.fromDer as unknown as (
+    bytes: forge.util.ByteStringBuffer,
+    options: { parseAllBytes: boolean },
+  ) => forge.asn1.Asn1;
+  return fromDer(forge.util.createBuffer(binary), { parseAllBytes: false });
 }
 
 /**
@@ -288,23 +293,18 @@ export function verifyPdfSignature(pdfBuffer: Buffer): VerifyResult {
   } catch (err) {
     return { valid: false, reason: `extractSignature failed: ${(err as Error).message}` };
   }
-  const { signedData, ByteRange } = extracted;
+  const { signedData } = extracted;
 
-  // Re-read the CMS blob ourselves. @signpdf's extractSignature strips
-  // trailing "00" pairs to drop the zero padding, which also truncates a DER
-  // blob whose last real byte is 0x00 (~1 in 256 signatures) and made valid
-  // PDFs fail with "Too few bytes to read ASN.1 value". Take the whole
-  // /Contents window and cut it at the length the DER header declares.
-  let cmsBinary: string;
-  try {
-    const hex = pdfBuffer.subarray(ByteRange[0] + ByteRange[1] + 1, ByteRange[2] - 1).toString("latin1");
-    cmsBinary = derPrefix(Buffer.from(hex, "hex")).toString("binary");
-  } catch (err) {
-    return { valid: false, reason: `CMS parse failed: ${(err as Error).message}` };
-  }
+  // Don't use `extracted.signature`: extractSignature strips trailing "00"
+  // hex pairs to drop the placeholder padding, which also eats real trailing
+  // 0x00 bytes of the CMS blob (~1 in 256 signatures end in one), so a valid
+  // PDF would fail as tampered. Instead decode the whole /Contents window,
+  // padding included, and let the outer DER SEQUENCE's length decide where
+  // the CMS ends.
+  const cmsBinary = extractCmsWithPadding(pdfBuffer, extracted.ByteRange);
   let p7Msg: forge.pkcs7.PkcsSignedData;
   try {
-    const asn1 = forge.asn1.fromDer(forge.util.createBuffer(cmsBinary));
+    const asn1 = parseDerPrefix(cmsBinary);
     p7Msg = forge.pkcs7.messageFromAsn1(asn1) as forge.pkcs7.PkcsSignedData;
   } catch (err) {
     return { valid: false, reason: `CMS parse failed: ${(err as Error).message}` };
