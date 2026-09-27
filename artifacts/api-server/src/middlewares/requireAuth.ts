@@ -239,11 +239,15 @@ export const requireAuth = async (
   // `two_factor_authentication` in the JWT session claims; older SDKs put
   // it on `auth.user.twoFactorEnabled`. We check all three so a deployment
   // configured either way still flows through.
+  // Set up in Clerk (Sessions > Customize session token):
+  //   { "two_factor": "{{user.two_factor_enabled}}" }
+  // A template shortcode may arrive as the string "true", so both forms count.
   const claims = (auth.sessionClaims ?? {}) as Record<string, unknown>;
+  const isOn = (v: unknown) => v === true || v === "true";
   const mfaFromClaims =
-    claims.two_factor === true ||
-    claims.two_factor_authentication === true ||
-    claims.mfa === true;
+    isOn(claims.two_factor) ||
+    isOn(claims.two_factor_authentication) ||
+    isOn(claims.mfa);
   const mfaFromUser =
     (auth as { user?: { twoFactorEnabled?: boolean } }).user?.twoFactorEnabled === true;
   const mfaEnrolled = Boolean(mfaFromClaims || mfaFromUser);
