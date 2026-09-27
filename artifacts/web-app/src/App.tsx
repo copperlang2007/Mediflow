@@ -33,7 +33,6 @@ const SettingsPage = lazy(() => import("@/pages/settings"));
 const RenewalsPage = lazy(() => import("@/pages/renewals"));
 const AepCockpitPage = lazy(() => import("@/pages/aep-cockpit"));
 const ChurnRiskPage = lazy(() => import("@/pages/churn-risk"));
-const AutomationsPage = lazy(() => import("@/pages/automations"));
 const ReportsPage = lazy(() => import("@/pages/reports"));
 const AdminCompliancePage = lazy(() => import("@/pages/admin-compliance"));
 const AdminHealthPage = lazy(() => import("@/pages/admin-health"));
@@ -56,6 +55,13 @@ const BillingPage = lazy(() => import("@/pages/billing"));
 const TeamPage = lazy(() => import("@/pages/team"));
 const AcceptInvitePage = lazy(() => import("@/pages/accept-invite"));
 const CreateOrganizationPage = lazy(() => import("@/pages/create-organization"));
+// --- stage2/new-pages-core ---
+const PoliciesPage = lazy(() => import("@/pages/policies"));
+const WorkflowsPage = lazy(() => import("@/pages/workflows"));
+const ReconciliationPage = lazy(() => import("@/pages/reconciliation"));
+const AgentBackofficePage = lazy(() => import("@/pages/agent-backoffice"));
+const DataToolsPage = lazy(() => import("@/pages/data-tools"));
+const KnowledgeBasePage = lazy(() => import("@/pages/knowledge-base"));
 
 // Dev console pages are only imported when the build-time flag is set, so
 // production bundles never include this code.
@@ -424,8 +430,9 @@ function ClerkProviderWithRoutes() {
               <Route path="/churn">
                 <ProtectedLayout><ChurnRiskPage /></ProtectedLayout>
               </Route>
+              {/* One automation page: the old /automations URL now lands on Workflow Automation. */}
               <Route path="/automations">
-                <ProtectedLayout><AutomationsPage /></ProtectedLayout>
+                <Redirect to="/workflows" replace />
               </Route>
               <Route path="/reports">
                 <ProtectedLayout><ReportsPage /></ProtectedLayout>
@@ -496,6 +503,25 @@ function ClerkProviderWithRoutes() {
               </Route>
               <Route path="/settings">
                 <ProtectedLayout><SettingsPage /></ProtectedLayout>
+              </Route>
+              {/* --- stage2/new-pages-core --- */}
+              <Route path="/policies">
+                <ProtectedLayout><PoliciesPage /></ProtectedLayout>
+              </Route>
+              <Route path="/workflows">
+                <ProtectedLayout><WorkflowsPage /></ProtectedLayout>
+              </Route>
+              <Route path="/reconciliation">
+                <ProtectedLayout><ReconciliationPage /></ProtectedLayout>
+              </Route>
+              <Route path="/backoffice">
+                <ProtectedLayout><AgentBackofficePage /></ProtectedLayout>
+              </Route>
+              <Route path="/data-tools">
+                <ProtectedLayout><DataToolsPage /></ProtectedLayout>
+              </Route>
+              <Route path="/knowledge-base">
+                <ProtectedLayout><KnowledgeBasePage /></ProtectedLayout>
               </Route>
               {DEV_CONSOLE_ENABLED && DevOpsPage && (
                 <Route path="/dev/ops">

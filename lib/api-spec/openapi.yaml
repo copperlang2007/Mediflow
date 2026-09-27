@@ -4713,6 +4713,204 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  # --- stage2/new-pages-core ---
+  # Book of business, reconciliation, agent back office, CSV exports and the
+  # Knowledge Base. Pages call these through customFetch; no generated hooks.
+  /enrollments/summary:
+    get:
+      operationId: getEnrollmentsSummary
+      tags: [enrollments]
+      summary: Book-of-business counts (same filters as GET /enrollments)
+      description: Requires contact:read. Org-scoped.
+      parameters:
+        - { name: carrierId, in: query, schema: { type: string } }
+        - { name: agentId, in: query, schema: { type: string } }
+        - { name: planType, in: query, schema: { type: string, enum: [MA, PDP, MAPD, supp, other] } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: effectuated, in: query, schema: { type: string, enum: ["true", "false"] } }
+        - { name: effectiveFrom, in: query, schema: { type: string, format: date } }
+        - { name: effectiveTo, in: query, schema: { type: string, format: date } }
+        - { name: search, in: query, description: Client name or policy number, schema: { type: string } }
+      responses:
+        "200":
+          description: Counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  active: { type: integer }
+                  pending: { type: integer }
+                  ended: { type: integer }
+                  effectuated: { type: integer }
+                  notEffectuated: { type: integer }
+                  startingSoon: { type: integer, description: Effective date within the next 60 days }
+  /commissions/reconciliation/overview:
+    get:
+      operationId: getReconciliationOverview
+      tags: [commissions]
+      summary: Statement variance, unmatched line items and open missed payments
+      description: Requires commission:read. Org-scoped. Never returns carrier member ids.
+      responses:
+        "200":
+          description: Overview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statements: { type: array, items: { type: object, additionalProperties: true } }
+                  totals: { type: object, additionalProperties: true }
+                  unmatchedItems: { type: array, items: { type: object, additionalProperties: true } }
+                  missedPayments: { type: array, items: { type: object, additionalProperties: true } }
+                  asOf: { type: string, format: date-time }
+  /agents/me/backoffice:
+    get:
+      operationId: getMyAgentBackoffice
+      tags: [agents]
+      summary: The caller's own agent back office
+      description: Any authenticated user with a linked agent record. 404 when none is linked.
+      responses:
+        "200":
+          description: Back office
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "404":
+          description: No agent linked to this user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /agents/{id}/backoffice:
+    get:
+      operationId: getAgentBackoffice
+      tags: [agents]
+      summary: One agent's back office (profile, readiness, AHIP, licenses, certifications, portals, tasks, documents, checklists)
+      description: Requires agent:read. Org-scoped.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Back office
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "404":
+          description: Agent not found in this org
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /reports/contacts/export:
+    get:
+      operationId: exportContactsCsv
+      tags: [reports]
+      summary: Every contact as CSV
+      description: |
+        Requires contact:update, a recent sign-in and `X-Confirm-Export: true`.
+        Medicare ID is decrypted only for PHI-privileged roles and masked
+        otherwise (same as the contacts bulk export). Logged to data_export_log.
+      parameters:
+        - { name: X-Confirm-Export, in: header, required: true, schema: { type: string, enum: ["true"] } }
+      responses:
+        "200": { description: CSV file, content: { text/csv: { schema: { type: string } } } }
+        "428": { description: Export confirmation header missing }
+  /reports/policies/export:
+    get:
+      operationId: exportPoliciesCsv
+      tags: [reports]
+      summary: Every enrollment (policy) as CSV — no Medicare ID column
+      description: Requires contact:update, a recent sign-in and `X-Confirm-Export true`. Logged to data_export_log.
+      parameters:
+        - { name: X-Confirm-Export, in: header, required: true, schema: { type: string, enum: ["true"] } }
+      responses:
+        "200": { description: CSV file, content: { text/csv: { schema: { type: string } } } }
+        "428": { description: Export confirmation header missing }
+  /reports/agents/export:
+    get:
+      operationId: exportAgentsCsv
+      tags: [reports]
+      summary: Agent roster as CSV — no contracting PII
+      description: Requires agent:update, a recent sign-in and `X-Confirm-Export true`. Logged to data_export_log.
+      parameters:
+        - { name: X-Confirm-Export, in: header, required: true, schema: { type: string, enum: ["true"] } }
+      responses:
+        "200": { description: CSV file, content: { text/csv: { schema: { type: string } } } }
+        "428": { description: Export confirmation header missing }
+  /kb/articles:
+    get:
+      operationId: listKbArticles
+      tags: [knowledge-base]
+      summary: List Knowledge Base articles (all staff roles)
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: includeInactive, in: query, schema: { type: string, enum: ["true", "false"] } }
+      responses:
+        "200":
+          description: Articles and org-wide counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  articles: { type: array, items: { $ref: "#/components/schemas/KbArticleStage2" } }
+                  stats:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      active: { type: integer }
+                      categories: { type: integer }
+                      keywords: { type: integer }
+    post:
+      operationId: createKbArticle
+      tags: [knowledge-base]
+      summary: Create an article (super_admin, agency_admin). Never include client data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KbArticleInputStage2" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KbArticleStage2" }
+  /kb/articles/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getKbArticle
+      tags: [knowledge-base]
+      responses:
+        "200":
+          description: Article
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KbArticleStage2" }
+        "404": { description: Not found in this org }
+    patch:
+      operationId: updateKbArticle
+      tags: [knowledge-base]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KbArticleInputStage2" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KbArticleStage2" }
+        "404": { description: Not found in this org }
+    delete:
+      operationId: deleteKbArticle
+      tags: [knowledge-base]
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Not found in this org }
 
 components:
   securitySchemes:
@@ -8285,3 +8483,27 @@ components:
         - preclearedAt
         - preclearanceId
         - expiresAt
+
+    # --- stage2/new-pages-core ---
+    KbArticleStage2:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        category: { type: string }
+        title: { type: string }
+        content: { type: string }
+        keywords: { type: array, items: { type: string } }
+        isActive: { type: boolean }
+        createdBy: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, orgId, category, title, content, keywords, isActive, createdAt, updatedAt]
+    KbArticleInputStage2:
+      type: object
+      properties:
+        category: { type: string, maxLength: 80 }
+        title: { type: string, maxLength: 200 }
+        content: { type: string, maxLength: 20000 }
+        keywords: { type: array, maxItems: 50, items: { type: string, maxLength: 60 } }
+        isActive: { type: boolean }
