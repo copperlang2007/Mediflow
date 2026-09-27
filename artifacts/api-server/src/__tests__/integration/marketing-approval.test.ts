@@ -215,6 +215,25 @@ describe("PATCH /marketing-materials/:id — review decision", () => {
     expect(resubmit.body.reviewedByUserId).toBeNull();
   });
 
+  it("makes whoever resubmits the submitter, so they cannot approve their own swap", async () => {
+    const third = await seedUser(testDb, { orgId: org.id, role: "compliance_manager" });
+    const id = await submit("Swap target");
+    await request(app).patch(`/api/marketing-materials/${id}`).set(withAuth(reviewer.id)).send({ status: "approved" });
+
+    const swap = await request(app)
+      .patch(`/api/marketing-materials/${id}`)
+      .set(withAuth(third.id))
+      .send({ status: "submitted", fileUrl: "https://cdn.example.com/swap.pdf" });
+    expect(swap.status).toBe(200);
+    expect(swap.body.submittedByUserId).toBe(third.id);
+
+    const selfApprove = await request(app)
+      .patch(`/api/marketing-materials/${id}`)
+      .set(withAuth(third.id))
+      .send({ status: "approved" });
+    expect(selfApprove.status).toBe(403);
+  });
+
   it("404s an unknown id", async () => {
     const res = await request(app)
       .patch("/api/marketing-materials/nope")

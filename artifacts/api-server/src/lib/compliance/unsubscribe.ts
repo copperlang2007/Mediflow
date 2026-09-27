@@ -70,10 +70,37 @@ export function publicBaseUrl(): string | null {
   return isNonProdEnv() ? "http://localhost:5173" : null;
 }
 
+/**
+ * The unsubscribe link for a contact, or null when this deployment cannot
+ * build one (no public base URL, or no signing key). Never throws: callers
+ * treat null as "cannot send commercial email".
+ */
 export function unsubscribeUrl(claims: UnsubscribeClaims): string | null {
   const base = publicBaseUrl();
   if (!base) return null;
-  return `${base}${UNSUBSCRIBE_PATH}?t=${encodeURIComponent(signUnsubscribeToken(claims))}`;
+  let token: string;
+  try {
+    token = signUnsubscribeToken(claims);
+  } catch {
+    return null;
+  }
+  return `${base}${UNSUBSCRIBE_PATH}?t=${encodeURIComponent(token)}`;
+}
+
+/**
+ * Configuration problems that stop automated consumer email, reported at boot
+ * (index.ts) at ERROR so a misconfigured deploy is loud. Not a boot failure:
+ * the rest of the CRM keeps working; only automated consumer email is held,
+ * because it cannot legally go out without a working opt-out link.
+ */
+export function consumerEmailConfigIssues(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (env.NODE_ENV !== "production") return [];
+  const issues: string[] = [];
+  if (!env.PHI_HMAC_KEY) issues.push("PHI_HMAC_KEY is not set: unsubscribe links cannot be signed");
+  if (!(env.APP_BASE_URL ?? env.APP_PUBLIC_URL)?.trim()) {
+    issues.push("APP_BASE_URL (or APP_PUBLIC_URL) is not set: unsubscribe links cannot be built");
+  }
+  return issues;
 }
 
 /** Footer appended to every automated consumer email. */

@@ -136,7 +136,13 @@ export async function deliverScheduledEmail(job: ScheduledEmailJob): Promise<Del
   const ctx = job.consumer;
   const decision = await evaluateConsumerEmail(ctx);
   if (decision.action === "block") {
-    logger.info({ contactId: ctx.contactId, orgId: ctx.orgId, reason: decision.reason }, "Consumer email blocked by compliance gate");
+    const log = { contactId: ctx.contactId, orgId: ctx.orgId, reason: decision.reason };
+    // A missing unsubscribe link is a deployment fault, not a consumer choice.
+    if (decision.reason === "unsubscribe_unavailable") {
+      logger.error(log, "Automated consumer email held: unsubscribe link unavailable (check APP_BASE_URL / PHI_HMAC_KEY)");
+    } else {
+      logger.info(log, "Consumer email blocked by compliance gate");
+    }
     return "blocked";
   }
 

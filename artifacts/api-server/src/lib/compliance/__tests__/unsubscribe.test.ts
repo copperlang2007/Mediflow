@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  consumerEmailConfigIssues,
   signUnsubscribeToken,
   verifyUnsubscribeToken,
   unsubscribeHeaders,
@@ -33,5 +34,18 @@ describe("unsubscribe tokens", () => {
     const headers = unsubscribeHeaders(url!);
     expect(headers["List-Unsubscribe"]).toBe(`<${url}>`);
     expect(headers["List-Unsubscribe-Post"]).toBe("List-Unsubscribe=One-Click");
+  });
+});
+
+describe("consumerEmailConfigIssues", () => {
+  it("reports nothing outside production", () => {
+    expect(consumerEmailConfigIssues({ NODE_ENV: "development" })).toEqual([]);
+  });
+
+  it("names each missing production setting", () => {
+    expect(consumerEmailConfigIssues({ NODE_ENV: "production" })).toHaveLength(2);
+    expect(
+      consumerEmailConfigIssues({ NODE_ENV: "production", PHI_HMAC_KEY: "a2V5", APP_BASE_URL: "https://app.example.com" }),
+    ).toEqual([]);
   });
 });

@@ -50,6 +50,8 @@ import {
   carrierCertificationsTable,
   carriersTable,
   contactsTable,
+  dataRetentionPoliciesTable,
+  enrollmentsTable,
   optOutsTable,
   stateLicensesTable,
 } from "@workspace/db/schema";
@@ -248,6 +250,60 @@ describe("STOP / START phone matching", () => {
 
     const history = await db.select({ action: auditLogTable.action }).from(auditLogTable).where(eq(auditLogTable.resourceId, contact.id));
     expect(history.map((h) => h.action).sort()).toEqual(["sms_opt_in", "sms_opt_out"]);
+  });
+});
+
+describe("START only reverses keyword opt-outs", () => {
+  function inbound(from: string, body: string): Record<string, string> {
+    return { From: from, To: "+15555550000", Body: body, MessageSid: `SM${randomUUID().replace(/-/g, "")}`, AccountSid: "ACtest" };
+  }
+
+  it("does not lift an opt-out another org recorded some other way", async () => {
+    const orgB = await seedOrg(db, { id: `org-cm-b-${randomUUID().slice(0, 8)}` });
+    const contact = await seedContact(db, { orgId: orgB.id });
+    // Opted out by the agency (e.g. GHL DND) — never texted STOP.
+    await db.update(contactsTable).set({ phone: "512-555-0188", optOutSms: true }).where(eq(contactsTable.id, contact.id));
+
+    const start = await request(app).post("/webhooks/twilio/sms").type("form").set("x-twilio-signature", "x").send(inbound("+15125550188", "START"));
+    expect(start.status).toBe(200);
+    const [row] = await db.select({ optOutSms: contactsTable.optOutSms }).from(contactsTable).where(eq(contactsTable.id, contact.id));
+    expect(row.optOutSms).toBe(true);
+  });
+});
+
+describe("retention sweep and ended enrollments", () => {
+  it("keeps members with open or recently-touched enrollments, releases long-ended ones", async () => {
+    const retOrg = await seedOrg(db, { id: `org-cm-ret-${randomUUID().slice(0, 8)}` });
+    await db.insert(dataRetentionPoliciesTable).values({
+      id: randomUUID(), orgId: retOrg.id, recordType: "contacts", retentionDays: CMS_RECORD_RETENTION_DAYS, isEnabled: true,
+    });
+    const old = new Date(Date.now() - (CMS_RECORD_RETENTION_DAYS + 400) * DAY);
+    const mk = async (name: string) => {
+      const c = await seedContact(db, { orgId: retOrg.id, firstName: name, status: "lost" });
+      await db.update(contactsTable).set({ createdAt: old }).where(eq(contactsTable.id, c.id));
+      return c.id;
+    };
+    const enroll = async (contactId: string, status: "active" | "terminated", updatedAt: Date) => {
+      await db.insert(enrollmentsTable).values({
+        id: randomUUID(), orgId: retOrg.id, contactId, planType: "MA", planYear: 2014,
+        effectiveDate: "2014-01-01", status, updatedAt,
+      });
+    };
+    const longEnded = await mk("LongEnded");
+    await enroll(longEnded, "terminated", old); // no disenrolled date, untouched for 11 years
+    const recentlyTouched = await mk("RecentlyTouched");
+    await enroll(recentlyTouched, "terminated", new Date()); // end date unknown, touched recently
+    const stillActive = await mk("StillActive");
+    await enroll(stillActive, "active", old);
+
+    const { retentionEnforcementWorker } = await import("../../workers/retentionEnforcement");
+    await retentionEnforcementWorker();
+
+    const deleted = async (id: string) =>
+      (await db.select({ d: contactsTable.deletedAt }).from(contactsTable).where(eq(contactsTable.id, id)))[0].d !== null;
+    expect(await deleted(longEnded)).toBe(true);
+    expect(await deleted(recentlyTouched)).toBe(false);
+    expect(await deleted(stillActive)).toBe(false);
   });
 });
 

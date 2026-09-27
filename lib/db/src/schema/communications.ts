@@ -7,6 +7,7 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { organizationsTable } from "./core";
@@ -149,6 +150,11 @@ export const optOutsTable = pgTable(
     uniqueIndex("opt_outs_org_phone_channel_unique").on(
       t.orgId,
       t.phone,
+      t.channel,
+    ),
+    // Format-independent opt-out matching (migration 0050).
+    index("opt_outs_phone_last10_channel_idx").on(
+      sql`(right(regexp_replace(coalesce(${t.phone}, ''), '[^0-9]', '', 'g'), 10))`,
       t.channel,
     ),
   ],

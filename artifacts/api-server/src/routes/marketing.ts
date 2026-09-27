@@ -354,7 +354,10 @@ router.patch(
         patch.reviewedByUserId = authReq.userId;
         patch.reviewedAt = new Date();
       } else if (data.status === "submitted") {
+        // Whoever resubmits owns what is now under review — including any
+        // content they swapped in — so separation of duties applies to them.
         patch.submittedAt = new Date();
+        patch.submittedByUserId = authReq.userId;
         patch.reviewedByUserId = null;
         patch.reviewedAt = null;
       }

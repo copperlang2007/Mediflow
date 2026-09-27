@@ -128,6 +128,11 @@ export const contactsTable = pgTable(
     index("contacts_phone_idx")
       .on(t.phone)
       .where(sql`${t.phone} IS NOT NULL`),
+    // Format-independent opt-out matching (migration 0050). Must match
+    // phoneMatchKeySql() in api-server lib/compliance/phone.ts exactly.
+    index("contacts_phone_last10_idx").on(
+      sql`(right(regexp_replace(coalesce(${t.phone}, ''), '[^0-9]', '', 'g'), 10))`,
+    ),
   ],
 );
 

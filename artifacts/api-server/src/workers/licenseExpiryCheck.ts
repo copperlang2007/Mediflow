@@ -36,6 +36,9 @@ import { logger } from "../lib/logger";
 // e.g. 45 days → 60-day threshold (not 90).
 const ALERT_THRESHOLDS_DAYS = [7, 14, 30, 60, 90];
 
+/** Above this many lapses in one run, an org gets one summary notification. */
+const LAPSE_NOTICE_BATCH_THRESHOLD = 5;
+
 /** Agent statuses whose credentials still matter for selling / alerts. */
 const ALERTABLE_AGENT_STATUSES = ["onboarding", "active"] as const;
 
@@ -72,8 +75,11 @@ export async function expireLapsedLicenses(
 
   if (lapsed.length === 0) return 0;
 
-  const adminsByOrg = new Map<string, string[]>();
+  // Lapses to report, grouped per org so a backlog becomes one summary
+  // notification per org instead of a burst of one per license.
+  const toNotify = new Map<string, typeof lapsed>();
   for (const lic of lapsed) {
+    let expired = false;
     await db.transaction(async (tx) => {
       // Re-check status inside the UPDATE so a concurrent renewal (status or
       // expiry changed since the read) is never overwritten.
@@ -89,6 +95,7 @@ export async function expireLapsedLicenses(
         )
         .returning({ id: stateLicensesTable.id });
       if (updated.length === 0) return;
+      expired = true;
 
       await tx.insert(auditLogTable).values({
         id: randomUUID(),
@@ -109,38 +116,48 @@ export async function expireLapsedLicenses(
       });
     });
 
-    if (!(ALERTABLE_AGENT_STATUSES as readonly string[]).includes(lic.agentStatus)) continue;
+    if (!expired || !(ALERTABLE_AGENT_STATUSES as readonly string[]).includes(lic.agentStatus)) continue;
+    const list = toNotify.get(lic.orgId) ?? [];
+    list.push(lic);
+    toNotify.set(lic.orgId, list);
+  }
 
-    let adminIds = adminsByOrg.get(lic.orgId);
-    if (!adminIds) {
-      const admins = await db
-        .select({ id: usersTable.id })
-        .from(usersTable)
-        .where(
-          and(
-            eq(usersTable.orgId, lic.orgId),
-            inArray(usersTable.role, ["super_admin", "agency_admin", "compliance_manager"]),
-            eq(usersTable.isActive, true),
-          ),
-        );
-      adminIds = admins.map((a) => a.id);
-      adminsByOrg.set(lic.orgId, adminIds);
-    }
+  for (const [orgId, lics] of toNotify) {
+    const admins = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(
+        and(
+          eq(usersTable.orgId, orgId),
+          inArray(usersTable.role, ["super_admin", "agency_admin", "compliance_manager"]),
+          eq(usersTable.isActive, true),
+        ),
+      );
+    const adminIds = admins.map((a) => a.id);
     if (adminIds.length === 0) continue;
 
-    const notifs = adminIds.map((uid) => ({
-      id: randomUUID(),
-      orgId: lic.orgId,
-      userId: uid,
-      type: "license_lapsed",
-      title: `License lapsed — ${lic.stateCode}`,
-      body: `${lic.agentFirstName} ${lic.agentLastName}: ${lic.stateCode} ${lic.licenseType} expired ${lic.expiryDate?.toLocaleDateString() ?? ""}. The agent is no longer ready to sell in ${lic.stateCode}.`,
-      resourceType: "license",
-      resourceId: lic.licenseId,
-      priority: "high",
-    }));
-    await db.insert(notificationsTable).values(notifs).onConflictDoNothing();
-    broadcastToUsers(adminIds, { type: "notification", resourceType: "license", resourceId: lic.licenseId });
+    const notices =
+      lics.length <= LAPSE_NOTICE_BATCH_THRESHOLD
+        ? lics.map((lic) => ({
+            title: `License lapsed — ${lic.stateCode}`,
+            body: `${lic.agentFirstName} ${lic.agentLastName}: ${lic.stateCode} ${lic.licenseType} expired ${lic.expiryDate?.toLocaleDateString() ?? ""}. The agent is no longer ready to sell in ${lic.stateCode}.`,
+            resourceType: "license",
+            resourceId: lic.licenseId,
+          }))
+        : [
+            {
+              title: `${lics.length} licenses lapsed`,
+              body: `${lics.length} active-agent licenses were past their expiry date and have been marked expired. Those agents are no longer ready to sell in the affected states — review the readiness board.`,
+              resourceType: "org",
+              resourceId: orgId,
+            },
+          ];
+
+    const rows = notices.flatMap((n) =>
+      adminIds.map((uid) => ({ id: randomUUID(), orgId, userId: uid, type: "license_lapsed", priority: "high", ...n })),
+    );
+    await db.insert(notificationsTable).values(rows).onConflictDoNothing();
+    broadcastToUsers(adminIds, { type: "notification", resourceType: "license", resourceId: orgId });
   }
 
   logger.info({ count: lapsed.length }, "License lapse sweep: expired lapsed licenses");

@@ -9,7 +9,7 @@
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, isNotNull, sql } from "drizzle-orm";
+import { eq, and, inArray, isNotNull, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -147,18 +147,29 @@ router.post(
       if (isOptIn) {
         const phoneKey = phoneMatchKey(from);
         if (phoneKey) {
-          // A re-opt-in lifts the block everywhere it was recorded. The
-          // opt_outs rows are removed so sends resume; the history survives in
-          // the immutable audit log (sms_opt_out / sms_opt_in rows).
+          // START reverses a STOP sent to this number — nothing else. It is
+          // scoped to the orgs holding a keyword opt-out for the number, so an
+          // opt-out recorded any other way (GHL DND, an agent marking the
+          // contact, an org the consumer never texted) is never lifted by it.
+          // The opt_outs rows are removed so sends resume; the history stays
+          // in the immutable audit log (sms_opt_out / sms_opt_in rows).
           await db.transaction(async (tx) => {
+            const lifted = await tx
+              .delete(optOutsTable)
+              .where(and(eq(optOutsTable.channel, "sms"), sql`${phoneMatchKeySql(optOutsTable.phone)} = ${phoneKey}`))
+              .returning({ orgId: optOutsTable.orgId });
+            const orgIds = [...new Set(lifted.map((r) => r.orgId))];
+            if (orgIds.length === 0) return;
             const matched = await tx
               .update(contactsTable)
               .set({ optOutSms: false })
-              .where(sql`${phoneMatchKeySql(contactsTable.phone)} = ${phoneKey}`)
+              .where(
+                and(
+                  inArray(contactsTable.orgId, orgIds),
+                  sql`${phoneMatchKeySql(contactsTable.phone)} = ${phoneKey}`,
+                ),
+              )
               .returning({ id: contactsTable.id, orgId: contactsTable.orgId });
-            await tx
-              .delete(optOutsTable)
-              .where(and(eq(optOutsTable.channel, "sms"), sql`${phoneMatchKeySql(optOutsTable.phone)} = ${phoneKey}`));
             for (const c of matched) {
               await tx.insert(auditLogTable).values({
                 id: randomUUID(),
