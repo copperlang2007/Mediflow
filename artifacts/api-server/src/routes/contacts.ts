@@ -333,6 +333,10 @@ router.patch(
         res.status(400).json({ error: "Set tcpaConsentAt together with tcpaConsentSource" });
         return;
       }
+      if (d.tcpaConsentSource === null) {
+        res.status(400).json({ error: "tcpaConsentSource cannot be cleared while tcpaConsentAt is set" });
+        return;
+      }
       updates.tcpaConsentSource = d.tcpaConsentSource ?? null;
     }
     if (d.county !== undefined) updates.county = d.county;

@@ -76,25 +76,30 @@ router.post(UNSUBSCRIBE_PATH, unsubscribeLimiter, async (req: Request, res: Resp
 
   try {
     await db.transaction(async (tx) => {
-      const [contact] = await tx
-        .update(contactsTable)
-        .set({ optOutEmail: true })
-        .where(
-          and(
-            eq(contactsTable.id, claims.contactId),
-            eq(contactsTable.orgId, claims.orgId),
-            eq(contactsTable.optOutEmail, false),
-          ),
-        )
-        .returning({ id: contactsTable.id, email: contactsTable.email });
+      const [current] = await tx
+        .select({
+          id: contactsTable.id,
+          email: contactsTable.email,
+          optOutEmail: contactsTable.optOutEmail,
+        })
+        .from(contactsTable)
+        .where(and(eq(contactsTable.id, claims.contactId), eq(contactsTable.orgId, claims.orgId)))
+        .limit(1);
+      if (!current?.email) {
+        throw new Error("unsubscribe target has no email");
+      }
       // Already unsubscribed (a repeat click, a retry or a mail-client
       // prefetch): record nothing new, so the log shows one opt-out.
-      if (!contact) return;
+      if (current.optOutEmail) return;
+      await tx
+        .update(contactsTable)
+        .set({ optOutEmail: true })
+        .where(and(eq(contactsTable.id, claims.contactId), eq(contactsTable.orgId, claims.orgId)));
 
       await tx.insert(optOutsTable).values({
         id: randomUUID(),
         orgId: claims.orgId,
-        email: contact.email,
+        email: current.email,
         channel: "email",
         source: "unsubscribe_link",
       });
@@ -105,7 +110,7 @@ router.post(UNSUBSCRIBE_PATH, unsubscribeLimiter, async (req: Request, res: Resp
         userRole: null,
         action: "email_unsubscribe",
         resourceType: "contact",
-        resourceId: contact.id,
+        resourceId: current.id,
         changes: { optOutEmail: true, via: "unsubscribe_link" },
         ipAddress: req.ip ?? null,
       });
