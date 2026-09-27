@@ -103,7 +103,7 @@ export const contactsTable = pgTable(
     optOutSms: boolean("opt_out_sms").notNull().default(false),
     optOutEmail: boolean("opt_out_email").notNull().default(false),
     // TCPA prior express written consent for automated texts (migration
-    // 0049). Automated SMS checks these when the org requires consent.
+    // 0050). Automated SMS checks these when the org requires consent.
     tcpaConsentAt: timestamp("tcpa_consent_at", { withTimezone: true }),
     tcpaConsentSource: text("tcpa_consent_source"),
     tags: text("tags").array(),
@@ -128,7 +128,7 @@ export const contactsTable = pgTable(
     index("contacts_phone_idx")
       .on(t.phone)
       .where(sql`${t.phone} IS NOT NULL`),
-    // Format-independent opt-out matching (migration 0050). Must match
+    // Format-independent opt-out matching (migration 0051). Must match
     // phoneMatchKeySql() in api-server lib/compliance/phone.ts exactly.
     index("contacts_phone_last10_idx").on(
       sql`(right(regexp_replace(coalesce(${t.phone}, ''), '[^0-9]', '', 'g'), 10))`,

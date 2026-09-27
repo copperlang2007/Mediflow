@@ -1,4 +1,4 @@
--- Expression indexes for format-independent phone matching (0049 follow-up).
+-- Expression indexes for format-independent phone matching (0050 follow-up).
 --
 -- Opt-out checks compare the last 10 digits of a phone number
 -- (artifacts/api-server/src/lib/compliance/phone.ts) so "(512) 555-0100"

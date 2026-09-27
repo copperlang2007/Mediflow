@@ -152,7 +152,7 @@ export const optOutsTable = pgTable(
       t.phone,
       t.channel,
     ),
-    // Format-independent opt-out matching (migration 0050).
+    // Format-independent opt-out matching (migration 0051).
     index("opt_outs_phone_last10_channel_idx").on(
       sql`(right(regexp_replace(coalesce(${t.phone}, ''), '[^0-9]', '', 'g'), 10))`,
       t.channel,
