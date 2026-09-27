@@ -142,4 +142,41 @@ describe("automation send actions on a contact", () => {
     expect(jobs("send-scheduled-email")).toHaveLength(1);
     expect(jobs("send-scheduled-sms")).toHaveLength(0);
   });
+
+  it("blocks sends to an opted-out contact on non-contact triggers that carry contactId", async () => {
+    const c = await contactWith({ optOutEmail: true, optOutSms: true });
+    await seedAutomationRule(handle.db, {
+      orgId: org.id,
+      triggerType: "custom_optout_lead",
+      conditions: [],
+      actions: [
+        { type: "send_email", config: { to: `${c.id}@EXAMPLE.com`, subject: "Hi", html: "<p>Hi</p>" } },
+        { type: "send_sms", config: { to: "(555) 555-0123", body: "Hi" } },
+      ],
+    });
+    await runAutomationRulesWorker({
+      orgId: org.id, trigger: "custom_optout_lead", resourceType: "lead",
+      resourceId: `lead-${randomUUID()}`, context: { contactId: c.id },
+    });
+    expect(jobs("send-scheduled-email")).toHaveLength(0);
+    expect(jobs("send-scheduled-sms")).toHaveLength(0);
+  });
+
+  it("still sends internal alerts to other recipients about an opted-out contact", async () => {
+    const c = await contactWith({ optOutEmail: true, optOutSms: true });
+    await seedAutomationRule(handle.db, {
+      orgId: org.id,
+      triggerType: "custom_optout_internal",
+      conditions: [],
+      actions: [
+        { type: "send_email", config: { to: "office@agency.example", subject: "New lead", html: "<p>New</p>" } },
+        { type: "send_sms", config: { to: "+15555550999", body: "New lead" } },
+      ],
+    });
+    await runAutomationRulesWorker({
+      orgId: org.id, trigger: "custom_optout_internal", resourceType: "contact", resourceId: c.id,
+    });
+    expect(jobs("send-scheduled-email")).toHaveLength(1);
+    expect(jobs("send-scheduled-sms")).toHaveLength(1);
+  });
 });

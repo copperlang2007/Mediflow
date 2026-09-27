@@ -54,14 +54,48 @@ interface AutomationAction {
 
 // ---- Action execution ----
 
-/** True when the contact has opted out of the given channel. */
-async function contactOptedOut(orgId: string, contactId: string, channel: "email" | "sms"): Promise<boolean> {
+/**
+ * The contact a rule fired about: the resource itself for contact triggers,
+ * otherwise the contactId the trigger carries (lead_created,
+ * deal_stage_changed, ...). Same convention as change_contact_status.
+ */
+function relatedContactId(
+  resourceType: string,
+  resourceId: string | undefined,
+  context: Record<string, unknown>,
+): string | null {
+  if (resourceType === "contact" && resourceId) return resourceId;
+  return typeof context.contactId === "string" ? context.contactId : null;
+}
+
+const digits = (v: string) => v.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+
+/**
+ * True when `to` is the related contact's own address and that contact has
+ * opted out of the channel. Sends to other recipients (e.g. an internal
+ * "new lead" alert to the agency inbox) are not the contact's to block.
+ */
+async function recipientOptedOut(
+  orgId: string,
+  contactId: string | null,
+  channel: "email" | "sms",
+  to: string,
+): Promise<boolean> {
+  if (!contactId) return false;
   const [c] = await db
-    .select({ optOutEmail: contactsTable.optOutEmail, optOutSms: contactsTable.optOutSms })
+    .select({
+      email: contactsTable.email,
+      phone: contactsTable.phone,
+      optOutEmail: contactsTable.optOutEmail,
+      optOutSms: contactsTable.optOutSms,
+    })
     .from(contactsTable)
     .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId)));
   if (!c) return false;
-  return channel === "email" ? c.optOutEmail : c.optOutSms;
+  if (channel === "email") {
+    return c.optOutEmail && !!c.email && c.email.trim().toLowerCase() === to.trim().toLowerCase();
+  }
+  return c.optOutSms && !!c.phone && digits(c.phone) === digits(to);
 }
 
 async function executeAction(
@@ -210,9 +244,10 @@ async function executeAction(
           if (a?.email) resolvedTo = a.email;
         }
       }
-      if (resolvedTo && resourceType === "contact" && resourceId
-          && (await contactOptedOut(orgId, resourceId, "email"))) {
-        logger.info({ action: "send_email", resourceId }, "send_email skipped — contact opted out of email");
+      if (resolvedTo && (await recipientOptedOut(
+        orgId, relatedContactId(resourceType, resourceId, context), "email", resolvedTo,
+      ))) {
+        logger.info({ action: "send_email", resourceType, resourceId }, "send_email skipped — contact opted out of email");
         break;
       }
       if (resolvedTo && subject && html) {
@@ -244,9 +279,10 @@ async function executeAction(
           if (c?.phone) resolvedTo = c.phone;
         }
       }
-      if (resolvedTo && resourceType === "contact" && resourceId
-          && (await contactOptedOut(orgId, resourceId, "sms"))) {
-        logger.info({ action: "send_sms", resourceId }, "send_sms skipped — contact opted out of SMS");
+      if (resolvedTo && (await recipientOptedOut(
+        orgId, relatedContactId(resourceType, resourceId, context), "sms", resolvedTo,
+      ))) {
+        logger.info({ action: "send_sms", resourceType, resourceId }, "send_sms skipped — contact opted out of SMS");
         break;
       }
       if (resolvedTo && body) {
