@@ -2,16 +2,27 @@ import { useEffect, useState } from "react";
 import { Eye, X } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 
 type Agency = { id: string; name: string; slug: string };
 const VIEW_AS_KEY = "mediflow:view-as-org";
 
-export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
+function readActiveOrgId(): string | null {
+  try { return globalThis.localStorage?.getItem(VIEW_AS_KEY) ?? null; } catch { return null; }
+}
+
+/** Agencies a super admin can view read-only, plus the one being viewed now. */
+function useViewAsAgencies(enabled: boolean) {
   const [agencies, setAgencies] = useState<Agency[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [activeOrgId] = useState<string | null>(() => {
-    try { return globalThis.localStorage?.getItem(VIEW_AS_KEY) ?? null; } catch { return null; }
-  });
+  const [activeOrgId] = useState<string | null>(readActiveOrgId);
 
   useEffect(() => {
     if (!enabled) return;
@@ -25,9 +36,6 @@ export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
       });
   }, [enabled]);
 
-  if (!enabled) return null;
-
-  const activeAgency = agencies.find((agency) => agency.id === activeOrgId);
   const setView = (orgId: string) => {
     if (!orgId) return;
     localStorage.setItem(VIEW_AS_KEY, orgId);
@@ -38,13 +46,57 @@ export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
     window.location.reload();
   };
 
+  return { agencies, error, activeOrgId, setView, exitView };
+}
+
+function AgencySelect({
+  agencies,
+  onPick,
+  className,
+}: {
+  agencies: Agency[];
+  onPick: (id: string) => void;
+  className?: string;
+}) {
+  return (
+    <select
+      className={cn("h-8 rounded-md border border-input bg-background px-2 text-xs", className)}
+      value=""
+      onChange={(event) => onPick(event.target.value)}
+      aria-label="View agency"
+    >
+      <option value="">Select agency</option>
+      {agencies.map((agency) => <option key={agency.id} value={agency.id}>{agency.name}</option>)}
+    </select>
+  );
+}
+
+/**
+ * Top-bar control for super admins to view another agency read-only.
+ *
+ * The "Select agency" dropdown only sits in the bar on wide screens (xl+);
+ * below that the account menu offers the same picker (<ViewAsAgencyDialog>).
+ * While an agency is being viewed the read-only badge always shows,
+ * shortened on small screens.
+ */
+export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
+  const { agencies, error, activeOrgId, setView, exitView } = useViewAsAgencies(enabled);
+  if (!enabled) return null;
+
+  const activeAgency = agencies.find((agency) => agency.id === activeOrgId);
+
   if (activeOrgId) {
+    const name = activeAgency?.name ?? "agency";
     return (
-      <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900">
-        <Eye className="h-3.5 w-3.5" />
-        <span className="font-medium">Viewing {activeAgency?.name ?? "agency"} - read-only</span>
-        {error && <span role="alert">{error}</span>}
-        <Button variant="ghost" size="sm" className="h-6 px-1.5 text-amber-900 hover:bg-amber-100" onClick={exitView} aria-label="Exit agency view">
+      <div
+        className="flex min-w-0 items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
+        title={`Viewing ${name} — read-only`}
+      >
+        <Eye className="h-3.5 w-3.5 shrink-0" />
+        <span className="hidden font-medium sm:inline truncate max-w-48">Viewing {name} - read-only</span>
+        <span className="sr-only sm:hidden">Viewing {name}, read-only</span>
+        {error && <span role="alert" className="hidden md:inline">{error}</span>}
+        <Button variant="ghost" size="sm" className="h-6 px-1.5 text-amber-900 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-500/20" onClick={exitView} aria-label="Exit agency view">
           <X className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -52,14 +104,36 @@ export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
   }
 
   return (
-    <label className="flex items-center gap-2 text-xs text-muted-foreground" title="View an agency without permission to create, edit, or delete data">
+    <label className="hidden xl:flex items-center gap-2 text-xs text-muted-foreground" title="View an agency without permission to create, edit, or delete data">
       <Eye className="h-4 w-4" />
-      <span className="hidden xl:inline">View agency</span>
-      <select className="h-8 max-w-44 rounded-md border border-input bg-background px-2 text-xs" value="" onChange={(event) => setView(event.target.value)} aria-label="View agency">
-        <option value="">Select agency</option>
-        {agencies.map((agency) => <option key={agency.id} value={agency.id}>{agency.name}</option>)}
-      </select>
+      <span className="hidden 2xl:inline">View agency</span>
+      <AgencySelect agencies={agencies} onPick={setView} className="max-w-44" />
       {error && <span role="alert" className="max-w-52 text-amber-700">{error}</span>}
     </label>
+  );
+}
+
+/** The same picker in a dialog, opened from the account menu on small screens. */
+export function ViewAsAgencyDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { agencies, error, setView } = useViewAsAgencies(open);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>View an agency</DialogTitle>
+          <DialogDescription>
+            See another agency exactly as they do, without permission to create, edit or delete anything.
+          </DialogDescription>
+        </DialogHeader>
+        <AgencySelect agencies={agencies} onPick={setView} className="h-10 w-full text-sm" />
+        {error && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">{error}</p>}
+      </DialogContent>
+    </Dialog>
   );
 }

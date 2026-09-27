@@ -396,11 +396,5 @@ export function initialsOf(first?: string | null, last?: string | null): string 
   return `${first?.[0] ?? ""}${last?.[0] ?? ""}`.toUpperCase() || "?";
 }
 
-/** "+13105550101" → "(310) 555-0101"; anything else is returned as typed. */
-export function formatPhone(raw: string | null | undefined): string {
-  if (!raw) return "";
-  const d = raw.replace(/\D/g, "");
-  const ten = d.length === 11 && d.startsWith("1") ? d.slice(1) : d;
-  if (ten.length === 10) return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)}-${ten.slice(6)}`;
-  return raw;
-}
+/** "+13105550101" → "(310) 555-0101" — the shared display formatter. */
+export { formatPhone } from "@/lib/phone";

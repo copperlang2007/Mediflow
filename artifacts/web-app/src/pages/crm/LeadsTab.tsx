@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { EmptyState, MiniStat, StatusPill, humanizeStatus } from "@/components/shared";
 import { ContactAvatar, ListCard } from "./ui";
+import { formatPhone } from "@/lib/phone";
 
 const LEAD_STAT_ICONS: Record<string, typeof Target> = {
   new: Sparkles,
@@ -250,7 +251,7 @@ export default function LeadsTab() {
                   {contacts.map((contact) => (
                     <SelectItem key={contact.id} value={contact.id}>
                       {contact.firstName} {contact.lastName}
-                      {contact.email ? ` — ${contact.email}` : contact.phone ? ` — ${contact.phone}` : ""}
+                      {contact.email ? ` — ${contact.email}` : contact.phone ? ` — ${formatPhone(contact.phone)}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>

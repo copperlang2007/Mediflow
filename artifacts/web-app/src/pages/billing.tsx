@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import {
   CreditCard,
   Check,
+  Clock,
   ExternalLink,
   AlertTriangle,
   Info,
@@ -26,7 +27,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
-import { PageHeader, KpiCard, SectionCard, StatusPill, type StatusTone } from "@/components/shared";
+import { PageHeader, KpiCard, SectionCard, StatusPill, TechnicalDetails, type StatusTone } from "@/components/shared";
 import { PageShell, KpiGrid, NoticeBanner } from "@/components/ops";
 import { Users, Contact, CalendarClock, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -65,11 +66,19 @@ interface Subscription {
 const FEATURE_LABELS: Record<string, string> = {
   commissionReconciliation: "Commission reconciliation",
   aiAssistant: "AI assistant",
-  voiceStack: "Voice AI stack",
+  voiceStack: "Voice AI calling",
   eSignature: "E-signature",
   apiAccess: "API access",
-  ssoEnforcement: "SSO enforcement",
+  ssoEnforcement: "Single sign-on (SSO) enforcement",
 };
+
+/**
+ * Plan features whose engine isn't built yet. The plan catalog reserves them
+ * for a tier, but nothing in the app provides them today (no browser calling,
+ * no customer API keys, no SSO enforcement), so they are shown as
+ * "Coming soon" and never as included.
+ */
+const COMING_SOON_FEATURES = new Set(["voiceStack", "apiAccess", "ssoEnforcement"]);
 
 const TIER_ORDER: PlanTier[] = ["starter", "growth", "agency"];
 
@@ -210,10 +219,13 @@ export default function BillingPage() {
       </PageHeader>
 
       {!sub.billingConfigured && (
-        <NoticeBanner icon={Info} title="This deployment does not take payments">
-          No Stripe keys are configured, so every feature is unlocked and no
-          limits are enforced. Set <code>STRIPE_SECRET_KEY</code> and the{" "}
-          <code>STRIPE_PRICE_*</code> variables to turn on billing.
+        <NoticeBanner icon={Info} title="Online payments aren't switched on yet">
+          Payments haven't been connected for this account, so every available
+          feature is unlocked and no plan limits apply. Whoever runs your
+          installation can connect Stripe to turn on billing.
+          <TechnicalDetails>
+            Set STRIPE_SECRET_KEY and the STRIPE_PRICE_* variables on the server to turn on billing.
+          </TechnicalDetails>
         </NoticeBanner>
       )}
 
@@ -347,11 +359,22 @@ export default function BillingPage() {
                       : `${plan.limits.contacts.toLocaleString()} contacts`}
                   </li>
                   {Object.entries(plan.limits.features)
-                    .filter(([, on]) => on)
+                    .filter(([key, on]) => on && !COMING_SOON_FEATURES.has(key))
                     .map(([key]) => (
                       <li key={key} className="flex items-center gap-2">
                         <Check className="h-4 w-4 shrink-0 text-success" />
                         {FEATURE_LABELS[key] ?? key}
+                      </li>
+                    ))}
+                  {Object.entries(plan.limits.features)
+                    .filter(([key, on]) => on && COMING_SOON_FEATURES.has(key))
+                    .map(([key]) => (
+                      <li key={key} className="flex items-center gap-2 text-muted-foreground" data-testid={`coming-soon-${key}`}>
+                        <Clock className="h-4 w-4 shrink-0" />
+                        <span className="min-w-0">{FEATURE_LABELS[key] ?? key}</span>
+                        <span className="ml-auto shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+                          Coming soon
+                        </span>
                       </li>
                     ))}
                 </ul>

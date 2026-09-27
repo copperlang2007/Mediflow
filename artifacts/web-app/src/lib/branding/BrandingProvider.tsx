@@ -269,6 +269,11 @@ export function useBranding(): BrandingContextValue {
   );
 }
 
+/** The product name to show users: the agency's own name, else "agencyBRIDGE". */
+export function useProductName(): string {
+  return useBranding().resolved.productName;
+}
+
 /** Lets a preview area render BrandLockup with unsaved values. */
 export function BrandingPreviewProvider({
   value,

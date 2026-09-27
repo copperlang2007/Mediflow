@@ -47,9 +47,10 @@ import {
   CheckCircle2, AlertTriangle, Clock, ChevronRight, Users,
   RefreshCcw, FileText, MonitorSmartphone, LogOut,
 } from "lucide-react";
-import { PageHeader, KpiCard, MiniStat, SectionCard, StatusPill, EmptyState, type StatusTone } from "@/components/shared";
+import { PageHeader, KpiCard, MiniStat, SectionCard, StatusPill, EmptyState, TechnicalDetails, type StatusTone } from "@/components/shared";
 import { PageShell, KpiGrid, TableFrame, NoticeBanner } from "@/components/ops";
 import { Info, ShieldAlert, XCircle, ListChecks } from "lucide-react";
+import { useProductName } from "@/lib/branding/BrandingProvider";
 
 function humanize(s: string): string {
   const t = s.replace(/[_-]+/g, " ").trim();
@@ -634,7 +635,63 @@ function SecurityConfigTab() {
   );
 }
 
-// ─── BAA & SOC 2 Tab ──────────────────────────────────────────────────────────
+// ─── Readiness checks tab ─────────────────────────────────────────────────────
+
+/**
+ * Plain-language titles for the checks GET /api/admin/baa-checklist runs.
+ * The server's own label and note (which name tables, files and constants)
+ * stay available to admins under "Technical details".
+ */
+const CONTROL_TITLES: Record<string, string> = {
+  audit_logging_enabled: "Activity log is recording",
+  phi_masking_active: "Health details are hidden from roles that don't need them",
+  object_storage_acl_enforced: "Stored files have an access policy for your agency",
+  data_retention_policy_set: "Record-keeping periods are set",
+  breach_notification_workflow: "Breach reporting process is in place",
+  export_anomaly_alerting: "Alerts for unusual data downloads",
+};
+
+const plural = (n: string, one: string, many: string) => `${n} ${n === "1" ? one : many}`;
+
+/** Rewrites the server's check note in everyday words. Unknown notes pass through. */
+export function plainControlNote(id: string, note: string | null | undefined): string | null {
+  if (id === "phi_masking_active") {
+    return "Protected health information is masked for anyone whose role isn't allowed to see it.";
+  }
+  if (!note) return null;
+  if (/query failed/i.test(note)) return "We couldn't run this check just now. Reload the page to try again.";
+  let m: RegExpMatchArray | null;
+  if (/table not provisioned/i.test(note) || /No ACL policy row/i.test(note)) {
+    return "No agency-specific file access policy on file yet. Files are still protected by the storage provider's own access rules.";
+  }
+  if ((m = note.match(/^(\d+) ACL policy row\(s\) on file/))) {
+    return `${plural(m[1], "file access policy", "file access policies")} on file.`;
+  }
+  if ((m = note.match(/^(\d+) retention policy row\(s\) configured/))) {
+    return `${plural(m[1], "record-keeping rule", "record-keeping rules")} set.`;
+  }
+  if (/^No retention rows/.test(note)) {
+    return "No custom rules yet, so the standard record-keeping periods (5–7 years) apply.";
+  }
+  if ((m = note.match(/^(\d+) exports in last 30d but no anomaly alerts/))) {
+    return `${plural(m[1], "download", "downloads")} in the last 30 days but no unusual-activity alerts yet. Ask whoever runs your install to confirm the automatic check is running.`;
+  }
+  if ((m = note.match(/^(\d+) anomaly alert\(s\) recorded in last 30d/))) {
+    return `${plural(m[1], "unusual-download alert", "unusual-download alerts")} in the last 30 days — the automatic check is working.`;
+  }
+  if (/^No export traffic in last 30d/.test(note)) return "No data downloads in the last 30 days, so nothing to alert on.";
+  if ((m = note.match(/^(\d+) audit entries in last 24h/))) {
+    return `${plural(m[1], "activity recorded", "activities recorded")} in the last 24 hours.`;
+  }
+  if (/^No audit entries in last 24h/.test(note)) return "Nothing recorded in the last 24 hours.";
+  if ((m = note.match(/^(\d+) resolved breach record\(s\); (\d+) reported in last 90d/))) {
+    return `${plural(m[1], "resolved breach record", "resolved breach records")}; ${m[2]} reported in the last 90 days.`;
+  }
+  if ((m = note.match(/^(\d+) unresolved breaches reported in last 90d/))) {
+    return `${plural(m[1], "unresolved breach", "unresolved breaches")} reported in the last 90 days.`;
+  }
+  return note;
+}
 const BAA_STATUS_LABEL: Record<BaaStatus, string> = {
   pass: "Pass",
   warn: "Needs review",
@@ -674,11 +731,11 @@ export function BaaSoc2Tab() {
       const blob = await res.blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `soc2-evidence-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.download = `security-evidence-${new Date().toISOString().slice(0, 10)}.pdf`;
       a.click();
-      toast({ title: "SOC 2 evidence pack generated and downloaded" });
+      toast({ title: "Evidence pack downloaded" });
     } catch {
-      toast({ title: "Failed to generate SOC 2 pack", variant: "destructive" });
+      toast({ title: "Couldn't create the evidence pack. Try again.", variant: "destructive" });
     } finally {
       setGenerating(false);
     }
@@ -736,7 +793,7 @@ export function BaaSoc2Tab() {
         </SectionCard>
       ) : (
         <SectionCard
-          title="HIPAA BAA readiness"
+          title="HIPAA readiness checks"
           description={data?.generatedAt ? `Checked live from your settings · ${new Date(data.generatedAt).toLocaleString()}` : "Checked live from your settings"}
           icon={ListChecks}
           contentClassName="space-y-2"
@@ -748,8 +805,15 @@ export function BaaSoc2Tab() {
               <div key={control.id} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card" data-testid={`baa-control-${control.id}`}>
                 {statusIcon(control.status)}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{control.label}</p>
-                  {control.note && <p className="text-xs text-muted-foreground mt-0.5">{control.note}</p>}
+                  <p className="text-sm font-medium">{CONTROL_TITLES[control.id] ?? control.label}</p>
+                  {plainControlNote(control.id, control.note) && (
+                    <p className="text-xs text-muted-foreground mt-0.5">{plainControlNote(control.id, control.note)}</p>
+                  )}
+                  <TechnicalDetails className="mt-1">
+                    <div>check: {control.id}</div>
+                    <div>{control.label}</div>
+                    {control.note && <div>{control.note}</div>}
+                  </TechnicalDetails>
                 </div>
                 <StatusPill tone={BAA_STATUS_TONE[control.status] ?? "neutral"} className="shrink-0">
                   {BAA_STATUS_LABEL[control.status] ?? control.status}
@@ -916,6 +980,7 @@ function SessionsTab() {
 
 // ─── Export Log Tab ───────────────────────────────────────────────────────────
 function ExportLogTab() {
+  const productName = useProductName();
   const { data, isLoading } = useQuery({
     queryKey: ["admin", "export-log"],
     queryFn: () => apiFetch<ExportLogResponse>("/api/admin/export-log?limit=100"),
@@ -924,7 +989,7 @@ function ExportLogTab() {
   return (
     <SectionCard
       title="Export log"
-      description="Every time someone downloads data from Mediflow, it's recorded here"
+      description={`Every time someone downloads data from ${productName}, it's recorded here`}
       icon={Download}
     >
       {isLoading ? (
@@ -977,6 +1042,7 @@ type ClerkSession = { sessionId: string; createdAt: string; lastActiveAt: string
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function AdminCompliancePage() {
   const { isAdmin, isLoading: meLoading } = useIsAdmin(ADMIN_OR_COMPLIANCE_ROLES);
+  const productName = useProductName();
 
   if (!meLoading && !isAdmin) {
     return (
@@ -995,13 +1061,14 @@ export default function AdminCompliancePage() {
   return (
     <PageShell>
       <PageHeader
-        title="HIPAA / SOC 2 readiness"
+        title="Security & HIPAA readiness checks"
         subtitle="Live security checks, who can get in, and a record of every sign-in, change and export"
       />
 
       <NoticeBanner icon={Info} title="These are live checks, not a certification">
-        Each control below is worked out from your agency's real settings every time this page loads. Mediflow
-        is not SOC 2 or HITRUST certified; the evidence pack gives your own auditor the facts they'll ask for.
+        Each check below is worked out from your agency's real settings every time this page loads. Passing
+        them doesn't make {productName} or your agency certified under any security or compliance standard;
+        the evidence pack gives your own auditor the facts they'll ask for.
       </NoticeBanner>
 
       <Tabs defaultValue="baa-soc2">

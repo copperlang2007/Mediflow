@@ -182,7 +182,7 @@ export const NAV_GROUPS: NavGroup[] = [
       // Narrower on purpose: billing is the agency's money, and the RBAC
       // matrix restricts it to the same two roles server-side.
       { href: "/settings/billing", label: "Billing", icon: CreditCard, roles: ADMINS },
-      { href: "/admin-compliance", label: "HIPAA / SOC 2", icon: Lock, roles: ADMIN_COMPLIANCE },
+      { href: "/admin-compliance", label: "Security & HIPAA checklist", icon: Lock, roles: ADMIN_COMPLIANCE },
       // Import / Export hub; the import wizards stay at /data-migration.
       { href: "/data-tools", label: "Import / Export", icon: ArrowLeftRight, roles: ADMINS },
       { href: "/admin/health", label: "System Health", icon: Activity, roles: ADMINS },

@@ -26,6 +26,7 @@ import { apiFetch } from "@/lib/api";
 import { PageHeader, SectionCard, StatusPill, EmptyState as SharedEmptyState } from "@/components/shared";
 import { PageShell, NoticeBanner } from "@/components/ops";
 import { FileSpreadsheet, Play, Lock } from "lucide-react";
+import { useProductName } from "@/lib/branding/BrandingProvider";
 
 const COLORS = ["#3b6fa0", "#22a05a", "#f59e0b", "#dc2626", "#1e3a5f", "#8db3d9"];
 
@@ -275,7 +276,7 @@ function PipelineTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between print:hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <DateRangePicker value={range} onChange={setRange} />
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => downloadCsv(`/api/reports/pipeline/export?startDate=${range.start}&endDate=${range.end}`, "pipeline-report.csv")}>
@@ -563,7 +564,7 @@ function CommunicationsTab() {
 
   return (
     <div className="space-y-6 print:space-y-4">
-      <div className="flex items-center justify-between print:hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <DateRangePicker value={range} onChange={setRange} />
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => downloadCsv(`/api/reports/communications/export?startDate=${range.start}&endDate=${range.end}`, "communications-report.csv")}>
@@ -786,7 +787,7 @@ function ExecutiveTab() {
 
   return (
     <div className="space-y-6 print:space-y-4">
-      <div className="flex items-center justify-between print:hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <DateRangePicker value={range} onChange={setRange} />
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => downloadCsv(`/api/reports/executive/export?startDate=${range.start}&endDate=${range.end}`, "executive-report.csv")}>
@@ -828,6 +829,15 @@ function ExecutiveTab() {
         <Card className="rounded-xl shadow-sm">
           <CardHeader><CardTitle className="font-display text-lg">Deal Outcomes</CardTitle><CardDescription>Period: {range.start} – {range.end}</CardDescription></CardHeader>
           <CardContent>
+            {data.deals.won + data.deals.lost === 0 ? (
+              <SharedEmptyState
+                compact
+                icon={BarChart2}
+                title="No deals closed in this period"
+                description="Won and lost deals show up here once they're marked in your pipeline. Try a longer date range."
+              />
+            ) : (
+            <>
             <ResponsiveContainer width="100%" height={200}>
               <PieChart>
                 <Pie
@@ -845,6 +855,8 @@ function ExecutiveTab() {
               </PieChart>
             </ResponsiveContainer>
             <p className="text-center text-2xl font-bold mt-1">{data.deals.winRate}% <span className="text-sm font-normal text-muted-foreground">win rate</span></p>
+            </>
+            )}
           </CardContent>
         </Card>
 
@@ -915,12 +927,13 @@ function LoadingSkeleton() {
 }
 
 function EmptyState({ message }: { message: string }) {
+  const productName = useProductName();
   return (
     <SectionCard>
       <SharedEmptyState
         icon={BarChart2}
         title={message}
-        description="Numbers appear here as soon as there's activity in Mediflow for this period. Try a longer date range."
+        description={`Numbers appear here as soon as there's activity in ${productName} for this period. Try a longer date range.`}
       />
     </SectionCard>
   );

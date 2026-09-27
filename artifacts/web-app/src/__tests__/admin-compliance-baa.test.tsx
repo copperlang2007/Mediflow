@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * BAA & SOC 2 tab on the HIPAA / SOC 2 admin page.
+ * Readiness checks tab on the Security & HIPAA admin page.
  *
  * Regression: the tab typed GET /api/admin/baa-checklist as `BaaControl[]`
  * and called `.filter` on it, but the endpoint returns
@@ -69,8 +69,13 @@ describe("BaaSoc2Tab", () => {
     await waitFor(() =>
       expect(screen.getByTestId("baa-control-audit_logging_enabled")).toBeInTheDocument(),
     );
-    expect(screen.getByText("Audit logging is actively recording events")).toBeInTheDocument();
-    expect(screen.getByText("No ACL policy row found for this org")).toBeInTheDocument();
+    // Plain-language titles and notes; the server's technical wording is not
+    // shown to users without an admin role.
+    expect(screen.getByText("Activity log is recording")).toBeInTheDocument();
+    expect(screen.getByText("12 activities recorded in the last 24 hours.")).toBeInTheDocument();
+    expect(screen.getByText(/No agency-specific file access policy on file yet/)).toBeInTheDocument();
+    expect(screen.queryByText("No ACL policy row found for this org")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Technical details/)).not.toBeInTheDocument();
     expect(screen.getByTestId("baa-passing")).toHaveTextContent("2/3");
     expect(screen.getByTestId("baa-attention")).toHaveTextContent("1/3");
     expect(screen.getByText("Needs review")).toBeInTheDocument();

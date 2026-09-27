@@ -38,6 +38,7 @@ import {
 import { BarChart3, PhoneMissed, Radio, TriangleAlert, Users, Route, PhoneOff, Lock, History, ShieldCheck } from "lucide-react";
 import { PageHeader, KpiCard, MiniStat, SectionCard, StatusPill, EmptyState } from "@/components/shared";
 import { PageShell, KpiGrid, TableFrame } from "@/components/ops";
+import { useProductName } from "@/lib/branding/BrandingProvider";
 
 const STATUS_LABEL: Record<string, string> = {
   available: "Available",
@@ -272,6 +273,7 @@ function CallbacksPanel({ enabled }: { enabled: boolean }) {
 }
 
 export default function AdminQueuePage() {
+  const productName = useProductName();
   const { isAdmin, isLoading: meLoading } = useIsAdmin();
   const [sinceHours, setSinceHours] = useState(24);
   const presence = useQueuePresence(Boolean(isAdmin));
@@ -537,7 +539,7 @@ export default function AdminQueuePage() {
               compact
               icon={Users}
               title="No agents have checked in yet."
-              description="Agents appear here as soon as they set themselves available in Mediflow."
+              description={`Agents appear here as soon as they set themselves available in ${productName}.`}
             />
           )}
       </SectionCard>

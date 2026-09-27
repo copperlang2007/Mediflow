@@ -44,6 +44,7 @@ import TasksTab from "./agent-profile/TasksTab";
 import DocumentsTab from "./agent-profile/DocumentsTab";
 import ActivityTab from "./agent-profile/ActivityTab";
 import CommissionsTab from "./agent-profile/CommissionsTab";
+import { formatPhone } from "@/lib/phone";
 
 type Tab = "overview" | "licenses" | "certifications" | "ahip" | "checklist" | "techstack" | "tasks" | "documents" | "activity" | "commissions";
 
@@ -173,7 +174,7 @@ export default function AgentProfilePage() {
                   <Mail className="h-4 w-4 shrink-0" /><span className="truncate">{agent.email}</span>
                 </span>
                 {agent.phone && (
-                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap"><Phone className="h-4 w-4" />{agent.phone}</span>
+                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap"><Phone className="h-4 w-4" />{formatPhone(agent.phone)}</span>
                 )}
                 {agent.npn && <span className="whitespace-nowrap font-mono text-xs">NPN {agent.npn}</span>}
               </div>

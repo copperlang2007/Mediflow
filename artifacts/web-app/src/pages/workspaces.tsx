@@ -184,7 +184,7 @@ export default function WorkspacesPage() {
         <KpiCard label="Clients under management" value={totals.clients} icon={ShieldCheck} color="green" loading={overview.isLoading} />
       </div>
 
-      <div className="grid items-start gap-6 lg:grid-cols-[1.4fr_1fr]">
+      <div className="grid items-start gap-6 lg:grid-cols-[1.4fr_1fr] [&>*]:min-w-0">
         <SectionCard title="All workspaces" description="Counts are live from each agency's records.">
           {overview.isError ? (
             <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -197,7 +197,7 @@ export default function WorkspacesPage() {
           ) : (overview.data?.agencies.length ?? 0) === 0 ? (
             <EmptyState icon={Building2} title="No workspaces yet" description="Create the first one on the right." compact />
           ) : (
-            <div className="overflow-x-auto">
+            <div className="relative overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
@@ -223,7 +223,7 @@ export default function WorkspacesPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">{a.slug}</td>
+                      <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground whitespace-nowrap">{a.slug}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{a.users}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{a.agents}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{a.clients}</td>

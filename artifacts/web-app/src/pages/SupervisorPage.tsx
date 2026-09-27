@@ -34,6 +34,7 @@ import {
   type PresenceAgent,
 } from "@/lib/queue/api";
 import { SUPERVISOR_ROLES, initialsOf, useSupervisorCallSummaries } from "@/lib/portalDialer/api";
+import { useProductName } from "@/lib/branding/BrandingProvider";
 
 const STATUS_META: Record<string, { label: string; dot: string; border: string }> = {
   available: { label: "Available", dot: "bg-success", border: "border-l-success" },
@@ -266,12 +267,13 @@ function LiveFloor() {
 }
 
 function CallReview() {
+  const productName = useProductName();
   const { data, isLoading, isError } = useSupervisorCallSummaries();
   const rows = data?.data ?? [];
   return (
     <div className="space-y-6">
       <ComingSoonNote title="Call recordings and full transcripts are coming soon with browser calling." icon={Headphones}>
-        Below are the post-call summaries Mediflow has already produced from connected dialer calls — summary, suggested outcome, risk flags and next steps.
+        Below are the post-call summaries {productName} has already produced from connected dialer calls — summary, suggested outcome, risk flags and next steps.
       </ComingSoonNote>
       <SectionCard title="Recent post-call summaries" icon={MessageSquareText} description="Newest first · suggestions are advisory, the agent confirms">
         {isLoading ? (
@@ -282,7 +284,7 @@ function CallReview() {
           <EmptyState
             icon={Activity}
             title="No call summaries yet"
-            description="When a connected dialer sends a call transcript, Mediflow summarises it and it shows up here for review."
+            description={`When a connected dialer sends a call transcript, ${productName} summarises it and it shows up here for review.`}
           />
         ) : (
           <ul className="space-y-3">
