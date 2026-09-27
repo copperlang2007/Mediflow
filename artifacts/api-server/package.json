@@ -6,7 +6,8 @@
   "exports": {
     "./workers/commissionSplits": "./src/workers/commissionSplits.ts",
     "./lib/carrierSeed": "./src/lib/carrierSeed.ts",
-    "./lib/demoMode": "./src/lib/demoMode.ts"
+    "./lib/demoMode": "./src/lib/demoMode.ts",
+    "./lib/aepRenewal/generate": "./src/lib/aepRenewal/generate.ts"
   },
   "scripts": {
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",

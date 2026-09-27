@@ -52,6 +52,16 @@ import {
   commissionStatementsTable,
   commissionLineItemsTable,
   subscriptionsTable,
+  enrollmentsTable,
+  appointmentsTable,
+  kbArticlesTable,
+  automationRulesTable,
+  automationRuleLogsTable,
+  documentsTable,
+  messageThreadsTable,
+  missedPaymentAlertsTable,
+  agentCommissionPayoutsTable,
+  ahipRecordsTable,
   encryptSsn,
 } from "@workspace/db";
 import { seedDefaultCarriers } from "@workspace/api-server/lib/carrierSeed";
@@ -63,14 +73,21 @@ import {
   COMMISSION_LINES_PER_STATEMENT,
   LAST_COMMISSION_LINE_ID,
 } from "./demo-constants";
+import {
+  ACTIVITY_SCRIPT,
+  DEMO_AGENTS,
+  DEMO_LICENSES,
+  demoContact,
+  demoMembers,
+  demoPolicyNumber,
+  DEMO_CONTACT_COUNT,
+} from "./demo-contacts";
+import { seedDemoCoherence, demoPeriods, currentPlanYear } from "./seed-demo-coherence";
 
 // ---- Stable fixed IDs ------------------------------------------------------
 // Fixed UUIDs so re-runs land on the same rows and the demo URL stays stable.
 
-const AGENTS = {
-  carlos: "00000000-0000-4000-8000-000000000020",
-  linda: "00000000-0000-4000-8000-000000000021",
-};
+const AGENTS = DEMO_AGENTS;
 const PIPELINE_ID = "00000000-0000-4000-8000-000000000030";
 const STAGES = {
   newLead: "00000000-0000-4000-8000-000000000031",
@@ -99,6 +116,24 @@ function log(...parts: unknown[]): void {
 
 async function resetDemoOrg(): Promise<void> {
   log("[reset] wiping demo org rows…");
+  // Rows added by seed-demo-coherence.ts. Messages cascade from threads,
+  // presence/AHIP/certs cascade from agents, rule logs from rules.
+  await db.delete(messageThreadsTable).where(eq(messageThreadsTable.orgId, DEMO_ORG_ID));
+  await db.delete(appointmentsTable).where(eq(appointmentsTable.orgId, DEMO_ORG_ID));
+  await db.delete(enrollmentsTable).where(eq(enrollmentsTable.orgId, DEMO_ORG_ID));
+  await db.delete(missedPaymentAlertsTable).where(eq(missedPaymentAlertsTable.orgId, DEMO_ORG_ID));
+  await db.delete(agentCommissionPayoutsTable).where(eq(agentCommissionPayoutsTable.orgId, DEMO_ORG_ID));
+  await db.delete(documentsTable).where(eq(documentsTable.orgId, DEMO_ORG_ID));
+  const demoRules = await db
+    .select({ id: automationRulesTable.id })
+    .from(automationRulesTable)
+    .where(eq(automationRulesTable.orgId, DEMO_ORG_ID));
+  for (const r of demoRules) {
+    await db.delete(automationRuleLogsTable).where(eq(automationRuleLogsTable.ruleId, r.id));
+  }
+  await db.delete(automationRulesTable).where(eq(automationRulesTable.orgId, DEMO_ORG_ID));
+  await db.delete(kbArticlesTable).where(eq(kbArticlesTable.orgId, DEMO_ORG_ID));
+  await db.delete(ahipRecordsTable).where(eq(ahipRecordsTable.id, "")); // cascade from agents
   // Order matters — child tables before parents to satisfy FKs that don't
   // cascade. Cascade is wired on most agent-keyed children, but we delete
   // explicitly so a partially-cascading schema change can't leave orphans.
@@ -357,29 +392,32 @@ async function seedAgents(): Promise<{
     }
   }
 
-  // Licenses
-  const licenses: Array<{ agentId: string; state: string }> = [
-    { agentId: carlos.id, state: "CA" },
-    { agentId: carlos.id, state: "TX" },
-    { agentId: carlos.id, state: "FL" },
-    { agentId: carlos.id, state: "NY" },
-    { agentId: linda.id, state: "FL" },
-  ];
+  // Licenses — relative expiry dates (see DEMO_LICENSES in demo-contacts.ts).
+  // Legacy rows carrying the old hard-coded expiry are fixed by the
+  // coherence pass, which also runs on already-seeded demos.
+  const DAY = 86_400_000;
+  const nowMs = Date.now();
+  const licenses = DEMO_LICENSES;
   for (const l of licenses) {
     const id = stableId("license", `${l.agentId}-${l.state}`);
+    const expiryDate = new Date(nowMs + l.expiresInDays * DAY);
     const existing = await db
       .select({ id: stateLicensesTable.id })
       .from(stateLicensesTable)
       .where(eq(stateLicensesTable.id, id));
     if (existing.length === 0) {
+      // Deterministic, obviously-fake license number (no Math.random, so
+      // --reset reproduces the same rows).
+      const num = createHash("sha1").update(`license:${l.agentId}:${l.state}`).digest("hex")
+        .replace(/\D/g, "").slice(0, 6).padStart(6, "0");
       await db.insert(stateLicensesTable).values({
         id,
         agentId: l.agentId,
         stateCode: l.state,
         licenseType: "Resident Producer — Accident & Health",
-        licenseNumber: `${l.state}-${Math.floor(100000 + Math.random() * 900000)}`,
+        licenseNumber: `${l.state}-DEMO-${num}`,
         issueDate: new Date("2023-01-15T00:00:00Z"),
-        expiryDate: new Date("2026-01-15T00:00:00Z"),
+        expiryDate,
         status: "active",
       }).onConflictDoNothing();
     }
@@ -614,55 +652,37 @@ async function seedOnboardingForLinda(
   );
 }
 
-// ---- Contacts (≈30 realistic-but-fake Medicare leads) ----------------------
-
-const FIRST_NAMES = [
-  "Margaret", "Robert", "Patricia", "James", "Linda", "Michael",
-  "Barbara", "William", "Elizabeth", "David", "Susan", "Richard",
-  "Jessica", "Joseph", "Karen", "Thomas", "Nancy", "Charles",
-  "Lisa", "Daniel", "Betty", "Matthew", "Helen", "Anthony",
-  "Sandra", "Mark", "Donna", "Steven", "Carol", "Paul",
-];
-const LAST_NAMES = [
-  "Anderson", "Brown", "Chen", "Davis", "Edwards", "Foster",
-  "Garcia", "Hernandez", "Iverson", "Johnson", "Kelly", "Lopez",
-  "Miller", "Nguyen", "OBrien", "Patel", "Quinn", "Roberts",
-  "Singh", "Taylor", "Underwood", "Valdez", "Williams", "Xu",
-  "Young", "Zimmerman", "Adams", "Baker", "Cooper", "Diaz",
-];
-const STATES_FL_CA_TX_NY = ["FL", "CA", "TX", "NY"];
-const PLAN_TYPES = ["MA", "MAPD", "PDP", "supp"] as const;
-const STATUSES = ["lead", "prospect", "enrolled", "retained"] as const;
+// ---- Contacts (30 realistic-but-fake Medicare contacts) --------------------
+//
+// The book itself (names, statuses, plan types, agents) lives in
+// demo-contacts.ts so the enrollments/appointments/commission seeders agree
+// with it. 8 leads, 8 prospects, 14 members (enrolled + retained).
 
 async function seedContacts(): Promise<string[]> {
   const ids: string[] = [];
-  for (let i = 0; i < 30; i++) {
-    const first = FIRST_NAMES[i % FIRST_NAMES.length]!;
-    const last = LAST_NAMES[(i * 7) % LAST_NAMES.length]!;
-    const id = stableId("contact", `${first}-${last}-${i}`);
-    ids.push(id);
+  const planYear = currentPlanYear();
+  for (let i = 0; i < DEMO_CONTACT_COUNT; i++) {
+    const c = demoContact(i);
+    ids.push(c.id);
     const exists = await db
       .select({ id: contactsTable.id })
       .from(contactsTable)
-      .where(eq(contactsTable.id, id));
+      .where(eq(contactsTable.id, c.id));
     if (exists.length > 0) continue;
-    const state = STATES_FL_CA_TX_NY[i % 4]!;
-    const planType = PLAN_TYPES[i % PLAN_TYPES.length]!;
-    const status = STATUSES[i % STATUSES.length]!;
     const phoneTail = String(5550000 + i).padStart(7, "0");
     await db.insert(contactsTable).values({
-      id,
+      id: c.id,
       orgId: DEMO_ORG_ID,
-      assignedAgentId: i % 3 === 0 ? AGENTS.linda : AGENTS.carlos,
-      firstName: first,
-      lastName: last,
-      email: `${first.toLowerCase()}.${last.toLowerCase()}@example.com`,
+      assignedAgentId: c.assignedAgentId,
+      firstName: c.firstName,
+      lastName: c.lastName,
+      email: `${c.firstName.toLowerCase()}.${c.lastName.toLowerCase()}@example.com`,
       phone: `+1${phoneTail.slice(0, 3)}${phoneTail}`.slice(0, 12),
-      stateCode: state,
-      zipCode: state === "CA" ? "90210" : state === "TX" ? "75001" : state === "NY" ? "10001" : "33101",
-      currentPlanType: planType,
-      planYear: 2025,
-      status,
+      stateCode: c.stateCode,
+      zipCode: c.stateCode === "CA" ? "90210" : c.stateCode === "TX" ? "75001" : c.stateCode === "NY" ? "10001" : "33101",
+      currentPlanType: c.planType,
+      planYear,
+      status: c.status,
       leadSource: i % 2 === 0 ? "Inbound web" : "Referral",
     }).onConflictDoNothing();
   }
@@ -681,8 +701,8 @@ async function seedPipelineAndDeals(contactIds: string[]): Promise<void> {
   await db.insert(pipelinesTable).values({
     id: PIPELINE_ID,
     orgId: DEMO_ORG_ID,
-    name: "Medicare AEP 2025",
-    description: "Annual Enrollment Period pipeline",
+    name: `Medicare AEP ${currentPlanYear() + 1}`,
+    description: `Annual Enrollment Period pipeline for ${currentPlanYear() + 1} plans`,
     isDefault: true,
   }).onConflictDoNothing();
   await db.insert(pipelineStagesTable).values([
@@ -746,34 +766,35 @@ async function seedPipelineAndDeals(contactIds: string[]): Promise<void> {
         title: `MAPD enrollment — ${(i + 1) * 100}/mo`,
         valueEst: 1200 + i * 75,
         status: i % 4 === 3 ? "won" : "open",
-        wonAt: i % 4 === 3 ? new Date("2025-05-10T00:00:00Z") : null,
+        wonAt: i % 4 === 3 ? new Date(Date.now() - (20 + i) * 86_400_000) : null,
       }).onConflictDoNothing();
     }
   }
 
-  // A handful of activities for the dashboard feed.
-  for (let i = 0; i < 6; i++) {
+  // A handful of activities for the dashboard feed — six distinct ones
+  // (ACTIVITY_SCRIPT). Legacy repeated bodies are fixed by the coherence pass.
+  for (let i = 0; i < ACTIVITY_SCRIPT.length; i++) {
     const contactId = contactIds[i];
     if (!contactId) break;
     const id = stableId("activity", `${contactId}-${i}`);
+    const script = ACTIVITY_SCRIPT[i]!;
     const exists = await db
       .select({ id: activitiesTable.id })
       .from(activitiesTable)
       .where(eq(activitiesTable.id, id));
+    const agentId = demoContact(i).assignedAgentId;
+    const createdBy = agentId === AGENTS.linda ? USERS.lindaUser : USERS.carlosUser;
     if (exists.length === 0) {
       await db.insert(activitiesTable).values({
         id,
         orgId: DEMO_ORG_ID,
         contactId,
-        agentId: i % 2 === 0 ? AGENTS.carlos : AGENTS.linda,
-        type: i % 3 === 0 ? "call_log" : i % 3 === 1 ? "note" : "email",
-        body:
-          i % 3 === 0
-            ? "Talked through plan options. Sending Aetna SOB."
-            : i % 3 === 1
-              ? "Lead wants to compare Humana vs UHC for Q4."
-              : "Sent follow-up summary email.",
-        createdBy: USERS.carlosUser,
+        agentId,
+        type: script.type,
+        body: script.body,
+        createdBy,
+        // Spread over the last few days instead of all "9 minutes ago".
+        createdAt: new Date(Date.now() - (i * 7 + 2) * 3_600_000),
       }).onConflictDoNothing();
     }
   }
@@ -861,24 +882,29 @@ async function seedCommissions(
     );
   }
 
+  // Periods are relative to today: Aetna for two months ago, Humana for
+  // last month. (The slugs are only stable id keys.) The Humana statement's
+  // stated total deliberately disagrees with its lines by $574.50 so the
+  // demo shows a "Reconciled with variance" statement next to a clean one.
+  const [older, recent] = demoPeriods();
   const statements = [
     {
       id: stableId("stmt", COMMISSION_STATEMENT_SLUGS[0]),
       carrierId: aetna.id,
-      statementDate: "2025-04-15",
-      periodStart: "2025-04-01",
-      periodEnd: "2025-04-30",
+      carrierName: "Aetna/CVS",
+      ...older,
       totalAmount: "2450.00",
     },
     {
       id: stableId("stmt", COMMISSION_STATEMENT_SLUGS[1]),
       carrierId: humana.id,
-      statementDate: "2025-04-15",
-      periodStart: "2025-04-01",
-      periodEnd: "2025-04-30",
+      carrierName: "Humana",
+      ...recent,
       totalAmount: "1875.50",
     },
   ];
+  const planYear = currentPlanYear();
+  const members = demoMembers();
 
   for (const s of statements) {
     // Guard on line-item COMPLETENESS, not statement existence: a crash
@@ -902,12 +928,16 @@ async function seedCommissions(
         currency: "USD",
         source: "manual",
         status: "reconciled",
+        reconciledAt: new Date(new Date(`${s.statementDate}T00:00:00Z`).getTime() + 2 * 86_400_000),
         uploadedByUserId: USERS.agencyAdmin,
       }).onConflictDoNothing();
 
-      // 4 line items per statement, all crediting Carlos.
+      // 4 line items per statement, all crediting Carlos, each paying on a
+      // member who actually holds a policy with this carrier.
+      const payable = members.filter((m) => m.carrierName === s.carrierName);
       for (let i = 0; i < COMMISSION_LINES_PER_STATEMENT; i++) {
-        const contactId = contactIds[i % contactIds.length] ?? null;
+        const member = payable[i % Math.max(1, payable.length)] ?? members[i]!;
+        const contactId = member.id;
         const lineId = stableId("line", `${s.id}-${i}`);
         await db.insert(commissionLineItemsTable).values({
           id: lineId,
@@ -915,9 +945,9 @@ async function seedCommissions(
           orgId: DEMO_ORG_ID,
           contactId,
           memberId: `MBR-${(1000 + i).toString()}`,
-          policyNumber: `POL-${s.carrierId.slice(0, 6)}-${i}`,
-          planType: "MAPD",
-          planYear: 2025,
+          policyNumber: demoPolicyNumber(member, planYear),
+          planType: member.planType,
+          planYear,
           periodStart: s.periodStart,
           periodEnd: s.periodEnd,
           premium: "175.00",
@@ -1175,6 +1205,9 @@ async function seedAll(): Promise<void> {
     // bug seedSubscription was added to fix. It is idempotent and cheap, so
     // running it on every pass costs one indexed lookup.
     await seedSubscription();
+    // Coherence backfill (enrollments, appointments, KB, etc.) — idempotent,
+    // and it is how demos seeded before it existed pick it up.
+    await seedDemoCoherence(log);
 
     const done = await db
       .select({ id: commissionLineItemsTable.id })
@@ -1208,7 +1241,11 @@ async function seedAll(): Promise<void> {
   await seedOnboardingForLinda(carriers);
   const contactIds = await seedContacts();
   await seedPipelineAndDeals(contactIds);
+  await seedDemoCoherence(log);
   await seedCommissions(carriers, contactIds);
+  // Payouts / missed-payment alerts hang off the statements, so run the
+  // coherence pass once more now that they exist (idempotent).
+  await seedDemoCoherence(log);
 
   log("[seed] done. Demo org id:", DEMO_ORG_ID);
 }
