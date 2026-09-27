@@ -351,6 +351,20 @@
       "when": 1790900000000,
       "tag": "0049_schema_drift_renewals",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791300000000,
+      "tag": "0053_campaigns",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1791400000000,
+      "tag": "0054_campaign_settings_events",
+      "breakpoints": true
     }
   ]
 }

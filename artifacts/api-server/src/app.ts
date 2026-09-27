@@ -18,6 +18,7 @@ import stripeWebhookRouter from "./routes/stripeWebhook";
 import dialerEventsRouter from "./routes/dialerEvents";
 import queuePublicRouter from "./routes/queuePublic";
 import enrollhereWebhookRouter from "./routes/enrollhereWebhook";
+import campaignsPublicRouter from "./routes/campaignsPublic";
 import { logger } from "./lib/logger";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "./middlewares/requireAuth";
 import { isDemoMode } from "./lib/demoMode";
@@ -332,6 +333,12 @@ app.use(queuePublicRouter);
 // Clerk-guarded `/api` router, trust from a per-tenant shared secret or
 // X-MB-Signature HMAC. See routes/enrollhereWebhook.ts.
 app.use(enrollhereWebhookRouter);
+
+// Omnichannel campaigns: public unsubscribe page/one-click endpoint and the
+// Resend (svix-signed) / Twilio (X-Twilio-Signature) delivery webhooks. Same
+// posture as the receivers above: no Clerk session, trust from a signature.
+// See routes/campaignsPublic.ts.
+app.use(campaignsPublicRouter);
 
 /**
  * GET /version — release identity for monitoring probes.
