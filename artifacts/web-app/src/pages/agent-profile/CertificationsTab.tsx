@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Award, Plus } from "lucide-react";
 import { toast } from "sonner";
+import { sellingPlanYear } from "@/lib/planYear";
 
 export default function CertificationsTab({ agentId }: { agentId: string }) {
   const qc = useQueryClient();
@@ -35,7 +36,7 @@ export default function CertificationsTab({ agentId }: { agentId: string }) {
   const { mutateAsync: createCert } = useCreateAgentCertification();
   const { mutateAsync: updateCert } = useUpdateAgentCertification();
   const [addOpen, setAddOpen] = useState(false);
-  const currentYear = new Date().getFullYear();
+  const currentYear = sellingPlanYear();
   const [form, setForm] = useState({ carrierId: "", certificationYear: String(currentYear), status: "not_started" as string });
 
   const handleAdd = async (e: React.FormEvent) => {

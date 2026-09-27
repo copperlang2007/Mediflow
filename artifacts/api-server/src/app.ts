@@ -17,6 +17,7 @@ import webhooksRouter from "./routes/webhooks";
 import stripeWebhookRouter from "./routes/stripeWebhook";
 import dialerEventsRouter from "./routes/dialerEvents";
 import queuePublicRouter from "./routes/queuePublic";
+import unsubscribeRouter from "./routes/unsubscribe";
 import enrollhereWebhookRouter from "./routes/enrollhereWebhook";
 import { logger } from "./lib/logger";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "./middlewares/requireAuth";
@@ -332,6 +333,10 @@ app.use(queuePublicRouter);
 // Clerk-guarded `/api` router, trust from a per-tenant shared secret or
 // X-MB-Signature HMAC. See routes/enrollhereWebhook.ts.
 app.use(enrollhereWebhookRouter);
+
+// Public email unsubscribe (CAN-SPAM opt-out). Trust comes from the signed
+// token in the link, not a Clerk session. See routes/unsubscribe.ts.
+app.use(unsubscribeRouter);
 
 /**
  * GET /version — release identity for monitoring probes.

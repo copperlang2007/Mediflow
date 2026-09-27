@@ -7,8 +7,6 @@ import {
   stateLicensesTable,
   carrierCertificationsTable,
   ahipRecordsTable,
-  checklistRunsTable,
-  checklistItemsTable,
   documentsTable,
   type Agent,
 } from "@workspace/db";
@@ -23,6 +21,11 @@ import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { randomUUID } from "crypto";
 import { createChecklistRun } from "./checklists";
 import { safeLimit, safeOffset } from "../lib/listGuards";
+import {
+  complianceContext,
+  complianceScoreSql as complianceScoreExpr,
+  getAgentComplianceScores,
+} from "../lib/compliance/agentComplianceScore";
 
 const InitialLicenseSchema = z.object({
   stateCode: z.string().length(2).toUpperCase(),
@@ -122,19 +125,9 @@ router.get(
     }
 
     const dir = sortDir === "desc" ? "DESC" : "ASC";
-    // Compliance score formula (max 100):
-    //   Licensing    40 pts — proportional: active_licenses / total_licenses
-    //   Certifications 30 pts — proportional: passed_certs / total_certs
-    //   AHIP         20 pts — binary: passed in current year = 20, else 0
-    //   Onboarding   10 pts — proportional: completed+skipped items / total items
-    // Proportional scoring chosen over binary for onboarding so partial progress
-    // is visible on the roster and agents aren't stuck at 0 until the last step.
-    const complianceScoreSql = sql`(
-      COALESCE((SELECT CAST(count(*) FILTER (WHERE status = 'active') AS FLOAT) / NULLIF(count(*), 0) FROM state_licenses WHERE agent_id = agents.id), 0) * 40 +
-      COALESCE((SELECT CAST(count(*) FILTER (WHERE status = 'passed') AS FLOAT) / NULLIF(count(*), 0) FROM carrier_certifications WHERE agent_id = agents.id), 0) * 30 +
-      CASE WHEN EXISTS (SELECT 1 FROM ahip_records WHERE agent_id = agents.id AND status = 'passed' AND certification_year = EXTRACT(YEAR FROM NOW())::int) THEN 20 ELSE 0 END +
-      COALESCE((SELECT CAST(count(*) FILTER (WHERE ci.status IN ('completed', 'skipped')) AS FLOAT) / NULLIF(count(*), 0) FROM checklist_runs cr JOIN checklist_items ci ON cr.id = ci.run_id WHERE cr.agent_id = agents.id AND cr.type = 'onboarding'), 0) * 10
-    )`;
+    // Sorting uses the exact expression the score endpoint reports — see
+    // lib/compliance/agentComplianceScore.ts for the formula.
+    const complianceScoreSql = complianceScoreExpr(complianceContext());
 
     const orderExpr =
       sortBy === "complianceScore" ? sql`${complianceScoreSql} ${sql.raw(dir)}` :
@@ -170,6 +163,7 @@ router.get(
               and(
                 inArray(stateLicensesTable.agentId, agentIds),
                 eq(stateLicensesTable.status, "active"),
+                sql`(${stateLicensesTable.expiryDate} IS NULL OR ${stateLicensesTable.expiryDate} > now())`,
               ),
             )
             .groupBy(stateLicensesTable.agentId)
@@ -511,7 +505,7 @@ router.get(
 
     // Validate org ownership FIRST — cache must never bypass authorization
     const [agent] = await db
-      .select()
+      .select({ id: agentsTable.id })
       .from(agentsTable)
       .where(and(eq(agentsTable.id, raw), eq(agentsTable.orgId, authReq.orgId)))
       .limit(1);
@@ -529,93 +523,11 @@ router.get(
       return;
     }
 
-    const currentYear = new Date().getFullYear();
-
-    const [licenses, certs, ahip, onboardingRun] = await Promise.all([
-      db
-        .select()
-        .from(stateLicensesTable)
-        .where(eq(stateLicensesTable.agentId, agent.id)),
-      db
-        .select()
-        .from(carrierCertificationsTable)
-        .where(eq(carrierCertificationsTable.agentId, agent.id)),
-      db
-        .select()
-        .from(ahipRecordsTable)
-        .where(
-          and(
-            eq(ahipRecordsTable.agentId, agent.id),
-            eq(ahipRecordsTable.certificationYear, currentYear),
-          ),
-        )
-        .limit(1),
-      db
-        .select({ id: checklistRunsTable.id })
-        .from(checklistRunsTable)
-        .where(
-          and(
-            eq(checklistRunsTable.agentId, agent.id),
-            eq(checklistRunsTable.orgId, authReq.orgId),
-            sql`${checklistRunsTable.type} = 'onboarding'`,
-          ),
-        )
-        .orderBy(sql`${checklistRunsTable.startedAt} desc`)
-        .limit(1),
-    ]);
-
-    let onboardingTaskScore = 0;
-    let onboardingCompletedItems = 0;
-    let onboardingTotalItems = 0;
-
-    if (onboardingRun[0]) {
-      const items = await db
-        .select({ status: checklistItemsTable.status })
-        .from(checklistItemsTable)
-        .where(eq(checklistItemsTable.runId, onboardingRun[0].id));
-
-      onboardingTotalItems = items.length;
-      onboardingCompletedItems = items.filter(
-        (i) => i.status === "completed" || i.status === "skipped",
-      ).length;
-      onboardingTaskScore =
-        onboardingTotalItems > 0
-          ? (onboardingCompletedItems / onboardingTotalItems) * 100
-          : 0;
-    }
-
-    const activeLicenses = licenses.filter((l) => l.status === "active").length;
-    const activeCerts = certs.filter((c) => c.status === "passed").length;
-    const ahipCompleted = ahip[0]?.status === "passed";
-
-    const licenseScore =
-      licenses.length > 0 ? (activeLicenses / licenses.length) * 100 : 0;
-    const certScore =
-      certs.length > 0 ? (activeCerts / certs.length) * 100 : 0;
-    const ahipScore = ahipCompleted ? 100 : 0;
-
-    const totalScore =
-      licenseScore * 0.4 +
-      certScore * 0.3 +
-      ahipScore * 0.2 +
-      onboardingTaskScore * 0.1;
-
-    const payload = {
-      agentId: agent.id,
-      totalScore: Math.round(totalScore * 10) / 10,
-      licenseScore: Math.round(licenseScore * 10) / 10,
-      certificationScore: Math.round(certScore * 10) / 10,
-      ahipScore,
-      onboardingScore: Math.round(onboardingTaskScore * 10) / 10,
-      activeLicenses,
-      totalLicenses: licenses.length,
-      activeCertifications: activeCerts,
-      totalCertifications: certs.length,
-      ahipCompleted,
-      onboardingComplete: onboardingTotalItems > 0 && onboardingCompletedItems >= onboardingTotalItems,
-      onboardingCompletedItems,
-      onboardingTotalItems,
-    };
+    const [score] = await getAgentComplianceScores({
+      orgId: authReq.orgId,
+      agentIds: [agent.id],
+    });
+    const { licensesExpiringSoon: _soon, ...payload } = score;
 
     complianceScoreCache.set(cacheKey, { payload, expiresAt: Date.now() + COMPLIANCE_CACHE_TTL_MS });
     res.json(payload);

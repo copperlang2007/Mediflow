@@ -106,7 +106,10 @@ export interface DashboardStats {
   overdueTasks: number;
   openLeadsCount: number;
   unreadNotificationsCount: number;
+  /** Share of active agents with a passed/waived AHIP for ahipPlanYear. */
   ahipCompletionRateCurrent: number;
+  /** Plan year being sold today — the calendar year through Sept 30, the next year from Oct 1. */
+  ahipPlanYear?: number;
   totalContacts: number;
   agentsWithExpiringLicenses: AgentLicenseAlert[];
 }
@@ -287,6 +290,8 @@ export interface OffboardResponse {
 
 export interface ComplianceScore {
   agentId: string;
+  /** Plan year the AHIP and carrier certifications were evaluated for. */
+  planYear?: number;
   totalScore: number;
   licenseScore: number;
   certificationScore: number;
@@ -837,6 +842,8 @@ export interface OrgSettings {
    * @maximum 52
    */
   ahipReminderIntervalWeeks: number;
+  /** When true, automated SMS is only sent to contacts with a recorded TCPA consent. */
+  requireSmsConsent?: boolean;
 }
 
 export interface UpdateOrgSettingsBody {
@@ -866,6 +873,7 @@ export interface UpdateOrgSettingsBody {
    * @maximum 52
    */
   ahipReminderIntervalWeeks?: number;
+  requireSmsConsent?: boolean;
 }
 
 export type BulkUpdateTechStackBodyStatus =
@@ -1258,6 +1266,10 @@ export interface Contact {
   status: ContactStatus;
   optOutSms: boolean;
   optOutEmail: boolean;
+  /** When the contact gave prior express written consent to automated texts. */
+  tcpaConsentAt?: string | null;
+  /** Where the consent was captured (form URL, recorded call id, paper form reference). */
+  tcpaConsentSource?: string | null;
   tags?: string[] | null;
   createdAt: string;
   updatedAt: string;
@@ -1284,6 +1296,8 @@ export interface CreateContactBody {
   status?: string;
   tags?: string[];
   assignedAgentId?: string | null;
+  tcpaConsentAt?: string | null;
+  tcpaConsentSource?: string | null;
 }
 
 export interface UpdateContactBody {
@@ -1307,6 +1321,8 @@ export interface UpdateContactBody {
   status?: string;
   tags?: string[];
   assignedAgentId?: string | null;
+  tcpaConsentAt?: string | null;
+  tcpaConsentSource?: string | null;
 }
 
 export interface ContactListResponse {
@@ -2219,6 +2235,11 @@ export interface DataRetentionPolicy {
 
 export interface UpdateDataRetentionPolicyBody {
   recordType: string;
+  /**
+   * At least 3650 days — CMS requires MA/Part D records be kept 10 years.
+   * @minimum 3650
+   * @maximum 36500
+   */
   retentionDays: number;
   isEnabled: boolean;
 }

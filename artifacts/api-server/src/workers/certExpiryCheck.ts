@@ -7,7 +7,7 @@
  * enqueues reminder emails to BOTH the agent AND all compliance managers.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -33,7 +33,9 @@ export async function certExpiryCheckWorker(
   const in90 = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
 
   const baseConditions = [
-    eq(carrierCertificationsTable.status, "passed"),
+    inArray(carrierCertificationsTable.status, ["passed", "waived"]),
+    // Offboarded / suspended agents don't need renewal nags.
+    inArray(agentsTable.status, ["onboarding", "active"]),
     sql`${carrierCertificationsTable.expiryDate} IS NOT NULL`,
     sql`${carrierCertificationsTable.expiryDate} > ${now}`,
     sql`${carrierCertificationsTable.expiryDate} <= ${in90}`,
@@ -92,6 +94,10 @@ export async function certExpiryCheckWorker(
 
     const pendingThresholds = crossedThresholds.filter((t) => !alreadySentSet.has(t));
     if (pendingThresholds.length === 0) continue;
+    // Only the most urgent unsent milestone produces an alert. A cert first
+    // seen with 5 days left would otherwise send the 90/60/30/14/7 emails all
+    // at once; the wider milestones are recorded as covered by this one.
+    const alertThreshold = Math.min(...pendingThresholds);
 
     // Fetch org-level admins/compliance roles for oversight notifications
     const orgAdmins = await db
@@ -128,6 +134,7 @@ export async function certExpiryCheckWorker(
     orgAdmins.forEach((a) => { if (a.email) emailSet.add(a.email); });
 
     for (const threshold of pendingThresholds) {
+      const isAlert = threshold === alertThreshold;
       // Create in-app notifications for agent + manager + org admins
       const notifInserts = notifUserIds.map((uid) => ({
         id: randomUUID(),
@@ -142,7 +149,7 @@ export async function certExpiryCheckWorker(
       }));
 
       let firstNotifId: string | null = null;
-      if (notifInserts.length > 0) {
+      if (isAlert && notifInserts.length > 0) {
         firstNotifId = notifInserts[0].id;
         await db.insert(notificationsTable).values(notifInserts).onConflictDoNothing();
         broadcastToUsers(
@@ -162,7 +169,7 @@ export async function certExpiryCheckWorker(
 
       const emailRecipients = Array.from(emailSet);
 
-      if (emailRecipients.length > 0) {
+      if (isAlert && emailRecipients.length > 0) {
         await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
           to: emailRecipients,
           subject: `Certification expiring in ${daysUntilExpiry} days — ${cert.carrierName}`,

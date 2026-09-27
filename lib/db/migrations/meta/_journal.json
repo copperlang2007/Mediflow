@@ -351,6 +351,20 @@
       "when": 1790900000000,
       "tag": "0049_renewal_snoozes",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791000000000,
+      "tag": "0050_tcpa_consent",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1791100000000,
+      "tag": "0051_phone_match_indexes",
+      "breakpoints": true
     }
   ]
 }

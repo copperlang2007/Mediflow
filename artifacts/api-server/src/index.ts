@@ -1,6 +1,7 @@
 import { initSentry } from "./lib/sentry";
 import { logger } from "./lib/logger";
 import { assertProdEnvIntegrity } from "./lib/prodEnvGuard";
+import { consumerEmailConfigIssues } from "./lib/compliance/unsubscribe";
 
 // L1 security guard: refuse to boot if production-looking credentials
 // (live Clerk keys, non-localhost DATABASE_URL, PHI_ENCRYPTION_KEY set)
@@ -97,6 +98,13 @@ async function bootstrap(): Promise<void> {
   } catch {
     // A malformed or absent base URL is already reported by the checks above
     // and by /admin/health/ai; a log line must never be what stops a boot.
+  }
+
+  // Automated consumer email needs a working unsubscribe link (CAN-SPAM).
+  // Without one, every automated email to a contact is held — say so loudly
+  // at boot rather than leaving operators to notice the silence.
+  for (const issue of consumerEmailConfigIssues()) {
+    logger.error({ issue }, "Automated consumer email is disabled");
   }
 
   // HIPAA guard: uploaded documents (signed PDFs, etc.) routinely embed PHI.

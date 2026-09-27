@@ -59,4 +59,21 @@ describe("contact details and editing", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByLabelText("First Name")).toHaveValue("Updated");
   });
+  it("saves the texting consent date and source together, and requires a source", async () => {
+    mount();
+    expect(screen.getByText("Not recorded")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Edit", exact: true }));
+    fireEvent.change(screen.getByLabelText("Texting Consent Date"), { target: { value: "2026-03-02" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    // No source yet — the form refuses to save a half-recorded consent.
+    expect(state.update).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Consent Source"), { target: { value: "web_form:https://example.test/quote" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => expect(state.update).toHaveBeenCalledTimes(1));
+    const { data } = state.update.mock.calls[0][0] as { data: Record<string, unknown> };
+    expect(data.tcpaConsentSource).toBe("web_form:https://example.test/quote");
+    expect(String(data.tcpaConsentAt)).toMatch(/^2026-03-0[12]T/);
+  });
 });

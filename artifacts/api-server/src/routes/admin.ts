@@ -35,6 +35,12 @@ import PDFDocument from "pdfkit";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { clerkClient } from "@clerk/express";
 import { safeLimit, safeOffset } from "../lib/listGuards";
+import {
+  CMS_RECORD_RETENTION_DAYS,
+  MAX_RETENTION_DAYS,
+  effectiveRetentionDays,
+} from "../lib/compliance/retention";
+import { z } from "zod";
 
 const objectStorage = new ObjectStorageService();
 
@@ -492,7 +498,13 @@ router.post(
 );
 
 // ─── Data Retention Policies ──────────────────────────────────────────────────
-const RETENTION_RECORD_TYPES = ["contacts", "deals", "agents", "audit_log", "communications", "documents"];
+const RETENTION_RECORD_TYPES = ["contacts", "deals", "agents", "audit_log", "communications", "documents"] as const;
+
+const RetentionPolicySchema = z.object({
+  recordType: z.enum(RETENTION_RECORD_TYPES),
+  retentionDays: z.number().int().min(CMS_RECORD_RETENTION_DAYS).max(MAX_RETENTION_DAYS),
+  isEnabled: z.boolean(),
+});
 
 router.get(
   "/admin/data-retention",
@@ -510,7 +522,7 @@ router.get(
         id: null,
         orgId: authReq.orgId,
         recordType: rt,
-        retentionDays: rt === "audit_log" ? 2555 : 1825, // audit: 7yr, others: 5yr
+        retentionDays: CMS_RECORD_RETENTION_DAYS, // CMS 10-year floor
         isEnabled: false,
         updatedAt: new Date(),
         updatedByUserId: null,
@@ -528,11 +540,18 @@ router.put(
   requireRole("super_admin", "agency_admin"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const { recordType, retentionDays, isEnabled } = req.body as { recordType: string; retentionDays: number; isEnabled: boolean };
-
-    if (!RETENTION_RECORD_TYPES.includes(recordType)) {
-      res.status(400).json({ error: "Invalid record type" }); return;
+    const parsed = RetentionPolicySchema.safeParse(req.body);
+    if (!parsed.success) {
+      const floorIssue = parsed.error.issues.some((i) => i.path[0] === "retentionDays" && i.code === "too_small");
+      res.status(400).json({
+        error: floorIssue
+          ? `Retention cannot be shorter than ${CMS_RECORD_RETENTION_DAYS} days (CMS 10-year record retention).`
+          : "Invalid request body",
+        details: parsed.error.issues,
+      });
+      return;
     }
+    const { recordType, retentionDays, isEnabled } = parsed.data;
 
     const [existing] = await db.select().from(dataRetentionPoliciesTable)
       .where(and(eq(dataRetentionPoliciesTable.orgId, authReq.orgId), eq(dataRetentionPoliciesTable.recordType, recordType)));
@@ -961,9 +980,10 @@ router.delete(
         .limit(1);
 
       if (policy?.isEnabled) {
-        const cutoff = new Date(Date.now() - policy.retentionDays * 24 * 60 * 60 * 1000);
+        const days = effectiveRetentionDays(policy.retentionDays);
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
         if (contact.deletedAt > cutoff) {
-          res.status(409).json({ error: `Record has not yet passed the ${policy.retentionDays}-day retention window` });
+          res.status(409).json({ error: `Record has not yet passed the ${days}-day retention window` });
           return;
         }
       }
@@ -1004,9 +1024,10 @@ router.delete(
         .limit(1);
 
       if (policy?.isEnabled) {
-        const cutoff = new Date(Date.now() - policy.retentionDays * 24 * 60 * 60 * 1000);
+        const days = effectiveRetentionDays(policy.retentionDays);
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
         if (deal.deletedAt > cutoff) {
-          res.status(409).json({ error: `Record has not yet passed the ${policy.retentionDays}-day retention window` });
+          res.status(409).json({ error: `Record has not yet passed the ${days}-day retention window` });
           return;
         }
       }
