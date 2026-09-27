@@ -107,11 +107,12 @@ export async function upsertPolicyEnrollment(
     const carrierless = existing.find((e) => e.carrierId === null);
     // Only a row no other policy's application points at: another policy's
     // carrier-less enrollment is not this one arriving late.
+    // Without a policy id there's no way to tell, so nothing is promoted.
     const [othersRow] = carrierless && p.policyId ? await tx.select({ id: enrollmentApplicationsTable.id })
       .from(enrollmentApplicationsTable)
       .where(and(eq(enrollmentApplicationsTable.enrollmentId, carrierless.id), ne(enrollmentApplicationsTable.externalPolicyId, p.policyId)))
       .limit(1) : [];
-    if (carrierless && !othersRow) {
+    if (carrierless && p.policyId && !othersRow) {
       await tx.update(enrollmentsTable).set({ carrierId }).where(eq(enrollmentsTable.id, carrierless.id));
     }
   }
