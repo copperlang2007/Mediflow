@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import type {
   PipelineWithStages, PipelineStage,
@@ -10,17 +11,57 @@ import {
   useGetPipelineAnalytics,
   getGetPipelinesQueryKey, getGetDealsQueryKey, getGetContactsQueryKey,
 } from "@workspace/api-client-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Plus, TrendingUp, DollarSign } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import {
+  Plus, TrendingUp, DollarSign, Gauge, Trophy, Percent, MoreHorizontal, CheckCircle2, XCircle, Info,
+} from "lucide-react";
 import { toast } from "sonner";
+import { formatDistanceToNow, format } from "date-fns";
+import { EmptyState, KpiCard, SectionCard, StatusPill } from "@/components/shared";
+import { cn } from "@/lib/utils";
+
+/** Shape of one row from GET /deals (the generated type is untyped). */
+type DealRow = {
+  deal: {
+    id: string;
+    stageId: string;
+    contactId: string;
+    title: string;
+    valueEst: number | null;
+    status: "open" | "won" | "lost";
+    lostReason: string | null;
+    wonAt: string | null;
+    lostAt: string | null;
+    updatedAt: string;
+    createdAt: string;
+  };
+  contactFirstName: string | null;
+  contactLastName: string | null;
+};
+
+/**
+ * A pipeline's last stage usually *is* the finish line ("Enrolled"). When it
+ * is, won deals are shown in that column so "Won (2)" and the Enrolled column
+ * always agree. Otherwise won deals get their own "Won" column at the end.
+ */
+const FINISH_STAGE = /enrol|won|closed|sold|complete|issued/i;
+
+const fmtCurrency = (n: number) => `$${Math.round(n).toLocaleString()}`;
+
+function contactName(row: DealRow) {
+  return [row.contactFirstName, row.contactLastName].filter(Boolean).join(" ") || "Unnamed contact";
+}
 
 export default function PipelineTab() {
   const qc = useQueryClient();
@@ -32,6 +73,8 @@ export default function PipelineTab() {
   const [addPipelineOpen, setAddPipelineOpen] = useState(false);
   const [dealForm, setDealForm] = useState<CreateDealBody>({ pipelineId: "", stageId: "", contactId: "", title: "", valueEst: null });
   const [pipelineForm, setPipelineForm] = useState<Pick<CreatePipelineBody, "name" | "description">>({ name: "", description: "" });
+  const [lostTarget, setLostTarget] = useState<DealRow | null>(null);
+  const [lostReason, setLostReason] = useState("");
 
   const { data: pipelines, isLoading: pipelinesLoading } = useGetPipelines();
   const pipelineList: PipelineWithStages[] = pipelines ?? [];
@@ -60,8 +103,20 @@ export default function PipelineTab() {
   const { mutateAsync: updateDeal } = useUpdateDeal();
   const { mutateAsync: createPipeline, isPending: creatingPipeline } = useCreatePipeline();
 
-  const stages: PipelineStage[] = activePipeline?.stages ?? [];
-  const deals: GetDeals200Item[] = dealsRaw ?? [];
+  const stages: PipelineStage[] = useMemo(
+    () => [...(activePipeline?.stages ?? [])].sort((a, b) => a.orderIndex - b.orderIndex),
+    [activePipeline],
+  );
+  const deals = useMemo(
+    () => ((dealsRaw ?? []) as GetDeals200Item[]).filter((r) => (r as Record<string, unknown>).deal) as unknown as DealRow[],
+    [dealsRaw],
+  );
+  const openDeals = deals.filter((r) => r.deal.status === "open");
+  const wonDeals = deals.filter((r) => r.deal.status === "won");
+  const lostDeals = deals.filter((r) => r.deal.status === "lost");
+
+  const lastStage = stages[stages.length - 1];
+  const finishStageId = lastStage && FINISH_STAGE.test(lastStage.name) ? lastStage.id : null;
 
   const onDealOpenChange = (open: boolean) => {
     setAddDealOpen(open);
@@ -109,21 +164,62 @@ export default function PipelineTab() {
   };
 
   const moveStage = async (dealId: string, stageId: string) => {
-    await updateDeal({ id: dealId, data: { stageId } satisfies UpdateDealBody });
+    try {
+      await updateDeal({ id: dealId, data: { stageId } satisfies UpdateDealBody });
+      const stageName = stages.find((s) => s.id === stageId)?.name;
+      toast.success(stageName ? `Moved to ${stageName}` : "Deal moved");
+    } catch {
+      toast.error("Could not move the deal");
+    }
     void qc.invalidateQueries({ queryKey: getGetDealsQueryKey() });
+    void qc.invalidateQueries({ queryKey: ["pipeline-analytics", activePipeline?.id ?? ""] });
   };
 
-  if (pipelinesLoading) return <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-40 rounded-xl" />)}</div>;
+  const closeDeal = async (
+    dealId: string,
+    status: "won" | "lost",
+    reason?: string,
+  ) => {
+    try {
+      await updateDeal({
+        id: dealId,
+        data: { status, ...(status === "lost" ? { lostReason: reason ?? null } : {}) } satisfies UpdateDealBody,
+      });
+      toast.success(status === "won" ? "Deal marked as won" : "Deal marked as lost");
+      void qc.invalidateQueries({ queryKey: getGetDealsQueryKey() });
+      void qc.invalidateQueries({ queryKey: ["pipeline-analytics", activePipeline?.id ?? ""] });
+    } catch {
+      toast.error(`Failed to mark deal as ${status}`);
+    }
+  };
+
+  const confirmLost = async () => {
+    if (!lostTarget) return;
+    await closeDeal(lostTarget.deal.id, "lost", lostReason.trim() || undefined);
+    setLostTarget(null);
+    setLostReason("");
+  };
+
+  if (pipelinesLoading) {
+    return (
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}</div>
+        <Skeleton className="h-72 rounded-xl" />
+      </div>
+    );
+  }
 
   if (pipelineList.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <TrendingUp className="h-12 w-12 text-muted-foreground/20 mb-3" />
-        <p className="font-medium text-muted-foreground">No pipelines yet</p>
-        <p className="text-sm text-muted-foreground/70 mt-1 mb-4">Create your first sales pipeline to track deals</p>
-        <Button size="sm" onClick={() => setAddPipelineOpen(true)}><Plus className="h-4 w-4 mr-1" />Create Pipeline</Button>
+      <SectionCard>
+        <EmptyState
+          icon={TrendingUp}
+          title="No sales pipeline yet"
+          description="A pipeline shows every deal as a card moving from first contact to enrolled. Create one to start tracking your sales."
+          action={{ label: "Create a pipeline", onClick: () => setAddPipelineOpen(true) }}
+        />
         <CreatePipelineDialog open={addPipelineOpen} onOpenChange={setAddPipelineOpen} form={pipelineForm} setForm={setPipelineForm} onSubmit={handleCreatePipeline} isPending={creatingPipeline} />
-      </div>
+      </SectionCard>
     );
   }
 
@@ -140,148 +236,245 @@ export default function PipelineTab() {
       }
     | undefined;
 
-  const fmtCurrency = (n: number) => `$${Math.round(n).toLocaleString()}`;
+  // Weighted forecast = each open deal's value × its stage's win probability.
+  const stageProbability = new Map(stages.map((s) => [s.id, s.probabilityPct ?? 0]));
+  const weightedForecast = openDeals.reduce(
+    (sum, r) => sum + (Number(r.deal.valueEst ?? 0) || 0) * ((stageProbability.get(r.deal.stageId) ?? 0) / 100),
+    0,
+  );
+  const sumValue = (rows: DealRow[]) => rows.reduce((s, r) => s + (Number(r.deal.valueEst ?? 0) || 0), 0);
 
-  const closeDeal = async (
-    dealId: string,
-    status: "won" | "lost",
-    lostReason?: string,
-  ) => {
-    try {
-      await updateDeal({
-        id: dealId,
-        data: { status, ...(status === "lost" ? { lostReason: lostReason ?? null } : {}) } satisfies UpdateDealBody,
-      });
-      toast.success(status === "won" ? "Deal marked as won" : "Deal marked as lost");
-      void qc.invalidateQueries({ queryKey: getGetDealsQueryKey() });
-      void qc.invalidateQueries({ queryKey: ["pipeline-analytics", activePipeline?.id ?? ""] });
-    } catch {
-      toast.error(`Failed to mark deal as ${status}`);
-    }
+  type Column = { key: string; name: string; color: string; stage?: PipelineStage; open: DealRow[]; won: DealRow[] };
+  const columns: Column[] = stages.map((stage) => ({
+    key: stage.id,
+    name: stage.name,
+    color: stage.color,
+    stage,
+    open: openDeals.filter((r) => r.deal.stageId === stage.id),
+    won: stage.id === finishStageId ? wonDeals : [],
+  }));
+  if (!finishStageId) {
+    columns.push({ key: "__won", name: "Won", color: "#16a34a", open: [], won: wonDeals });
+  }
+
+  const renderOpenCard = (row: DealRow, isFinish: boolean) => {
+    const { deal } = row;
+    const prob = stageProbability.get(deal.stageId) ?? 0;
+    return (
+      <div key={deal.id} className="rounded-lg border border-border bg-card p-3 shadow-sm hover:shadow-md transition-shadow">
+        <div className="flex items-start justify-between gap-2">
+          <Link href={`/crm/contacts/${deal.contactId}`} className="min-w-0 font-medium text-sm leading-tight hover:underline truncate">
+            {contactName(row)}
+          </Link>
+          {deal.valueEst != null && (
+            <span className="shrink-0 text-sm font-semibold text-success tabular-nums">{fmtCurrency(Number(deal.valueEst))}</span>
+          )}
+        </div>
+        <p className="mt-0.5 text-xs text-muted-foreground truncate" title={deal.title}>{deal.title}</p>
+        <div className="mt-2.5 flex items-center gap-2">
+          <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden" aria-hidden>
+            <div className="h-full rounded-full bg-navy-600 dark:bg-accent" style={{ width: `${Math.min(100, Math.max(0, prob))}%` }} />
+          </div>
+          <span className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap" title="Chance of closing at this stage">{prob}%</span>
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className="text-[11px] text-muted-foreground truncate">
+            Updated {formatDistanceToNow(new Date(deal.updatedAt), { addSuffix: true })}
+          </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" aria-label={`Actions for ${contactName(row)}`}>
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">Move to stage</DropdownMenuLabel>
+              <DropdownMenuRadioGroup value={deal.stageId} onValueChange={(v) => { if (v !== deal.stageId) void moveStage(deal.id, v); }}>
+                {stages.map((s) => (
+                  <DropdownMenuRadioItem key={s.id} value={s.id}>{s.name}</DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => void closeDeal(deal.id, "won")}>
+                <CheckCircle2 className="h-4 w-4 mr-2 text-success" />Mark as won
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => { setLostReason(""); setLostTarget(row); }}>
+                <XCircle className="h-4 w-4 mr-2 text-destructive" />Mark as lost…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        {isFinish && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-2 h-7 w-full text-xs text-success border-success/30 hover:bg-success/10 hover:text-success"
+            onClick={() => void closeDeal(deal.id, "won")}
+          >
+            <CheckCircle2 className="h-3.5 w-3.5 mr-1" />Confirm enrolled — mark won
+          </Button>
+        )}
+      </div>
+    );
   };
 
+  const renderWonCard = (row: DealRow) => (
+    <div key={row.deal.id} className="rounded-lg border border-success/30 bg-success/5 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <Link href={`/crm/contacts/${row.deal.contactId}`} className="min-w-0 font-medium text-sm leading-tight hover:underline truncate">
+          {contactName(row)}
+        </Link>
+        {row.deal.valueEst != null && (
+          <span className="shrink-0 text-sm font-semibold text-success tabular-nums">{fmtCurrency(Number(row.deal.valueEst))}</span>
+        )}
+      </div>
+      <p className="mt-0.5 text-xs text-muted-foreground truncate" title={row.deal.title}>{row.deal.title}</p>
+      <p className="mt-2 flex items-center gap-1 text-[11px] font-medium text-success">
+        <CheckCircle2 className="h-3.5 w-3.5" />
+        Won{row.deal.wonAt ? ` · ${format(new Date(row.deal.wonAt), "MMM d, yyyy")}` : ""}
+      </p>
+    </div>
+  );
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-2">
         <Select value={activePipeline?.id ?? ""} onValueChange={setSelectedPipelineId}>
-          <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-56 bg-card" aria-label="Pipeline"><SelectValue /></SelectTrigger>
           <SelectContent>
             {pipelineList.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Button variant="outline" size="sm" onClick={() => setAddPipelineOpen(true)}><Plus className="h-4 w-4 mr-1" />New Pipeline</Button>
+        <Button variant="outline" onClick={() => setAddPipelineOpen(true)}><Plus className="h-4 w-4 mr-1.5" />New Pipeline</Button>
         <div className="flex-1" />
-        <Button size="sm" onClick={() => {
+        <Button onClick={() => {
           setDealForm((f) => ({ ...f, pipelineId: activePipeline?.id ?? "" }));
           setAddDealOpen(true);
-        }}><Plus className="h-4 w-4 mr-1" />New Deal</Button>
+        }}><Plus className="h-4 w-4 mr-1.5" />New Deal</Button>
       </div>
 
-      {pipelineAnalytics && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <Card className="py-3"><CardContent className="px-4 py-0 text-center">
-            <p className="text-xl font-bold">{pipelineAnalytics.totalDeals ?? 0}</p>
-            <p className="text-xs text-muted-foreground">Total Deals</p>
-          </CardContent></Card>
-          <Card className="py-3"><CardContent className="px-4 py-0 text-center">
-            <p className="text-xl font-bold tabular-nums">{fmtCurrency(pipelineAnalytics.openValueTotal ?? 0)}</p>
-            <p className="text-xs text-muted-foreground">Open Pipeline</p>
-          </CardContent></Card>
-          <Card className="py-3"><CardContent className="px-4 py-0 text-center">
-            <p className="text-xl font-bold text-green-700 tabular-nums">{fmtCurrency(pipelineAnalytics.wonValueTotal ?? 0)}</p>
-            <p className="text-xs text-muted-foreground">Won ({pipelineAnalytics.wonDeals ?? 0})</p>
-          </CardContent></Card>
-          <Card className="py-3"><CardContent className="px-4 py-0 text-center">
-            <p className="text-xl font-bold text-red-700 tabular-nums">{fmtCurrency(pipelineAnalytics.lostValueTotal ?? 0)}</p>
-            <p className="text-xs text-muted-foreground">Lost ({pipelineAnalytics.lostDeals ?? 0})</p>
-          </CardContent></Card>
-          <Card className="py-3"><CardContent className="px-4 py-0 text-center">
-            <p className="text-xl font-bold">{pipelineAnalytics.conversionRate ?? 0}%</p>
-            <p className="text-xs text-muted-foreground">Conv. Rate</p>
-          </CardContent></Card>
-        </div>
-      )}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard
+          variant="white" color="green" icon={DollarSign}
+          label="Open pipeline value"
+          value={fmtCurrency(pipelineAnalytics?.openValueTotal ?? sumValue(openDeals))}
+          hint={`${openDeals.length} open deal${openDeals.length === 1 ? "" : "s"}`}
+          loading={dealsLoading}
+        />
+        <KpiCard
+          variant="white" color="blue" icon={Gauge}
+          label="Weighted forecast"
+          value={fmtCurrency(weightedForecast)}
+          hint="Open value × stage odds"
+          loading={dealsLoading}
+        />
+        <KpiCard
+          variant="white" color="navy" icon={Trophy}
+          label="Won deals"
+          value={pipelineAnalytics?.wonDeals ?? wonDeals.length}
+          hint={`${fmtCurrency(pipelineAnalytics?.wonValueTotal ?? sumValue(wonDeals))} enrolled`}
+          loading={dealsLoading}
+        />
+        <KpiCard
+          variant="white" color="orange" icon={Percent}
+          label="Conversion rate"
+          value={`${pipelineAnalytics?.conversionRate ?? 0}%`}
+          hint={`Won out of ${pipelineAnalytics?.totalDeals ?? deals.length} deals`}
+          loading={dealsLoading}
+        />
+      </div>
 
-      {dealsLoading ? <Skeleton className="h-64 w-full rounded-xl" /> : (
+      {dealsLoading ? <Skeleton className="h-72 w-full rounded-xl" /> : (
         <ScrollArea className="w-full">
-          <div className="flex gap-4 pb-4 min-w-max">
-            {stages.map((stage) => {
-              const stageDeals = deals.filter((rowRaw) => {
-                const row = rowRaw as Record<string, unknown>;
-                const deal = row.deal as Record<string, unknown> | undefined;
-                // Only count open deals in stage columns — won/lost get their
-                // own pipeline-level totals shown in the stat cards above.
-                return deal?.stageId === stage.id && deal?.status === "open";
-              });
-              // Real-time per-stage value rolls up from the deals list, so the
-              // total updates immediately on stage moves / won/lost without
-              // waiting for the analytics refetch.
-              const stageValueTotal = stageDeals.reduce((sum, rowRaw) => {
-                const deal = (rowRaw as Record<string, unknown>).deal as
-                  | Record<string, unknown>
-                  | undefined;
-                return sum + (Number(deal?.valueEst ?? 0) || 0);
-              }, 0);
+          <div className="flex gap-3 pb-4 min-w-max">
+            {columns.map((col) => {
+              const isFinish = col.key === finishStageId || col.key === "__won";
+              const count = col.open.length + col.won.length;
+              const value = sumValue(col.open) + sumValue(col.won);
               return (
-                <div key={stage.id} className="w-72 flex-shrink-0">
-                  <div className="flex items-center gap-2 mb-2 px-1">
-                    <div className="h-2.5 w-2.5 rounded-full" style={{ background: stage.color }} />
-                    <span className="font-medium text-sm">{stage.name}</span>
-                    <Badge variant="secondary" className="ml-auto text-xs">{stageDeals.length}</Badge>
+                <div key={col.key} className="w-64 flex-shrink-0 rounded-xl bg-muted/50 p-2.5">
+                  <div className="flex items-center gap-2 px-1">
+                    <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: col.color }} />
+                    <span className="font-display font-semibold text-sm truncate">{col.name}</span>
+                    <span className="ml-auto rounded-md bg-card px-1.5 py-0.5 text-xs font-medium text-muted-foreground border border-border">{count}</span>
                   </div>
-                  <div className="px-1 mb-2 text-[11px] text-muted-foreground tabular-nums">
-                    {stageValueTotal > 0 ? fmtCurrency(stageValueTotal) : "—"}
-                  </div>
-                  <div className="space-y-2 bg-muted/30 rounded-xl p-2 min-h-[120px]">
-                    {stageDeals.map((rowRaw) => {
-                      const row = rowRaw as Record<string, unknown>;
-                      const deal = row.deal as Record<string, unknown> | undefined;
-                      if (!deal) return null;
-                      return (
-                        <div key={String(deal.id)} className="bg-card rounded-lg border p-3 shadow-sm hover:shadow-md transition-shadow">
-                          <p className="font-medium text-sm leading-tight truncate">{String(deal.title)}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">{String(row.contactFirstName ?? "")} {String(row.contactLastName ?? "")}</p>
-                          <div className="flex items-center gap-2 mt-2">
-                            {deal.valueEst != null && <span className="text-xs font-medium text-green-700 bg-green-50 px-1.5 py-0.5 rounded"><DollarSign className="h-2.5 w-2.5 inline mr-0.5" />{Number(deal.valueEst).toLocaleString()}</span>}
-                            <Select value={String(deal.stageId)} onValueChange={(v) => moveStage(String(deal.id), v)}>
-                              <SelectTrigger className="h-6 w-28 text-xs ml-auto"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                {stages.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="flex gap-1.5 mt-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-6 px-2 text-[11px] flex-1 text-green-700 border-green-200 hover:bg-green-50"
-                              onClick={() => closeDeal(String(deal.id), "won")}
-                            >
-                              Won
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-6 px-2 text-[11px] flex-1 text-red-700 border-red-200 hover:bg-red-50"
-                              onClick={() => {
-                                const reason = window.prompt("Reason for losing this deal? (optional)") ?? undefined;
-                                void closeDeal(String(deal.id), "lost", reason);
-                              }}
-                            >
-                              Lost
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {stageDeals.length === 0 && <p className="text-xs text-muted-foreground text-center py-4">No deals</p>}
+                  <p className="px-1 mt-1 mb-2.5 text-xs text-muted-foreground tabular-nums">
+                    {value > 0 ? fmtCurrency(value) : "No value yet"}
+                  </p>
+                  <div className="space-y-2 min-h-[96px]">
+                    {col.open.map((r) => renderOpenCard(r, col.key === finishStageId))}
+                    {col.won.map(renderWonCard)}
+                    {count === 0 && (
+                      <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
+                        {isFinish ? "Won deals show up here" : "No deals at this stage"}
+                      </p>
+                    )}
                   </div>
                 </div>
               );
             })}
           </div>
+          <ScrollBar orientation="horizontal" />
         </ScrollArea>
       )}
+
+      <p className="flex items-start gap-2 text-xs text-muted-foreground -mt-2">
+        <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+        <span>
+          Use the <MoreHorizontal className="inline h-3.5 w-3.5" /> menu on a card to move it to another stage or close it.
+          {finishStageId
+            ? ` Won deals are listed under "${lastStage?.name}".`
+            : " Won deals are listed in the Won column."}
+          {" "}Lost deals move to the list below.
+        </span>
+      </p>
+
+      <SectionCard
+        title={`Lost deals (${lostDeals.length})`}
+        description={lostDeals.length > 0 ? `${fmtCurrency(sumValue(lostDeals))} in estimated value` : undefined}
+      >
+        {lostDeals.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No lost deals in this pipeline.</p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {lostDeals.map((r) => (
+              <li key={r.deal.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
+                <Link href={`/crm/contacts/${r.deal.contactId}`} className="font-medium text-sm hover:underline">{contactName(r)}</Link>
+                <span className="text-sm text-muted-foreground truncate">· {r.deal.title}</span>
+                <span className="ml-auto flex items-center gap-2">
+                  <StatusPill tone="danger">{r.deal.lostReason || "No reason given"}</StatusPill>
+                  {r.deal.lostAt && <span className="text-xs text-muted-foreground whitespace-nowrap">{format(new Date(r.deal.lostAt), "MMM d")}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </SectionCard>
+
+      {/* Mark-as-lost dialog (reason is optional) */}
+      <Dialog open={lostTarget !== null} onOpenChange={(o) => { if (!o) { setLostTarget(null); setLostReason(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Mark this deal as lost?</DialogTitle>
+            <DialogDescription>
+              {lostTarget ? `${contactName(lostTarget)} — ${lostTarget.deal.title}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5 py-1">
+            <Label htmlFor="lost-reason">Reason (optional)</Label>
+            <Textarea
+              id="lost-reason"
+              placeholder="e.g. Went with another agent, kept current plan…"
+              value={lostReason}
+              onChange={(e) => setLostReason(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setLostTarget(null); setLostReason(""); }}>Cancel</Button>
+            <Button variant="destructive" onClick={() => void confirmLost()}>Mark as lost</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Deal Dialog */}
       <Dialog open={addDealOpen} onOpenChange={onDealOpenChange}>
