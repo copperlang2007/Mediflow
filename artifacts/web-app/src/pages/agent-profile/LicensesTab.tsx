@@ -32,6 +32,7 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { LICENSE_STATUS_STYLES } from "./shared";
+import { EmptyState, StatusPill } from "@/components/shared";
 
 export default function LicensesTab({ agentId }: { agentId: string }) {
   const qc = useQueryClient();
@@ -83,10 +84,7 @@ export default function LicensesTab({ agentId }: { agentId: string }) {
       </div>
 
       {(licenses ?? []).length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <FileText className="h-10 w-10 mx-auto mb-2 opacity-20" />
-          <p className="text-sm">No licenses recorded</p>
-        </div>
+        <EmptyState compact icon={FileText} title="No licenses yet" description="Add the state licenses this agent holds so you can see where they can sell and when each one expires." />
       ) : (
         <div className="space-y-2">
           {(licenses ?? []).map((lic) => (
@@ -110,9 +108,7 @@ export default function LicensesTab({ agentId }: { agentId: string }) {
                   );
                 })()}
               </div>
-              <Badge variant="secondary" className={`text-xs capitalize ${LICENSE_STATUS_STYLES[lic.status] ?? ""}`}>
-                {lic.status.replace("_", " ")}
-              </Badge>
+              <StatusPill status={lic.status} tone={lic.status === "not_appointed" ? "neutral" : undefined} />
               {lic.documentKey && (
                 <Button
                   size="sm"

@@ -2,6 +2,7 @@ import { useGetAgentDocuments } from "@workspace/api-client-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileText, FolderOpen } from "lucide-react";
 import { format } from "date-fns";
+import { EmptyState } from "@/components/shared";
 
 export default function DocumentsTab({ agentId }: { agentId: string }) {
   const { data: docs, isLoading } = useGetAgentDocuments(agentId);
@@ -12,10 +13,7 @@ export default function DocumentsTab({ agentId }: { agentId: string }) {
     <div className="p-6 space-y-4">
       <p className="text-sm text-muted-foreground">{docs?.length ?? 0} document{docs?.length !== 1 ? "s" : ""}</p>
       {(docs ?? []).length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <FolderOpen className="h-10 w-10 mx-auto mb-2 opacity-20" />
-          <p className="text-sm">No documents</p>
-        </div>
+        <EmptyState compact icon={FolderOpen} title="No documents yet" description="Contracts, licenses and other files for this agent will appear here." />
       ) : (
         <div className="space-y-2">
           {(docs ?? []).map((doc) => (
