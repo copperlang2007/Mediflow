@@ -89,6 +89,10 @@ function FullApplicationDialog({ applicationId, onClose }: { applicationId: stri
     staleTime: 0,
     gcTime: 0,
     retry: false,
+    // Each fetch is an audited PHI view: only an explicit open or version
+    // change fetches, never a window refocus or reconnect.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   return (

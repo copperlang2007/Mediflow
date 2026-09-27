@@ -92,6 +92,22 @@ export async function upsertPolicyEnrollment(
       await tx.update(enrollmentsTable).set({ carrierId }).where(eq(enrollmentsTable.id, carrierless.id));
     }
   }
+  // The slot may already hold a DIFFERENT policy's enrollment (e.g. a plan
+  // switch within the same carrier). That policy's in-force coverage is not
+  // undone by another policy that was cancelled or declined.
+  const [ownedByOther] = p.policyId ? await tx.select({ id: enrollmentApplicationsTable.id })
+    .from(enrollmentsTable)
+    .innerJoin(enrollmentApplicationsTable, eq(enrollmentApplicationsTable.enrollmentId, enrollmentsTable.id))
+    .where(and(
+      eq(enrollmentsTable.contactId, contactId),
+      eq(enrollmentsTable.planYear, planYear),
+      eq(enrollmentsTable.planType, p.planType),
+      carrierId ? eq(enrollmentsTable.carrierId, carrierId) : isNull(enrollmentsTable.carrierId),
+      eq(enrollmentsTable.effectuated, true),
+      ne(enrollmentApplicationsTable.externalPolicyId, p.policyId),
+    )).limit(1) : [];
+  const keepStatus = !!ownedByOther && !effectuated;
+
   const [row] = await tx.insert(enrollmentsTable).values({
     id: randomUUID(),
     orgId,
@@ -113,8 +129,8 @@ export async function upsertPolicyEnrollment(
     // EnrollHere is the source of truth for status on its own policies; plan
     // details only fill blanks so a manual correction isn't overwritten.
     set: {
-      status,
-      effectuated,
+      status: keepStatus ? sql`${enrollmentsTable.status}` : status,
+      effectuated: keepStatus ? sql`${enrollmentsTable.effectuated}` : effectuated,
       planId: sql`coalesce(${enrollmentsTable.planId}, excluded.plan_id)`,
       planName: sql`coalesce(${enrollmentsTable.planName}, excluded.plan_name)`,
       policyNumber: sql`coalesce(${enrollmentsTable.policyNumber}, excluded.policy_number)`,

@@ -322,6 +322,25 @@ describe("EnrollHere policy events", () => {
     expect(after.find((e) => e.id === res.body.enrollmentId)).toMatchObject({ planYear: 2027, effectiveDate: "2027-01-01" });
   });
 
+  it("a second policy in the same slot doesn't cancel the first one's in-force coverage", async () => {
+    const first = sample();
+    first.policy.id = "policy-slot-a";
+    first.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF10000001"];
+    delete first.policy.identifiers.bySource.sunfire;
+    Object.assign(first.policy.enrollment.consumer, { firstName: "Jordan", email: "jordan@example.com", phone: "+15553330000" });
+    first.policy.lead = undefined;
+    const a = await post(first);
+    expect(a.status).toBe(200);
+    const second = JSON.parse(JSON.stringify(first));
+    second.policy.id = "policy-slot-b";
+    second.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF10000002"];
+    second.policy.manualStatus = "POL_CANCELLED";
+    const b = await post(second);
+    expect(b.body.enrollmentId).toBe(a.body.enrollmentId);
+    const [e] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.id, a.body.enrollmentId));
+    expect(e).toMatchObject({ status: "active", effectuated: true });
+  });
+
   it("a deleted contact's application can't be opened, and a purge removes it", async () => {
     await tdb.update(contactsTable).set({ deletedAt: new Date() }).where(eq(contactsTable.id, contactId));
     const res = await request(app).get(`/api/applications/${applicationId}/full`).set(withAuth(admin.id));
