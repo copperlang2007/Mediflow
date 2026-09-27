@@ -56,6 +56,11 @@ const BillingPage = lazy(() => import("@/pages/billing"));
 const TeamPage = lazy(() => import("@/pages/team"));
 const AcceptInvitePage = lazy(() => import("@/pages/accept-invite"));
 const CreateOrganizationPage = lazy(() => import("@/pages/create-organization"));
+// --- stage2/portal-dialer ---
+const ClientPortalPage = lazy(() => import("@/pages/ClientPortalPage"));
+const DialerPage = lazy(() => import("@/pages/DialerPage"));
+const SupervisorPage = lazy(() => import("@/pages/SupervisorPage"));
+const QuotingPage = lazy(() => import("@/pages/QuotingPage"));
 
 // Dev console pages are only imported when the build-time flag is set, so
 // production bundles never include this code.
@@ -493,6 +498,19 @@ function ClerkProviderWithRoutes() {
               </Route>
               <Route path="/clawbacks">
                 <ProtectedLayout><ClawbacksPage /></ProtectedLayout>
+              </Route>
+              {/* --- stage2/portal-dialer --- */}
+              <Route path="/client-portal">
+                <ProtectedLayout><ClientPortalPage /></ProtectedLayout>
+              </Route>
+              <Route path="/dialer">
+                <ProtectedLayout><DialerPage /></ProtectedLayout>
+              </Route>
+              <Route path="/supervisor">
+                <ProtectedLayout><SupervisorPage /></ProtectedLayout>
+              </Route>
+              <Route path="/quoting">
+                <ProtectedLayout><QuotingPage /></ProtectedLayout>
               </Route>
               <Route path="/settings">
                 <ProtectedLayout><SettingsPage /></ProtectedLayout>

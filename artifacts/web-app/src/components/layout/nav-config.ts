@@ -110,8 +110,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/tasks", label: "Tasks", icon: CheckSquare, roles: ALL_ROLES, badge: "overdueTasks" },
       { href: "/onboarding", label: "My Onboarding", icon: ClipboardCheck, roles: ["agent"] },
       { href: "/calendar", label: "Calendar", icon: CalendarDays, roles: ALL_ROLES, upcoming: true },
-      { href: "/dialer", label: "Softphone", icon: Phone, roles: BACK_OFFICE, upcoming: true },
-      { href: "/supervisor", label: "Supervisor", icon: Headphones, roles: ADMINS, upcoming: true },
+      { href: "/dialer", label: "Softphone", icon: Phone, roles: BACK_OFFICE },
+      { href: "/supervisor", label: "Supervisor", icon: Headphones, roles: ADMINS },
     ],
   },
   {
@@ -122,7 +122,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/readiness", label: "Ready to Sell", icon: Target, roles: ADMIN_COMPLIANCE },
       { href: "/aep", label: "AEP Center", icon: CalendarClock, roles: ADMIN_COMPLIANCE },
       { href: "/automations", label: "Automations", icon: Zap, roles: ADMINS },
-      { href: "/quoting", label: "Quoting Engine", icon: Search, roles: BACK_OFFICE, upcoming: true },
+      { href: "/quoting", label: "Quoting Engine", icon: Search, roles: BACK_OFFICE },
       { href: "/workflows", label: "Workflow Automation", icon: Workflow, roles: ADMINS, upcoming: true },
       { href: "/campaigns", label: "Omnichannel Campaigns", icon: Mail, roles: ADMINS, upcoming: true },
     ],
@@ -132,7 +132,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/churn", label: "Retention & Churn Risk", icon: TrendingDown, roles: ADMIN_COMPLIANCE },
       { href: "/documents", label: "Documents", icon: FolderOpen, roles: ALL_ROLES },
-      { href: "/client-portal", label: "Client Portal", icon: Globe, roles: ADMINS, upcoming: true },
+      { href: "/client-portal", label: "Client Portal", icon: Globe, roles: ADMINS },
       { href: "/knowledge-base", label: "Knowledge Base", icon: BookOpen, roles: ALL_ROLES, upcoming: true },
     ],
   },
