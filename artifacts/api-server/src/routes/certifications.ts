@@ -13,7 +13,7 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
-import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 
 const router: IRouter = Router();
 
@@ -36,7 +36,7 @@ const UpdateCertSchema = z.object({
 });
 
 router.use(
-  auditMiddleware("certification", undefined, {
+  routerAuditMiddleware(router, "certification", undefined, {
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.cid ?? req.params.id;

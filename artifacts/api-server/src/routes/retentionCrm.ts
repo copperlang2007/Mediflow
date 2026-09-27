@@ -38,16 +38,16 @@ router.get(
           sql`${contactsTable.dob} IS NOT NULL`,
           sql`(
             CASE
-              WHEN EXTRACT(DOY FROM (NOW() + INTERVAL '1 day' * ${days})) >= EXTRACT(DOY FROM NOW())
+              WHEN EXTRACT(DOY FROM (NOW() + INTERVAL '1 day' * ${days}::int)) >= EXTRACT(DOY FROM NOW())
               THEN
                 EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day')
-                BETWEEN EXTRACT(DOY FROM NOW()) AND EXTRACT(DOY FROM (NOW() + INTERVAL '1 day' * ${days}))
+                BETWEEN EXTRACT(DOY FROM NOW()) AND EXTRACT(DOY FROM (NOW() + INTERVAL '1 day' * ${days}::int))
               ELSE
                 EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day')
                 >= EXTRACT(DOY FROM NOW())
                 OR
                 EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day')
-                <= EXTRACT(DOY FROM (NOW() + INTERVAL '1 day' * ${days}))
+                <= EXTRACT(DOY FROM (NOW() + INTERVAL '1 day' * ${days}::int))
             END
           )`,
         ),
@@ -221,8 +221,8 @@ router.get(
     const cutoff60 = new Date(now.getTime() - 60 * 86400000);
 
     const [birthdayCount, atRiskCount, openFlagsCount] = await Promise.all([
-      db.select({ count: sql<number>`count(*)` }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), sql`${contactsTable.dob} IS NOT NULL`, sql`(CASE WHEN EXTRACT(DOY FROM ${in30}) >= EXTRACT(DOY FROM NOW()) THEN EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day') BETWEEN EXTRACT(DOY FROM NOW()) AND EXTRACT(DOY FROM ${in30}) ELSE EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day') >= EXTRACT(DOY FROM NOW()) OR EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day') <= EXTRACT(DOY FROM ${in30}) END)`)),
-      db.select({ count: sql<number>`count(*)` }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), sql`${contactsTable.status} IN ('enrolled', 'retained')`, sql`NOT EXISTS (SELECT 1 FROM activities a WHERE a.contact_id = ${contactsTable.id} AND a.created_at >= ${cutoff60})`)),
+      db.select({ count: sql<number>`count(*)` }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), sql`${contactsTable.dob} IS NOT NULL`, sql`(CASE WHEN EXTRACT(DOY FROM ${in30}::timestamptz) >= EXTRACT(DOY FROM NOW()) THEN EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day') BETWEEN EXTRACT(DOY FROM NOW()) AND EXTRACT(DOY FROM ${in30}::timestamptz) ELSE EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day') >= EXTRACT(DOY FROM NOW()) OR EXTRACT(DOY FROM DATE_TRUNC('year', NOW()) + (EXTRACT(MONTH FROM ${contactsTable.dob}) - 1) * INTERVAL '1 month' + (EXTRACT(DAY FROM ${contactsTable.dob}) - 1) * INTERVAL '1 day') <= EXTRACT(DOY FROM ${in30}::timestamptz) END)`)),
+      db.select({ count: sql<number>`count(*)` }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), sql`${contactsTable.status} IN ('enrolled', 'retained')`, sql`NOT EXISTS (SELECT 1 FROM activities a WHERE a.contact_id = ${contactsTable.id} AND a.created_at >= ${cutoff60}::timestamptz)`)),
       db.select({ count: sql<number>`count(*)` }).from(retentionFlagsTable).where(and(eq(retentionFlagsTable.orgId, authReq.orgId), isNull(retentionFlagsTable.resolvedAt))),
     ]);
 
