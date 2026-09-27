@@ -13,7 +13,8 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
-import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
+import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
+
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import { logger } from "../lib/logger";
@@ -23,13 +24,14 @@ import { serializeContact } from "../lib/serializeContact";
 const router: IRouter = Router();
 
 router.use(
-  scopeToRouter(router, auditMiddleware("lead", undefined, {
+  routerAuditMiddleware(router, "lead", undefined, {
+
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.id;
       return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
     },
-  })),
+  }),
 );
 
 const CreateLeadSchema = z.object({

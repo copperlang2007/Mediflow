@@ -15,7 +15,8 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
-import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
+import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
+
 
 const router: IRouter = Router();
 
@@ -112,13 +113,14 @@ export async function createChecklistRun(
 }
 
 router.use(
-  scopeToRouter(router, auditMiddleware("task_instance", undefined, {
+  routerAuditMiddleware(router, "task_instance", undefined, {
+
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.runId ?? req.params.id;
       return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
     },
-  })),
+  }),
 );
 
 router.get(

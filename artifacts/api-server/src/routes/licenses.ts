@@ -8,7 +8,8 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
-import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
+import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
+
 import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const router: IRouter = Router({ mergeParams: true });
@@ -34,13 +35,14 @@ const UpdateLicenseSchema = z.object({
 });
 
 router.use(
-  scopeToRouter(router, auditMiddleware("agent", undefined, {
+  routerAuditMiddleware(router, "agent", undefined, {
+
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.lid ?? req.params.id;
       return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
     },
-  })),
+  }),
 );
 
 async function getAgentOrFail(

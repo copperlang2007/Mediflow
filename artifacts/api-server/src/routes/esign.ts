@@ -8,7 +8,7 @@
  *   GET    /esign/envelopes/:envelopeId/signed-pdf  — stream the signed PDF
  *
  * All routes are org-scoped via `requireAuth` + the `orgId` on the
- * authenticated request. Audit-log via `auditMiddleware("esign", ...)`.
+ * authenticated request. Audit-log via `routerAuditMiddleware(router, "esign", ...)`.
  *
  * Sign-route permission narrowing:
  *   - The caller MUST either be the signer-userId on the envelope OR
@@ -28,7 +28,8 @@ import {
   requireAuth,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
-import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
+import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
+
 import {
   EnvelopeNotFoundError,
   EnvelopeStateError,
@@ -42,13 +43,14 @@ import { getEsignProvider } from "../lib/esign/factory";
 const router: IRouter = Router();
 
 router.use(
-  scopeToRouter(router, auditMiddleware("esign", undefined, {
+  routerAuditMiddleware(router, "esign", undefined, {
+
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.envelopeId;
       return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
     },
-  })),
+  }),
 );
 
 // ---- Zod schemas -----------------------------------------------------------

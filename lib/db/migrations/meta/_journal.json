@@ -349,6 +349,13 @@
       "idx": 49,
       "version": "7",
       "when": 1790900000000,
+      "tag": "0049_renewal_snoozes",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1790950000000,
       "tag": "0049_schema_drift_renewals",
       "breakpoints": true
     }
