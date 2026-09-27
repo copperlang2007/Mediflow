@@ -341,6 +341,32 @@ describe("EnrollHere policy events", () => {
     expect(e).toMatchObject({ status: "active", effectuated: true });
   });
 
+  it("folds a code-less record into the one already holding its Sunfire code", async () => {
+    const base = sample();
+    Object.assign(base.policy.enrollment.consumer, { firstName: "Taylor", email: "taylor@example.com", phone: "+15554440000" });
+    base.policy.lead = undefined;
+    delete base.policy.identifiers.bySource.sunfire;
+    const coded = JSON.parse(JSON.stringify(base));
+    coded.policy.id = "policy-old-id";
+    coded.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF20000001"];
+    const codedRes = await post(coded);
+    const codeless = JSON.parse(JSON.stringify(base));
+    codeless.policy.id = "policy-new-id";
+    delete codeless.policy.enrollment.identifiers.bySource.sunfire;
+    await post(codeless);
+    const late = JSON.parse(JSON.stringify(base));
+    late.event = "PE_POLICY_UPDATED";
+    late.policy.id = "policy-new-id";
+    late.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF20000001"];
+    const res = await post(late);
+    expect(res.body).toMatchObject({ applicationId: codedRes.body.applicationId, applicationVersion: 3 });
+    expect(await tdb.select().from(enrollmentApplicationsTable)
+      .where(eq(enrollmentApplicationsTable.applicationKey, "policy:policy-new-id"))).toHaveLength(0);
+    const versions = await tdb.select().from(enrollmentApplicationVersionsTable)
+      .where(eq(enrollmentApplicationVersionsTable.applicationId, codedRes.body.applicationId));
+    expect(versions.map((v) => v.version).sort()).toEqual([1, 2, 3]);
+  });
+
   it("a deleted contact's application can't be opened, and a purge removes it", async () => {
     await tdb.update(contactsTable).set({ deletedAt: new Date() }).where(eq(contactsTable.id, contactId));
     const res = await request(app).get(`/api/applications/${applicationId}/full`).set(withAuth(admin.id));

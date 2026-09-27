@@ -12,7 +12,7 @@
  *     race/ethnicity exist only inside the encrypted payload.
  */
 import { randomUUID } from "crypto";
-import { and, eq, isNull, max, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, max, ne, sql } from "drizzle-orm";
 import {
   enrollmentsTable,
   enrollmentApplicationsTable,
@@ -191,15 +191,44 @@ export async function storeApplication(
   }
 
   // The policy was first stored without a Sunfire code: re-key that record so
-  // its history continues on one application instead of splitting in two.
+  // its history continues on one application instead of splitting in two. If
+  // a record already holds the code (the same Sunfire application reached us
+  // under another EnrollHere policy id), fold the code-less history into it.
   if (p.confirmationCode && p.policyId) {
-    await tx.execute(sql`
-      UPDATE enrollment_applications SET application_key = ${p.confirmationCode}
-      WHERE org_id = ${orgId} AND source = ${APPLICATION_SOURCE} AND application_key = ${`policy:${p.policyId}`}
-        AND NOT EXISTS (
-          SELECT 1 FROM enrollment_applications
-          WHERE org_id = ${orgId} AND source = ${APPLICATION_SOURCE} AND application_key = ${p.confirmationCode})`);
+    const fallbackKey = `policy:${p.policyId}`;
+    const rows = await tx.select({ id: enrollmentApplicationsTable.id, key: enrollmentApplicationsTable.applicationKey })
+      .from(enrollmentApplicationsTable)
+      .where(and(
+        eq(enrollmentApplicationsTable.orgId, orgId),
+        eq(enrollmentApplicationsTable.source, APPLICATION_SOURCE),
+        inArray(enrollmentApplicationsTable.applicationKey, [fallbackKey, p.confirmationCode]),
+      ));
+    const codeless = rows.find((r) => r.key === fallbackKey);
+    const coded = rows.find((r) => r.key === p.confirmationCode);
+    if (codeless && !coded) {
+      await tx.update(enrollmentApplicationsTable).set({ applicationKey: p.confirmationCode })
+        .where(eq(enrollmentApplicationsTable.id, codeless.id));
+    } else if (codeless && coded) {
+      const v = enrollmentApplicationVersionsTable;
+      // Payloads the coded record already has are dropped; the rest are
+      // appended after its latest version, keeping their order.
+      await tx.execute(sql`
+        DELETE FROM enrollment_application_versions d
+        WHERE d.application_id = ${codeless.id}
+          AND EXISTS (SELECT 1 FROM enrollment_application_versions k
+                      WHERE k.application_id = ${coded.id} AND k.payload_hmac = d.payload_hmac)`);
+      const [{ top } = { top: null }] = await tx.select({ top: max(v.version) }).from(v).where(eq(v.applicationId, coded.id));
+      await tx.execute(sql`
+        UPDATE enrollment_application_versions u SET application_id = ${coded.id}, version = r.n + ${top ?? 0}
+        FROM (SELECT id, row_number() OVER (ORDER BY version) AS n
+              FROM enrollment_application_versions WHERE application_id = ${codeless.id}) r
+        WHERE u.id = r.id`);
+      await tx.delete(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, codeless.id));
+      const [{ newTop } = { newTop: null }] = await tx.select({ newTop: max(v.version) }).from(v).where(eq(v.applicationId, coded.id));
+      if (newTop) await tx.update(enrollmentApplicationsTable).set({ currentVersion: newTop }).where(eq(enrollmentApplicationsTable.id, coded.id));
+    }
   }
+
 
   const mbi = p.medicareNumber ? encryptMedicareId(p.medicareNumber) : null;
   const medicaid = p.medicaidNumber ? encryptPii(p.medicaidNumber).encrypted : null;
