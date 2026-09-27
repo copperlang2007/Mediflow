@@ -185,4 +185,33 @@ describe("EnrollHere policy events", () => {
     const [a] = await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, res.body.applicationId));
     expect(a).toMatchObject({ applicationKey: "policy:policy-no-sunfire", confirmationCode: null });
   });
+
+  it("an update without a Medicare number clears it; older versions still show their own", async () => {
+    const noMbi = sample();
+    noMbi.event = "PE_POLICY_UPDATED";
+    noMbi.policy.manualStatus = "POL_CANCELLED";
+    noMbi.policy.enrollment.consumer.medicare = {};
+    noMbi.policy.enrollment.medicareInfo.number = "";
+    const res = await post(noMbi);
+    expect(res.body).toMatchObject({ applicationId, applicationVersion: 3 });
+    const [a] = await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, applicationId));
+    expect(a!.medicareIdEncrypted).toBeNull();
+    expect(a!.medicareIdHash).toBeNull();
+
+    const v3 = await request(app).get(`/api/applications/${applicationId}/full`).set(withAuth(admin.id));
+    expect(v3.body).toMatchObject({ version: 3, medicareId: null });
+    const v1 = await request(app).get(`/api/applications/${applicationId}/full?version=1`).set(withAuth(admin.id));
+    expect(v1.body).toMatchObject({ version: 1, medicareId: "1EG4TE5MK72" });
+  });
+
+  it("a deleted contact's application can't be opened, and a purge removes it", async () => {
+    await tdb.update(contactsTable).set({ deletedAt: new Date() }).where(eq(contactsTable.id, contactId));
+    const res = await request(app).get(`/api/applications/${applicationId}/full`).set(withAuth(admin.id));
+    expect(res.status).toBe(404);
+
+    await tdb.delete(activitiesTable).where(eq(activitiesTable.contactId, contactId));
+    await tdb.delete(contactsTable).where(eq(contactsTable.id, contactId));
+    expect(await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, applicationId))).toHaveLength(0);
+    expect(await tdb.select().from(enrollmentApplicationVersionsTable).where(eq(enrollmentApplicationVersionsTable.applicationId, applicationId))).toHaveLength(0);
+  });
 });

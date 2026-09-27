@@ -123,7 +123,8 @@ export const enrollmentApplicationsTable = pgTable(
     applicationKey: text("application_key").notNull(),
     confirmationCode: text("confirmation_code"),
     externalPolicyId: text("external_policy_id"),
-    contactId: text("contact_id").references(() => contactsTable.id, { onDelete: "set null" }),
+    /** Cascade: purging a contact purges their applications (PHI) with them. */
+    contactId: text("contact_id").references(() => contactsTable.id, { onDelete: "cascade" }),
     enrollmentId: text("enrollment_id").references(() => enrollmentsTable.id, { onDelete: "set null" }),
     currentVersion: integer("current_version").notNull().default(1),
     lastEventType: text("last_event_type"),

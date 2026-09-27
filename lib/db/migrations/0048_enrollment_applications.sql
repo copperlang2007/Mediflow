@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS enrollment_applications (
   application_key text NOT NULL,
   confirmation_code text,
   external_policy_id text,
-  contact_id text REFERENCES contacts(id) ON DELETE SET NULL,
+  -- Cascade: purging a contact purges their applications (PHI) with them.
+  contact_id text REFERENCES contacts(id) ON DELETE CASCADE,
   enrollment_id text REFERENCES enrollments(id) ON DELETE SET NULL,
   current_version integer NOT NULL DEFAULT 1,
   last_event_type text,

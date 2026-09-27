@@ -19,11 +19,11 @@ import {
   contactsTable,
   enrollmentApplicationsTable,
   enrollmentApplicationVersionsTable,
-  decryptMedicareId,
   decryptPii,
 } from "@workspace/db";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { PHI_PRIVILEGED_ROLES } from "../lib/permissions";
+import { isPolicyEvent, parsePolicyEvent } from "../lib/integrations/enrollhere/policyEvent";
 
 const router: IRouter = Router();
 
@@ -75,8 +75,16 @@ router.get(
       return;
     }
     const id = param(req.params.id);
-    const [app] = await db.select().from(enrollmentApplicationsTable)
+    // Only for a live contact in this org: a deleted contact's application is
+    // not viewable (hard deletes cascade the application away entirely).
+    const [found] = await db.select({ app: enrollmentApplicationsTable }).from(enrollmentApplicationsTable)
+      .innerJoin(contactsTable, and(
+        eq(contactsTable.id, enrollmentApplicationsTable.contactId),
+        eq(contactsTable.orgId, authReq.orgId),
+        isNull(contactsTable.deletedAt),
+      ))
       .where(and(eq(enrollmentApplicationsTable.id, id), eq(enrollmentApplicationsTable.orgId, authReq.orgId))).limit(1);
+    const app = found?.app;
     if (!app) { res.status(404).json({ error: "Application not found" }); return; }
 
     const requested = Number(req.query.version);
@@ -107,6 +115,11 @@ router.get(
       .where(eq(enrollmentApplicationVersionsTable.applicationId, id))
       .orderBy(desc(enrollmentApplicationVersionsTable.version));
 
+    // Identifiers come from the selected version's own payload, so an older
+    // version shows the numbers it was received with, not today's.
+    const payload = JSON.parse(decryptPii(row.payloadEncrypted)) as Record<string, unknown>;
+    const ids = isPolicyEvent(payload) ? parsePolicyEvent(payload) : null;
+
     res.set("Cache-Control", "no-store");
     res.json({
       application: {
@@ -121,9 +134,9 @@ router.get(
       eventType: row.eventType,
       receivedAt: row.receivedAt,
       versions,
-      medicareId: app.medicareIdEncrypted ? decryptMedicareId(app.medicareIdEncrypted) : null,
-      medicaidNumber: app.medicaidNumberEncrypted ? decryptPii(app.medicaidNumberEncrypted) : null,
-      payload: JSON.parse(decryptPii(row.payloadEncrypted)),
+      medicareId: ids?.medicareNumber ?? null,
+      medicaidNumber: ids?.medicaidNumber ?? null,
+      payload,
     });
   },
 );

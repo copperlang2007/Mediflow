@@ -115,8 +115,11 @@ export async function storeApplication(
     submittedAt: p.submittedAt,
     agentEmail: p.agentEmail,
     agentNpn: p.agentNpn,
-    ...(mbi ? { medicareIdEncrypted: mbi.encrypted, medicareIdHash: mbi.hash } : {}),
-    ...(medicaid ? { medicaidNumberEncrypted: medicaid } : {}),
+    // The latest payload is authoritative: an update without a number clears
+    // it rather than leaving a stale one readable.
+    medicareIdEncrypted: mbi?.encrypted ?? null,
+    medicareIdHash: mbi?.hash ?? null,
+    medicaidNumberEncrypted: medicaid,
   };
 
   const [app] = await tx.insert(enrollmentApplicationsTable).values({
