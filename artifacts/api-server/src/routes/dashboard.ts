@@ -13,13 +13,13 @@ import {
   usersTable,
 } from "@workspace/db";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "../middlewares/requireAuth";
-import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
 import { safeLimit } from "../lib/listGuards";
 
 const router: IRouter = Router();
 
 // Group-level audit: all dashboard reads are logged (HIPAA activity reporting).
-router.use(auditMiddleware("dashboard", undefined, { includeReads: true }));
+router.use(scopeToRouter(router, auditMiddleware("dashboard", undefined, { includeReads: true })));
 
 router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read"), async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthenticatedRequest;

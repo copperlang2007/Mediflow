@@ -28,7 +28,7 @@ import {
   requireAuth,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
-import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
 import {
   EnvelopeNotFoundError,
   EnvelopeStateError,
@@ -42,13 +42,13 @@ import { getEsignProvider } from "../lib/esign/factory";
 const router: IRouter = Router();
 
 router.use(
-  auditMiddleware("esign", undefined, {
+  scopeToRouter(router, auditMiddleware("esign", undefined, {
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.envelopeId;
       return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
     },
-  }),
+  })),
 );
 
 // ---- Zod schemas -----------------------------------------------------------

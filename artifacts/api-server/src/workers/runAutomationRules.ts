@@ -71,6 +71,21 @@ function relatedContactId(
 const digits = (v: string) => v.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
 
 /**
+ * Canonical mailbox for opt-out matching: case-insensitive, "+tag" dropped,
+ * and dots ignored for Gmail. Errs toward treating variants as the same
+ * person, so a hand-typed variant can't slip past an opt-out.
+ */
+function mailbox(v: string): string {
+  const e = v.trim().toLowerCase();
+  const at = e.lastIndexOf("@");
+  if (at < 1) return e;
+  const domain = e.slice(at + 1);
+  let local = e.slice(0, at).split("+")[0] ?? "";
+  if (domain === "gmail.com" || domain === "googlemail.com") local = local.replace(/\./g, "");
+  return `${local}@${domain === "googlemail.com" ? "gmail.com" : domain}`;
+}
+
+/**
  * True when `to` is the related contact's own address and that contact has
  * opted out of the channel. Sends to other recipients (e.g. an internal
  * "new lead" alert to the agency inbox) are not the contact's to block.
@@ -93,7 +108,7 @@ async function recipientOptedOut(
     .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId)));
   if (!c) return false;
   if (channel === "email") {
-    return c.optOutEmail && !!c.email && c.email.trim().toLowerCase() === to.trim().toLowerCase();
+    return c.optOutEmail && !!c.email && mailbox(c.email) === mailbox(to);
   }
   return c.optOutSms && !!c.phone && digits(c.phone) === digits(to);
 }

@@ -92,3 +92,35 @@ function extractIdParam(req: Request): string | null {
   if (Array.isArray(req.params.id)) return req.params.id[0] ?? null;
   return null;
 }
+
+type RouteLayer = {
+  route?: { methods: Record<string, boolean> };
+  match(path: string): boolean;
+};
+
+/**
+ * Limit a router-level audit middleware to requests that router actually
+ * handles. Routers are mounted at the API root, so a bare
+ * `router.use(auditMiddleware(...))` otherwise runs for every request that
+ * passes through on its way to a later router and logs it under the wrong
+ * resource.
+ */
+export function scopeToRouter(
+  router: { stack: unknown[] },
+  middleware: (req: Request, res: Response, next: NextFunction) => void,
+) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const method = req.method.toLowerCase();
+    const handled = (router.stack as RouteLayer[]).some((layer) => {
+      const methods = layer.route?.methods;
+      if (!methods) return false;
+      const allows = methods[method] || methods._all || (method === "head" && methods.get);
+      return !!allows && layer.match(req.path);
+    });
+    if (!handled) {
+      next();
+      return;
+    }
+    middleware(req, res, next);
+  };
+}

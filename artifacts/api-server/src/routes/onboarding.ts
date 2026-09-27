@@ -62,7 +62,7 @@ import {
   requireRole,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
-import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import { PHI_PRIVILEGED_ROLES, type Role } from "../lib/permissions";
 import {
@@ -87,13 +87,13 @@ const MASKED_EIN = "**-*******";
 const router: IRouter = Router();
 
 router.use(
-  auditMiddleware("agent_onboarding", undefined, {
+  scopeToRouter(router, auditMiddleware("agent_onboarding", undefined, {
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.agentId;
       return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
     },
-  }),
+  })),
 );
 
 // ---- Helpers ---------------------------------------------------------------

@@ -10,7 +10,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { generateAepRenewalTasks } from "../lib/aepRenewal/generate";
-import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import { logger } from "../lib/logger";
@@ -41,13 +41,13 @@ const UpdateTaskSchema = z.object({
 });
 
 router.use(
-  auditMiddleware("task_instance", undefined, {
+  scopeToRouter(router, auditMiddleware("task_instance", undefined, {
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.id;
       return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
     },
-  }),
+  })),
 );
 
 router.get(
