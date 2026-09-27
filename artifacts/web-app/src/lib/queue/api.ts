@@ -177,5 +177,6 @@ export function useCancelCallback() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: CALLBACKS_KEY });
     },
+    meta: { toastOnError: true },
   });
 }

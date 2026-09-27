@@ -154,6 +154,7 @@ export default function BillingPage() {
       else toast.error("Stripe did not return a checkout URL.");
     },
     onSettled: () => setPendingTier(null),
+    meta: { toastOnError: true },
   });
 
   const portal = useMutation({
@@ -162,6 +163,7 @@ export default function BillingPage() {
     onSuccess: ({ url }) => {
       if (url) window.location.href = url;
     },
+    meta: { toastOnError: true },
   });
 
   if (subLoading || plansLoading) {
