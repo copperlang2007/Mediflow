@@ -60,8 +60,12 @@ import type {
   ContactListResponse,
   ContactThreadListResponse,
   ConvertLead200,
+  CreateAgency201,
+  CreateAgencyBody,
   CreateAgentBody,
   CreateAhipBody,
+  CreateAppointment201,
+  CreateAppointmentBody,
   CreateAutomationRuleBody,
   CreateCarrierBody,
   CreateCertificationBody,
@@ -104,6 +108,7 @@ import type {
   GetAgentTasksParams,
   GetAgentsParams,
   GetAhipDashboardParams,
+  GetAppointment200,
   GetAuditLogParams,
   GetAutomationRuleLogsParams,
   GetAutomationRulesParams,
@@ -126,6 +131,7 @@ import type {
   GetLeadsReportParams,
   GetLoginHistoryParams,
   GetNotificationsParams,
+  GetOrgBranding200,
   GetPipelineReportParams,
   GetRenewalsParams,
   GetRetentionAepParams,
@@ -152,6 +158,12 @@ import type {
   LeadStats,
   LeadsReport,
   LicenseRenewalAlert,
+  ListAgenciesOverview200,
+  ListAppointmentAgentOptions200,
+  ListAppointmentContactOptions200,
+  ListAppointmentContactOptionsParams,
+  ListAppointments200,
+  ListAppointmentsParams,
   ListOnboardingsParams,
   LogActivityBody,
   MarkMessageRead200,
@@ -188,6 +200,7 @@ import type {
   RequestContractingResponse,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
+  ResetOrgBranding200,
   ResolveRenewal200,
   ResolveRetentionFlag200,
   RetentionReport,
@@ -224,6 +237,8 @@ import type {
   ThreadWithContact,
   UpdateAgentBody,
   UpdateAhipBody,
+  UpdateAppointment200,
+  UpdateAppointmentBody,
   UpdateAutomationRuleBody,
   UpdateCarrierBody,
   UpdateCertificationBody,
@@ -235,6 +250,8 @@ import type {
   UpdateEmailTemplateBody,
   UpdateLeadBody,
   UpdateLicenseBody,
+  UpdateOrgBranding200,
+  UpdateOrgBrandingBody,
   UpdateOrgSettingsBody,
   UpdateOrganizationBody,
   UpdatePipelineBody,
@@ -19715,4 +19732,1112 @@ export const usePostDialerV1Events = <
   TContext
 > => {
   return useMutation(getPostDialerV1EventsMutationOptions(options));
+};
+
+export const getListAppointmentsUrl = (params: ListAppointmentsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/appointments?${stringifiedParams}`
+    : `/api/appointments`;
+};
+
+/**
+ * @summary Appointments starting in [from, to) (max 100 days). Agents see only their own.
+ */
+export const listAppointments = async (
+  params: ListAppointmentsParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ListAppointments200> => {
+  return customFetch<ListAppointments200>(getListAppointmentsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListAppointmentsQueryKey = (
+  params?: ListAppointmentsParams,
+) => {
+  return [`/api/appointments`, ...(params ? [params] : [])] as const;
+};
+
+export const getListAppointmentsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAppointments>>,
+  TError = ErrorType<Error>,
+>(
+  params: ListAppointmentsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listAppointments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListAppointmentsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listAppointments>>
+  > = ({ signal }) => listAppointments(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAppointments>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAppointmentsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAppointments>>
+>;
+export type ListAppointmentsQueryError = ErrorType<Error>;
+
+/**
+ * @summary Appointments starting in [from, to) (max 100 days). Agents see only their own.
+ */
+
+export function useListAppointments<
+  TData = Awaited<ReturnType<typeof listAppointments>>,
+  TError = ErrorType<Error>,
+>(
+  params: ListAppointmentsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listAppointments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAppointmentsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getCreateAppointmentUrl = () => {
+  return `/api/appointments`;
+};
+
+/**
+ * @summary Book an appointment (notes are encrypted at rest)
+ */
+export const createAppointment = async (
+  createAppointmentBody: CreateAppointmentBody,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CreateAppointment201> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+  return customFetch<CreateAppointment201>(getCreateAppointmentUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(createAppointmentBody),
+  });
+};
+
+export const getCreateAppointmentMutationKey = () =>
+  ["createAppointment"] as const;
+
+export const getCreateAppointmentMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAppointment>>,
+    TError,
+    CreateAppointmentMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createAppointment>>,
+  TError,
+  CreateAppointmentMutationVariables,
+  TContext
+> => {
+  const mutationKey = getCreateAppointmentMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createAppointment>>,
+    CreateAppointmentMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createAppointment(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateAppointmentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createAppointment>>
+>;
+export type CreateAppointmentMutationBody = BodyType<CreateAppointmentBody>;
+export type CreateAppointmentMutationError = ErrorType<Error>;
+export type CreateAppointmentMutationVariables = {
+  data: BodyType<CreateAppointmentBody>;
+};
+
+/**
+ * @summary Book an appointment (notes are encrypted at rest)
+ */
+export const useCreateAppointment = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAppointment>>,
+    TError,
+    CreateAppointmentMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createAppointment>>,
+  TError,
+  CreateAppointmentMutationVariables,
+  TContext
+> => {
+  return useMutation(getCreateAppointmentMutationOptions(options));
+};
+
+export const getListAppointmentContactOptionsUrl = (
+  params?: ListAppointmentContactOptionsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/appointments/contact-options?${stringifiedParams}`
+    : `/api/appointments/contact-options`;
+};
+
+/**
+ * @summary Contact picker (names only). Agents get only contacts assigned to them.
+ */
+export const listAppointmentContactOptions = async (
+  params?: ListAppointmentContactOptionsParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ListAppointmentContactOptions200> => {
+  return customFetch<ListAppointmentContactOptions200>(
+    getListAppointmentContactOptionsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListAppointmentContactOptionsQueryKey = (
+  params?: ListAppointmentContactOptionsParams,
+) => {
+  return [
+    `/api/appointments/contact-options`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListAppointmentContactOptionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAppointmentContactOptions>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListAppointmentContactOptionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listAppointmentContactOptions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListAppointmentContactOptionsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listAppointmentContactOptions>>
+  > = ({ signal }) =>
+    listAppointmentContactOptions(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAppointmentContactOptions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAppointmentContactOptionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAppointmentContactOptions>>
+>;
+export type ListAppointmentContactOptionsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Contact picker (names only). Agents get only contacts assigned to them.
+ */
+
+export function useListAppointmentContactOptions<
+  TData = Awaited<ReturnType<typeof listAppointmentContactOptions>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListAppointmentContactOptionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listAppointmentContactOptions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAppointmentContactOptionsQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getListAppointmentAgentOptionsUrl = () => {
+  return `/api/appointments/agent-options`;
+};
+
+/**
+ * @summary Agent picker. Agents get only themselves.
+ */
+export const listAppointmentAgentOptions = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ListAppointmentAgentOptions200> => {
+  return customFetch<ListAppointmentAgentOptions200>(
+    getListAppointmentAgentOptionsUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListAppointmentAgentOptionsQueryKey = () => {
+  return [`/api/appointments/agent-options`] as const;
+};
+
+export const getListAppointmentAgentOptionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAppointmentAgentOptions>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAppointmentAgentOptions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListAppointmentAgentOptionsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listAppointmentAgentOptions>>
+  > = ({ signal }) =>
+    listAppointmentAgentOptions({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAppointmentAgentOptions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAppointmentAgentOptionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAppointmentAgentOptions>>
+>;
+export type ListAppointmentAgentOptionsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Agent picker. Agents get only themselves.
+ */
+
+export function useListAppointmentAgentOptions<
+  TData = Awaited<ReturnType<typeof listAppointmentAgentOptions>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAppointmentAgentOptions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAppointmentAgentOptionsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getGetAppointmentUrl = (id: string) => {
+  return `/api/appointments/${id}`;
+};
+
+/**
+ * @summary One appointment
+ */
+export const getAppointment = async (
+  id: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<GetAppointment200> => {
+  return customFetch<GetAppointment200>(getGetAppointmentUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAppointmentQueryKey = (id: string) => {
+  return [`/api/appointments/${id}`] as const;
+};
+
+export const getGetAppointmentQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAppointment>>,
+  TError = ErrorType<Error>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAppointment>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetAppointmentQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAppointment>>> = ({
+    signal,
+  }) => getAppointment(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: id !== null && id !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAppointment>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAppointmentQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAppointment>>
+>;
+export type GetAppointmentQueryError = ErrorType<Error>;
+
+/**
+ * @summary One appointment
+ */
+
+export function useGetAppointment<
+  TData = Awaited<ReturnType<typeof getAppointment>>,
+  TError = ErrorType<Error>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAppointment>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAppointmentQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getUpdateAppointmentUrl = (id: string) => {
+  return `/api/appointments/${id}`;
+};
+
+/**
+ * @summary Edit or reschedule (rescheduling clears the reminder claim)
+ */
+export const updateAppointment = async (
+  id: string,
+  updateAppointmentBody: UpdateAppointmentBody,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<UpdateAppointment200> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+  return customFetch<UpdateAppointment200>(getUpdateAppointmentUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(updateAppointmentBody),
+  });
+};
+
+export const getUpdateAppointmentMutationKey = () =>
+  ["updateAppointment"] as const;
+
+export const getUpdateAppointmentMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateAppointment>>,
+    TError,
+    UpdateAppointmentMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateAppointment>>,
+  TError,
+  UpdateAppointmentMutationVariables,
+  TContext
+> => {
+  const mutationKey = getUpdateAppointmentMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateAppointment>>,
+    UpdateAppointmentMutationVariables
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateAppointment(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateAppointmentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateAppointment>>
+>;
+export type UpdateAppointmentMutationBody = BodyType<UpdateAppointmentBody>;
+export type UpdateAppointmentMutationError = ErrorType<Error>;
+export type UpdateAppointmentMutationVariables = {
+  id: string;
+  data: BodyType<UpdateAppointmentBody>;
+};
+
+/**
+ * @summary Edit or reschedule (rescheduling clears the reminder claim)
+ */
+export const useUpdateAppointment = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateAppointment>>,
+    TError,
+    UpdateAppointmentMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateAppointment>>,
+  TError,
+  UpdateAppointmentMutationVariables,
+  TContext
+> => {
+  return useMutation(getUpdateAppointmentMutationOptions(options));
+};
+
+export const getDeleteAppointmentUrl = (id: string) => {
+  return `/api/appointments/${id}`;
+};
+
+/**
+ * @summary Delete an appointment
+ */
+export const deleteAppointment = async (
+  id: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getDeleteAppointmentUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteAppointmentMutationKey = () =>
+  ["deleteAppointment"] as const;
+
+export const getDeleteAppointmentMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteAppointment>>,
+    TError,
+    DeleteAppointmentMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteAppointment>>,
+  TError,
+  DeleteAppointmentMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDeleteAppointmentMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteAppointment>>,
+    DeleteAppointmentMutationVariables
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteAppointment(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteAppointmentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteAppointment>>
+>;
+
+export type DeleteAppointmentMutationError = ErrorType<Error>;
+export type DeleteAppointmentMutationVariables = { id: string };
+
+/**
+ * @summary Delete an appointment
+ */
+export const useDeleteAppointment = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteAppointment>>,
+    TError,
+    DeleteAppointmentMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteAppointment>>,
+  TError,
+  DeleteAppointmentMutationVariables,
+  TContext
+> => {
+  return useMutation(getDeleteAppointmentMutationOptions(options));
+};
+
+export const getGetOrgBrandingUrl = () => {
+  return `/api/organizations/me/branding`;
+};
+
+/**
+ * @summary This agency's white-label settings (null = agencyBRIDGE default). Any member.
+ */
+export const getOrgBranding = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<GetOrgBranding200> => {
+  return customFetch<GetOrgBranding200>(getGetOrgBrandingUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetOrgBrandingQueryKey = () => {
+  return [`/api/organizations/me/branding`] as const;
+};
+
+export const getGetOrgBrandingQueryOptions = <
+  TData = Awaited<ReturnType<typeof getOrgBranding>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getOrgBranding>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetOrgBrandingQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getOrgBranding>>> = ({
+    signal,
+  }) => getOrgBranding({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getOrgBranding>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetOrgBrandingQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getOrgBranding>>
+>;
+export type GetOrgBrandingQueryError = ErrorType<unknown>;
+
+/**
+ * @summary This agency's white-label settings (null = agencyBRIDGE default). Any member.
+ */
+
+export function useGetOrgBranding<
+  TData = Awaited<ReturnType<typeof getOrgBranding>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getOrgBranding>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetOrgBrandingQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getUpdateOrgBrandingUrl = () => {
+  return `/api/organizations/me/branding`;
+};
+
+/**
+ * @summary Update branding (agency_admin / super_admin). Rejects colours under 3:1 contrast on white.
+ */
+export const updateOrgBranding = async (
+  updateOrgBrandingBody: UpdateOrgBrandingBody,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<UpdateOrgBranding200> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+  return customFetch<UpdateOrgBranding200>(getUpdateOrgBrandingUrl(), {
+    ...options,
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(updateOrgBrandingBody),
+  });
+};
+
+export const getUpdateOrgBrandingMutationKey = () =>
+  ["updateOrgBranding"] as const;
+
+export const getUpdateOrgBrandingMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateOrgBranding>>,
+    TError,
+    UpdateOrgBrandingMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateOrgBranding>>,
+  TError,
+  UpdateOrgBrandingMutationVariables,
+  TContext
+> => {
+  const mutationKey = getUpdateOrgBrandingMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateOrgBranding>>,
+    UpdateOrgBrandingMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateOrgBranding(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateOrgBrandingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateOrgBranding>>
+>;
+export type UpdateOrgBrandingMutationBody = BodyType<UpdateOrgBrandingBody>;
+export type UpdateOrgBrandingMutationError = ErrorType<Error>;
+export type UpdateOrgBrandingMutationVariables = {
+  data: BodyType<UpdateOrgBrandingBody>;
+};
+
+/**
+ * @summary Update branding (agency_admin / super_admin). Rejects colours under 3:1 contrast on white.
+ */
+export const useUpdateOrgBranding = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateOrgBranding>>,
+    TError,
+    UpdateOrgBrandingMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateOrgBranding>>,
+  TError,
+  UpdateOrgBrandingMutationVariables,
+  TContext
+> => {
+  return useMutation(getUpdateOrgBrandingMutationOptions(options));
+};
+
+export const getResetOrgBrandingUrl = () => {
+  return `/api/organizations/me/branding`;
+};
+
+/**
+ * @summary Reset to the agencyBRIDGE defaults (also clears the logo)
+ */
+export const resetOrgBranding = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ResetOrgBranding200> => {
+  return customFetch<ResetOrgBranding200>(getResetOrgBrandingUrl(), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getResetOrgBrandingMutationKey = () =>
+  ["resetOrgBranding"] as const;
+
+export const getResetOrgBrandingMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resetOrgBranding>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resetOrgBranding>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = getResetOrgBrandingMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resetOrgBranding>>,
+    void
+  > = () => {
+    return resetOrgBranding(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResetOrgBrandingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof resetOrgBranding>>
+>;
+
+export type ResetOrgBrandingMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Reset to the agencyBRIDGE defaults (also clears the logo)
+ */
+export const useResetOrgBranding = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resetOrgBranding>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof resetOrgBranding>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getResetOrgBrandingMutationOptions(options));
+};
+
+export const getListAgenciesOverviewUrl = () => {
+  return `/api/admin/agencies/overview`;
+};
+
+/**
+ * @summary Every agency with live member, agent, client and pending-invitation counts (super_admin)
+ */
+export const listAgenciesOverview = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ListAgenciesOverview200> => {
+  return customFetch<ListAgenciesOverview200>(getListAgenciesOverviewUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListAgenciesOverviewQueryKey = () => {
+  return [`/api/admin/agencies/overview`] as const;
+};
+
+export const getListAgenciesOverviewQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAgenciesOverview>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAgenciesOverview>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListAgenciesOverviewQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listAgenciesOverview>>
+  > = ({ signal }) => listAgenciesOverview({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAgenciesOverview>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAgenciesOverviewQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAgenciesOverview>>
+>;
+export type ListAgenciesOverviewQueryError = ErrorType<Error>;
+
+/**
+ * @summary Every agency with live member, agent, client and pending-invitation counts (super_admin)
+ */
+
+export function useListAgenciesOverview<
+  TData = Awaited<ReturnType<typeof listAgenciesOverview>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAgenciesOverview>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAgenciesOverviewQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getCreateAgencyUrl = () => {
+  return `/api/admin/agencies`;
+};
+
+/**
+ * @summary Create an agency and invite its first admin via the invitation flow (super_admin)
+ */
+export const createAgency = async (
+  createAgencyBody: CreateAgencyBody,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CreateAgency201> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+  return customFetch<CreateAgency201>(getCreateAgencyUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(createAgencyBody),
+  });
+};
+
+export const getCreateAgencyMutationKey = () => ["createAgency"] as const;
+
+export const getCreateAgencyMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAgency>>,
+    TError,
+    CreateAgencyMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createAgency>>,
+  TError,
+  CreateAgencyMutationVariables,
+  TContext
+> => {
+  const mutationKey = getCreateAgencyMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createAgency>>,
+    CreateAgencyMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createAgency(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateAgencyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createAgency>>
+>;
+export type CreateAgencyMutationBody = BodyType<CreateAgencyBody>;
+export type CreateAgencyMutationError = ErrorType<Error>;
+export type CreateAgencyMutationVariables = {
+  data: BodyType<CreateAgencyBody>;
+};
+
+/**
+ * @summary Create an agency and invite its first admin via the invitation flow (super_admin)
+ */
+export const useCreateAgency = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAgency>>,
+    TError,
+    CreateAgencyMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createAgency>>,
+  TError,
+  CreateAgencyMutationVariables,
+  TContext
+> => {
+  return useMutation(getCreateAgencyMutationOptions(options));
 };
