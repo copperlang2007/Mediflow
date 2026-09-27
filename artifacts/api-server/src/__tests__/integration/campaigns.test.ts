@@ -422,7 +422,7 @@ describe("campaign unsubscribe (shared endpoint)", () => {
     const page = await request(app).get(path);
     expect(page.status).toBe(200);
     // The confirmation form keeps the campaign recipient id.
-    expect(page.text).toContain("&amp;r=");
+    expect(page.text).toContain(`&r=${encodeURIComponent(link.split("&r=")[1]!)}`);
 
     const res = await request(app).post(path).type("form").send("List-Unsubscribe=One-Click");
     expect(res.status).toBe(200);

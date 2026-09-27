@@ -19,7 +19,8 @@ import { and, eq } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db, messageThreadsTable, messagesTable } from "@workspace/db";
 import { logger } from "../logger";
-import { sendEmail, fromHeaderFor } from "../email";
+import { sendEmail } from "../email";
+import { fromHeaderFor } from "../emailFrom";
 import { sendSMS } from "../sms";
 import {
   evaluateConsumerEmail,

@@ -390,12 +390,3 @@ export function invitationEmailHtml(opts: {
 <a href="${href}" style="display:inline-block;background:#1d4ed8;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px">Accept Invitation</a>
 <p style="color:#94a3b8;font-size:12px;margin:20px 0 0">This invitation expires in ${days} days. If you weren't expecting it, you can safely ignore this email — nothing happens until you accept.</p>`);
 }
-
-/** `"Name <addr>"` using the configured sender address, or undefined for the default. */
-export function fromHeaderFor(fromName: string | undefined): string | undefined {
-  const clean = fromName?.replace(/[<>"\\\r\n]/g, "").trim();
-  if (!clean) return undefined;
-  const configured = process.env.EMAIL_FROM_ADDRESS ?? "noreply@mediflow.app";
-  const address = configured.match(/<([^>]+)>/)?.[1] ?? configured;
-  return `${clean} <${address}>`;
-}

@@ -2,8 +2,10 @@
  * Appointment reminder sweep + `create_appointment` automation action
  * (stage2/calendar-branding).
  *
- * Reminder pins: SMS respects the contact's opt-out, the STOP list and TCPA
- * calling hours (deferred, never sent at night); email respects its opt-out;
+ * Reminder pins: channels come from the shared consumer outreach gate — SMS
+ * respects the contact's opt-out, the STOP list, TCPA consent and texting
+ * hours (deferred, never sent at night); email respects its opt-out; jobs
+ * carry consumer context so the gate re-checks at send time;
  * the claim makes the sweep idempotent; content carries no notes.
  */
 import { vi, describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
@@ -71,6 +73,8 @@ async function contact(over: {
   stateCode?: string | null;
   optOutSms?: boolean;
   optOutEmail?: boolean;
+  /** Documented TCPA consent; on by default (the org requires it for automated SMS). */
+  consent?: boolean;
 }) {
   const c = await seedContact(testDb, { orgId: org.id, firstName: "Rita" });
   await testDb
@@ -81,6 +85,8 @@ async function contact(over: {
       stateCode: over.stateCode === undefined ? "NY" : over.stateCode,
       optOutSms: over.optOutSms ?? false,
       optOutEmail: over.optOutEmail ?? false,
+      tcpaConsentAt: over.consent === false ? null : new Date("2026-01-05T15:00:00Z"),
+      tcpaConsentSource: over.consent === false ? null : "signed SOA form #123",
     })
     .where(eq(contactsTable.id, c.id));
   const [row] = await testDb.select().from(contactsTable).where(eq(contactsTable.id, c.id));
@@ -247,12 +253,36 @@ describe("appointment reminders", () => {
     expect(jobsTo(c.email!)).toHaveLength(1);
   });
 
-  it("never texts when the contact's timezone is unknown", async () => {
+  it("holds a contact with no state to the texting window in every continental zone", async () => {
+    // 09:00 in New York is 06:00 in California: not yet texting hours everywhere.
+    const nineNy = new Date("2026-10-12T13:00:00.000Z");
+    const early = await contact({ stateCode: null });
+    await appt(early.id, new Date(nineNy.getTime() + 5 * 3600_000));
+    const summary = await worker(nineNy);
+    expect(summary.deferred).toBeGreaterThanOrEqual(1);
+    expect(jobsTo(early.phone!)).toHaveLength(0);
+
+    // Noon in New York is 09:00 in California: inside the window everywhere.
     const c = await contact({ stateCode: null });
     await appt(c.id, new Date(NOON_NY.getTime() + 5 * 3600_000));
     await worker(NOON_NY);
-    expect(jobsTo(c.phone!)).toHaveLength(0);
+    expect(jobsTo(c.phone!)).toHaveLength(1);
     expect(jobsTo(c.email!)).toHaveLength(1);
+  });
+
+  it("does not text a contact without documented TCPA consent (email still goes)", async () => {
+    const c = await contact({ consent: false });
+    await appt(c.id, new Date(NOON_NY.getTime() + 3 * 3600_000));
+    await worker(NOON_NY);
+    expect(jobsTo(c.phone!)).toHaveLength(0);
+    const email = jobsTo(c.email!);
+    expect(email).toHaveLength(1);
+    // Re-checked at send time by the shared gate.
+    expect((email[0].data as { consumer?: { contactId: string; automated: boolean } }).consumer).toEqual({
+      orgId: org.id,
+      contactId: c.id,
+      automated: true,
+    });
   });
 
   it("skips cancelled and far-future appointments", async () => {

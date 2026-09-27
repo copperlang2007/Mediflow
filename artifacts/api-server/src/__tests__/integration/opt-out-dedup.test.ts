@@ -307,7 +307,7 @@ describe("Twilio inbound SMS — START lifts the opt-out", () => {
 
     const { auditLogTable } = await import("@workspace/db");
     const audits = await db.select().from(auditLogTable)
-      .where(and(eq(auditLogTable.orgId, org.id), eq(auditLogTable.action, "sms_resubscribe")));
+      .where(and(eq(auditLogTable.orgId, org.id), eq(auditLogTable.action, "sms_opt_in")));
     expect(audits).toHaveLength(1);
 
     // sendSMS() is the send-time guard; it must no longer block the number.
