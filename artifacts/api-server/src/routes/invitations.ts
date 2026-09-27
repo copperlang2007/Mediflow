@@ -26,7 +26,7 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
-import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
 import {
   getSeatUsage,
   requireSeat,
@@ -145,13 +145,13 @@ function serialize(row: typeof userInvitationsTable.$inferSelect) {
 const router: IRouter = Router();
 
 router.use(
-  auditMiddleware("invitation", undefined, {
+  scopeToRouter(router, auditMiddleware("invitation", undefined, {
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.id;
       return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
     },
-  }),
+  })),
 );
 
 /**

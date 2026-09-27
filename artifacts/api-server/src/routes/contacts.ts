@@ -26,7 +26,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { enforceCapacity } from "../middlewares/requirePlan";
-import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
 import { logExport } from "./reports/shared";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
@@ -57,13 +57,13 @@ async function isAgentInOrg(agentId: string, orgId: string): Promise<boolean> {
 const ContactStatusSchema = z.enum(contactStatusEnum.enumValues);
 
 router.use(
-  auditMiddleware("contact", undefined, {
+  scopeToRouter(router, auditMiddleware("contact", undefined, {
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.id;
       return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
     },
-  }),
+  })),
 );
 
 const CreateContactSchema = z.object({

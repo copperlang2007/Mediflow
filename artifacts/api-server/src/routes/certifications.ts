@@ -13,7 +13,7 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
-import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
 
 const router: IRouter = Router();
 
@@ -36,13 +36,13 @@ const UpdateCertSchema = z.object({
 });
 
 router.use(
-  auditMiddleware("certification", undefined, {
+  scopeToRouter(router, auditMiddleware("certification", undefined, {
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.cid ?? req.params.id;
       return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
     },
-  }),
+  })),
 );
 
 async function getAgentOrFail(agentId: string, orgId: string, res: Response): Promise<boolean> {
