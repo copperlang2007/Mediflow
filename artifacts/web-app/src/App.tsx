@@ -7,6 +7,7 @@ import { QueryClientProvider, useQueryClient, useQuery } from "@tanstack/react-q
 import { useEffect, useRef } from "react";
 import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
+import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import AppShell from "@/components/layout/AppShell";
@@ -600,6 +601,8 @@ function ClerkProviderWithRoutes() {
             </Switch>
           </ErrorBoundary>
           <Toaster />
+          {/* Pages call `toast` from "sonner" directly; this is its only mount. */}
+          <SonnerToaster />
         </TooltipProvider>
       </QueryClientProvider>
     </ClerkProvider>
