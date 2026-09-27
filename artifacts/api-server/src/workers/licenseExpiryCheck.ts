@@ -39,6 +39,9 @@ const ALERT_THRESHOLDS_DAYS = [7, 14, 30, 60, 90];
 /** Licenses expired per run at most; a larger backlog drains over later runs. */
 const MAX_LAPSES_PER_RUN = 500;
 
+/** Consecutive per-license failures that abort the sweep as systemic. */
+const MAX_CONSECUTIVE_LAPSE_ERRORS = 10;
+
 /** Above this many lapses in one run, an org gets one summary notification. */
 const LAPSE_NOTICE_BATCH_THRESHOLD = 5;
 
@@ -102,6 +105,7 @@ export async function expireLapsedLicenses(
       .orderBy(stateLicensesTable.expiryDate)
       .limit(MAX_LAPSES_PER_RUN);
 
+    let consecutiveErrors = 0;
     for (const lic of lapsed) {
       // Each license runs in its own savepoint: a bad row is skipped and
       // logged instead of rolling back every other lapse in the batch.
@@ -140,8 +144,14 @@ export async function expireLapsedLicenses(
           });
           return true;
         });
+        consecutiveErrors = 0;
       } catch (err) {
         logger.warn({ err, licenseId: lic.licenseId }, "License lapse sweep: skipped license after error");
+        // A run of failures is systemic (lost connection, aborted
+        // transaction), not bad rows: stop and let the job retry.
+        if (++consecutiveErrors >= MAX_CONSECUTIVE_LAPSE_ERRORS) {
+          throw new Error(`License lapse sweep: ${consecutiveErrors} consecutive errors, aborting batch`);
+        }
         continue;
       }
       if (!flipped) continue;

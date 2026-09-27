@@ -578,11 +578,21 @@ export async function startWorkers(): Promise<void> {
       await deliverScheduledSms(job.data, async (data, startAfter) => {
         // Deterministic id derived from this job: if this handler is retried
         // after the deferral was already enqueued, the second insert collides
-        // on the id and is dropped, so the text is never queued twice.
-        await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { ...data }, {
-          startAfter,
-          id: deferredJobId(job.id),
-        });
+        // on the id and is dropped (send resolves null), so the text is never
+        // queued twice. A queue error is NOT swallowed here (unlike
+        // enqueue()): it fails this job so pg-boss retries it instead of the
+        // text being silently lost.
+        try {
+          const boss = await getQueue();
+          await boss.send(JOB_NAMES.SEND_SCHEDULED_SMS, { ...data }, {
+            startAfter,
+            id: deferredJobId(job.id),
+          });
+          jobEnqueueTotal.inc({ queue: JOB_NAMES.SEND_SCHEDULED_SMS, outcome: "accepted" });
+        } catch (err) {
+          jobEnqueueTotal.inc({ queue: JOB_NAMES.SEND_SCHEDULED_SMS, outcome: "failed" });
+          throw err;
+        }
       });
     }
   };
