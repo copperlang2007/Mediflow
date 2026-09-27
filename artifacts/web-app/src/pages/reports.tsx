@@ -803,7 +803,7 @@ function ExecutiveTab() {
           <StatCard title="Active Agents" value={data.agents.active} icon={<Users className="h-5 w-5 text-accent" />} />
           <StatCard title="In Onboarding" value={data.agents.onboarding} icon={<Activity className="h-5 w-5 text-warning" />} />
           <StatCard title="Enrolled Members" value={data.members.enrolled.toLocaleString()} icon={<ShieldCheck className="h-5 w-5 text-success" />} />
-          <StatCard title="AHIP Pass Rate" value={`${data.compliance.ahipRate}%`} subtitle={`${data.compliance.ahipPassed}/${data.compliance.ahipTotal} agents`} icon={<CheckCircle2 className="h-5 w-5 text-navy-700 dark:text-accent" />} />
+          <StatCard title="AHIP Complete" value={`${data.compliance.ahipRate}%`} subtitle={`${data.compliance.ahipPassed} of ${data.compliance.ahipTotal} active + onboarding agents`} icon={<CheckCircle2 className="h-5 w-5 text-navy-700 dark:text-accent" />} />
         </div>
       </div>
 
@@ -812,7 +812,7 @@ function ExecutiveTab() {
         <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Sales & Pipeline</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
-            title="New Leads"
+            title="New clients & leads added"
             value={data.leads.total.toLocaleString()}
             subtitle={leadsTrend != null ? `${leadsTrend >= 0 ? "+" : ""}${leadsTrend}% vs prior period` : undefined}
             icon={<TrendingUp className={`h-5 w-5 ${leadsTrend != null && leadsTrend >= 0 ? "text-success" : "text-destructive"}`} />}

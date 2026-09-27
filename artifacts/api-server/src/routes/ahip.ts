@@ -8,6 +8,7 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { getAhipCoverage } from "../lib/agents/ahipCoverage";
 import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
 
 const router: IRouter = Router();
@@ -163,11 +164,8 @@ router.get(
     const authReq = req as AuthenticatedRequest;
     const year = parseInt((req.query.year as string) ?? String(new Date().getFullYear()), 10);
 
-    const [totalActive, completed] = await Promise.all([
-      db
-        .select({ count: sql<number>`count(*)` })
-        .from(agentsTable)
-        .where(and(eq(agentsTable.orgId, authReq.orgId), eq(agentsTable.status, "active"))),
+    const [coverage, completed] = await Promise.all([
+      getAhipCoverage(authReq.orgId, year),
       db
         .select({
           agentId: ahipRecordsTable.agentId,
@@ -187,15 +185,15 @@ router.get(
         ),
     ]);
 
-    const totalActiveCount = Number(totalActive[0]?.count ?? 0);
-    const passedCount = completed.filter((r) => r.status === "passed").length;
-    const completionRate = totalActiveCount > 0 ? (passedCount / totalActiveCount) * 100 : 0;
-
+    // Shared definition (lib/agents/ahipCoverage.ts): agents who need AHIP
+    // are active + onboarding; complete = passed or waived. Renewals, the
+    // dashboard and the executive report use the same numbers.
     res.json({
       year,
-      totalActiveAgents: totalActiveCount,
-      passedCount,
-      completionRate: Math.round(completionRate * 10) / 10,
+      totalActiveAgents: coverage.agentsRequiringAhip,
+      agentsRequiringAhip: coverage.agentsRequiringAhip,
+      passedCount: coverage.complete,
+      completionRate: coverage.completionRate,
       records: completed,
     });
   },

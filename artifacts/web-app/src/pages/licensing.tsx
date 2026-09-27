@@ -1,4 +1,7 @@
 import { useState, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { customFetch } from "@workspace/api-client-react";
+import { daysUntilExpiry, isLicenseActive, isLicenseExpired, licenseEffectiveStatus } from "@/lib/licenses";
 import { useGetAgents, useGetAgentLicenses, useGetRenewals, useBulkImportLicenses } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -167,6 +170,13 @@ export default function LicensingPage() {
   const licenseRenewals = renewals?.renewals.filter((r) => r.type === "license") ?? [];
 
   const { data: agentData, isLoading: agentsLoading } = useGetAgents({ limit: 200 });
+  // Expired count from the same rollup the Renewals page uses.
+  const { data: alerts, isLoading: alertsLoading } = useQuery<{ licenses: { expired?: number } }>({
+    queryKey: ["/api/compliance-alerts"],
+    queryFn: () => customFetch<{ licenses: { expired?: number } }>("/api/compliance-alerts"),
+    staleTime: 60_000,
+  });
+  const expiredCount = alerts?.licenses.expired ?? 0;
   const agents = agentData?.agents ?? [];
 
   const filteredAgents = agents.filter((a) => {
@@ -197,12 +207,16 @@ export default function LicensingPage() {
 
       <KpiGrid>
         <KpiCard
-          label="Agents tracked"
-          value={agents.length}
+          label="Expired licenses"
+          value={expiredCount}
           icon={Users}
           color="navy"
-          loading={agentsLoading}
-          hint="Click an agent to see each state"
+          loading={agentsLoading || alertsLoading}
+          hint={
+            expiredCount > 0
+              ? `Past their expiry date · ${agents.length} agents tracked`
+              : `None expired · ${agents.length} agents tracked`
+          }
         />
         <KpiCard
           label="Expiring in 30 days"
@@ -274,7 +288,11 @@ export default function LicensingPage() {
             compact
             icon={ShieldCheck}
             title="Nothing coming due in the next 90 days"
-            description="We'll list a license here once it's within 90 days of expiring. Licenses that have already expired are flagged in red on each agent below."
+            description={
+              expiredCount > 0
+                ? `${expiredCount} license${expiredCount === 1 ? " has" : "s have"} already expired — they're flagged in red on each agent below.`
+                : "We'll list a license here once it's within 90 days of expiring."
+            }
           />
         </SectionCard>
       )}
@@ -348,13 +366,18 @@ function AgentLicenseRow({
 }) {
   const { data: licensesData } = useGetAgentLicenses(agentId);
   const licenses = licensesData?.data;
-  const activeLicenses = (licenses ?? []).filter((l) => l.status === "active").length;
+  // Shared definition (lib/licenses.ts ↔ API effectiveStatus): active means
+  // status active AND not past its expiry date — the same test Ready to Sell,
+  // the agent profile and the back office use.
+  const now = new Date();
+  const activeLicenses = (licenses ?? []).filter((l) => isLicenseActive(l, now)).length;
   const totalLicenses = (licenses ?? []).length;
+  const expiredStates = (licenses ?? []).filter((l) => isLicenseExpired(l, now)).map((l) => l.stateCode);
 
-  // Find nearest expiry across all active licenses
+  // Nearest upcoming expiry among licenses that are still active.
   const nearestExpiry = (licenses ?? [])
-    .filter((l) => l.status === "active" && l.expiryDate)
-    .map((l) => ({ id: l.id, stateCode: l.stateCode, daysLeft: Math.ceil((new Date(l.expiryDate!).getTime() - Date.now()) / 86400000) }))
+    .filter((l) => isLicenseActive(l, now) && l.expiryDate)
+    .map((l) => ({ id: l.id, stateCode: l.stateCode, daysLeft: daysUntilExpiry(l, now)! }))
     .sort((a, b) => a.daysLeft - b.daysLeft)[0];
 
   const expiryColor = nearestExpiry
@@ -380,11 +403,15 @@ function AgentLicenseRow({
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium">{agentName}</p>
         <p className="text-xs text-muted-foreground">{agentEmail}</p>
-        {nearestExpiry && nearestExpiry.daysLeft <= 90 && (
-          <p className={cn("text-xs mt-0.5", expiryColor)}>
-            {nearestExpiry.stateCode} {nearestExpiry.daysLeft < 0 ? "has expired" : nearestExpiry.daysLeft === 0 ? "expires today" : `expires in ${nearestExpiry.daysLeft} days`}
+        {expiredStates.length > 0 ? (
+          <p className="text-xs mt-0.5 text-red-600 font-semibold">
+            {expiredStates.join(", ")} {expiredStates.length === 1 ? "has" : "have"} expired
           </p>
-        )}
+        ) : nearestExpiry && nearestExpiry.daysLeft <= 90 ? (
+          <p className={cn("text-xs mt-0.5", expiryColor)}>
+            {nearestExpiry.stateCode} {nearestExpiry.daysLeft === 0 ? "expires today" : `expires in ${nearestExpiry.daysLeft} days`}
+          </p>
+        ) : null}
       </div>
       {licenses === undefined ? (
         <Skeleton className="h-4 w-20" />
@@ -395,18 +422,19 @@ function AgentLicenseRow({
           ) : (
             <>
               <span className={cn("text-xs", activeLicenses === 0 ? "text-red-600 font-medium" : "text-muted-foreground")}>
-                {activeLicenses}/{totalLicenses} active
+                {activeLicenses} of {totalLicenses} active
               </span>
               <div className="flex gap-1 flex-wrap max-w-xs">
                 {(licenses ?? []).slice(0, 5).map((lic) => {
-                  const daysLeft = lic.expiryDate ? Math.ceil((new Date(lic.expiryDate).getTime() - Date.now()) / 86400000) : null;
-                  const urgentBorder = daysLeft !== null && daysLeft <= 30 && lic.status === "active" ? "ring-1 ring-red-400" : "";
+                  const daysLeft = daysUntilExpiry(lic, now);
+                  const shown = licenseEffectiveStatus(lic, now);
+                  const urgentBorder = daysLeft !== null && daysLeft <= 30 && shown === "active" ? "ring-1 ring-red-400" : "";
                   return (
                     <span
                       key={lic.id}
                       className={cn(
                         "text-[10px] px-1.5 py-0.5 rounded-full font-semibold",
-                        LICENSE_STATUS_STYLES[lic.status] ?? "bg-slate-100 text-slate-600",
+                        LICENSE_STATUS_STYLES[shown] ?? "bg-slate-100 text-slate-600",
                         urgentBorder
                       )}
                     >

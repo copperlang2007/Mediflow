@@ -68,6 +68,7 @@ export interface Organization {
   id: string;
   name: string;
   slug: string;
+  /** The plan the product actually enforces (from the subscription / entitlements — the same tier /billing/subscription reports), not the legacy organizations.plan_tier column. */
   planTier: string;
   /** @nullable */
   logoUrl?: string | null;
@@ -104,9 +105,15 @@ export interface DashboardStats {
   licensesExpiringIn90Days: number;
   openTasksCount: number;
   overdueTasks: number;
+  /** CRM contacts whose status is Lead (not deleted) — the same number the Clients & Leads page shows. Not the inbound queue's `leads` table. */
   openLeadsCount: number;
   unreadNotificationsCount: number;
+  /** Percent of agents who need AHIP (status active or onboarding) with a passed or waived record for the current year. */
   ahipCompletionRateCurrent: number;
+  ahipCompleteCount?: number;
+  agentsRequiringAhip?: number;
+  /** Licenses past their expiry date (or stored as expired) for agents still on the team (onboarding, active, suspended). */
+  licensesExpiredCount?: number;
   totalContacts: number;
   agentsWithExpiringLicenses: AgentLicenseAlert[];
 }
@@ -121,6 +128,11 @@ export interface ActivityItem {
   userId?: string | null;
   /** @nullable */
   userFullName?: string | null;
+  /**
+   * The client the activity is about; null unless the caller has contact:read.
+   * @nullable
+   */
+  contactName?: string | null;
   /** @nullable */
   resourceType?: string | null;
   /** @nullable */
@@ -352,6 +364,20 @@ export const StateLicenseStatus = {
   not_appointed: "not_appointed",
 } as const;
 
+/**
+ * The status to show and count. Same as `status`, except a license whose expiry date has passed is always "expired". Active means status active AND no expiry or expiry in the future — the shared definition Licensing, the agent profile, Ready to Sell, the back office and the dashboard all use.
+ */
+export type StateLicenseEffectiveStatus =
+  (typeof StateLicenseEffectiveStatus)[keyof typeof StateLicenseEffectiveStatus];
+
+export const StateLicenseEffectiveStatus = {
+  active: "active",
+  pending: "pending",
+  expired: "expired",
+  suspended: "suspended",
+  not_appointed: "not_appointed",
+} as const;
+
 export interface StateLicense {
   id: string;
   agentId: string;
@@ -364,6 +390,8 @@ export interface StateLicense {
   /** @nullable */
   expiryDate?: string | null;
   status: StateLicenseStatus;
+  /** The status to show and count. Same as `status`, except a license whose expiry date has passed is always "expired". Active means status active AND no expiry or expiry in the future — the shared definition Licensing, the agent profile, Ready to Sell, the back office and the dashboard all use. */
+  effectiveStatus?: StateLicenseEffectiveStatus;
   /** @nullable */
   renewalSubmittedAt?: string | null;
   /** @nullable */
@@ -656,7 +684,11 @@ export type AhipDashboardRecordsItem = {
 
 export interface AhipDashboard {
   year: number;
+  /** Deprecated alias of agentsRequiringAhip. */
   totalActiveAgents: number;
+  /** Agents whose status is active or onboarding. */
+  agentsRequiringAhip?: number;
+  /** Of those, how many have a passed or waived AHIP record for the year. */
   passedCount: number;
   completionRate: number;
   records: AhipDashboardRecordsItem[];

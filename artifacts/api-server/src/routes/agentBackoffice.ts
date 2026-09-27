@@ -35,6 +35,7 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { withEffectiveStatus } from "../lib/licenses/licenseStatus";
 import { getOrgReadiness } from "../lib/agents/readiness";
 import { computeComplianceScore } from "../lib/agents/complianceScore";
 
@@ -201,7 +202,7 @@ async function buildBackoffice(agent: AgentRow, orgId: string) {
       : null,
     complianceScore: score,
     ahip,
-    licenses,
+    licenses: licenses.map((l) => withEffectiveStatus(l, now)),
     certifications,
     portals,
     tasks,

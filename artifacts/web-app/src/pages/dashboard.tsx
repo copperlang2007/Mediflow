@@ -335,7 +335,7 @@ export default function Dashboard() {
         <KpiCard
           label="Clients & Leads"
           value={(stats?.totalContacts ?? 0).toLocaleString()}
-          hint={`${plural(stats?.openLeadsCount ?? 0, "open lead")}`}
+          hint={`${plural(stats?.openLeadsCount ?? 0, "lead")} at the Lead stage`}
           icon={Users}
           color="navy"
           loading={statsLoading}
@@ -373,18 +373,22 @@ export default function Dashboard() {
       {/* Secondary stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MiniStat
-          label="Open leads"
+          label="Leads (Lead stage)"
           value={(stats?.openLeadsCount ?? 0).toLocaleString()}
           icon={Target}
           loading={statsLoading}
           href={linkIf("/crm")}
         />
         <MiniStat
-          label="Licenses expiring (90 days)"
-          value={(stats?.licensesExpiringIn90Days ?? 0).toLocaleString()}
+          label={(stats?.licensesExpiredCount ?? 0) > 0 ? "Licenses expired · expiring in 90 days" : "Licenses expiring (90 days)"}
+          value={
+            (stats?.licensesExpiredCount ?? 0) > 0
+              ? `${(stats?.licensesExpiredCount ?? 0).toLocaleString()} · ${(stats?.licensesExpiringIn90Days ?? 0).toLocaleString()}`
+              : (stats?.licensesExpiringIn90Days ?? 0).toLocaleString()
+          }
           icon={FileText}
           loading={statsLoading}
-          tone={(stats?.licensesExpiringIn30Days ?? 0) > 0 ? "warning" : "default"}
+          tone={(stats?.licensesExpiredCount ?? 0) > 0 ? "danger" : (stats?.licensesExpiringIn30Days ?? 0) > 0 ? "warning" : "default"}
           href={linkIf("/licensing")}
         />
         <MiniStat
@@ -563,14 +567,20 @@ export default function Dashboard() {
           )}
         </SectionCard>
 
-        <SectionCard title={`AHIP ${now.getFullYear()}`} description="Share of agents who have passed this year" icon={Award}>
+        <SectionCard
+          title={`AHIP ${now.getFullYear()}`}
+          description="Active and onboarding agents with AHIP passed (or waived) this year"
+          icon={Award}
+        >
           {statsLoading ? (
             <Skeleton className="h-20 w-full" />
           ) : (
             <>
               <div className="flex items-end gap-2 mb-3">
                 <span className="font-display text-4xl font-bold">{stats?.ahipCompletionRateCurrent ?? 0}%</span>
-                <span className="text-sm text-muted-foreground mb-1.5">complete</span>
+                <span className="text-sm text-muted-foreground mb-1.5">
+                  complete{stats?.agentsRequiringAhip != null ? ` · ${stats.ahipCompleteCount ?? 0} of ${plural(stats.agentsRequiringAhip, "agent")}` : ""}
+                </span>
               </div>
               <Progress value={stats?.ahipCompletionRateCurrent ?? 0} className="h-2.5" />
               <p className="text-sm text-muted-foreground mt-3">
@@ -591,7 +601,17 @@ export default function Dashboard() {
           {statsLoading ? (
             <Skeleton className="h-20 w-full" />
           ) : (stats?.agentsWithExpiringLicenses ?? []).length === 0 ? (
-            <EmptyState compact icon={ShieldCheck} title="All clear" description="No licenses expire in the next 90 days." />
+            (stats?.licensesExpiredCount ?? 0) > 0 ? (
+              <EmptyState
+                compact
+                icon={AlertTriangle}
+                title={`${plural(stats?.licensesExpiredCount ?? 0, "license has", "licenses have")} expired`}
+                description="None expire in the next 90 days, but these are already past their expiry date. Agents can't sell in those states until they're renewed."
+                action={linkIf("/licensing") ? { label: "Open Licensing", href: "/licensing" } : undefined}
+              />
+            ) : (
+              <EmptyState compact icon={ShieldCheck} title="All clear" description="No licenses expire in the next 90 days." />
+            )
           ) : (
             <ul className="space-y-2">
               {(stats?.agentsWithExpiringLicenses ?? []).slice(0, 4).map((alert, i) => (
@@ -630,7 +650,10 @@ export default function Dashboard() {
                   <Activity className="h-4 w-4" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-foreground">{item.title}</p>
+                  <p className="text-sm text-foreground">
+                    {item.contactName && <span className="font-semibold">{item.contactName}: </span>}
+                    {item.title}
+                  </p>
                   {(item.userFullName || (item.description && item.description !== item.title)) && (
                     <p className="text-xs text-muted-foreground truncate">
                       {[item.userFullName, item.description !== item.title ? item.description : null].filter(Boolean).join(" · ")}

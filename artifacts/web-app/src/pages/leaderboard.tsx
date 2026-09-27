@@ -105,6 +105,9 @@ function LeaderboardRow({ entry }: { entry: AgentLeaderboardEntry }) {
         {entry.callbacksResolved}
       </TableCell>
       <TableCell className="text-center tabular-nums">
+        {entry.leadContacts ?? 0}
+      </TableCell>
+      <TableCell className="text-center tabular-nums text-muted-foreground">
         {entry.openLeads}
       </TableCell>
     </TableRow>
@@ -122,7 +125,9 @@ export default function LeaderboardPage() {
   const windowLabel = WINDOWS.find((w) => w.value === String(sinceHours))?.label ?? "";
   const totalInbounds = rows.reduce((s, r) => s + r.inboundsRouted, 0);
   const totalCallbacks = rows.reduce((s, r) => s + r.callbacksResolved, 0);
-  const totalOpen = rows.reduce((s, r) => s + r.openLeads, 0);
+  // Same "lead" as the dashboard and Clients & Leads: contacts at the Lead
+  // stage. The queue column below is the inbound router's workload.
+  const totalLeads = rows.reduce((s, r) => s + (r.leadContacts ?? 0), 0);
   const readyCount = rows.filter((r) => r.readyToSell).length;
 
   if (!meLoading && !isAdmin) {
@@ -143,7 +148,7 @@ export default function LeaderboardPage() {
     <PageShell>
       <PageHeader
         title="Agent Leaderboard"
-        subtitle="Who's been taking inbound calls and closing callbacks, and how many open leads each agent has now"
+        subtitle="Who's been taking inbound calls and closing callbacks, and how many leads each agent has now"
       >
         <ToggleGroup
           type="single"
@@ -171,10 +176,10 @@ export default function LeaderboardPage() {
         <KpiCard label="Agents ranked" value={rows.length} icon={Users} color="navy" loading={query.isLoading} hint={`${readyCount} ready to sell`} />
         <KpiCard label={`Inbounds routed · ${windowLabel}`} value={totalInbounds} icon={PhoneIncoming} color="blue" loading={query.isLoading} hint={totalInbounds === 0 ? "No inbound calls in this window" : "Calls sent to an agent"} />
         <KpiCard label={`Callbacks resolved · ${windowLabel}`} value={totalCallbacks} icon={PhoneCall} color="green" loading={query.isLoading} hint="Promised call-backs completed" />
-        <KpiCard label="Open leads right now" value={totalOpen} icon={Inbox} color="orange" loading={query.isLoading} hint="Across every ranked agent" />
+        <KpiCard label="Leads assigned" value={totalLeads} icon={Inbox} color="orange" loading={query.isLoading} hint="Clients at the Lead stage, across ranked agents" />
       </KpiGrid>
 
-      <SectionCard title="Rankings" description="Ranked by inbound calls routed; ties go to the agent with fewer open leads" icon={Trophy} iconClassName="text-warning">
+      <SectionCard title="Rankings" description="Ranked by inbound calls routed; ties go to the agent with fewer open queue leads" icon={Trophy} iconClassName="text-warning">
           {query.isLoading ? (
             <div className="space-y-2" data-testid="leaderboard-loading">
               {[...Array(5)].map((_, i) => (
@@ -201,7 +206,15 @@ export default function LeaderboardPage() {
                   <TableHead className="text-center">
                     Callbacks resolved
                   </TableHead>
-                  <TableHead className="text-center">Open leads</TableHead>
+                  <TableHead className="text-center">Leads</TableHead>
+                  <TableHead className="text-center">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="underline decoration-dotted underline-offset-2">Open queue leads</span>
+                      </TooltipTrigger>
+                      <TooltipContent>Inbound Live Call Queue leads still new, contacted or qualified</TooltipContent>
+                    </Tooltip>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

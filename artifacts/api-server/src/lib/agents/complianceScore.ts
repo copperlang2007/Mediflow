@@ -18,6 +18,7 @@ import {
   checklistRunsTable,
   checklistItemsTable,
 } from "@workspace/db";
+import { isLicenseActive } from "../licenses/licenseStatus";
 
 export type ComplianceScore = {
   agentId: string;
@@ -83,7 +84,7 @@ export async function computeComplianceScore(
       onboardingTotalItems > 0 ? (onboardingCompletedItems / onboardingTotalItems) * 100 : 0;
   }
 
-  const activeLicenses = licenses.filter((l) => l.status === "active").length;
+  const activeLicenses = licenses.filter((l) => isLicenseActive(l)).length;
   const activeCerts = certs.filter((c) => c.status === "passed").length;
   const ahipCompleted = ahip[0]?.status === "passed";
 

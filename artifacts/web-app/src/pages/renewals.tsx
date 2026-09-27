@@ -41,7 +41,7 @@ type ComplianceAlerts = {
   generatedAt: string;
   currentCertYear: number;
   daysUntilAhipDeadline: number;
-  licenses: { critical: number; warning: number; notice: number };
+  licenses: { critical: number; warning: number; notice: number; expired?: number };
   certifications: { critical: number; warning: number; notice: number };
   ahip: {
     passed: number;
@@ -56,6 +56,7 @@ type ComplianceAlerts = {
     agentId: string;
     agentName: string;
     licensesExpiring: number;
+    licensesExpired?: number;
     certsExpiring: number;
     ahipStatus: "passed" | "in_progress" | "not_started" | "missing" | "failed";
     alertCount: number;
@@ -96,7 +97,13 @@ function ComplianceAlertsCard({
             value={totalLicenseAlerts}
             icon={FileText}
             color="navy"
-            hint={totalLicenseAlerts === 0 ? "None — nice" : `${data.licenses.critical} within 30 days`}
+            hint={
+              (data.licenses.expired ?? 0) > 0
+                ? `${data.licenses.expired} already expired${totalLicenseAlerts > 0 ? ` · ${data.licenses.critical} within 30 days` : ""}`
+                : totalLicenseAlerts === 0
+                  ? "None — nice"
+                  : `${data.licenses.critical} within 30 days`
+            }
           />
           <KpiCard
             label="Certifications expiring (90 days)"
@@ -110,7 +117,7 @@ function ComplianceAlertsCard({
             value={`${data.ahip.completionRate}%`}
             icon={ShieldCheck}
             color="green"
-            hint={`${data.ahip.passed} of ${data.ahip.totalActiveAgents} agents · ${
+            hint={`${data.ahip.passed} of ${data.ahip.totalActiveAgents} active + onboarding agents · ${
               data.daysUntilAhipDeadline >= 0 ? `${data.daysUntilAhipDeadline} days to Oct 1` : "deadline passed"
             }`}
           />
@@ -137,6 +144,11 @@ function ComplianceAlertsCard({
                 >
                   <span className="flex-1 text-sm font-medium truncate">{a.agentName}</span>
                   <div className="flex items-center gap-1.5 text-[11px]">
+                    {(a.licensesExpired ?? 0) > 0 && (
+                      <StatusPill tone="danger">
+                        {a.licensesExpired} license{a.licensesExpired !== 1 ? "s" : ""} expired
+                      </StatusPill>
+                    )}
                     {a.licensesExpiring > 0 && (
                       <StatusPill tone="warning">
                         {a.licensesExpiring} license{a.licensesExpiring !== 1 ? "s" : ""}

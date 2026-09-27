@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select";
 import { EmptyState, KpiCard, PageHeader, SectionCard, StatusPill, type KpiColor } from "@/components/shared";
 import { cn } from "@/lib/utils";
+import { isLicenseActive, isLicenseExpired, licenseEffectiveStatus } from "@/lib/licenses";
 
 export type Backoffice = {
   agent: {
@@ -70,7 +71,7 @@ export type Backoffice = {
     onboardingTotalItems: number;
   };
   ahip: { id: string; certificationYear: number; status: string; score: number | null; completedDate: string | null }[];
-  licenses: { id: string; stateCode: string; licenseType: string; status: string; expiryDate: string | null }[];
+  licenses: { id: string; stateCode: string; licenseType: string; status: string; effectiveStatus?: string; expiryDate: string | null }[];
   certifications: {
     id: string;
     carrierName: string | null;
@@ -199,14 +200,13 @@ export function BackofficeView({ data, isStaff }: { data: Backoffice; isStaff: b
   const overdue = data.tasks.filter((t) => t.dueDate && new Date(t.dueDate) < now).length;
   const highPriority = data.tasks.filter((t) => t.priority === "high" || t.priority === "urgent").length;
   const expiringSoon =
-    data.licenses.filter((l) => l.expiryDate && differenceInCalendarDays(parseISO(l.expiryDate), now) >= 0 && differenceInCalendarDays(parseISO(l.expiryDate), now) <= 60).length +
+    data.licenses.filter((l) => isLicenseActive(l, now) && l.expiryDate && differenceInCalendarDays(parseISO(l.expiryDate), now) <= 60).length +
     data.certifications.filter((c) => c.expiryDate && differenceInCalendarDays(parseISO(c.expiryDate), now) >= 0 && differenceInCalendarDays(parseISO(c.expiryDate), now) <= 60).length;
   const provisioned = data.portals.filter((p) => p.status === "provisioned").length;
-  // Same test as the Ready-to-Sell gate: active AND not past its expiry date.
-  const pastExpiry = data.licenses.filter((l) => l.expiryDate && new Date(l.expiryDate) < now).length;
-  const currentLicenses = data.licenses.filter(
-    (l) => l.status === "active" && (!l.expiryDate || new Date(l.expiryDate) >= now),
-  ).length;
+  // Shared definition (lib/licenses.ts ↔ API effectiveStatus) — the same
+  // test as the Ready-to-Sell gate: active AND not past its expiry date.
+  const pastExpiry = data.licenses.filter((l) => isLicenseExpired(l, now)).length;
+  const currentLicenses = data.licenses.filter((l) => isLicenseActive(l, now)).length;
   const latestAhip = data.ahip[0];
   const ahipColor: KpiColor = score.ahipCompleted ? "green" : "orange";
   const tone = (done: number, total: number): KpiColor => (total > 0 && done >= total ? "green" : "orange");
@@ -347,15 +347,15 @@ export function BackofficeView({ data, isStaff }: { data: Backoffice; isStaff: b
               <EmptyState compact icon={MapPin} title="No licenses on file" description="Add the agent's state licenses on the Licensing page." />
             ) : (
               <SimpleList rows={data.licenses.map((l) => {
-                const expired = Boolean(l.expiryDate && new Date(l.expiryDate) < now);
-                const ok = l.status === "active" && !expired;
+                const expired = isLicenseExpired(l, now);
+                const ok = isLicenseActive(l, now);
                 return {
                   key: l.id,
                   icon: ok ? CheckCircle2 : XCircle,
                   ok,
                   title: `${l.stateCode} · ${l.licenseType}`,
                   detail: l.expiryDate ? `${expired ? "Expired" : "Expires"} ${fmt(l.expiryDate)}` : "No expiry date on file",
-                  status: expired ? "expired" : l.status,
+                  status: licenseEffectiveStatus(l, now),
                 };
               })} />
             )}
