@@ -14,8 +14,9 @@ import { useLocation } from "wouter";
 import { useGetMe, useGetAgents, getGetAgentsQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { Check, ClipboardCheck, Handshake, UserX } from "lucide-react";
+import { EmptyState, PageHeader } from "@/components/shared";
+import { cn } from "@/lib/utils";
 import {
   useOnboarding,
   wizardStepForRun,
@@ -115,7 +116,7 @@ export default function OnboardingPage() {
     // so the page shape stops jumping when data lands.
     return (
       <div
-        className="p-4 sm:p-6 space-y-6 max-w-4xl mx-auto"
+        className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-5xl mx-auto"
         data-testid="onboarding-loading"
       >
         <div className="space-y-2">
@@ -127,27 +128,21 @@ export default function OnboardingPage() {
             <Skeleton key={i} className="h-7 w-24" />
           ))}
         </div>
-        <Skeleton className="h-48 w-full rounded-lg" />
+        <Skeleton className="h-48 w-full rounded-xl" />
       </div>
     );
   }
 
   if (!isAgent) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
         <Card>
-          <CardContent className="py-10 text-center space-y-3">
-            <h1 className="text-xl font-semibold">Onboarding wizard</h1>
-            <p className="text-sm text-muted-foreground">
-              This wizard is for agents who are filling out their own
-              contracting paperwork. As an admin, you can manage agent
-              onboarding from the{" "}
-              <a className="text-primary underline" href="../admin-onboarding">
-                admin onboarding dashboard
-              </a>
-              .
-            </p>
-          </CardContent>
+          <EmptyState
+            icon={Handshake}
+            title={<h1>Onboarding wizard</h1>}
+            description="This wizard is for agents filling out their own contracting paperwork. As an admin, you manage agent onboarding from the Contracting page."
+            action={{ label: "Go to Contracting", href: "/admin-onboarding" }}
+          />
         </Card>
       </div>
     );
@@ -155,15 +150,13 @@ export default function OnboardingPage() {
 
   if (!myAgent) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
         <Card>
-          <CardContent className="py-10 text-center space-y-3">
-            <h1 className="text-xl font-semibold">No agent profile found</h1>
-            <p className="text-sm text-muted-foreground">
-              Your user account isn't linked to an agent record yet. Please
-              ask your administrator to invite you as an agent.
-            </p>
-          </CardContent>
+          <EmptyState
+            icon={UserX}
+            title={<h1>No agent profile found</h1>}
+            description="Your user account isn't linked to an agent record yet. Please ask your administrator to invite you as an agent."
+          />
         </Card>
       </div>
     );
@@ -171,17 +164,13 @@ export default function OnboardingPage() {
 
   if (!onboarding) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
         <Card>
-          <CardContent className="py-10 text-center space-y-3">
-            <h1 className="text-xl font-semibold">
-              You don't have an active onboarding run
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Your administrator hasn't started a contracting onboarding for
-              you yet. Once they do, you'll see the wizard here.
-            </p>
-          </CardContent>
+          <EmptyState
+            icon={ClipboardCheck}
+            title={<h1>You don't have an active onboarding run</h1>}
+            description="Your administrator hasn't started a contracting onboarding for you yet. Once they do, you'll see the wizard here."
+          />
         </Card>
       </div>
     );
@@ -190,47 +179,57 @@ export default function OnboardingPage() {
   const stepIndex = STEP_ORDER.indexOf(activeStep);
 
   return (
-    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-bold">Carrier contracting onboarding</h1>
-        <p className="text-sm text-muted-foreground">
-          Step {stepIndex + 1} of {STEP_ORDER.length}: {STEP_LABEL[activeStep]}
-        </p>
-      </header>
+    <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto space-y-6">
+      <PageHeader
+        eyebrow={`Step ${stepIndex + 1} of ${STEP_ORDER.length}`}
+        title="Getting contracted with carriers"
+        subtitle={`${STEP_LABEL[activeStep]} — we'll walk you through it one step at a time. Your answers are saved as you go.`}
+      />
 
-      <ol className="flex items-center gap-2 flex-wrap" aria-label="Progress">
-        {STEP_ORDER.map((s, idx) => {
-          const isActive = s === activeStep;
-          const isDone = idx < stepIndex;
-          return (
-            <li key={s} className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setStepOverride(s)}
-                className={[
-                  "flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-full border transition-colors",
-                  isActive
-                    ? "bg-primary text-primary-foreground border-primary"
-                    : isDone
-                    ? "bg-green-50 text-green-700 border-green-200"
-                    : "bg-muted text-muted-foreground border-border",
-                ].join(" ")}
-                data-testid={`onboarding-step-${s}`}
-              >
-                {isDone ? (
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                ) : (
-                  <span className="font-semibold">{idx + 1}</span>
+      <nav className="rounded-xl border border-border bg-card px-4 py-4 shadow-sm overflow-x-auto" aria-label="Onboarding steps">
+        <ol className="flex min-w-max items-start" aria-label="Progress">
+          {STEP_ORDER.map((s, idx) => {
+            const isActive = s === activeStep;
+            const isDone = idx < stepIndex;
+            return (
+              <li key={s} className="flex items-start">
+                <button
+                  type="button"
+                  onClick={() => setStepOverride(s)}
+                  aria-current={isActive ? "step" : undefined}
+                  className="group flex w-20 flex-col items-center gap-1.5 rounded-lg px-1 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  data-testid={`onboarding-step-${s}`}
+                >
+                  <span
+                    className={cn(
+                      "flex h-8 w-8 items-center justify-center rounded-full border-2 text-sm font-semibold transition-colors",
+                      isActive
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : isDone
+                          ? "border-success bg-success text-white"
+                          : "border-border bg-card text-muted-foreground group-hover:border-accent",
+                    )}
+                  >
+                    {isDone ? <Check className="h-4 w-4" /> : idx + 1}
+                  </span>
+                  <span className={cn(
+                    "text-center text-xs leading-tight",
+                    isActive ? "font-semibold text-foreground" : isDone ? "text-success" : "text-muted-foreground",
+                  )}>
+                    {STEP_LABEL[s]}
+                  </span>
+                </button>
+                {idx < STEP_ORDER.length - 1 && (
+                  <span
+                    aria-hidden
+                    className={cn("mt-4 h-0.5 w-6 sm:w-10 rounded-full", idx < stepIndex ? "bg-success" : "bg-border")}
+                  />
                 )}
-                {STEP_LABEL[s]}
-              </button>
-              {idx < STEP_ORDER.length - 1 && (
-                <ArrowRight className="h-3 w-3 text-muted-foreground/50" />
-              )}
-            </li>
-          );
-        })}
-      </ol>
+              </li>
+            );
+          })}
+        </ol>
+      </nav>
 
       <div className="space-y-4">
         {activeStep === "welcome" && (
