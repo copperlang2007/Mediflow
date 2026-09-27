@@ -1,5 +1,6 @@
 import crypto from "crypto";
-import { eq } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
+import { phoneVariants } from "./csvImport";
 import { db, optOutsTable } from "@workspace/db";
 import { logger } from "./logger";
 
@@ -131,7 +132,7 @@ export async function sendSMS(
   const [optOut] = await db
     .select({ id: optOutsTable.id })
     .from(optOutsTable)
-    .where(eq(optOutsTable.phone, to))
+    .where(inArray(optOutsTable.phone, phoneVariants(to)))
     .limit(1);
 
   if (optOut) {

@@ -418,6 +418,11 @@ export function normalizeStateCode(raw: string): string | null {
  * inbound SMS resolves to the imported contact (webhooks.ts matches on exact
  * equality). Anything that is not a 10/11-digit US number is kept as typed.
  */
+/** The number as stored plus its E.164 form, for opt-out / DNC lookups. */
+export function phoneVariants(raw: string): string[] {
+  return [...new Set([raw, normalizePhone(raw)].filter((v): v is string => !!v))];
+}
+
 export function normalizePhone(raw: string): string | null {
   const s = raw.trim();
   if (!s) return null;

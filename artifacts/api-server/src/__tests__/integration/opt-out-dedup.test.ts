@@ -279,3 +279,40 @@ describe("Twilio inbound SMS — opt-out audit-log dedup", () => {
     expect(finalRows).toHaveLength(2);
   });
 });
+
+describe("Twilio inbound SMS — START lifts the opt-out", () => {
+  it("STOP then START clears the contact flag and the opt_outs row, audited", async () => {
+    const org = await seedOrg(db, { id: `org-${randomUUID().slice(0, 8)}` });
+    const phone = `+1555${Math.floor(Math.random() * 9000000 + 1000000)}`;
+    const contact = await seedContact(db, { orgId: org.id });
+    await db.update(contactsTable).set({ phone }).where(eq(contactsTable.id, contact.id));
+
+    expect((await postStop(phone)).status).toBe(200);
+    const blocked = await db.select().from(optOutsTable)
+      .where(and(eq(optOutsTable.phone, phone), eq(optOutsTable.channel, "sms")));
+    expect(blocked).toHaveLength(1);
+
+    const res = await request(app)
+      .post("/webhooks/twilio/sms")
+      .type("form")
+      .set("x-twilio-signature", "dummy")
+      .send({ ...twilioStopPayload(phone), Body: "START" });
+    expect(res.status).toBe(200);
+
+    const after = await db.select().from(optOutsTable)
+      .where(and(eq(optOutsTable.phone, phone), eq(optOutsTable.channel, "sms")));
+    expect(after).toHaveLength(0);
+    const [c] = await db.select().from(contactsTable).where(eq(contactsTable.id, contact.id));
+    expect(c?.optOutSms).toBe(false);
+
+    const { auditLogTable } = await import("@workspace/db");
+    const audits = await db.select().from(auditLogTable)
+      .where(and(eq(auditLogTable.orgId, org.id), eq(auditLogTable.action, "sms_resubscribe")));
+    expect(audits).toHaveLength(1);
+
+    // sendSMS() is the send-time guard; it must no longer block the number.
+    const { sendSMS } = await import("../../lib/sms");
+    const result = await sendSMS(phone, "hello", "agent-x");
+    expect(result).not.toMatchObject({ error: "Recipient has opted out of SMS" });
+  });
+});

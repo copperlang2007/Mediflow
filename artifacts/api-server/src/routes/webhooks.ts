@@ -15,6 +15,7 @@ import {
   db,
   contactsTable,
   optOutsTable,
+  auditLogTable,
   messageThreadsTable,
   messagesTable,
   agentsTable,
@@ -137,10 +138,30 @@ router.post(
 
       // --- Opt-in ---
       if (isOptIn) {
-        await db
-          .update(contactsTable)
-          .set({ optOutSms: false })
-          .where(eq(contactsTable.phone, from));
+        // START comes from the consumer's own phone, so it lifts the SMS block
+        // everywhere it was recorded: the contact flag and the opt_outs rows
+        // that sendSMS() and campaigns check. Each lifted row is audited.
+        await db.transaction(async (tx) => {
+          await tx
+            .update(contactsTable)
+            .set({ optOutSms: false })
+            .where(eq(contactsTable.phone, from));
+          const lifted = await tx
+            .delete(optOutsTable)
+            .where(and(eq(optOutsTable.phone, from), eq(optOutsTable.channel, "sms")))
+            .returning({ orgId: optOutsTable.orgId, optedOutAt: optOutsTable.optedOutAt });
+          for (const row of lifted) {
+            await tx.insert(auditLogTable).values({
+              id: randomUUID(),
+              orgId: row.orgId,
+              userId: null,
+              action: "sms_resubscribe",
+              resourceType: "contact",
+              resourceId: null,
+              changes: { source: "inbound START", optedOutAt: row.optedOutAt },
+            });
+          }
+        });
 
         logger.info({ from }, "Contact re-opted in to SMS");
         res

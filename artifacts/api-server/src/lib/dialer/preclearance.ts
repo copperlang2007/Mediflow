@@ -28,7 +28,8 @@
  * path — only the opaque `contactRef`, phone, state and product line.
  */
 import { randomUUID } from "crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
+import { phoneVariants } from "../csvImport";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import {
   db as defaultDb,
@@ -332,7 +333,9 @@ async function checkConsentAndDnc(
       .where(
         and(
           eq(optOutsTable.orgId, opts.orgId),
-          eq(optOutsTable.phone, opts.phone),
+          // Match the E.164 form too: STOPs are stored as Twilio sends them
+          // ("+13105550101") while contacts may hold "(310) 555-0101".
+          inArray(optOutsTable.phone, phoneVariants(opts.phone)),
         ),
       )
       .limit(1);
