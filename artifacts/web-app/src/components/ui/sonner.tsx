@@ -8,8 +8,8 @@ type ToasterProps = React.ComponentProps<typeof Sonner>
  * `toast.success(...)` / `toast.error(...)` from "sonner" directly; without
  * this mounted once at the app root those messages are silently dropped.
  *
- * Styled with the agencyBRIDGE tokens (white card, navy text, coloured left
- * edge per kind) and follows the light/dark theme.
+ * Styled with the agencyBRIDGE tokens (card surface, theme text, coloured
+ * icon per kind) and follows the light/dark theme.
  */
 const Toaster = ({ ...props }: ToasterProps) => {
   const { resolvedTheme } = useTheme()
@@ -32,10 +32,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
             "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
           cancelButton:
             "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground",
-          success: "group-[.toaster]:border-l-4 group-[.toaster]:border-l-success [&_[data-icon]]:text-success",
-          error: "group-[.toaster]:border-l-4 group-[.toaster]:border-l-destructive [&_[data-icon]]:text-destructive",
-          warning: "group-[.toaster]:border-l-4 group-[.toaster]:border-l-warning [&_[data-icon]]:text-warning",
-          info: "group-[.toaster]:border-l-4 group-[.toaster]:border-l-accent [&_[data-icon]]:text-accent",
+          success: "[&_[data-icon]]:text-success",
+          error: "[&_[data-icon]]:text-destructive",
+          warning: "[&_[data-icon]]:text-warning",
+          info: "[&_[data-icon]]:text-accent",
         },
       }}
       {...props}
