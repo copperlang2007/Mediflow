@@ -178,6 +178,25 @@ router.get(
         : Promise.resolve(null),
     ]);
 
+    // Older contacts may only carry the pre-enrollments plan columns
+    // (`current_plan_type` / `current_carrier_id` / `plan_year`). Show that
+    // as the member's plan when no enrollment row exists yet.
+    let recordedPlan: { planType: string; planYear: number | null; carrierName: string | null } | null = null;
+    if (plans.length === 0 && contact.currentPlanType) {
+      const [carrier] = contact.currentCarrierId
+        ? await db
+            .select({ name: carriersTable.name })
+            .from(carriersTable)
+            .where(and(eq(carriersTable.id, contact.currentCarrierId), eq(carriersTable.orgId, authReq.orgId)))
+            .limit(1)
+        : [];
+      recordedPlan = {
+        planType: contact.currentPlanType,
+        planYear: contact.planYear ?? null,
+        carrierName: carrier?.name ?? null,
+      };
+    }
+
     // No audit row, no data — same rule as the full-application view.
     await db.insert(auditLogTable).values({
       id: randomUUID(),
@@ -220,6 +239,7 @@ router.get(
         optOutEmail: safe.optOutEmail,
       },
       plans,
+      recordedPlan,
       // Oldest first, like a chat thread.
       messages: [...messagesDesc].sort(
         (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),

@@ -314,6 +314,17 @@ export default function ClientPortalPage() {
                     {plan.agentFirstName ? `${plan.agentFirstName} ${plan.agentLastName ?? ""}`.trim() : "—"}
                   </Row>
                 </div>
+              ) : data.recordedPlan ? (
+                <div className="divide-y divide-border/60">
+                  <Row label="Carrier">{data.recordedPlan.carrierName ?? "—"}</Row>
+                  <Row label="Plan type">{PLAN_TYPE_LABEL[data.recordedPlan.planType] ?? data.recordedPlan.planType}</Row>
+                  {data.recordedPlan.planYear && <Row label="Plan year">{data.recordedPlan.planYear}</Row>}
+                  {data.recordedPlan.planYear && !["supp", "other"].includes(data.recordedPlan.planType) && (
+                    <Row label="Plan year renews">{format(new Date(data.recordedPlan.planYear + 1, 0, 1), "MMM d, yyyy")}</Row>
+                  )}
+                  <Row label="Agent">{data.agent ? `${data.agent.firstName} ${data.agent.lastName}` : "—"}</Row>
+                  <p className="pt-2 text-[11px] text-muted-foreground">From the client record — no enrollment has been recorded yet.</p>
+                </div>
               ) : (
                 <EmptyState compact icon={FileText} title="No plan on file yet" description="Once an enrollment is recorded for this client, their plan shows here." />
               )}

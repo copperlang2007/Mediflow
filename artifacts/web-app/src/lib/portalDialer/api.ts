@@ -107,6 +107,8 @@ export interface PortalPreview {
     optOutEmail: boolean;
   };
   plans: PortalPlan[];
+  /** Plan from the contact's own plan fields, when no enrollment exists yet. */
+  recordedPlan: { planType: string; planYear: number | null; carrierName: string | null } | null;
   messages: PortalMessage[];
   documents: PortalDocument[];
   agent: { id: string; firstName: string; lastName: string; email: string; phone: string | null } | null;

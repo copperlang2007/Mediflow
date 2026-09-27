@@ -177,6 +177,21 @@ describe("GET /client-portal/preview/:contactId", () => {
   });
 });
 
+describe("GET /client-portal/preview — legacy plan fields", () => {
+  it("falls back to the contact's own plan fields when no enrollment exists", async () => {
+    const legacy = await seedContact(db, { orgId: org.id, firstName: "Lee", lastName: "Gacy" });
+    const [carrier] = await db.insert(schema.carriersTable)
+      .values({ id: randomUUID(), orgId: org.id, name: "Legacy Mutual" }).returning();
+    await db.update(schema.contactsTable)
+      .set({ currentPlanType: "PDP", currentCarrierId: carrier.id, planYear: 2026 })
+      .where(eq(schema.contactsTable.id, legacy.id));
+    const res = await request(app).get(`/api/client-portal/preview/${legacy.id}`).set(withAuth(admin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.plans).toHaveLength(0);
+    expect(res.body.recordedPlan).toEqual({ planType: "PDP", planYear: 2026, carrierName: "Legacy Mutual" });
+  });
+});
+
 describe("GET /softphone/lookup", () => {
   it("requires contact:read", async () => {
     const res = await request(app).get("/api/softphone/lookup?phone=5035551234").set(withAuth(agentUser.id));

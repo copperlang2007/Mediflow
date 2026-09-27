@@ -134,8 +134,8 @@ function LiveFloor() {
         <MiniStat label="Agents online" value={online} icon={Users} loading={presence.isLoading} />
         <MiniStat label="Available now" value={presence.data?.availableCount ?? 0} icon={UserCheck} tone="success" loading={presence.isLoading} />
         <MiniStat label="On a call" value={onCall} icon={PhoneCall} loading={presence.isLoading} />
-        <MiniStat label="Leads routed (24h)" value={s?.routed ?? 0} icon={PhoneForwarded} loading={stats.isLoading} />
-        <MiniStat label="No agent free (24h)" value={s?.noAgent ?? 0} icon={PhoneMissed} tone={(s?.noAgent ?? 0) > 0 ? "warning" : "default"} loading={stats.isLoading} />
+        <MiniStat label="Routed (24h)" value={s?.routed ?? 0} icon={PhoneForwarded} loading={stats.isLoading} />
+        <MiniStat label="Missed (24h)" value={s?.noAgent ?? 0} icon={PhoneMissed} tone={(s?.noAgent ?? 0) > 0 ? "warning" : "default"} loading={stats.isLoading} />
         <MiniStat label="Open callbacks" value={openCallbacks.length} icon={ClipboardList} tone={openCallbacks.some((c) => slaLabel(c.slaDueAt).overdue) ? "danger" : "default"} loading={callbacks.isLoading} />
       </div>
 

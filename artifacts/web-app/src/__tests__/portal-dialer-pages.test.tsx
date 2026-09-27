@@ -51,6 +51,7 @@ const PREVIEW = {
     planType: "MAPD", planYear: 2026, effectiveDate: "2026-01-01", disenrolledDate: null, status: "active",
     agentId: "a-1", agentFirstName: "Sam", agentLastName: "Rivera",
   }],
+  recordedPlan: null,
   messages: [
     { id: "m-1", channel: "sms", direction: "outbound", subject: null, body: "Hi Joan, time for a review?", status: "sent", sentAt: null, createdAt: "2026-03-01T10:00:00Z" },
     { id: "m-2", channel: "sms", direction: "inbound", subject: null, body: "Yes please", status: "received", sentAt: null, createdAt: "2026-03-02T10:00:00Z" },
