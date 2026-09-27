@@ -12,9 +12,9 @@ export function BookAppointmentButton({ contactId, contactName }: { contactId: s
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)} aria-label="Book appointment" title="Book appointment">
         <CalendarPlus className="h-4 w-4 mr-1" />
-        Book appointment
+        Book
       </Button>
       <AppointmentDialog
         open={open}

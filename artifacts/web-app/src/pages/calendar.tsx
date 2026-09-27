@@ -216,7 +216,7 @@ export default function CalendarPage() {
   const weekDays = useMemo(() => eachDayOfInterval({ start: startOfWeek(anchor), end: endOfWeek(anchor) }), [anchor]);
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
       <PageHeader title="Calendar & Appointments" subtitle="Book and manage client meetings and reviews">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent">
           <Eye className="h-3.5 w-3.5" /> Viewing: {scopeLabel}

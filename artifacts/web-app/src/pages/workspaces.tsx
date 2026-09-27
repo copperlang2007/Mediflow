@@ -167,7 +167,7 @@ export default function WorkspacesPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
       <PageHeader
         title="Workspaces"
         subtitle="Every agency on the platform. Provision a new one and invite its first administrator."
@@ -264,7 +264,7 @@ export default function WorkspacesPage() {
                 </Button>
               </div>
               <p className="mt-1.5 text-[11px] text-muted-foreground">
-                Shown once. The link expires in 7 days; you can re-issue it from the agency's Team page.
+                Shown once — keep it until they have signed in. The link expires in 7 days.
               </p>
             </div>
           )}

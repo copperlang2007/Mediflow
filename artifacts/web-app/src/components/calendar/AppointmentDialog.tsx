@@ -410,7 +410,7 @@ export function AppointmentDialog({
                 placeholder="Anything to prepare"
               />
             )}
-            <p className="text-xs text-muted-foreground">Stored encrypted. Only admins, compliance and the assigned agent can read them.</p>
+            <p className="text-xs text-muted-foreground">Stored encrypted. Only admins, compliance, the assigned agent and the author can read them.</p>
           </div>
 
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
