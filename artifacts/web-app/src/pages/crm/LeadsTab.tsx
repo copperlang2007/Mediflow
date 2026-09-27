@@ -105,9 +105,11 @@ export default function LeadsTab() {
   };
 
   const handleUpdateStatus = async (id: string, status: string) => {
-    await updateLead({ id, data: { status } satisfies UpdateLeadBody });
-    void qc.invalidateQueries({ queryKey: getGetLeadsQueryKey() });
-    void qc.invalidateQueries({ queryKey: getGetLeadStatsQueryKey() });
+    try {
+      await updateLead({ id, data: { status } satisfies UpdateLeadBody });
+      void qc.invalidateQueries({ queryKey: getGetLeadsQueryKey() });
+      void qc.invalidateQueries({ queryKey: getGetLeadStatsQueryKey() });
+    } catch { toast.error("Failed to update lead status"); }
   };
 
   return (

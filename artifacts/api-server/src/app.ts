@@ -334,6 +334,10 @@ app.use(queuePublicRouter);
 // X-MB-Signature HMAC. See routes/enrollhereWebhook.ts.
 app.use(enrollhereWebhookRouter);
 
+// Public email unsubscribe (CAN-SPAM opt-out). Trust comes from the signed
+// token in the link, not a Clerk session. See routes/unsubscribe.ts.
+app.use(unsubscribeRouter);
+
 // Omnichannel campaigns: public unsubscribe page/one-click endpoint and the
 // Resend (svix-signed) / Twilio (X-Twilio-Signature) delivery webhooks. Same
 // posture as the receivers above: no Clerk session, trust from a signature.

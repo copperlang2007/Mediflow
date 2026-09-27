@@ -83,9 +83,10 @@ export default function InboxTab() {
     for (const m of messages) {
       const item = inboxByMsgId.get(m.id);
       if (item) {
-        void markRead({ id: m.id }).then(() =>
-          qc.invalidateQueries({ queryKey: getGetInboxQueryKey() }),
-        );
+        // Background auto-mark on open: a failure just leaves it unread.
+        void markRead({ id: m.id })
+          .then(() => qc.invalidateQueries({ queryKey: getGetInboxQueryKey() }))
+          .catch(() => {});
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -115,8 +116,10 @@ export default function InboxTab() {
   };
 
   const handleMarkRead = async (msgId: string) => {
-    await markRead({ id: msgId });
-    void qc.invalidateQueries({ queryKey: getGetInboxQueryKey() });
+    try {
+      await markRead({ id: msgId });
+      void qc.invalidateQueries({ queryKey: getGetInboxQueryKey() });
+    } catch { toast.error("Failed to mark as read"); }
   };
 
   return (

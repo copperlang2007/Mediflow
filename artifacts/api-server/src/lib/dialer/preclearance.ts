@@ -39,6 +39,7 @@ import {
   carrierCertificationsTable,
   ahipRecordsTable,
 } from "@workspace/db";
+import { sellingPlanYear } from "../compliance/planYear";
 import type { IssueTicketInput, PreclearanceDecision } from "./issuance";
 
 /** Machine-readable preclearance failure reasons. */
@@ -375,7 +376,7 @@ export async function runPreclearance(
   const failures: PreclearanceFailure[] = [];
 
   const productLine: ProductLine = input.productLine ?? "MAPD";
-  const planYear = input.planYear ?? now.getUTCFullYear();
+  const planYear = input.planYear ?? sellingPlanYear(now);
 
   // 1) Agent eligibility (§2).
   await checkAgentEligibility(

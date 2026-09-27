@@ -376,8 +376,10 @@ export default function SequencesTab() {
 
   const toggleStatus = async (id: string, current: string) => {
     const next = current === "active" ? "paused" : "active";
-    await updateSequence({ id, data: { status: next } satisfies UpdateSequenceBody });
-    void qc.invalidateQueries({ queryKey: getGetSequencesQueryKey() });
+    try {
+      await updateSequence({ id, data: { status: next } satisfies UpdateSequenceBody });
+      void qc.invalidateQueries({ queryKey: getGetSequencesQueryKey() });
+    } catch { toast.error("Failed to update sequence"); }
   };
 
   return (

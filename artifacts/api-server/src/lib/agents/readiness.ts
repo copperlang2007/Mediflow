@@ -48,6 +48,7 @@ import {
   ahipRecordsTable,
   carriersTable,
 } from "@workspace/db";
+import { sellingPlanYear } from "../compliance/planYear";
 // Reuse the canonical "satisfied" status set from the router predicate so the
 // two can never drift (read-only import — we do not change its behaviour).
 import { __testing as readyToSellConstants } from "../leadQueue/readyToSell";
@@ -106,15 +107,16 @@ export const BLOCKER = {
 /**
  * Compute readiness for every agent in `orgId`.
  *
- * @param certificationYear AHIP/cert year to evaluate. Defaults to the current
- *   UTC calendar year (matches readyToSell.ts).
+ * @param certificationYear AHIP/cert year to evaluate. Defaults to the plan
+ *   year being sold on `now` (matches readyToSell.ts).
  * @param now Injectable clock for deterministic expiry checks in tests.
  */
 export async function getOrgReadiness(
   orgId: string,
-  certificationYear: number = new Date().getUTCFullYear(),
+  certificationYear?: number,
   now: Date = new Date(),
 ): Promise<OrgReadiness> {
+  certificationYear ??= sellingPlanYear(now);
   // One row per agent in the org.
   const agents = await db
     .select({

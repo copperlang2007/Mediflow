@@ -68,6 +68,7 @@ import {
   leadsTable,
   leadRoutingTable,
 } from "@workspace/db";
+import { sellingPlanYear } from "../compliance/planYear";
 
 /** Open-lead statuses that count toward an agent's current workload. */
 export const OPEN_LEAD_STATUSES = ["new", "contacted", "qualified"] as const;
@@ -82,9 +83,9 @@ export interface ReadyToSellQuery {
   /** Carrier the lead is being sold (a `carriers.id`). */
   carrierId: string;
   /**
-   * Certification year to check certs/AHIP against. Defaults to the current
-   * UTC calendar year. Exposed so callers can pin a plan year (Medicare AEP
-   * certs for year N+1 are completed in the autumn of year N).
+   * Certification year to check certs/AHIP against. Defaults to the plan year
+   * being sold today (`sellingPlanYear`): the calendar year through Sept 30,
+   * the next year from Oct 1, when AEP marketing for year N+1 opens.
    */
   certificationYear?: number;
   /** Require a current AHIP record. Defaults to true (Medicare path). */
@@ -135,12 +136,12 @@ export async function findReadyToSellAgents(
     orgId,
     stateCode,
     carrierId,
-    certificationYear = new Date().getUTCFullYear(),
     requireAhip = true,
     availableAgentIds,
     inFlightSince,
     now = new Date(),
   } = query;
+  const certificationYear = query.certificationYear ?? sellingPlanYear(now);
 
   // An explicit, empty presence set means nobody is reachable right now —
   // short-circuit before touching the database.
