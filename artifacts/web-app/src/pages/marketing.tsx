@@ -25,6 +25,10 @@ import {
 } from "@/components/ui/dialog";
 import { Megaphone, Plus, Clock, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState, type StatusTone } from "@/components/shared";
+import { PageShell, KpiGrid, FilterBar } from "@/components/ops";
+import { cn } from "@/lib/utils";
+import { ExternalLink } from "lucide-react";
 
 type Status =
   | "draft"
@@ -82,14 +86,14 @@ interface Summary {
   total: number;
 }
 
-const STATUS_CONFIG: Record<Status, { label: string; className: string }> = {
-  draft: { label: "Draft", className: "bg-slate-100 text-slate-600 border-slate-200" },
-  submitted: { label: "Submitted", className: "bg-blue-100 text-blue-800 border-blue-200" },
-  in_review: { label: "In review", className: "bg-violet-100 text-violet-800 border-violet-200" },
-  approved: { label: "Approved", className: "bg-green-100 text-green-800 border-green-200" },
-  rejected: { label: "Rejected", className: "bg-red-100 text-red-800 border-red-200" },
-  changes_requested: { label: "Changes requested", className: "bg-amber-100 text-amber-800 border-amber-200" },
-  retired: { label: "Retired", className: "bg-slate-100 text-slate-500 border-slate-200" },
+const STATUS_CONFIG: Record<Status, { label: string; tone: StatusTone }> = {
+  draft: { label: "Draft", tone: "neutral" },
+  submitted: { label: "Submitted", tone: "info" },
+  in_review: { label: "In review", tone: "navy" },
+  approved: { label: "Approved", tone: "success" },
+  rejected: { label: "Rejected", tone: "danger" },
+  changes_requested: { label: "Changes requested", tone: "warning" },
+  retired: { label: "Retired", tone: "neutral" },
 };
 
 const TYPE_LABEL: Record<MaterialType, string> = {
@@ -163,8 +167,8 @@ function SubmitDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm">
-          <Plus className="h-3.5 w-3.5 mr-1.5" />
+        <Button>
+          <Plus className="h-4 w-4 mr-1.5" />
           Submit material
         </Button>
       </DialogTrigger>
@@ -234,25 +238,27 @@ function MaterialCard({ row }: { row: MaterialRow }) {
   const expired = isExpired(m);
 
   return (
-    <Card>
-      <CardContent className="p-4">
+    <div className="rounded-lg border border-border bg-card p-4 transition-colors hover:bg-muted/30">
         <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+            <Megaphone className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-medium truncate">{m.title}</span>
-              <Badge variant="outline" className={STATUS_CONFIG[m.status].className}>
+              <StatusPill tone={STATUS_CONFIG[m.status].tone}>
                 {STATUS_CONFIG[m.status].label}
-              </Badge>
-              <Badge variant="outline">{TYPE_LABEL[m.materialType]}</Badge>
+              </StatusPill>
+              <StatusPill tone="neutral">{TYPE_LABEL[m.materialType]}</StatusPill>
               {expired && (
-                <Badge variant="outline" className="bg-red-100 text-red-800 border-red-200">
-                  <AlertTriangle className="h-3 w-3 mr-1" />Expired
-                </Badge>
+                <StatusPill tone="danger" className="gap-1">
+                  <AlertTriangle className="h-3 w-3" />Expired
+                </StatusPill>
               )}
               {!expired && expiringSoon && (
-                <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200">
-                  <Clock className="h-3 w-3 mr-1" />Expiring soon
-                </Badge>
+                <StatusPill tone="warning" className="gap-1">
+                  <Clock className="h-3 w-3" />Expiring soon
+                </StatusPill>
               )}
             </div>
             {m.description && <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{m.description}</p>}
@@ -262,13 +268,13 @@ function MaterialCard({ row }: { row: MaterialRow }) {
               {row.submitterName && <span>By {row.submitterName}</span>}
               {m.status === "approved" && <span>Use {fmtDate(m.effectiveDate)} – {fmtDate(m.expiresAt)}</span>}
               {m.fileUrl && (
-                <a href={m.fileUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                  View asset
+                <a href={m.fileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-accent hover:underline">
+                  View asset <ExternalLink className="h-3 w-3" />
                 </a>
               )}
             </div>
             {m.reviewNotes && (
-              <p className="text-xs mt-1.5 text-amber-700">Reviewer: {m.reviewNotes}</p>
+              <p className="text-xs mt-2 rounded-md bg-warning/10 px-2.5 py-1.5 text-amber-800 dark:text-warning">Reviewer note: {m.reviewNotes}</p>
             )}
           </div>
           <div className="shrink-0">
@@ -280,8 +286,7 @@ function MaterialCard({ row }: { row: MaterialRow }) {
             </Select>
           </div>
         </div>
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
@@ -306,48 +311,67 @@ export default function MarketingPage() {
     },
   });
 
-  const cards = [
-    { key: "pendingReview", label: "Pending review", value: summary?.pendingReview ?? 0, icon: Megaphone, className: "text-blue-600" },
-    { key: "approved", label: "Approved", value: summary?.approved ?? 0, icon: CheckCircle2, className: "text-green-600" },
-    { key: "expiringSoon", label: "Expiring soon", value: summary?.expiringSoon ?? 0, icon: Clock, className: "text-amber-600" },
-    { key: "expired", label: "Expired", value: summary?.expired ?? 0, icon: AlertTriangle, className: "text-red-600" },
-  ] as const;
+  const filtered = statusFilter !== "all" || typeFilter !== "all";
+  const total = summary?.total ?? 0;
 
   return (
-    <div className="p-6 space-y-5 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Marketing Approval</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Submit and review marketing materials — only approved, in-window pieces should be used
-          </p>
-        </div>
+    <PageShell>
+      <PageHeader
+        title="Marketing Approval"
+        subtitle="Get flyers, ads and scripts approved before anyone uses them — only approved, in-date pieces are safe to share"
+      >
         <SubmitDialog />
-      </div>
+      </PageHeader>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {cards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <button
-              key={card.key}
-              onClick={() => {
-                if (card.key === "pendingReview") setStatusFilter((s) => (s === "submitted" ? "all" : "submitted"));
-                else if (card.key === "approved") setStatusFilter((s) => (s === "approved" ? "all" : "approved"));
-              }}
-              className="rounded-lg border p-4 text-left transition-all hover:shadow-sm"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{card.label}</span>
-                <Icon className={`h-4 w-4 ${card.className}`} />
-              </div>
-              <div className={`text-2xl font-bold mt-1 ${card.className}`}>{card.value}</div>
-            </button>
-          );
-        })}
-      </div>
+      <KpiGrid>
+        <button
+          type="button"
+          className="text-left"
+          onClick={() => setStatusFilter((s) => (s === "submitted" ? "all" : "submitted"))}
+          aria-pressed={statusFilter === "submitted"}
+        >
+          <KpiCard
+            label="Waiting for review"
+            value={summary?.pendingReview ?? 0}
+            icon={Megaphone}
+            color="navy"
+            className={cn("hover:shadow-lg", statusFilter === "submitted" && "ring-2 ring-offset-2 ring-accent ring-offset-background")}
+            hint={(summary?.pendingReview ?? 0) === 0 ? "Review queue is clear" : "Click to show only these"}
+          />
+        </button>
+        <button
+          type="button"
+          className="text-left"
+          onClick={() => setStatusFilter((s) => (s === "approved" ? "all" : "approved"))}
+          aria-pressed={statusFilter === "approved"}
+        >
+          <KpiCard
+            label="Approved"
+            value={summary?.approved ?? 0}
+            icon={CheckCircle2}
+            color="green"
+            className={cn("hover:shadow-lg", statusFilter === "approved" && "ring-2 ring-offset-2 ring-success ring-offset-background")}
+            hint="Safe to use while in date"
+          />
+        </button>
+        <KpiCard
+          label="Expiring in 30 days"
+          value={summary?.expiringSoon ?? 0}
+          icon={Clock}
+          color="blue"
+          hint={(summary?.expiringSoon ?? 0) === 0 ? "Nothing expiring soon" : "Plan a refresh"}
+        />
+        <KpiCard
+          label="Expired"
+          value={summary?.expired ?? 0}
+          icon={AlertTriangle}
+          color="orange"
+          hint={(summary?.expired ?? 0) === 0 ? "Nothing out of date — nice" : "Stop using these"}
+        />
+      </KpiGrid>
 
-      <div className="flex items-center gap-3 flex-wrap">
+      <SectionCard title="Materials" description="Everything submitted, newest first. Reviewers can change the status on each row.">
+      <FilterBar>
         <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "all" | Status)}>
           <SelectTrigger className="w-[180px] h-9"><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>
@@ -362,21 +386,32 @@ export default function MarketingPage() {
             {TYPES.map((t) => <SelectItem key={t} value={t}>{TYPE_LABEL[t]}</SelectItem>)}
           </SelectContent>
         </Select>
-      </div>
+      </FilterBar>
 
       {isLoading ? (
         <div className="space-y-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-24 w-full" />)}</div>
       ) : (rows ?? []).length === 0 ? (
-        <Card>
-          <CardContent className="p-10 text-center text-sm text-muted-foreground">
-            No marketing materials match the current filters.
-          </CardContent>
-        </Card>
+        filtered || total > 0 ? (
+          <EmptyState
+            icon={Megaphone}
+            title="No marketing materials match the current filters."
+            description="Try a different status or type."
+          />
+        ) : (
+          <EmptyState
+            icon={Megaphone}
+            title="Nothing submitted yet"
+            description="Before you share a flyer, social post or call script with clients, submit it here. A reviewer approves it and sets the dates it can be used."
+          >
+            <SubmitDialog />
+          </EmptyState>
+        )
       ) : (
         <div className="space-y-3">
           {(rows ?? []).map((row) => <MaterialCard key={row.material.id} row={row} />)}
         </div>
       )}
-    </div>
+      </SectionCard>
+    </PageShell>
   );
 }

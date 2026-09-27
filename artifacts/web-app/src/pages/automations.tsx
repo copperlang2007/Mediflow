@@ -36,6 +36,10 @@ import {
   type CreateAutomationRuleBody,
 } from "@workspace/api-client-react";
 import { useQuery } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
+import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState } from "@/components/shared";
+import { PageShell, KpiGrid } from "@/components/ops";
+import { History, Workflow } from "lucide-react";
 
 // ---- Constants ----
 
@@ -87,9 +91,9 @@ const ACTION_OPTIONS = [
 ];
 
 const RESULT_ICONS = {
-  success: <CheckCircle2 className="h-4 w-4 text-green-500" />,
-  partial: <AlertCircle className="h-4 w-4 text-yellow-500" />,
-  failed: <XCircle className="h-4 w-4 text-red-500" />,
+  success: <CheckCircle2 className="h-4 w-4 text-success" />,
+  partial: <AlertCircle className="h-4 w-4 text-warning" />,
+  failed: <XCircle className="h-4 w-4 text-destructive" />,
 };
 
 // ---- Action Config Editor ----
@@ -494,15 +498,17 @@ function RuleCard({ rule }: { rule: AutomationRule }) {
 
   return (
     <>
-      <Card className={!rule.isActive ? "opacity-60" : ""}>
-        <CardContent className="p-4">
+      <div className={cn("rounded-lg border border-border bg-card p-4 transition-colors hover:bg-muted/30", !rule.isActive && "opacity-70")}>
           <div className="flex items-start justify-between gap-3">
+            <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg", rule.isActive ? "bg-accent/10 text-accent" : "bg-muted text-muted-foreground")}>
+              <Zap className="h-5 w-5" />
+            </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium text-sm truncate">{rule.name}</span>
-                <Badge variant={rule.isActive ? "default" : "secondary"} className="text-[10px]">
-                  {rule.isActive ? "Active" : "Disabled"}
-                </Badge>
+                <StatusPill tone={rule.isActive ? "success" : "neutral"}>
+                  {rule.isActive ? "On" : "Paused"}
+                </StatusPill>
               </div>
               <div className="flex items-center gap-3 mt-1 flex-wrap">
                 <span className="text-xs text-muted-foreground flex items-center gap-1">
@@ -528,15 +534,14 @@ function RuleCard({ rule }: { rule: AutomationRule }) {
                 <ChevronRight className="h-3.5 w-3.5" />
               </Button>
               <Button size="icon" variant="ghost" className="h-8 w-8" title={rule.isActive ? "Disable" : "Enable"} onClick={() => void handleToggle()}>
-                {rule.isActive ? <ToggleRight className="h-4 w-4 text-primary" /> : <ToggleLeft className="h-4 w-4" />}
+                {rule.isActive ? <ToggleRight className="h-5 w-5 text-success" /> : <ToggleLeft className="h-5 w-5" />}
               </Button>
               <Button size="icon" variant="ghost" className="h-8 w-8" title="Delete" onClick={() => void handleDelete()}>
                 <Trash2 className="h-3.5 w-3.5 text-destructive" />
               </Button>
             </div>
           </div>
-        </CardContent>
-      </Card>
+      </div>
 
       {editOpen && <RuleBuilderDialog open={editOpen} onClose={() => setEditOpen(false)} editRule={rule} />}
       {logsOpen && <RuleLogsModal rule={rule} open={logsOpen} onClose={() => setLogsOpen(false)} />}
@@ -566,8 +571,8 @@ type RecentActivityResponse = {
   total: number;
 };
 
-function RecentActivityCard() {
-  const { data, isLoading } = useQuery({
+function useRecentActivity() {
+  return useQuery({
     queryKey: ["/api/automations/recent-activity"],
     queryFn: () =>
       customFetch<RecentActivityResponse>(
@@ -576,49 +581,25 @@ function RecentActivityCard() {
     refetchInterval: 30_000,
     staleTime: 10_000,
   });
+}
 
-  if (isLoading) {
-    return <Skeleton className="h-40 w-full" />;
-  }
-  if (!data) return null;
-
-  const { recent, last24h } = data;
-  const total24h = last24h.success + last24h.partial + last24h.failed;
+function RecentActivityCard() {
+  const { data, isLoading } = useRecentActivity();
 
   return (
-    <Card>
-      <CardHeader className="pb-2 pt-4 px-5">
-        <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-          Recent activity (last 24h: {total24h} run{total24h !== 1 ? "s" : ""}
-          {total24h > 0 && (
-            <>
-              {" — "}
-              <span className="text-green-700">{last24h.success}✓</span>
-              {last24h.partial > 0 && (
-                <>
-                  {" "}
-                  · <span className="text-amber-700">{last24h.partial}⚠</span>
-                </>
-              )}
-              {last24h.failed > 0 && (
-                <>
-                  {" "}
-                  · <span className="text-red-700">{last24h.failed}✗</span>
-                </>
-              )}
-            </>
-          )}
-          )
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="px-5 pb-4">
-        {recent.length === 0 ? (
-          <p className="py-6 text-center text-xs text-muted-foreground">
-            No automation runs yet — rules will execute when their triggers fire.
-          </p>
-        ) : (
-          <div className="space-y-1 max-h-72 overflow-y-auto">
-            {recent.map((row) => {
+    <SectionCard title="Recent runs" description="The last 20 times a rule fired" icon={History}>
+      {isLoading ? (
+        <Skeleton className="h-40 w-full" />
+      ) : !data || data.recent.length === 0 ? (
+        <EmptyState
+          compact
+          icon={Clock}
+          title="No automation runs yet"
+          description="Rules run by themselves when their trigger happens. Each run is listed here."
+        />
+      ) : (
+          <div className="space-y-1 max-h-[28rem] overflow-y-auto -mx-1">
+            {data.recent.map((row) => {
               const Icon =
                 row.result === "success"
                   ? CheckCircle2
@@ -627,31 +608,32 @@ function RecentActivityCard() {
                   : XCircle;
               const colorClass =
                 row.result === "success"
-                  ? "text-green-600"
+                  ? "text-success"
                   : row.result === "partial"
-                  ? "text-amber-600"
-                  : "text-red-600";
+                  ? "text-warning"
+                  : "text-destructive";
               return (
                 <div
                   key={row.id}
-                  className="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-muted/40 text-sm"
+                  className="flex items-start gap-2.5 px-2 py-2 rounded-md hover:bg-muted/40 text-sm"
                 >
-                  <Icon className={`h-3.5 w-3.5 shrink-0 ${colorClass}`} />
-                  <span className="font-medium truncate">{row.ruleName}</span>
-                  <span className="text-xs text-muted-foreground truncate hidden sm:inline">
-                    {row.triggerEvent}
-                    {row.matchedRecordType ? ` · ${row.matchedRecordType}` : ""}
-                  </span>
-                  <span className="text-xs text-muted-foreground/80 ml-auto shrink-0 tabular-nums">
+                  <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${colorClass}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium truncate">{row.ruleName}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {row.triggerEvent}
+                      {row.matchedRecordType ? ` · ${row.matchedRecordType}` : ""}
+                    </p>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground/80 shrink-0 tabular-nums">
                     {formatDistanceToNow(new Date(row.executedAt), { addSuffix: true })}
                   </span>
                 </div>
               );
             })}
           </div>
-        )}
-      </CardContent>
-    </Card>
+      )}
+    </SectionCard>
   );
 }
 
@@ -666,58 +648,82 @@ export default function AutomationsPage() {
   const total = data?.total ?? 0;
   const activeCount = rules.filter((r) => r.isActive).length;
 
+  const activity = useRecentActivity();
+  const last24h = activity.data?.last24h;
+  const runs24h = last24h ? last24h.success + last24h.partial + last24h.failed : 0;
+
   return (
-    <div className="p-6 space-y-5 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Automation Rules</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {total} rule{total !== 1 ? "s" : ""} · {activeCount} active
-          </p>
-        </div>
+    <PageShell>
+      <PageHeader
+        title="Automations"
+        subtitle="Let Mediflow do the repetitive work — when something happens, it creates the task, sends the message or updates the record for you"
+      >
         <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4 mr-1" />New Rule
+          <Plus className="h-4 w-4 mr-1.5" />New rule
         </Button>
-      </div>
+      </PageHeader>
 
-      <RecentActivityCard />
+      <KpiGrid>
+        <KpiCard label="Rules" value={total} icon={Workflow} color="navy" loading={isLoading} hint={triggerFilter !== "all" ? "Matching this trigger" : "Set up for your agency"} />
+        <KpiCard label="Switched on" value={activeCount} icon={Zap} color="blue" loading={isLoading} hint={`${rules.length - activeCount} paused`} />
+        <KpiCard
+          label="Runs in the last 24h"
+          value={runs24h}
+          icon={CheckCircle2}
+          color="green"
+          loading={activity.isLoading}
+          hint={last24h ? `${last24h.success} succeeded` : undefined}
+        />
+        <KpiCard
+          label="Problems in the last 24h"
+          value={last24h ? last24h.failed + last24h.partial : 0}
+          icon={AlertCircle}
+          color="orange"
+          loading={activity.isLoading}
+          hint={last24h && last24h.failed + last24h.partial === 0 ? "Nothing failed — nice" : "Open a rule's history to see why"}
+        />
+      </KpiGrid>
 
-      {/* Filter */}
-      <div className="flex items-center gap-3">
-        <Select value={triggerFilter} onValueChange={setTriggerFilter}>
-          <SelectTrigger className="w-56 h-8 text-xs">
-            <SelectValue placeholder="Filter by trigger" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All triggers</SelectItem>
-            {TRIGGER_OPTIONS.map((t) => (
-              <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Rules list */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        <SectionCard
+          className="lg:col-span-2"
+          title="Your rules"
+          description="Run one now, see its history, edit it, or switch it off"
+          icon={Zap}
+          actions={
+            <Select value={triggerFilter} onValueChange={setTriggerFilter}>
+              <SelectTrigger className="w-52 h-8 text-xs">
+                <SelectValue placeholder="Filter by trigger" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All triggers</SelectItem>
+                {TRIGGER_OPTIONS.map((t) => (
+                  <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          }
+        >
       {isLoading ? (
         <div className="space-y-3">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}</div>
       ) : rules.length === 0 ? (
-        <Card>
-          <CardContent className="py-16 text-center">
-            <Zap className="h-12 w-12 mx-auto mb-3 text-muted-foreground/20" />
-            <p className="text-sm font-medium text-muted-foreground">No automation rules yet</p>
-            <p className="text-xs text-muted-foreground mt-1">Create rules to automate tasks, notifications, and outreach based on platform events.</p>
-            <Button className="mt-4" onClick={() => setCreateOpen(true)}>
-              <Plus className="h-4 w-4 mr-1" />Create First Rule
-            </Button>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Zap}
+          title={triggerFilter !== "all" ? "No rules use this trigger" : "No automation rules yet"}
+          description="For example: when a license is 30 days from expiring, create a renewal task for the agent and notify an admin."
+          action={{ label: "Create your first rule", onClick: () => setCreateOpen(true) }}
+        />
       ) : (
         <div className="space-y-3">
           {rules.map((rule) => <RuleCard key={rule.id} rule={rule} />)}
         </div>
       )}
+        </SectionCard>
+
+        <RecentActivityCard />
+      </div>
 
       {createOpen && <RuleBuilderDialog open={createOpen} onClose={() => setCreateOpen(false)} />}
-    </div>
+    </PageShell>
   );
 }

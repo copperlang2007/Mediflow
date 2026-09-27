@@ -21,6 +21,9 @@ import {
   CircleDashed,
   CalendarDays,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState } from "@/components/shared";
+import { PageShell, KpiGrid, TableFrame } from "@/components/ops";
 
 interface AepCockpit {
   seasonYear: number;
@@ -77,169 +80,166 @@ const TIMELINE: Array<{ key: keyof AepCockpit["keyDates"]; label: string; note: 
   { key: "renewalDate", label: "Renewal", note: "Plans renew January 1" },
 ];
 
-function KpiCard({
-  label,
-  value,
-  icon: Icon,
-  className,
-  sub,
-}: {
-  label: string;
-  value: number | string;
-  icon: typeof Users;
-  className: string;
-  sub?: string;
-}) {
-  return (
-    <div className="rounded-lg border p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {label}
-        </span>
-        <Icon className={`h-4 w-4 ${className}`} />
-      </div>
-      <div className={`text-2xl font-bold mt-1 ${className}`}>{value}</div>
-      {sub && <div className="text-xs text-muted-foreground mt-0.5">{sub}</div>}
-    </div>
-  );
-}
-
 export default function AepCockpitPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["aep-cockpit"],
     queryFn: () => customFetch<AepCockpit>("/api/aep-cockpit"),
     staleTime: 60_000,
   });
 
+  if (isError && !data) {
+    return (
+      <PageShell>
+        <PageHeader title="AEP Center" subtitle="Annual Enrollment Period readiness" />
+        <SectionCard>
+          <EmptyState
+            icon={AlertTriangle}
+            title="We couldn't load the AEP numbers"
+            description="Please try again in a moment."
+            action={{ label: "Try again", onClick: () => void refetch() }}
+          />
+        </SectionCard>
+      </PageShell>
+    );
+  }
+
   if (isLoading || !data) {
     return (
-      <div className="p-6 space-y-5 max-w-7xl mx-auto">
+      <PageShell>
         <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24 w-full" />)}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-32 w-full rounded-xl" />)}
         </div>
-        <Skeleton className="h-64 w-full" />
-      </div>
+        <Skeleton className="h-64 w-full rounded-xl" />
+      </PageShell>
     );
   }
 
   const planEntries = Object.entries(data.members.byPlanType);
+  const now = Date.now();
+  const nextKey = TIMELINE.find((t) => new Date(data.keyDates[t.key]).getTime() >= now)?.key;
 
   return (
-    <div className="p-6 space-y-5 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">AEP Command Center</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {data.seasonYear} season readiness — members renew Jan 1, {data.seasonYear + 1}.
-            Reviews should be set before Oct 1.
-          </p>
-        </div>
-        <Badge variant="outline" className="text-xs">
-          Season {data.seasonYear}
-        </Badge>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="AEP Center"
+        subtitle={`Get every member reviewed before the ${data.seasonYear} Annual Enrollment Period — plans renew Jan 1, ${data.seasonYear + 1}. Aim to set reviews before Oct 1.`}
+      >
+        <StatusPill tone="navy" className="text-sm px-3 py-1">Season {data.seasonYear}</StatusPill>
+      </PageHeader>
 
-      {/* Coverage + completion hero */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <ClipboardCheck className="h-4 w-4 text-blue-600" />
-              Review coverage
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-end justify-between">
-              <div className="text-3xl font-bold">{pct(data.members.coverageRate)}</div>
-              <div className="text-sm text-muted-foreground">
-                {data.members.withReviewTask} of {data.members.total} members have a review task
-              </div>
-            </div>
-            <Progress value={data.members.coverageRate * 100} className="mt-3" />
-            {data.members.withoutReviewTask > 0 && (
-              <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
-                <AlertTriangle className="h-3 w-3" />
-                {data.members.withoutReviewTask} member
-                {data.members.withoutReviewTask === 1 ? "" : "s"} still need a review task
-              </p>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4 text-green-600" />
-              Review completion
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-end justify-between">
-              <div className="text-3xl font-bold">{pct(data.reviewTasks.completionRate)}</div>
-              <div className="text-sm text-muted-foreground">
-                {data.reviewTasks.completed} of {data.reviewTasks.total} review tasks done
-              </div>
-            </div>
-            <Progress value={data.reviewTasks.completionRate * 100} className="mt-3" />
-            {data.reviewTasks.overdue > 0 && (
-              <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
-                <AlertTriangle className="h-3 w-3" />
-                {data.reviewTasks.overdue} overdue
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* KPI row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <KpiGrid>
         <KpiCard
-          label="Members"
+          label="Members to review"
           value={data.members.total}
           icon={Users}
-          className="text-slate-700"
-          sub={planEntries.map(([k, v]) => `${k} ${v}`).join(" · ") || undefined}
+          color="navy"
+          hint={planEntries.map(([k, v]) => `${k} ${v}`).join(" · ") || "No members on a plan yet"}
         />
-        <KpiCard label="Active reviews" value={data.reviewTasks.active} icon={CircleDashed} className="text-blue-600" />
-        <KpiCard label="Completed" value={data.reviewTasks.completed} icon={CheckCircle2} className="text-green-600" />
-        <KpiCard label="Overdue" value={data.reviewTasks.overdue} icon={AlertTriangle} className="text-red-600" />
+        <KpiCard
+          label="Reviews in progress"
+          value={data.reviewTasks.active}
+          icon={CircleDashed}
+          color="blue"
+          hint={`${data.reviewTasks.total} review tasks in total`}
+        />
+        <KpiCard
+          label="Reviews completed"
+          value={data.reviewTasks.completed}
+          icon={CheckCircle2}
+          color="green"
+          hint={`${pct(data.reviewTasks.completionRate)} done`}
+        />
+        <KpiCard
+          label="Overdue"
+          value={data.reviewTasks.overdue}
+          icon={AlertTriangle}
+          color="orange"
+          hint={data.reviewTasks.overdue === 0 ? "Nothing overdue — nice" : "Past their due date"}
+        />
+      </KpiGrid>
+
+      {/* Coverage + completion */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <SectionCard title="Review coverage" description="Members who have a review task set up" icon={ClipboardCheck}>
+          <div className="flex items-end justify-between gap-3">
+            <div className="font-display text-4xl font-bold">{pct(data.members.coverageRate)}</div>
+            <div className="text-sm text-muted-foreground text-right">
+              {data.members.withReviewTask} of {data.members.total} members have a review task
+            </div>
+          </div>
+          <Progress value={data.members.coverageRate * 100} className="mt-3 h-2.5" />
+          {data.members.withoutReviewTask > 0 ? (
+            <p className="text-xs text-amber-700 dark:text-warning mt-3 flex items-center gap-1">
+              <AlertTriangle className="h-3 w-3" />
+              {data.members.withoutReviewTask} member
+              {data.members.withoutReviewTask === 1 ? "" : "s"} still need a review task
+            </p>
+          ) : data.members.total > 0 ? (
+            <p className="text-xs text-success mt-3 flex items-center gap-1">
+              <CheckCircle2 className="h-3 w-3" /> Every member has a review task
+            </p>
+          ) : null}
+        </SectionCard>
+        <SectionCard title="Review completion" description="Review tasks marked done" icon={CheckCircle2} iconClassName="text-success">
+          <div className="flex items-end justify-between gap-3">
+            <div className="font-display text-4xl font-bold">{pct(data.reviewTasks.completionRate)}</div>
+            <div className="text-sm text-muted-foreground text-right">
+              {data.reviewTasks.completed} of {data.reviewTasks.total} review tasks done
+            </div>
+          </div>
+          <Progress value={data.reviewTasks.completionRate * 100} className="mt-3 h-2.5" />
+          {data.reviewTasks.overdue > 0 && (
+            <p className="text-xs text-destructive mt-3 flex items-center gap-1">
+              <AlertTriangle className="h-3 w-3" />
+              {data.reviewTasks.overdue} overdue
+            </p>
+          )}
+        </SectionCard>
       </div>
 
       {/* Key dates timeline */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <CalendarDays className="h-4 w-4" />
-            Season key dates
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            {TIMELINE.map((t) => (
-              <div key={t.key} className="rounded-lg border p-3">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-                  <CalendarClock className="h-3.5 w-3.5" />
-                  {t.label}
+      <SectionCard title="Season key dates" description="What happens when this season" icon={CalendarDays}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {TIMELINE.map((t) => {
+            const when = new Date(data.keyDates[t.key]).getTime();
+            const past = when < now;
+            const isNext = t.key === nextKey;
+            return (
+              <div
+                key={t.key}
+                className={cn(
+                  "rounded-lg border p-3",
+                  isNext ? "border-accent/50 bg-accent/5" : "border-border",
+                  past && "opacity-60",
+                )}
+              >
+                <div className="flex items-center justify-between gap-1.5 text-xs font-semibold text-muted-foreground">
+                  <span className="flex items-center gap-1.5">
+                    <CalendarClock className="h-3.5 w-3.5" />
+                    {t.label}
+                  </span>
+                  {isNext && <StatusPill tone="info">Next</StatusPill>}
+                  {past && <StatusPill tone="neutral">Done</StatusPill>}
                 </div>
-                <div className="text-sm font-bold mt-1">{fmtDate(data.keyDates[t.key])}</div>
+                <div className="font-display text-base font-bold mt-1.5">{fmtDate(data.keyDates[t.key])}</div>
                 <div className="text-[11px] text-muted-foreground mt-0.5 leading-tight">{t.note}</div>
               </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+            );
+          })}
+        </div>
+      </SectionCard>
 
       {/* Per-agent breakdown */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold">Review progress by agent</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <SectionCard title="Review progress by agent" description="Each agent's share of this season's reviews" icon={Users}>
           {data.byAgent.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-6 text-center">
-              No review tasks yet for this season.
-            </p>
+            <EmptyState
+              icon={ClipboardCheck}
+              title="No review tasks yet for this season."
+              description="When review tasks are created for members, each agent's progress shows up here."
+            />
           ) : (
+            <TableFrame>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -257,12 +257,12 @@ export default function AepCockpitPage() {
                   return (
                     <TableRow key={a.agentId ?? "unassigned"}>
                       <TableCell className="font-medium">{a.agentName}</TableCell>
-                      <TableCell className="text-right">{a.total}</TableCell>
-                      <TableCell className="text-right text-green-700">{a.completed}</TableCell>
-                      <TableCell className="text-right">{a.open}</TableCell>
+                      <TableCell className="text-right tabular-nums">{a.total}</TableCell>
+                      <TableCell className="text-right tabular-nums text-success font-medium">{a.completed}</TableCell>
+                      <TableCell className="text-right tabular-nums">{a.open}</TableCell>
                       <TableCell className="text-right">
                         {a.overdue > 0 ? (
-                          <span className="text-red-600 font-medium">{a.overdue}</span>
+                          <StatusPill tone="danger">{a.overdue}</StatusPill>
                         ) : (
                           <span className="text-muted-foreground">0</span>
                         )}
@@ -278,9 +278,9 @@ export default function AepCockpitPage() {
                 })}
               </TableBody>
             </Table>
+            </TableFrame>
           )}
-        </CardContent>
-      </Card>
-    </div>
+      </SectionCard>
+    </PageShell>
   );
 }

@@ -20,6 +20,17 @@ import {
 } from "@/lib/queue/api";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
+import { EmptyState } from "@/components/shared";
+import { PageShell } from "@/components/ops";
+import { Lock } from "lucide-react";
+import type { CSSProperties } from "react";
+
+const TILE_BG: Record<"default" | "good" | "warn" | "alarm", CSSProperties> = {
+  default: { backgroundImage: "linear-gradient(135deg, var(--kpi-blue-from), var(--kpi-blue-to))" },
+  good: { backgroundImage: "linear-gradient(135deg, var(--kpi-green-from), var(--kpi-green-to))" },
+  warn: { backgroundImage: "linear-gradient(135deg, var(--kpi-orange-from), var(--kpi-orange-to))" },
+  alarm: { backgroundImage: "linear-gradient(135deg, var(--kpi-orange-from), var(--kpi-orange-to))" },
+};
 
 const STATUS_LABEL: Record<string, string> = {
   available: "Available",
@@ -72,23 +83,15 @@ function Tile({
   sub?: string;
   tone?: "default" | "good" | "warn" | "alarm";
 }) {
-  const toneClass =
-    tone === "good"
-      ? "text-emerald-400"
-      : tone === "warn"
-        ? "text-amber-400"
-        : tone === "alarm"
-          ? "text-rose-400"
-          : "text-white";
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 px-6 py-5">
-      <div className="text-sm font-semibold uppercase tracking-[0.2em] text-white/50">
+    <div className="rounded-2xl px-6 py-5 shadow-lg" style={TILE_BG[tone]}>
+      <div className="text-sm font-semibold uppercase tracking-[0.2em] text-white/70">
         {label}
       </div>
-      <div className={cn("mt-2 text-6xl font-black tabular-nums", toneClass)}>
+      <div className="mt-2 font-display text-6xl font-bold tabular-nums text-white">
         {value}
       </div>
-      {sub ? <div className="mt-1 text-lg text-white/60">{sub}</div> : null}
+      {sub ? <div className="mt-1 text-lg text-white/80">{sub}</div> : null}
     </div>
   );
 }
@@ -120,16 +123,17 @@ export default function QueueWallboardPage() {
 
   if (!meLoading && !isAdmin) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <Card>
-          <CardContent
-            className="py-10 text-center text-sm text-muted-foreground"
-            data-testid="wallboard-forbidden"
-          >
-            You don&apos;t have access to the queue wallboard.
+      <PageShell>
+        <Card className="rounded-xl">
+          <CardContent className="p-0" data-testid="wallboard-forbidden">
+            <EmptyState
+              icon={Lock}
+              title="You don't have access to the queue wallboard."
+              description="The wallboard is available to agency admins."
+            />
           </CardContent>
         </Card>
-      </div>
+      </PageShell>
     );
   }
 
@@ -159,13 +163,13 @@ export default function QueueWallboardPage() {
 
   return (
     <div
-      className="min-h-full bg-slate-950 text-white p-8"
+      className="min-h-full bg-gradient-to-br from-navy-950 via-navy-900 to-navy-800 text-white p-8"
       data-testid="wallboard"
     >
       {/* Header: title + live clock */}
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-4xl font-black tracking-tight">Inbound Queue</h1>
+          <h1 className="font-display text-4xl font-bold tracking-tight">Inbound Queue</h1>
           <p className="mt-1 text-lg text-white/50">
             Live floor wallboard · last 24 hours
           </p>
@@ -183,7 +187,7 @@ export default function QueueWallboardPage() {
             </span>
           </div>
           <div
-            className="text-5xl font-black tabular-nums"
+            className="font-display text-5xl font-bold tabular-nums"
             data-testid="wallboard-clock"
           >
             {clock}
@@ -201,8 +205,8 @@ export default function QueueWallboardPage() {
               </div>
               <div
                 className={cn(
-                  "mt-1 text-8xl font-black tabular-nums leading-none",
-                  availableCount > 0 ? "text-emerald-400" : "text-rose-400",
+                  "mt-1 font-display text-8xl font-bold tabular-nums leading-none",
+                  availableCount > 0 ? "text-emerald-400" : agents.length === 0 ? "text-white/80" : "text-amber-400",
                 )}
                 data-testid="wallboard-available-count"
               >
@@ -240,9 +244,16 @@ export default function QueueWallboardPage() {
                 ))}
               </div>
             ) : (
-              <div className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-6 py-10 text-center text-2xl font-bold text-rose-300">
-                No agents available
-              </div>
+              agents.length === 0 ? (
+                <div className="rounded-xl border border-white/15 bg-white/5 px-6 py-10 text-center">
+                  <div className="font-display text-2xl font-bold text-white/85">No agents on the floor yet</div>
+                  <div className="mt-2 text-lg text-white/55">Agents show up here as soon as they set themselves available</div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-6 py-10 text-center font-display text-2xl font-bold text-amber-300">
+                  No agents available
+                </div>
+              )
             )}
           </div>
         </div>
@@ -306,8 +317,8 @@ export default function QueueWallboardPage() {
             ))}
           </div>
         ) : (
-          <div className="mt-4 text-2xl font-bold text-emerald-400">
-            Full coverage — no gaps in the last 24h
+          <div className="mt-4 font-display text-2xl font-bold text-emerald-400">
+            {total === 0 ? "No calls yet in the last 24h — nothing to flag" : "Full coverage — no gaps in the last 24h"}
           </div>
         )}
       </div>

@@ -26,6 +26,10 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
+import { PageHeader, KpiCard, SectionCard, StatusPill, type StatusTone } from "@/components/shared";
+import { PageShell, KpiGrid, NoticeBanner } from "@/components/ops";
+import { Users, Contact, CalendarClock, Sparkles } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type PlanTier = "starter" | "growth" | "agency";
 
@@ -78,23 +82,23 @@ function money(cents: number): string {
 }
 
 /** Maps a subscription status to the badge the header should show. */
-function statusBadge(sub: Subscription) {
+function statusBadge(sub: Subscription): { label: string; tone: StatusTone } {
   if (!sub.billingConfigured) {
-    return { label: "Unbilled deployment", variant: "secondary" as const };
+    return { label: "Unbilled deployment", tone: "neutral" };
   }
   switch (sub.status) {
     case "active":
-      return { label: "Active", variant: "default" as const };
+      return { label: "Active", tone: "success" };
     case "trialing":
-      return { label: "Trial", variant: "default" as const };
+      return { label: "Trial", tone: "info" };
     case "past_due":
-      return { label: "Past due", variant: "destructive" as const };
+      return { label: "Past due", tone: "danger" };
     case "canceled":
-      return { label: "Canceled", variant: "destructive" as const };
+      return { label: "Canceled", tone: "danger" };
     case "unpaid":
-      return { label: "Unpaid", variant: "destructive" as const };
+      return { label: "Unpaid", tone: "danger" };
     default:
-      return { label: "No subscription", variant: "secondary" as const };
+      return { label: "No subscription", tone: "neutral" };
   }
 }
 
@@ -120,7 +124,7 @@ function UsageMeter({
           {unlimited ? " / unlimited" : ` / ${limit.toLocaleString()}`}
         </span>
       </div>
-      {!unlimited && <Progress value={pct} className="h-2" />}
+      {!unlimited ? <Progress value={pct} className="h-2" /> : <div className="h-2 rounded-full bg-success/20" />}
     </div>
   );
 }
@@ -166,7 +170,7 @@ export default function BillingPage() {
 
   if (subLoading || plansLoading) {
     return (
-      <div className="p-6 max-w-5xl mx-auto space-y-6">
+      <PageShell>
         <Skeleton className="h-8 w-56" />
         <Skeleton className="h-40 rounded-xl" />
         <div className="grid gap-4 md:grid-cols-3">
@@ -174,13 +178,13 @@ export default function BillingPage() {
             <Skeleton key={i} className="h-80 rounded-xl" />
           ))}
         </div>
-      </div>
+      </PageShell>
     );
   }
 
   if (!sub || !catalog) {
     return (
-      <div className="p-6 max-w-5xl mx-auto">
+      <PageShell>
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Billing unavailable</AlertTitle>
@@ -189,7 +193,7 @@ export default function BillingPage() {
             this persists.
           </AlertDescription>
         </Alert>
-      </div>
+      </PageShell>
     );
   }
 
@@ -197,30 +201,46 @@ export default function BillingPage() {
   const currentIndex = TIER_ORDER.indexOf(sub.tier);
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <CreditCard className="h-6 w-6 text-muted-foreground" />
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Billing &amp; plan
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Manage your subscription, seats, and payment method.
-          </p>
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Billing & plan"
+        subtitle="Your plan, what you're using, and how you pay. Card details are handled by Stripe and never stored here."
+      >
+        <StatusPill tone={badge.tone} className="text-sm px-3 py-1">{badge.label}</StatusPill>
+      </PageHeader>
 
       {!sub.billingConfigured && (
-        <Alert>
-          <Info className="h-4 w-4" />
-          <AlertTitle>This deployment does not take payments</AlertTitle>
-          <AlertDescription>
-            No Stripe keys are configured, so every feature is unlocked and no
-            limits are enforced. Set <code>STRIPE_SECRET_KEY</code> and the{" "}
-            <code>STRIPE_PRICE_*</code> variables to turn on billing.
-          </AlertDescription>
-        </Alert>
+        <NoticeBanner icon={Info} title="This deployment does not take payments">
+          No Stripe keys are configured, so every feature is unlocked and no
+          limits are enforced. Set <code>STRIPE_SECRET_KEY</code> and the{" "}
+          <code>STRIPE_PRICE_*</code> variables to turn on billing.
+        </NoticeBanner>
       )}
+
+      <KpiGrid>
+        <KpiCard label="Current plan" value={sub.plan.name} icon={Sparkles} color="navy" hint={money(sub.plan.monthlyPriceCents) + (sub.plan.monthlyPriceCents > 0 ? " per month" : "")} />
+        <KpiCard
+          label="Agents"
+          value={sub.usage.agents.toLocaleString()}
+          icon={Users}
+          color="blue"
+          hint={sub.plan.limits.agents === null ? "No limit on your plan" : `of ${sub.plan.limits.agents.toLocaleString()} on your plan`}
+        />
+        <KpiCard
+          label="Contacts"
+          value={sub.usage.contacts.toLocaleString()}
+          icon={Contact}
+          color="green"
+          hint={sub.plan.limits.contacts === null ? "No limit on your plan" : `of ${sub.plan.limits.contacts.toLocaleString()} on your plan`}
+        />
+        <KpiCard
+          label={sub.cancelAtPeriodEnd ? "Access ends" : "Renews"}
+          value={<span className="text-2xl">{sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd).toLocaleDateString() : "—"}</span>}
+          icon={CalendarClock}
+          color="orange"
+          hint={sub.currentPeriodEnd ? (sub.hasPaymentMethod ? "Card on file" : "No card on file") : "No billing period"}
+        />
+      </KpiGrid>
 
       {sub.status === "past_due" && (
         <Alert variant="destructive">
@@ -233,13 +253,12 @@ export default function BillingPage() {
         </Alert>
       )}
 
-      <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
-          <CardTitle className="flex items-center gap-2">
-            {sub.plan.name} plan
-            <Badge variant={badge.variant}>{badge.label}</Badge>
-          </CardTitle>
-          {sub.hasPaymentMethod && (
+      <SectionCard
+        title={`${sub.plan.name} plan`}
+        description={sub.plan.blurb}
+        icon={CreditCard}
+        contentClassName="space-y-5"
+        actions={sub.hasPaymentMethod ? (
             <Button
               variant="outline"
               size="sm"
@@ -253,10 +272,8 @@ export default function BillingPage() {
               )}
               Manage in Stripe
             </Button>
-          )}
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <p className="text-sm text-muted-foreground">{sub.plan.blurb}</p>
+          ) : undefined}
+      >
 
           {sub.currentPeriodEnd && (
             <p className="text-sm">
@@ -281,8 +298,7 @@ export default function BillingPage() {
               limit={sub.plan.limits.contacts}
             />
           </div>
-        </CardContent>
-      </Card>
+      </SectionCard>
 
       <div className="grid gap-4 md:grid-cols-3">
         {catalog.plans.map((plan) => {
@@ -292,12 +308,17 @@ export default function BillingPage() {
           return (
             <Card
               key={plan.tier}
-              className={isCurrent ? "border-primary shadow-sm" : undefined}
+              className={cn("relative rounded-xl shadow-sm", isCurrent && "border-2 border-navy-800 dark:border-primary shadow-md")}
             >
+              {isCurrent && (
+                <span className="absolute -top-2.5 left-4 rounded-full bg-navy-800 px-2.5 py-0.5 text-[11px] font-semibold text-white dark:bg-primary dark:text-primary-foreground">
+                  Your plan
+                </span>
+              )}
               <CardHeader>
-                <CardTitle className="flex items-baseline justify-between">
+                <CardTitle className="flex items-baseline justify-between font-display">
                   <span>{plan.name}</span>
-                  <span className="text-2xl font-semibold">
+                  <span className="text-2xl font-bold">
                     {money(plan.monthlyPriceCents)}
                     {plan.monthlyPriceCents > 0 && (
                       <span className="text-sm font-normal text-muted-foreground">
@@ -314,13 +335,13 @@ export default function BillingPage() {
 
                 <ul className="space-y-2 text-sm">
                   <li className="flex items-center gap-2">
-                    <Check className="h-4 w-4 shrink-0 text-primary" />
+                    <Check className="h-4 w-4 shrink-0 text-success" />
                     {plan.limits.agents === null
                       ? "Unlimited agents"
                       : `Up to ${plan.limits.agents} agents`}
                   </li>
                   <li className="flex items-center gap-2">
-                    <Check className="h-4 w-4 shrink-0 text-primary" />
+                    <Check className="h-4 w-4 shrink-0 text-success" />
                     {plan.limits.contacts === null
                       ? "Unlimited contacts"
                       : `${plan.limits.contacts.toLocaleString()} contacts`}
@@ -329,7 +350,7 @@ export default function BillingPage() {
                     .filter(([, on]) => on)
                     .map(([key]) => (
                       <li key={key} className="flex items-center gap-2">
-                        <Check className="h-4 w-4 shrink-0 text-primary" />
+                        <Check className="h-4 w-4 shrink-0 text-success" />
                         {FEATURE_LABELS[key] ?? key}
                       </li>
                     ))}
@@ -370,6 +391,6 @@ export default function BillingPage() {
           );
         })}
       </div>
-    </div>
+    </PageShell>
   );
 }

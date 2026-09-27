@@ -23,6 +23,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PageHeader, SectionCard, StatusPill, EmptyState } from "@/components/shared";
+import { PageShell, TableFrame } from "@/components/ops";
 import { useToast } from "@/hooks/use-toast";
 import {
   Upload, FileSpreadsheet, CheckCircle2, AlertTriangle,
@@ -99,7 +101,7 @@ function StepIndicator({ steps, current }: { steps: string[]; current: number })
     <div className="flex items-center gap-2 mb-8">
       {steps.map((step, i) => (
         <div key={i} className="flex items-center gap-2">
-          <div className={`flex items-center justify-center h-7 w-7 rounded-full text-xs font-bold transition-colors ${i < current ? "bg-green-500 text-white" : i === current ? "bg-blue-600 text-white" : "bg-muted text-muted-foreground"}`}>
+          <div className={`flex items-center justify-center h-7 w-7 rounded-full text-xs font-bold transition-colors ${i < current ? "bg-success text-white" : i === current ? "bg-navy-800 text-white dark:bg-primary dark:text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
             {i < current ? <CheckCircle2 className="h-4 w-4" /> : i + 1}
           </div>
           <span className={`text-sm ${i === current ? "font-medium" : "text-muted-foreground"}`}>{step}</span>
@@ -251,22 +253,22 @@ function ImportWizard({
 
       {/* Step 0: Upload */}
       {step === 0 && (
-        <Card>
+        <Card className="rounded-xl shadow-sm">
           <CardHeader>
-            <CardTitle>{title}</CardTitle>
+            <CardTitle className="font-display text-lg">{title}</CardTitle>
             <CardDescription>{description}</CardDescription>
           </CardHeader>
           <CardContent>
             <div
-              className="border-2 border-dashed rounded-xl p-12 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition-colors"
+              className="border-2 border-dashed rounded-xl p-12 text-center cursor-pointer border-border hover:border-accent hover:bg-accent/5 transition-colors"
               onClick={() => fileInputRef.current?.click()}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFileSelect(f); }}
             >
               {loading ? (
-                <RefreshCcw className="h-10 w-10 text-blue-500 animate-spin mx-auto mb-3" />
+                <RefreshCcw className="h-10 w-10 text-accent animate-spin mx-auto mb-3" />
               ) : (
-                <Upload className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+                <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-accent"><Upload className="h-7 w-7" /></div>
               )}
               <p className="font-medium">Drop your CSV file here or click to browse</p>
               <p className="text-sm text-muted-foreground mt-1">Supports CSV files up to 50MB</p>
@@ -279,9 +281,9 @@ function ImportWizard({
       {/* Step 1: Field Mapping */}
       {step === 1 && uploadData && (
         <div className="space-y-4">
-          <Card>
+          <Card className="rounded-xl shadow-sm">
             <CardHeader>
-              <CardTitle>Map Fields</CardTitle>
+              <CardTitle className="font-display text-lg">Map Fields</CardTitle>
               <CardDescription>
                 File: <span className="font-medium">{file?.name}</span> · {uploadData.totalRows.toLocaleString()} rows detected
               </CardDescription>
@@ -369,29 +371,29 @@ function ImportWizard({
       {step === 2 && validation && (
         <div className="space-y-4">
           <div className={`grid gap-4 ${validation.warningCount !== undefined ? "grid-cols-2 md:grid-cols-4" : "grid-cols-3"}`}>
-            <Card>
+            <Card className="rounded-xl shadow-sm">
               <CardContent className="p-4">
                 <p className="text-sm text-muted-foreground">Total Rows</p>
-                <p className="text-2xl font-bold">{validation.totalRows.toLocaleString()}</p>
+                <p className="font-display text-2xl font-bold">{validation.totalRows.toLocaleString()}</p>
               </CardContent>
             </Card>
-            <Card>
+            <Card className="rounded-xl shadow-sm">
               <CardContent className="p-4">
                 <p className="text-sm text-muted-foreground">Valid Rows</p>
-                <p className="text-2xl font-bold text-green-600">{validation.validRows.toLocaleString()}</p>
+                <p className="font-display text-2xl font-bold text-success">{validation.validRows.toLocaleString()}</p>
               </CardContent>
             </Card>
-            <Card>
+            <Card className="rounded-xl shadow-sm">
               <CardContent className="p-4">
                 <p className="text-sm text-muted-foreground">Errors</p>
-                <p className={`text-2xl font-bold ${validation.errorCount > 0 ? "text-red-500" : "text-green-600"}`}>{validation.errorCount.toLocaleString()}</p>
+                <p className={`font-display text-2xl font-bold ${validation.errorCount > 0 ? "text-destructive" : "text-success"}`}>{validation.errorCount.toLocaleString()}</p>
               </CardContent>
             </Card>
             {validation.warningCount !== undefined && (
-              <Card>
+              <Card className="rounded-xl shadow-sm">
                 <CardContent className="p-4">
                   <p className="text-sm text-muted-foreground">Warnings</p>
-                  <p className="text-2xl font-bold text-yellow-600">{validation.warningCount.toLocaleString()}</p>
+                  <p className="font-display text-2xl font-bold text-warning">{validation.warningCount.toLocaleString()}</p>
                 </CardContent>
               </Card>
             )}
@@ -405,10 +407,10 @@ function ImportWizard({
           )}
 
           {validation.errors.length > 0 && (
-            <Card>
+            <Card className="rounded-xl shadow-sm">
               <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                <CardTitle className="font-display text-lg flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-warning" />
                   Row Issues (showing {Math.min(validation.errors.length, 200)})
                 </CardTitle>
                 <CardDescription>
@@ -427,10 +429,10 @@ function ImportWizard({
                           <TableCell className="text-xs">{e.row > 0 ? e.row : "—"}</TableCell>
                           <TableCell>
                             {e.severity === "warning"
-                              ? <Badge variant="secondary" className="text-xs bg-yellow-100 text-yellow-800">Warning</Badge>
-                              : <Badge variant="destructive" className="text-xs">Error</Badge>}
+                              ? <StatusPill tone="warning">Warning</StatusPill>
+                              : <StatusPill tone="danger">Error</StatusPill>}
                           </TableCell>
-                          <TableCell><Badge variant="secondary" className="text-xs">{e.field}</Badge></TableCell>
+                          <TableCell><StatusPill tone="neutral">{e.field}</StatusPill></TableCell>
                           <TableCell className="text-xs text-muted-foreground">{e.message}</TableCell>
                         </TableRow>
                       ))}
@@ -453,25 +455,25 @@ function ImportWizard({
 
       {/* Step 3: Progress */}
       {step === 3 && (
-        <Card>
+        <Card className="rounded-xl shadow-sm">
           <CardContent className="p-8 text-center">
             {progress?.status === "completed" ? (
               <div className="space-y-4">
-                <CheckCircle2 className="h-16 w-16 text-green-500 mx-auto" />
-                <h3 className="text-xl font-bold">Import Completed!</h3>
+                <CheckCircle2 className="h-16 w-16 text-success mx-auto" />
+                <h3 className="font-display text-xl font-bold">Import Completed!</h3>
                 <p className="text-muted-foreground">{progress.processed.toLocaleString()} rows processed · {progress.errorCount} errors</p>
                 <Button onClick={reset}>Start New Import</Button>
               </div>
             ) : progress?.status === "failed" ? (
               <div className="space-y-4">
-                <AlertTriangle className="h-16 w-16 text-red-500 mx-auto" />
-                <h3 className="text-xl font-bold">Import Failed</h3>
+                <AlertTriangle className="h-16 w-16 text-destructive mx-auto" />
+                <h3 className="font-display text-xl font-bold">Import Failed</h3>
                 <Button onClick={reset}>Try Again</Button>
               </div>
             ) : (
               <div className="space-y-4">
-                <RefreshCcw className="h-16 w-16 text-blue-500 animate-spin mx-auto" />
-                <h3 className="text-xl font-bold">Importing…</h3>
+                <RefreshCcw className="h-16 w-16 text-accent animate-spin mx-auto" />
+                <h3 className="font-display text-xl font-bold">Importing…</h3>
                 <Progress value={progress ? (progress.processed / Math.max(progress.total, 1)) * 100 : 0} className="h-3 max-w-sm mx-auto" />
                 <p className="text-muted-foreground text-sm">
                   {progress ? `${progress.processed.toLocaleString()} / ${progress.total.toLocaleString()} rows` : "Starting…"}
@@ -541,14 +543,14 @@ function GhlLiveSyncCard() {
   if (isLoading || !status) return <Skeleton className="h-28 rounded-xl mb-6" />;
 
   return (
-    <Card className="mb-6">
+    <Card className="mb-6 rounded-xl shadow-sm">
       <CardHeader className="pb-3">
-        <CardTitle className="text-base flex items-center gap-2">
-          <RefreshCcw className={`h-4 w-4 text-blue-600 ${status.running ? "animate-spin" : ""}`} />
+        <CardTitle className="font-display text-lg flex items-center gap-2">
+          <RefreshCcw className={`h-5 w-5 text-accent ${status.running ? "animate-spin" : ""}`} />
           GoHighLevel live sync
           {status.configured
-            ? <Badge className="bg-green-100 text-green-800 text-xs">Connected</Badge>
-            : <Badge variant="secondary" className="text-xs">Not connected</Badge>}
+            ? <StatusPill tone="success">Connected</StatusPill>
+            : <StatusPill tone="neutral">Not connected</StatusPill>}
         </CardTitle>
         <CardDescription>
           {status.configured
@@ -566,7 +568,7 @@ function GhlLiveSyncCard() {
             {!status.backfillCompletedAt && status.lastRunAt && !status.running && <> · first full pull still in progress</>}
           </div>
           {status.lastStatus === "error" && status.lastError && (
-            <p className="text-sm text-red-600 flex items-start gap-1.5"><AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />{status.lastError}</p>
+            <p className="text-sm text-destructive flex items-start gap-1.5"><AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />{status.lastError}</p>
           )}
           <div className="flex gap-2">
             <Button size="sm" onClick={() => trigger(false)} disabled={busy || status.running}>Sync now</Button>
@@ -595,12 +597,17 @@ function ImportHistoryTab() {
   };
 
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">All past import jobs for your organization.</p>
+    <SectionCard title="Import history" description="Every import your agency has run, with a download of any rows that had problems" icon={History}>
       {isLoading ? (
         <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-16 rounded" />)}</div>
+      ) : jobs && jobs.length === 0 ? (
+        <EmptyState
+          icon={History}
+          title="No imports yet"
+          description="When you bring in agents or clients from Monday.com, GoHighLevel or a spreadsheet, each import is listed here."
+        />
       ) : (
-        <Card>
+        <TableFrame>
           <Table>
             <TableHeader>
               <TableRow>
@@ -618,19 +625,16 @@ function ImportHistoryTab() {
               {jobs?.map((job) => (
                 <TableRow key={job.id}>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{new Date(job.createdAt).toLocaleDateString()}</TableCell>
-                  <TableCell><Badge variant="secondary" className="text-xs">{TYPE_LABELS[job.importType] ?? job.importType}</Badge></TableCell>
+                  <TableCell><StatusPill tone="navy">{TYPE_LABELS[job.importType] ?? job.importType}</StatusPill></TableCell>
                   <TableCell className="text-xs text-muted-foreground max-w-32 truncate">{job.fileName ?? "—"}</TableCell>
                   <TableCell>
-                    <Badge variant={job.status === "completed" ? "default" : job.status === "failed" ? "destructive" : "secondary"}
-                      className={`text-xs ${job.status === "completed" ? "bg-green-100 text-green-800" : ""}`}>
-                      {job.status}
-                    </Badge>
+                    <StatusPill status={job.status} />
                   </TableCell>
                   <TableCell className="text-sm">{job.totalRows.toLocaleString()}</TableCell>
-                  <TableCell className="text-sm text-green-600">{job.createdCount.toLocaleString()}</TableCell>
+                  <TableCell className="text-sm text-success font-medium">{job.createdCount.toLocaleString()}</TableCell>
                   <TableCell className="text-sm">
                     {job.errorCount > 0
-                      ? <span className="text-red-500">{job.errorCount.toLocaleString()}</span>
+                      ? <span className="text-destructive font-medium">{job.errorCount.toLocaleString()}</span>
                       : <span className="text-muted-foreground">0</span>
                     }
                     {(job.warningCount ?? 0) > 0 && (
@@ -653,9 +657,9 @@ function ImportHistoryTab() {
               )}
             </TableBody>
           </Table>
-        </Card>
+        </TableFrame>
       )}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -664,21 +668,42 @@ export default function DataMigrationPage() {
   const { data: me } = useGetMe();
 
   if (me && !["super_admin", "agency_admin"].includes(me.role)) {
-    return <div className="p-8 text-center text-muted-foreground">Only admins can access data migration.</div>;
+    return (
+      <PageShell>
+        <SectionCard>
+          <EmptyState icon={Database} title="Only admins can access data migration." description="Ask an agency admin to run imports for you." />
+        </SectionCard>
+      </PageShell>
+    );
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Database className="h-6 w-6 text-blue-600" />
-          Data Migration
-        </h1>
-        <p className="text-muted-foreground mt-1">Import agents from Monday.com, contacts from GoHighLevel, or upload any CSV.</p>
+    <PageShell>
+      <PageHeader
+        title="Import & Migration"
+        subtitle="Bring your agents and clients over from Monday.com, GoHighLevel or any spreadsheet — check everything before it's saved"
+      />
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {[
+          { icon: Upload, title: "1. Upload", text: "Drop in a CSV export from your old system." },
+          { icon: ArrowRight, title: "2. Match & check", text: "Line up your columns and see any problem rows first." },
+          { icon: CheckCircle2, title: "3. Import", text: "Only valid rows are saved. Medicare IDs are encrypted." },
+        ].map((s) => (
+          <div key={s.title} className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 shadow-sm">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-accent">
+              <s.icon className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-display font-semibold text-sm">{s.title}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{s.text}</p>
+            </div>
+          </div>
+        ))}
       </div>
 
       <Tabs defaultValue="monday">
-        <TabsList>
+        <TabsList className="flex-wrap h-auto gap-1">
           <TabsTrigger value="monday" className="flex items-center gap-1.5">
             <Layers className="h-3.5 w-3.5" /> Monday.com (Agents)
           </TabsTrigger>
@@ -753,6 +778,6 @@ export default function DataMigrationPage() {
           </TabsContent>
         </div>
       </Tabs>
-    </div>
+    </PageShell>
   );
 }

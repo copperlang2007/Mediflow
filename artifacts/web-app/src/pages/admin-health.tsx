@@ -28,6 +28,10 @@ import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { Activity, AlertCircle, CheckCircle2, RefreshCcw, XCircle } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { PageHeader, SectionCard, StatusPill, EmptyState } from "@/components/shared";
+import { PageShell } from "@/components/ops";
+import { Database, Cog, Server, Sparkles, Lock } from "lucide-react";
 
 // ---------- Response shape -------------------------------------------------
 // Mirrors `routes/adminHealth.ts`. We intentionally don't import the server
@@ -62,10 +66,95 @@ export interface AiHealthResult {
 }
 
 const PROVIDER_BADGE: Record<HealthProvider, string> = {
-  azure: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  openai: "bg-blue-50 text-blue-700 border-blue-200",
-  unset: "bg-red-50 text-red-700 border-red-200",
+  azure: "bg-success/12 text-success border-success/25",
+  openai: "bg-accent/10 text-accent border-accent/25",
+  unset: "bg-destructive/10 text-destructive border-destructive/25",
 };
+
+// ---------- Core services ---------------------------------------------------
+// GET /api/readyz is the same probe the load balancer uses: it proves the
+// database answers and the background workers are up. Read-only, no PHI.
+
+type ReadyCheck = "ok" | string;
+interface ReadyResponse {
+  status: string;
+  checks?: Record<string, ReadyCheck>;
+}
+
+const SERVICE_LABELS: Record<string, { label: string; text: string; icon: typeof Database }> = {
+  db: { label: "Database", text: "Stores every record", icon: Database },
+  workers: { label: "Background jobs", text: "Reminders, syncs, reconciliation", icon: Cog },
+};
+
+function CoreServicesCard() {
+  const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+  const { data, isLoading, refetch, isFetching, dataUpdatedAt } = useQuery({
+    queryKey: ["system-health", "readyz"],
+    queryFn: async (): Promise<ReadyResponse | null> => {
+      try {
+        const res = await fetch(`${base}/api/readyz`, { credentials: "include" });
+        const body = (await res.json().catch(() => null)) as ReadyResponse | null;
+        return body ?? { status: res.ok ? "ok" : "error" };
+      } catch {
+        return null;
+      }
+    },
+    retry: false,
+    refetchInterval: 60_000,
+  });
+
+  const checks = Object.entries(data?.checks ?? {});
+  const allOk = data?.status === "ok";
+
+  return (
+    <SectionCard
+      title="Core services"
+      description="Checked every minute — the same test our hosting uses to decide if Mediflow is up"
+      icon={Server}
+      actions={
+        <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isFetching}>
+          <RefreshCcw className={`h-4 w-4 mr-1.5 ${isFetching ? "animate-spin" : ""}`} />
+          Check now
+        </Button>
+      }
+    >
+      {isLoading ? (
+        <div className="h-20 animate-pulse rounded-lg bg-muted" />
+      ) : !data ? (
+        <EmptyState compact icon={AlertCircle} title="Couldn't reach the service check" description="Your connection may be down, or the server is restarting." />
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <StatusPill tone={allOk ? "success" : "danger"} className="text-sm px-3 py-1">
+              {allOk ? "All systems running" : "Something needs attention"}
+            </StatusPill>
+            {dataUpdatedAt > 0 && (
+              <span className="text-xs text-muted-foreground">Checked {new Date(dataUpdatedAt).toLocaleTimeString()}</span>
+            )}
+          </div>
+          <div className="grid grid-cols-1 gap-3">
+            {checks.map(([key, value]) => {
+              const meta = SERVICE_LABELS[key] ?? { label: key, text: "", icon: Server };
+              const ok = value === "ok";
+              return (
+                <div key={key} className="flex items-center gap-3 rounded-lg border border-border p-3">
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${ok ? "bg-success/15 text-success" : "bg-destructive/10 text-destructive"}`}>
+                    <meta.icon className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{meta.label}</p>
+                    {meta.text && <p className="text-xs text-muted-foreground">{meta.text}</p>}
+                  </div>
+                  <StatusPill tone={ok ? "success" : "danger"}>{ok ? "Running" : "Down"}</StatusPill>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
 
 const ERROR_LABEL: Record<PingErrorCategory, string> = {
   auth_failed: "Authentication failed",
@@ -81,32 +170,31 @@ export default function AdminHealthPage() {
 
   if (!meLoading && !isAdmin) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <Card>
-          <CardContent
-            className="py-10 text-center text-sm text-muted-foreground"
-            data-testid="admin-health-forbidden"
-          >
-            You don't have access to system health checks.
+      <PageShell>
+        <Card className="rounded-xl">
+          <CardContent className="p-0" data-testid="admin-health-forbidden">
+            <EmptyState
+              icon={Lock}
+              title="You don't have access to system health checks."
+              description="System health is available to agency admins and compliance managers."
+            />
           </CardContent>
         </Card>
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Activity className="h-6 w-6" />
-          System Health
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Verify the AI provider wiring before launching real workflows.
-        </p>
+    <PageShell>
+      <PageHeader
+        title="System Health"
+        subtitle="Is everything running? Check the core services and the AI assistant's connection."
+      />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        <CoreServicesCard />
+        <AiProviderCard />
       </div>
-      <AiProviderCard />
-    </div>
+    </PageShell>
   );
 }
 
@@ -185,9 +273,12 @@ export function AiProviderCard() {
   const hasRun = state.checkedAt !== null;
 
   return (
-    <Card data-testid="ai-health-card">
+    <Card data-testid="ai-health-card" className="rounded-xl shadow-sm">
       <CardHeader>
-        <CardTitle className="text-lg">AI provider</CardTitle>
+        <CardTitle className="font-display text-lg flex items-center gap-2">
+          <Sparkles className="h-5 w-5 text-accent" />
+          AI provider
+        </CardTitle>
         <CardDescription>
           Calls the configured provider with a one-token ping. No PHI is sent.
         </CardDescription>
@@ -230,7 +321,7 @@ export function AiProviderCard() {
 
         {state.error && (
           <div
-            className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+            className="rounded-lg border border-destructive/25 bg-destructive/5 p-3 text-sm text-destructive"
             data-testid="ai-health-fetch-error"
           >
             {state.error}
@@ -270,10 +361,10 @@ function ResultPanel({ result }: { result: AiHealthResult }) {
 
       {result.envIssues.length > 0 && (
         <div data-testid="ai-health-env-issues">
-          <p className="text-sm font-medium text-red-700 mb-1">
+          <p className="text-sm font-medium text-destructive mb-1">
             Environment issues
           </p>
-          <ul className="list-disc list-inside text-sm text-red-700 space-y-0.5">
+          <ul className="list-disc list-inside text-sm text-destructive space-y-0.5">
             {result.envIssues.map((issue, i) => (
               <li key={i} data-testid={`ai-health-env-issue-${i}`}>
                 {issue}
@@ -287,7 +378,7 @@ function ResultPanel({ result }: { result: AiHealthResult }) {
         <p className="text-sm font-medium mb-1">Ping</p>
         {result.ping.ok ? (
           <p
-            className="text-sm text-emerald-700 flex items-center gap-1.5"
+            className="text-sm text-success flex items-center gap-1.5"
             data-testid="ai-health-ping-ok"
           >
             <CheckCircle2 className="h-4 w-4" />
@@ -296,7 +387,7 @@ function ResultPanel({ result }: { result: AiHealthResult }) {
           </p>
         ) : (
           <p
-            className="text-sm text-red-700 flex items-center gap-1.5"
+            className="text-sm text-destructive flex items-center gap-1.5"
             data-testid="ai-health-ping-fail"
           >
             <XCircle className="h-4 w-4" />
@@ -335,9 +426,9 @@ function CheckRow({
   return (
     <div className="flex items-center gap-2 text-sm" data-testid={testId}>
       {ok ? (
-        <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-label="ok" />
+        <CheckCircle2 className="h-4 w-4 text-success" aria-label="ok" />
       ) : (
-        <XCircle className="h-4 w-4 text-red-600" aria-label="not ok" />
+        <XCircle className="h-4 w-4 text-destructive" aria-label="not ok" />
       )}
       <span>{label}</span>
     </div>

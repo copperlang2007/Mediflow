@@ -13,6 +13,10 @@ import { Switch } from "@/components/ui/switch";
 import { Settings, User, Building2, Shield, CalendarClock, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "wouter";
+import { PageHeader, SectionCard, StatusPill } from "@/components/shared";
+import { PageShell } from "@/components/ops";
+import { UserPlus, CreditCard, Lock, ArrowLeftRight, Activity, ChevronRight } from "lucide-react";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -58,37 +62,24 @@ function AhipSeasonCard() {
 
   if (isLoading) {
     return (
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <CalendarClock className="h-4 w-4 text-primary" />
-            AHIP Season Configuration
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+      <SectionCard title="AHIP season" icon={CalendarClock}>
           <div className="space-y-2">
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-3/4" />
           </div>
-        </CardContent>
-      </Card>
+      </SectionCard>
     );
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-semibold flex items-center gap-2">
-          <CalendarClock className="h-4 w-4 text-primary" />
-          AHIP Season Configuration
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <p className="text-sm text-muted-foreground">
-          Configure the AHIP certification season window. Automated reminders will only be sent to agents who haven't completed AHIP during this period.
-        </p>
+    <SectionCard
+      title="AHIP season"
+      description="When agents can take AHIP each year. Reminders only go to agents who haven't finished it during this window."
+      icon={CalendarClock}
+      contentClassName="space-y-5"
+    >
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-3">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Season Opens</p>
             <div className="grid grid-cols-2 gap-2">
@@ -181,32 +172,33 @@ function AhipSeasonCard() {
             {isPending ? "Saving…" : "Save Settings"}
           </Button>
         </div>
-      </CardContent>
-    </Card>
+    </SectionCard>
   );
 }
+
+const ADMIN_LINKS = [
+  { href: "/settings/team", label: "Team", text: "Invite people and set their roles", icon: UserPlus },
+  { href: "/settings/billing", label: "Billing", text: "Your plan, seats and invoices", icon: CreditCard },
+  { href: "/admin-carriers", label: "Carriers", text: "Carriers you sell and their connections", icon: Building2 },
+  { href: "/admin-compliance", label: "HIPAA / SOC 2", text: "Security checks, access review and logs", icon: Lock },
+  { href: "/data-migration", label: "Import & Migration", text: "Bring in agents and clients", icon: ArrowLeftRight },
+  { href: "/admin/health", label: "System Health", text: "Background jobs and integrations", icon: Activity },
+];
 
 export default function SettingsPage() {
   const { user: clerkUser } = useUser();
   const { data: me, isLoading: meLoading } = useGetMe();
   const { data: org, isLoading: orgLoading } = useGetMyOrganization();
+  const isAdmin = !!me && (me.role === "super_admin" || me.role === "agency_admin");
 
   return (
-    <div className="p-6 space-y-5 max-w-3xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Manage your profile and organization</p>
-      </div>
+    <PageShell>
+      <PageHeader title="Settings" subtitle="Your profile, your agency, and the AHIP season" />
 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        <div className="space-y-6 lg:col-span-1">
       {/* Profile */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <User className="h-4 w-4 text-primary" />
-            Your Profile
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+      <SectionCard title="Your profile" icon={User}>
           {meLoading ? (
             <div className="flex items-center gap-4">
               <Skeleton className="h-16 w-16 rounded-full" />
@@ -219,31 +211,23 @@ export default function SettingsPage() {
             <div className="flex items-center gap-4">
               <Avatar className="h-16 w-16">
                 <AvatarImage src={clerkUser?.imageUrl} />
-                <AvatarFallback className="text-lg bg-primary/10 text-primary">
+                <AvatarFallback className="text-lg bg-navy-800 text-white">
                   {me.fullName.split(" ").map((n) => n[0]).join("").slice(0, 2)}
                 </AvatarFallback>
               </Avatar>
-              <div>
-                <p className="font-semibold text-lg">{me.fullName}</p>
-                <p className="text-sm text-muted-foreground">{me.email}</p>
-                <Badge variant="secondary" className="mt-1 text-xs capitalize">
-                  {me.role.replace("_", " ")}
-                </Badge>
+              <div className="min-w-0">
+                <p className="font-display font-semibold text-lg truncate">{me.fullName}</p>
+                <p className="text-sm text-muted-foreground truncate">{me.email}</p>
+                <StatusPill tone="navy" className="mt-1.5 capitalize">
+                  {me.role.replace(/_/g, " ")}
+                </StatusPill>
               </div>
             </div>
           ) : null}
-        </CardContent>
-      </Card>
+      </SectionCard>
 
       {/* Organization */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Building2 className="h-4 w-4 text-primary" />
-            Organization
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+      <SectionCard title="Agency" icon={Building2}>
           {orgLoading ? (
             <div className="space-y-2">
               <Skeleton className="h-4 w-48" />
@@ -258,13 +242,13 @@ export default function SettingsPage() {
               <Separator />
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Plan</span>
-                <Badge variant="secondary" className="capitalize">{org.planTier}</Badge>
+                <StatusPill tone="info" className="capitalize">{org.planTier}</StatusPill>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Created</span>
                 <span>{new Date(org.createdAt).toLocaleDateString()}</span>
               </div>
-              {me && (me.role === "super_admin" || me.role === "agency_admin") && (
+              {isAdmin && (
                 <div className="flex items-center justify-between gap-3 text-sm">
                   <span className="text-muted-foreground shrink-0">Agency ID</span>
                   <div className="flex items-center gap-2 min-w-0">
@@ -273,7 +257,7 @@ export default function SettingsPage() {
                       size="sm"
                       variant="outline"
                       className="h-7 px-2"
-onClick={() => {
+                      onClick={() => {
                         try {
                           void navigator.clipboard.writeText(org.id)
                             .then(() => toast.success("Agency ID copied"))
@@ -290,29 +274,47 @@ onClick={() => {
               )}
             </div>
           ) : null}
-        </CardContent>
-      </Card>
-
-      {/* AHIP Season Config */}
-      <AhipSeasonCard />
+      </SectionCard>
 
       {/* Security */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Shield className="h-4 w-4 text-primary" />
-            Security
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+      <SectionCard title="Sign-in & security" icon={Shield}>
           <p className="text-sm text-muted-foreground">
-            Manage your password, MFA, and active sessions through the account settings below.
+            Manage your password, MFA, and active sessions from your account menu.
           </p>
           <div className="mt-3 p-3 rounded-lg bg-muted/50 text-xs text-muted-foreground">
             Authentication is managed by Clerk. All sessions are secured with HTTPS and short-lived tokens.
           </div>
-        </CardContent>
-      </Card>
-    </div>
+      </SectionCard>
+        </div>
+
+        <div className="space-y-6 lg:col-span-2">
+      {/* AHIP Season Config */}
+      <AhipSeasonCard />
+
+      {isAdmin && (
+        <SectionCard title="Agency admin" description="Everything else you can set up for your agency" icon={Settings}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {ADMIN_LINKS.map((l) => (
+              <Link
+                key={l.href}
+                href={l.href}
+                className="group flex items-center gap-3 rounded-xl border border-border p-3 transition-colors hover:border-accent/40 hover:bg-muted/50"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-navy-100 text-navy-800 dark:bg-secondary dark:text-secondary-foreground group-hover:bg-accent group-hover:text-accent-foreground transition-colors">
+                  <l.icon className="h-5 w-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">{l.label}</span>
+                  <span className="block text-xs text-muted-foreground truncate">{l.text}</span>
+                </span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-accent" />
+              </Link>
+            ))}
+          </div>
+        </SectionCard>
+      )}
+        </div>
+      </div>
+    </PageShell>
   );
 }

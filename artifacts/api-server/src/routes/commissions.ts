@@ -17,7 +17,7 @@ import {
   type Request,
   type Response,
 } from "express";
-import { and, asc, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import multer from "multer";
@@ -542,9 +542,17 @@ router.get(
     if (from) conditions.push(gte(commissionStatementsTable.statementDate, from));
     if (to) conditions.push(lte(commissionStatementsTable.statementDate, to));
 
+    // Carrier name joined in (org-scoped) so the list can show it.
     const rows = await db
-      .select()
+      .select({ ...getTableColumns(commissionStatementsTable), carrierName: carriersTable.name })
       .from(commissionStatementsTable)
+      .leftJoin(
+        carriersTable,
+        and(
+          eq(commissionStatementsTable.carrierId, carriersTable.id),
+          eq(carriersTable.orgId, authReq.orgId),
+        ),
+      )
       .where(and(...conditions))
       .orderBy(desc(commissionStatementsTable.statementDate))
       .limit(safeLimit(req.query.limit))
@@ -738,7 +746,97 @@ router.get(
         .orderBy(desc(agentCommissionPayoutsTable.periodStart)),
     ]);
 
-    res.json({ lineItems, payouts });
+    // Summary fields for the agent profile's Commissions tab. Derived only
+    // from the rows above (payouts are unbounded per agent; line items are
+    // the paged window), so the figures always match what the tab renders.
+    const thisYear = String(new Date().getUTCFullYear());
+    let lifetimeEarned = 0;
+    let ytdEarned = 0;
+    let pendingPayouts = 0;
+    for (const p of payouts) {
+      const earned = Number(p.earned ?? 0);
+      lifetimeEarned += earned;
+      if (String(p.periodStart).startsWith(thisYear)) ytdEarned += earned;
+      if (p.status !== "paid") pendingPayouts += earned;
+    }
+    const latest = payouts[0];
+    const periods = payouts.map((p) => ({
+      id: p.id,
+      period: `${p.periodStart} – ${p.periodEnd}`,
+      periodStart: p.periodStart,
+      periodEnd: p.periodEnd,
+      earned: p.earned,
+      paid: p.paid,
+      status: p.status,
+      paidAt: p.paidAt,
+    }));
+
+    res.json({
+      lineItems,
+      payouts,
+      periods,
+      lifetimeEarned: Number(lifetimeEarned.toFixed(2)),
+      ytdEarned: Number(ytdEarned.toFixed(2)),
+      currentPeriodEarned: latest ? Number(Number(latest.earned ?? 0).toFixed(2)) : 0,
+      pendingPayouts: Number(pendingPayouts.toFixed(2)),
+    });
+  },
+);
+
+// POST /agents/:id/commissions/:periodId/mark-paid — the "Mark paid"
+// button on an agent's Commissions tab. `periodId` is the payout row id
+// (agent_commission_payouts.id). Same gate as the payout upsert below
+// (commission:update + MFA), org-scoped, and scoped to the agent in the
+// path so a payout id from another agent 404s. Paid amount defaults to
+// the earned amount when nothing was recorded as paid yet. Audit-logged
+// by the router-level auditMiddleware like every other commission write.
+router.post(
+  "/agents/:id/commissions/:periodId/mark-paid",
+  requireAuth,
+  requireMfa,
+  requirePermission("commission", "update"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const agentId = onlyParam(req.params.id) ?? "";
+    const payoutId = onlyParam(req.params.periodId) ?? "";
+
+    const [existing] = await db
+      .select()
+      .from(agentCommissionPayoutsTable)
+      .where(
+        and(
+          eq(agentCommissionPayoutsTable.id, payoutId),
+          eq(agentCommissionPayoutsTable.orgId, authReq.orgId),
+          eq(agentCommissionPayoutsTable.agentId, agentId),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      res.status(404).json({ error: "Payout not found" });
+      return;
+    }
+    if (existing.status === "paid") {
+      res.status(409).json({ error: "Payout is already marked paid" });
+      return;
+    }
+
+    const paidAmount = Number(existing.paid ?? 0) > 0 ? existing.paid : existing.earned;
+    const [row] = await db
+      .update(agentCommissionPayoutsTable)
+      .set({
+        status: "paid",
+        paid: paidAmount,
+        paidAt: new Date(),
+        paidByUserId: authReq.userId,
+      })
+      .where(
+        and(
+          eq(agentCommissionPayoutsTable.id, existing.id),
+          eq(agentCommissionPayoutsTable.orgId, authReq.orgId),
+        ),
+      )
+      .returning();
+    res.json(row);
   },
 );
 
@@ -981,6 +1079,10 @@ router.get(
 
 // ─── Missed payments ──────────────────────────────────────────────────
 
+// GET /commissions/missed-payments[?days_overdue=N&status=open|resolved|all]
+// Open (unresolved) alerts by default — the same set the summary card
+// counts — so resolving one removes it from the list. Each row carries the
+// contact's name and how many days it has been outstanding.
 router.get(
   "/commissions/missed-payments",
   requireAuth,
@@ -989,21 +1091,122 @@ router.get(
     const authReq = req as AuthenticatedRequest;
     const daysOverdueRaw = onlyParam(req.query.days_overdue);
     const days = daysOverdueRaw ? parseInt(daysOverdueRaw, 10) : 0;
+    const status = onlyParam(req.query.status) ?? "open";
+    if (!["open", "resolved", "all"].includes(status)) {
+      res.status(400).json({ error: "status must be open, resolved or all" });
+      return;
+    }
 
     const conditions = [eq(missedPaymentAlertsTable.orgId, authReq.orgId)];
+    if (status === "open") conditions.push(isNull(missedPaymentAlertsTable.resolvedAt));
+    if (status === "resolved") conditions.push(isNotNull(missedPaymentAlertsTable.resolvedAt));
     if (Number.isFinite(days) && days > 0) {
       const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
       conditions.push(lte(missedPaymentAlertsTable.detectedAt, cutoff));
     }
 
     const rows = await db
-      .select()
+      .select({
+        alert: missedPaymentAlertsTable,
+        contactFirstName: contactsTable.firstName,
+        contactLastName: contactsTable.lastName,
+      })
       .from(missedPaymentAlertsTable)
+      .leftJoin(
+        contactsTable,
+        and(
+          eq(missedPaymentAlertsTable.contactId, contactsTable.id),
+          eq(contactsTable.orgId, authReq.orgId),
+        ),
+      )
       .where(and(...conditions))
       .orderBy(desc(missedPaymentAlertsTable.detectedAt))
       .limit(safeLimit(req.query.limit, 100, 500))
       .offset(safeOffset(req.query.offset));
-    res.json(rows);
+
+    const now = Date.now();
+    res.json(
+      rows.map(({ alert, contactFirstName, contactLastName }) => {
+        let expectedPeriodEnd: string | null = null;
+        if (alert.expectedPeriod) {
+          const [y, m] = String(alert.expectedPeriod).split("-").map(Number);
+          if (y && m) expectedPeriodEnd = monthBounds(y, m).end;
+        }
+        const name = [contactFirstName, contactLastName].filter(Boolean).join(" ");
+        return {
+          ...alert,
+          contactName: name || null,
+          expectedPeriodStart: alert.expectedPeriod,
+          expectedPeriodEnd,
+          daysOverdue: Math.max(
+            0,
+            Math.floor((now - new Date(alert.detectedAt).getTime()) / 86_400_000),
+          ),
+        };
+      }),
+    );
+  },
+);
+
+// POST /commissions/missed-payments/:id/resolve — "Mark resolved" on the
+// commissions page. commission:update + MFA like the other commission
+// writes; org-scoped (another org's alert 404s); resolving twice is a 409
+// so the original resolution note is never overwritten. Audit-logged by the
+// router-level auditMiddleware.
+const ResolveMissedPaymentSchema = z.object({
+  note: z.string().max(2000).optional().nullable(),
+});
+
+router.post(
+  "/commissions/missed-payments/:id/resolve",
+  requireAuth,
+  requireMfa,
+  requirePermission("commission", "update"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const id = onlyParam(req.params.id) ?? "";
+    const parsed = ResolveMissedPaymentSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
+      return;
+    }
+    const note = parsed.data.note?.trim() || null;
+
+    const [existing] = await db
+      .select({ id: missedPaymentAlertsTable.id, resolvedAt: missedPaymentAlertsTable.resolvedAt })
+      .from(missedPaymentAlertsTable)
+      .where(
+        and(
+          eq(missedPaymentAlertsTable.id, id),
+          eq(missedPaymentAlertsTable.orgId, authReq.orgId),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      res.status(404).json({ error: "Missed payment not found" });
+      return;
+    }
+    if (existing.resolvedAt) {
+      res.status(409).json({ error: "Missed payment is already resolved" });
+      return;
+    }
+
+    const [row] = await db
+      .update(missedPaymentAlertsTable)
+      .set({ resolvedAt: new Date(), resolutionNote: note })
+      .where(
+        and(
+          eq(missedPaymentAlertsTable.id, id),
+          eq(missedPaymentAlertsTable.orgId, authReq.orgId),
+          isNull(missedPaymentAlertsTable.resolvedAt),
+        ),
+      )
+      .returning();
+    if (!row) {
+      res.status(409).json({ error: "Missed payment is already resolved" });
+      return;
+    }
+    res.json(row);
   },
 );
 

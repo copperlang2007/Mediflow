@@ -23,8 +23,140 @@ import {
   CheckCircle2, XCircle, Printer, DollarSign, Activity,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { PageHeader, SectionCard, StatusPill, EmptyState as SharedEmptyState } from "@/components/shared";
+import { PageShell, NoticeBanner } from "@/components/ops";
+import { FileSpreadsheet, Play, Lock } from "lucide-react";
 
-const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
+const COLORS = ["#3b6fa0", "#22a05a", "#f59e0b", "#dc2626", "#1e3a5f", "#8db3d9"];
+
+// ─── Report library ───────────────────────────────────────────────────────────
+// One row per real CSV export the API offers. "Run" downloads it straight
+// away for the chosen window — nothing here is scheduled or simulated.
+type LibraryReport = {
+  key: string;
+  title: string;
+  description: string;
+  columns: string[];
+  path: (range: { start: string; end: string }) => string;
+  file: string;
+  dated: boolean;
+};
+
+const LIBRARY: LibraryReport[] = [
+  {
+    key: "executive",
+    title: "Executive summary",
+    description: "Agents, leads, deals won, pipeline value and AHIP pass rate for the period",
+    columns: ["Agents", "Leads", "Deals won", "Won value", "AHIP rate"],
+    path: (r) => `/api/reports/executive/export?startDate=${r.start}&endDate=${r.end}`,
+    file: "executive-report.csv",
+    dated: true,
+  },
+  {
+    key: "agent-performance",
+    title: "Agent production",
+    description: "Contacts worked, calls, deals won and compliance score per agent",
+    columns: ["Agent", "Deals won", "Enrolled", "Compliance", "AHIP"],
+    path: (r) => `/api/reports/agent-performance/export?startDate=${r.start}&endDate=${r.end}`,
+    file: "agent-performance.csv",
+    dated: true,
+  },
+  {
+    key: "pipeline",
+    title: "Pipeline & win rate",
+    description: "Deals in each stage, won and lost, per pipeline",
+    columns: ["Pipeline", "Stage", "Deals", "Won", "Lost"],
+    path: (r) => `/api/reports/pipeline/export?startDate=${r.start}&endDate=${r.end}`,
+    file: "pipeline-report.csv",
+    dated: true,
+  },
+  {
+    key: "leads",
+    title: "Lead sources",
+    description: "Where leads came from and how many converted and enrolled",
+    columns: ["Source", "Leads", "Converted", "Enrolled"],
+    path: (r) => `/api/reports/leads/export?startDate=${r.start}&endDate=${r.end}`,
+    file: "leads-report.csv",
+    dated: true,
+  },
+  {
+    key: "compliance-matrix",
+    title: "Compliance status",
+    description: "Every agent's licenses by state, what's expiring, and carrier certifications",
+    columns: ["Agent", "State", "License", "Expiry", "Status"],
+    path: () => "/api/reports/compliance-matrix/export",
+    file: "compliance-matrix.csv",
+    dated: false,
+  },
+  {
+    key: "communications",
+    title: "Communications",
+    description: "SMS and email sent, AI-assisted messages and opt-outs",
+    columns: ["Agent", "SMS", "Email", "AI-assisted"],
+    path: (r) => `/api/reports/communications/export?startDate=${r.start}&endDate=${r.end}`,
+    file: "communications-report.csv",
+    dated: true,
+  },
+  {
+    key: "retention",
+    title: "Retention & churn",
+    description: "Enrolled, at-risk and lost members, and re-enrollment opportunities",
+    columns: ["Enrolled", "At risk", "Lost", "Retention rate"],
+    path: () => "/api/reports/retention/export",
+    file: "retention-report.csv",
+    dated: false,
+  },
+];
+
+function ReportLibrary() {
+  const [range, setRange] = useState({ start: dateOffset(30), end: today() });
+  const [running, setRunning] = useState<string | null>(null);
+
+  const run = async (r: LibraryReport) => {
+    setRunning(r.key);
+    try {
+      await downloadCsv(r.path(range), r.file);
+    } finally {
+      setRunning(null);
+    }
+  };
+
+  return (
+    <SectionCard
+      title="Report library"
+      description="Download any report as a spreadsheet. Dated reports use the window you pick here."
+      icon={FileSpreadsheet}
+      actions={<DateRangePicker value={range} onChange={setRange} />}
+    >
+      <div className="space-y-3">
+        {LIBRARY.map((r) => (
+          <div key={r.key} className="flex flex-col gap-3 rounded-lg border border-border p-4 transition-colors hover:bg-muted/30 sm:flex-row sm:items-center">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-accent">
+              <BarChart2 className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-sm">{r.title}</p>
+              <p className="text-xs text-muted-foreground">{r.description}</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {r.columns.map((c) => (
+                  <span key={c} className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">{c}</span>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <StatusPill tone={r.dated ? "info" : "neutral"}>{r.dated ? "Date range" : "Right now"}</StatusPill>
+              <StatusPill tone="navy">CSV</StatusPill>
+              <Button variant="outline" size="sm" onClick={() => void run(r)} disabled={running === r.key}>
+                {running === r.key ? <RefreshCcw className="h-4 w-4 mr-1.5 animate-spin" /> : <Play className="h-4 w-4 mr-1.5" />}
+                Run
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </SectionCard>
+  );
+}
 
 function DateRangePicker({ value, onChange }: { value: { start: string; end: string }; onChange: (v: { start: string; end: string }) => void }) {
   const presets = [
@@ -43,7 +175,7 @@ function DateRangePicker({ value, onChange }: { value: { start: string; end: str
       }}
       defaultValue="30"
     >
-      <SelectTrigger className="w-40">
+      <SelectTrigger className="w-40 bg-card">
         <SelectValue placeholder="Date range" />
       </SelectTrigger>
       <SelectContent>
@@ -79,14 +211,14 @@ function AgentPerformanceTab() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <StatCard title="Total Agents" value={data.length} icon={<Users className="h-5 w-5 text-blue-500" />} />
-        <StatCard title="Total Deals Won" value={data.reduce((s, r) => s + r.dealsWon, 0)} icon={<TrendingUp className="h-5 w-5 text-green-500" />} />
-        <StatCard title="Avg Compliance Score" value={`${Math.round(data.reduce((s, r) => s + r.complianceScore, 0) / data.length)}%`} icon={<ShieldCheck className="h-5 w-5 text-purple-500" />} />
+        <StatCard title="Total Agents" value={data.length} icon={<Users className="h-5 w-5 text-accent" />} />
+        <StatCard title="Total Deals Won" value={data.reduce((s, r) => s + r.dealsWon, 0)} icon={<TrendingUp className="h-5 w-5 text-success" />} />
+        <StatCard title="Avg Compliance Score" value={`${Math.round(data.reduce((s, r) => s + r.complianceScore, 0) / data.length)}%`} icon={<ShieldCheck className="h-5 w-5 text-navy-700 dark:text-accent" />} />
       </div>
 
-      <Card>
+      <Card className="rounded-xl shadow-sm">
         <CardHeader>
-          <CardTitle>Deals Won by Agent</CardTitle>
+          <CardTitle className="font-display text-lg">Deals Won by Agent</CardTitle>
           <CardDescription>Top performing agents in the selected period</CardDescription>
         </CardHeader>
         <CardContent>
@@ -96,15 +228,15 @@ function AgentPerformanceTab() {
               <XAxis dataKey="agentName" tick={{ fontSize: 11 }} tickFormatter={(v) => v.split(" ")[0]} />
               <YAxis tick={{ fontSize: 11 }} />
               <Tooltip />
-              <Bar dataKey="dealsWon" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Deals Won" />
-              <Bar dataKey="enrolledContacts" fill="#10b981" radius={[4, 4, 0, 0]} name="Enrolled" />
+              <Bar dataKey="dealsWon" fill="#3b6fa0" radius={[4, 4, 0, 0]} name="Deals Won" />
+              <Bar dataKey="enrolledContacts" fill="#22a05a" radius={[4, 4, 0, 0]} name="Enrolled" />
             </BarChart>
           </ResponsiveContainer>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader><CardTitle>Compliance Score by Agent</CardTitle></CardHeader>
+      <Card className="rounded-xl shadow-sm">
+        <CardHeader><CardTitle className="font-display text-lg">Compliance Score by Agent</CardTitle></CardHeader>
         <CardContent>
           <div className="space-y-2">
             {sorted.slice(0, 20).map((agent) => (
@@ -112,14 +244,14 @@ function AgentPerformanceTab() {
                 <span className="text-sm w-36 truncate text-muted-foreground">{agent.agentName}</span>
                 <div className="flex-1 bg-muted rounded-full h-2">
                   <div
-                    className={`h-2 rounded-full ${agent.complianceScore >= 75 ? "bg-green-500" : agent.complianceScore >= 50 ? "bg-yellow-500" : "bg-red-500"}`}
+                    className={`h-2 rounded-full ${agent.complianceScore >= 75 ? "bg-success" : agent.complianceScore >= 50 ? "bg-warning" : "bg-destructive"}`}
                     style={{ width: `${agent.complianceScore}%` }}
                   />
                 </div>
                 <span className="text-sm font-medium w-10 text-right">{agent.complianceScore}%</span>
-                <Badge variant={agent.ahipStatus === "passed" ? "default" : "secondary"} className="text-xs w-20 justify-center">
-                  {agent.ahipStatus === "passed" ? "AHIP ✓" : "No AHIP"}
-                </Badge>
+                <StatusPill tone={agent.ahipStatus === "passed" ? "success" : "neutral"} className="w-20 justify-center">
+                  {agent.ahipStatus === "passed" ? "AHIP done" : "No AHIP"}
+                </StatusPill>
               </div>
             ))}
           </div>
@@ -156,21 +288,21 @@ function PipelineTab() {
       </div>
 
       {data.map((pipeline) => (
-        <Card key={pipeline.pipelineId}>
+        <Card key={pipeline.pipelineId} className="rounded-xl shadow-sm">
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>{pipeline.pipelineName}</CardTitle>
+              <CardTitle className="font-display text-lg">{pipeline.pipelineName}</CardTitle>
               <div className="flex gap-4 text-sm text-muted-foreground">
                 <span>Win Rate: <span className="font-semibold text-foreground">{pipeline.winRate}%</span></span>
-                <span>Won Value: <span className="font-semibold text-green-600">${pipeline.totalWonValue.toLocaleString()}</span></span>
+                <span>Won Value: <span className="font-semibold text-success">${pipeline.totalWonValue.toLocaleString()}</span></span>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-3 gap-4 text-center">
               <div className="p-3 bg-muted/50 rounded-lg"><p className="text-2xl font-bold">{pipeline.totalDeals}</p><p className="text-xs text-muted-foreground">Total Deals</p></div>
-              <div className="p-3 bg-green-50 rounded-lg"><p className="text-2xl font-bold text-green-600">{pipeline.wonDeals}</p><p className="text-xs text-muted-foreground">Won</p></div>
-              <div className="p-3 bg-red-50 rounded-lg"><p className="text-2xl font-bold text-red-500">{pipeline.lostDeals}</p><p className="text-xs text-muted-foreground">Lost</p></div>
+              <div className="p-3 bg-success/10 rounded-lg"><p className="font-display text-2xl font-bold text-success">{pipeline.wonDeals}</p><p className="text-xs text-muted-foreground">Won</p></div>
+              <div className="p-3 bg-destructive/10 rounded-lg"><p className="font-display text-2xl font-bold text-destructive">{pipeline.lostDeals}</p><p className="text-xs text-muted-foreground">Lost</p></div>
             </div>
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={pipeline.funnel}>
@@ -179,9 +311,9 @@ function PipelineTab() {
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="dealCount" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Active" />
-                <Bar dataKey="wonCount" fill="#10b981" radius={[4, 4, 0, 0]} name="Won" />
-                <Bar dataKey="lostCount" fill="#ef4444" radius={[4, 4, 0, 0]} name="Lost" />
+                <Bar dataKey="dealCount" fill="#3b6fa0" radius={[4, 4, 0, 0]} name="Active" />
+                <Bar dataKey="wonCount" fill="#22a05a" radius={[4, 4, 0, 0]} name="Won" />
+                <Bar dataKey="lostCount" fill="#dc2626" radius={[4, 4, 0, 0]} name="Lost" />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -218,13 +350,13 @@ function LeadsTab() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <StatCard title="Total Leads" value={data.totalLeads} icon={<Users className="h-5 w-5 text-blue-500" />} />
-        <StatCard title="Converted Leads" value={data.convertedLeads} subtitle={data.totalLeads > 0 ? `${Math.round((data.convertedLeads / data.totalLeads) * 100)}% conversion` : undefined} icon={<TrendingUp className="h-5 w-5 text-green-500" />} />
+        <StatCard title="Total Leads" value={data.totalLeads} icon={<Users className="h-5 w-5 text-accent" />} />
+        <StatCard title="Converted Leads" value={data.convertedLeads} subtitle={data.totalLeads > 0 ? `${Math.round((data.convertedLeads / data.totalLeads) * 100)}% conversion` : undefined} icon={<TrendingUp className="h-5 w-5 text-success" />} />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader><CardTitle>Leads by Source</CardTitle></CardHeader>
+        <Card className="rounded-xl shadow-sm">
+          <CardHeader><CardTitle className="font-display text-lg">Leads by Source</CardTitle></CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={260}>
               <PieChart>
@@ -237,8 +369,8 @@ function LeadsTab() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader><CardTitle>Weekly Lead Volume</CardTitle></CardHeader>
+        <Card className="rounded-xl shadow-sm">
+          <CardHeader><CardTitle className="font-display text-lg">Weekly Lead Volume</CardTitle></CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={data.trend}>
@@ -246,15 +378,15 @@ function LeadsTab() {
                 <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(d) => d.slice(5)} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
-                <Line type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={2} dot={false} name="Leads" />
+                <Line type="monotone" dataKey="count" stroke="#3b6fa0" strokeWidth={2} dot={false} name="Leads" />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
       </div>
 
-      <Card>
-        <CardHeader><CardTitle>Source Breakdown Detail</CardTitle></CardHeader>
+      <Card className="rounded-xl shadow-sm">
+        <CardHeader><CardTitle className="font-display text-lg">Source Breakdown Detail</CardTitle></CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -310,9 +442,9 @@ function ComplianceMatrixTab() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <Card>
+        <Card className="rounded-xl shadow-sm">
           <CardHeader>
-            <CardTitle>AHIP Certification Trend</CardTitle>
+            <CardTitle className="font-display text-lg">AHIP Certification Trend</CardTitle>
             <CardDescription>Completion rate by year</CardDescription>
           </CardHeader>
           <CardContent>
@@ -323,16 +455,16 @@ function ComplianceMatrixTab() {
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="passed" fill="#10b981" radius={[4, 4, 0, 0]} name="Passed" />
-                <Bar dataKey="total" fill="#e2e8f0" radius={[4, 4, 0, 0]} name="Total" />
+                <Bar dataKey="passed" fill="#22a05a" radius={[4, 4, 0, 0]} name="Passed" />
+                <Bar dataKey="total" fill="#cbd5e1" radius={[4, 4, 0, 0]} name="Total" />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="rounded-xl shadow-sm">
           <CardHeader>
-            <CardTitle>License Expiry Heatmap</CardTitle>
+            <CardTitle className="font-display text-lg">License Expiry Heatmap</CardTitle>
             <CardDescription>Licenses expiring by month</CardDescription>
           </CardHeader>
           <CardContent>
@@ -349,9 +481,9 @@ function ComplianceMatrixTab() {
         </Card>
       </div>
 
-      <Card>
+      <Card className="rounded-xl shadow-sm">
         <CardHeader>
-          <CardTitle>Carrier Cert Completion by Carrier</CardTitle>
+          <CardTitle className="font-display text-lg">Carrier Cert Completion by Carrier</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
@@ -362,7 +494,7 @@ function ComplianceMatrixTab() {
                 <div key={carrier.carrierId} className="flex items-center gap-3">
                   <span className="text-sm w-36 truncate">{carrier.carrierName}</span>
                   <div className="flex-1 bg-muted rounded-full h-2">
-                    <div className="h-2 rounded-full bg-blue-500" style={{ width: `${currentYear.completionRate}%` }} />
+                    <div className="h-2 rounded-full bg-navy-600 dark:bg-accent" style={{ width: `${currentYear.completionRate}%` }} />
                   </div>
                   <span className="text-sm font-medium w-12 text-right">{currentYear.completionRate}%</span>
                   <span className="text-xs text-muted-foreground w-20 text-right">{currentYear.passed}/{currentYear.total}</span>
@@ -373,8 +505,8 @@ function ComplianceMatrixTab() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader><CardTitle>Agent License Matrix</CardTitle></CardHeader>
+      <Card className="rounded-xl shadow-sm">
+        <CardHeader><CardTitle className="font-display text-lg">Agent License Matrix</CardTitle></CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -444,10 +576,10 @@ function CommunicationsTab() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard title="SMS Sent" value={data.totalSms.toLocaleString()} icon={<MessageSquare className="h-5 w-5 text-blue-500" />} />
-        <StatCard title="Emails Sent" value={data.totalEmail.toLocaleString()} icon={<MessageSquare className="h-5 w-5 text-purple-500" />} />
-        <StatCard title="AI-Assisted SMS" value={data.aiAssistedSms.toLocaleString()} subtitle={data.totalSms > 0 ? `${Math.round((data.aiAssistedSms / data.totalSms) * 100)}% AI-written` : undefined} icon={<TrendingUp className="h-5 w-5 text-green-500" />} />
-        <StatCard title="AI-Assisted Email" value={data.aiAssistedEmail.toLocaleString()} subtitle={data.totalEmail > 0 ? `${Math.round((data.aiAssistedEmail / data.totalEmail) * 100)}% AI-written` : undefined} icon={<TrendingUp className="h-5 w-5 text-orange-500" />} />
+        <StatCard title="SMS Sent" value={data.totalSms.toLocaleString()} icon={<MessageSquare className="h-5 w-5 text-accent" />} />
+        <StatCard title="Emails Sent" value={data.totalEmail.toLocaleString()} icon={<MessageSquare className="h-5 w-5 text-navy-700 dark:text-accent" />} />
+        <StatCard title="AI-Assisted SMS" value={data.aiAssistedSms.toLocaleString()} subtitle={data.totalSms > 0 ? `${Math.round((data.aiAssistedSms / data.totalSms) * 100)}% AI-written` : undefined} icon={<TrendingUp className="h-5 w-5 text-success" />} />
+        <StatCard title="AI-Assisted Email" value={data.aiAssistedEmail.toLocaleString()} subtitle={data.totalEmail > 0 ? `${Math.round((data.aiAssistedEmail / data.totalEmail) * 100)}% AI-written` : undefined} icon={<TrendingUp className="h-5 w-5 text-warning" />} />
       </div>
 
       {/* Delivery & opt-out metrics */}
@@ -456,24 +588,24 @@ function CommunicationsTab() {
           title="SMS Opt-outs"
           value={(data.optOutSmsContacts ?? 0).toLocaleString()}
           subtitle="Contacts opted out of SMS"
-          icon={<XCircle className="h-5 w-5 text-red-500" />}
+          icon={<XCircle className="h-5 w-5 text-destructive" />}
         />
         <StatCard
           title="Email Opt-outs"
           value={(data.optOutEmailContacts ?? 0).toLocaleString()}
           subtitle="Contacts opted out of email"
-          icon={<XCircle className="h-5 w-5 text-red-400" />}
+          icon={<XCircle className="h-5 w-5 text-destructive" />}
         />
         <StatCard
           title="Effective Delivery Rate"
           value={`${deliveryRate}%`}
           subtitle="SMS recipients not opted out"
-          icon={<CheckCircle2 className="h-5 w-5 text-green-500" />}
+          icon={<CheckCircle2 className="h-5 w-5 text-success" />}
         />
       </div>
 
-      <Card>
-        <CardHeader><CardTitle>Weekly Volume Trend</CardTitle></CardHeader>
+      <Card className="rounded-xl shadow-sm">
+        <CardHeader><CardTitle className="font-display text-lg">Weekly Volume Trend</CardTitle></CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={data.trend}>
@@ -482,8 +614,8 @@ function CommunicationsTab() {
               <YAxis tick={{ fontSize: 11 }} />
               <Tooltip />
               <Legend />
-              <Line type="monotone" dataKey="sms" stroke="#3b82f6" strokeWidth={2} dot={false} name="SMS" />
-              <Line type="monotone" dataKey="email" stroke="#8b5cf6" strokeWidth={2} dot={false} name="Email" />
+              <Line type="monotone" dataKey="sms" stroke="#3b6fa0" strokeWidth={2} dot={false} name="SMS" />
+              <Line type="monotone" dataKey="email" stroke="#1e3a5f" strokeWidth={2} dot={false} name="Email" />
             </LineChart>
           </ResponsiveContainer>
         </CardContent>
@@ -491,9 +623,9 @@ function CommunicationsTab() {
 
       {/* Per-agent leaderboard */}
       {data.byAgent && data.byAgent.length > 0 && (
-        <Card>
+        <Card className="rounded-xl shadow-sm">
           <CardHeader>
-            <CardTitle>Agent Outreach Leaderboard</CardTitle>
+            <CardTitle className="font-display text-lg">Agent Outreach Leaderboard</CardTitle>
             <CardDescription>SMS and email volume per agent in the selected period</CardDescription>
           </CardHeader>
           <CardContent>
@@ -548,51 +680,41 @@ function RetentionTab() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard title="Enrolled Members" value={data.enrolledContacts.toLocaleString()} icon={<CheckCircle2 className="h-5 w-5 text-green-500" />} />
-        <StatCard title="At-Risk Members" value={data.atRiskContacts.toLocaleString()} subtitle="No activity 60+ days" icon={<AlertTriangle className="h-5 w-5 text-yellow-500" />} />
-        <StatCard title="Lost Members" value={data.lostContacts.toLocaleString()} icon={<XCircle className="h-5 w-5 text-red-500" />} />
+        <StatCard title="Enrolled Members" value={data.enrolledContacts.toLocaleString()} icon={<CheckCircle2 className="h-5 w-5 text-success" />} />
+        <StatCard title="At-Risk Members" value={data.atRiskContacts.toLocaleString()} subtitle="No activity 60+ days" icon={<AlertTriangle className="h-5 w-5 text-warning" />} />
+        <StatCard title="Lost Members" value={data.lostContacts.toLocaleString()} icon={<XCircle className="h-5 w-5 text-destructive" />} />
         <StatCard
           title="Re-enrollment Opportunities"
           value={(data.reEnrollmentOpportunity ?? 0).toLocaleString()}
           subtitle="AEP-eligible lost members"
-          icon={<TrendingUp className="h-5 w-5 text-blue-500" />}
+          icon={<TrendingUp className="h-5 w-5 text-accent" />}
         />
       </div>
 
       {/* AEP / OEP window banners */}
       {data.aepWindow?.isActive && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 flex items-start gap-3">
-          <AlertTriangle className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
-          <div>
-            <p className="font-medium text-blue-800">Annual Enrollment Period (AEP) is active</p>
-            <p className="text-sm text-blue-700 mt-0.5">
-              {data.reEnrollmentOpportunity ?? 0} lost members are re-enrollment candidates. Consider outreach sequences now.
-            </p>
-          </div>
-        </div>
+        <NoticeBanner icon={AlertTriangle} title="Annual Enrollment Period (AEP) is active">
+          {data.reEnrollmentOpportunity ?? 0} lost members are re-enrollment candidates. Consider outreach sequences now.
+        </NoticeBanner>
       )}
 
       {data.upcomingBirthdays != null && data.upcomingBirthdays > 0 && (
-        <div className="rounded-lg border border-purple-200 bg-purple-50 p-4 flex items-start gap-3">
-          <CheckCircle2 className="h-5 w-5 text-purple-600 mt-0.5 shrink-0" />
-          <div>
-            <p className="font-medium text-purple-800">{data.upcomingBirthdays} member(s) turning 65 in the next 90 days</p>
-            <p className="text-sm text-purple-700 mt-0.5">These contacts qualify for Medicare Part B enrollment — consider a targeted outreach campaign.</p>
-          </div>
-        </div>
+        <NoticeBanner icon={CheckCircle2} tone="success" title={`${data.upcomingBirthdays} member(s) turning 65 in the next 90 days`}>
+          These contacts qualify for Medicare Part B enrollment — consider a targeted outreach campaign.
+        </NoticeBanner>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader><CardTitle>Retention Rate</CardTitle></CardHeader>
+        <Card className="rounded-xl shadow-sm">
+          <CardHeader><CardTitle className="font-display text-lg">Retention Rate</CardTitle></CardHeader>
           <CardContent className="flex flex-col items-center justify-center h-48">
-            <div className="text-6xl font-bold text-green-600">{data.retentionRate}%</div>
+            <div className="font-display text-6xl font-bold text-success">{data.retentionRate}%</div>
             <p className="text-muted-foreground mt-2">Overall member retention</p>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader><CardTitle>Member Status Breakdown</CardTitle></CardHeader>
+        <Card className="rounded-xl shadow-sm">
+          <CardHeader><CardTitle className="font-display text-lg">Member Status Breakdown</CardTitle></CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={180}>
               <PieChart>
@@ -604,9 +726,9 @@ function RetentionTab() {
                   ]}
                   cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value"
                 >
-                  <Cell fill="#10b981" />
+                  <Cell fill="#22a05a" />
                   <Cell fill="#f59e0b" />
-                  <Cell fill="#ef4444" />
+                  <Cell fill="#dc2626" />
                 </Pie>
                 <Tooltip />
                 <Legend />
@@ -618,9 +740,9 @@ function RetentionTab() {
 
       {/* Monthly enrollment / loss trend */}
       {data.monthlyTrend && data.monthlyTrend.length > 0 && (
-        <Card>
+        <Card className="rounded-xl shadow-sm">
           <CardHeader>
-            <CardTitle>Monthly Enrollment Trend</CardTitle>
+            <CardTitle className="font-display text-lg">Monthly Enrollment Trend</CardTitle>
             <CardDescription>New enrollments vs. members lost over the past 12 months</CardDescription>
           </CardHeader>
           <CardContent>
@@ -631,8 +753,8 @@ function RetentionTab() {
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="enrolled" fill="#10b981" radius={[4, 4, 0, 0]} name="Enrolled" />
-                <Bar dataKey="lost" fill="#ef4444" radius={[4, 4, 0, 0]} name="Lost" />
+                <Bar dataKey="enrolled" fill="#22a05a" radius={[4, 4, 0, 0]} name="Enrolled" />
+                <Bar dataKey="lost" fill="#dc2626" radius={[4, 4, 0, 0]} name="Lost" />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -640,13 +762,9 @@ function RetentionTab() {
       )}
 
       {data.atRiskRate > 10 && (
-        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 flex items-start gap-3">
-          <AlertTriangle className="h-5 w-5 text-yellow-600 mt-0.5 shrink-0" />
-          <div>
-            <p className="font-medium text-yellow-800">{data.atRiskRate}% of enrolled members are at risk</p>
-            <p className="text-sm text-yellow-700 mt-0.5">Consider running a re-engagement sequence for members with no activity in the past 60 days.</p>
-          </div>
-        </div>
+        <NoticeBanner icon={AlertTriangle} tone="warning" title={`${data.atRiskRate}% of enrolled members are at risk`}>
+          Consider running a re-engagement sequence for members with no activity in the past 60 days.
+        </NoticeBanner>
       )}
     </div>
   );
@@ -682,10 +800,10 @@ function ExecutiveTab() {
       <div>
         <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Workforce</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard title="Active Agents" value={data.agents.active} icon={<Users className="h-5 w-5 text-blue-500" />} />
-          <StatCard title="In Onboarding" value={data.agents.onboarding} icon={<Activity className="h-5 w-5 text-yellow-500" />} />
-          <StatCard title="Enrolled Members" value={data.members.enrolled.toLocaleString()} icon={<ShieldCheck className="h-5 w-5 text-green-500" />} />
-          <StatCard title="AHIP Pass Rate" value={`${data.compliance.ahipRate}%`} subtitle={`${data.compliance.ahipPassed}/${data.compliance.ahipTotal} agents`} icon={<CheckCircle2 className="h-5 w-5 text-purple-500" />} />
+          <StatCard title="Active Agents" value={data.agents.active} icon={<Users className="h-5 w-5 text-accent" />} />
+          <StatCard title="In Onboarding" value={data.agents.onboarding} icon={<Activity className="h-5 w-5 text-warning" />} />
+          <StatCard title="Enrolled Members" value={data.members.enrolled.toLocaleString()} icon={<ShieldCheck className="h-5 w-5 text-success" />} />
+          <StatCard title="AHIP Pass Rate" value={`${data.compliance.ahipRate}%`} subtitle={`${data.compliance.ahipPassed}/${data.compliance.ahipTotal} agents`} icon={<CheckCircle2 className="h-5 w-5 text-navy-700 dark:text-accent" />} />
         </div>
       </div>
 
@@ -697,18 +815,18 @@ function ExecutiveTab() {
             title="New Leads"
             value={data.leads.total.toLocaleString()}
             subtitle={leadsTrend != null ? `${leadsTrend >= 0 ? "+" : ""}${leadsTrend}% vs prior period` : undefined}
-            icon={<TrendingUp className={`h-5 w-5 ${leadsTrend != null && leadsTrend >= 0 ? "text-green-500" : "text-red-500"}`} />}
+            icon={<TrendingUp className={`h-5 w-5 ${leadsTrend != null && leadsTrend >= 0 ? "text-success" : "text-destructive"}`} />}
           />
-          <StatCard title="Deals Won" value={data.deals.won} subtitle={`Win rate: ${data.deals.winRate}%`} icon={<CheckCircle2 className="h-5 w-5 text-green-500" />} />
-          <StatCard title="Won Value" value={`$${data.deals.wonValue.toLocaleString()}`} icon={<DollarSign className="h-5 w-5 text-green-600" />} />
-          <StatCard title="Active Pipeline" value={`$${data.deals.activePipelineValue.toLocaleString()}`} icon={<BarChart2 className="h-5 w-5 text-blue-500" />} />
+          <StatCard title="Deals Won" value={data.deals.won} subtitle={`Win rate: ${data.deals.winRate}%`} icon={<CheckCircle2 className="h-5 w-5 text-success" />} />
+          <StatCard title="Won Value" value={`$${data.deals.wonValue.toLocaleString()}`} icon={<DollarSign className="h-5 w-5 text-success" />} />
+          <StatCard title="Active Pipeline" value={`$${data.deals.activePipelineValue.toLocaleString()}`} icon={<BarChart2 className="h-5 w-5 text-accent" />} />
         </div>
       </div>
 
       {/* Section: Win rate + comms summary */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader><CardTitle>Deal Outcomes</CardTitle><CardDescription>Period: {range.start} – {range.end}</CardDescription></CardHeader>
+        <Card className="rounded-xl shadow-sm">
+          <CardHeader><CardTitle className="font-display text-lg">Deal Outcomes</CardTitle><CardDescription>Period: {range.start} – {range.end}</CardDescription></CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={200}>
               <PieChart>
@@ -719,8 +837,8 @@ function ExecutiveTab() {
                   ]}
                   cx="50%" cy="50%" innerRadius={55} outerRadius={80} dataKey="value"
                 >
-                  <Cell fill="#10b981" />
-                  <Cell fill="#ef4444" />
+                  <Cell fill="#22a05a" />
+                  <Cell fill="#dc2626" />
                 </Pie>
                 <Tooltip />
                 <Legend />
@@ -730,8 +848,8 @@ function ExecutiveTab() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader><CardTitle>Communications Volume</CardTitle><CardDescription>Outbound messages sent this period</CardDescription></CardHeader>
+        <Card className="rounded-xl shadow-sm">
+          <CardHeader><CardTitle className="font-display text-lg">Communications Volume</CardTitle><CardDescription>Outbound messages sent this period</CardDescription></CardHeader>
           <CardContent className="flex flex-col items-center justify-center h-40">
             <MessageSquare className="h-10 w-10 text-blue-400 mb-2" />
             <p className="text-4xl font-bold">{data.communications.outbound.toLocaleString()}</p>
@@ -772,16 +890,18 @@ async function downloadCsv(url: string, filename: string) {
 
 function StatCard({ title, value, icon, subtitle }: { title: string; value: string | number; icon?: React.ReactNode; subtitle?: string }) {
   return (
-    <Card>
-      <CardContent className="p-4 flex items-start gap-3">
-        {icon && <div className="mt-0.5">{icon}</div>}
-        <div>
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <p className="text-2xl font-bold">{value}</p>
+    <div className="h-full rounded-xl border border-border bg-card p-4 shadow-sm">
+      <div className="flex items-center gap-3">
+        {icon && (
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">{icon}</div>
+        )}
+        <div className="min-w-0">
+          <p className="text-xs text-muted-foreground truncate">{title}</p>
+          <p className="font-display text-xl font-bold leading-tight">{value}</p>
           {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -796,10 +916,13 @@ function LoadingSkeleton() {
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-      <BarChart2 className="h-12 w-12 mb-3 opacity-30" />
-      <p>{message}</p>
-    </div>
+    <SectionCard>
+      <SharedEmptyState
+        icon={BarChart2}
+        title={message}
+        description="Numbers appear here as soon as there's activity in Mediflow for this period. Try a longer date range."
+      />
+    </SectionCard>
   );
 }
 
@@ -848,21 +971,25 @@ export default function ReportsPage() {
   const { data: me } = useGetMe();
   const allowedRoles = ["super_admin", "agency_admin", "compliance_manager", "agent_support"];
   if (me && !allowedRoles.includes(me.role)) {
-    return <div className="p-8 text-center text-muted-foreground">You don't have access to reports.</div>;
+    return (
+      <PageShell>
+        <SectionCard>
+          <SharedEmptyState icon={Lock} title="You don't have access to reports." description="Reports are available to admins, compliance managers and agent support." />
+        </SectionCard>
+      </PageShell>
+    );
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <BarChart2 className="h-6 w-6 text-blue-600" />
-          Analytics & Reports
-        </h1>
-        <p className="text-muted-foreground mt-1">Agency performance, compliance, and pipeline analytics.</p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Reporting & Analytics"
+        subtitle="How the agency is doing — sales, agents, compliance, outreach and retention — with a spreadsheet for each"
+      />
 
-      <Tabs defaultValue="executive">
+      <Tabs defaultValue="library">
         <TabsList className="flex-wrap h-auto gap-1">
+          <TabsTrigger value="library">Report library</TabsTrigger>
           <TabsTrigger value="executive">Executive</TabsTrigger>
           <TabsTrigger value="agent-performance">Agent Performance</TabsTrigger>
           <TabsTrigger value="pipeline">Pipeline</TabsTrigger>
@@ -873,6 +1000,7 @@ export default function ReportsPage() {
         </TabsList>
 
         <div className="mt-6">
+          <TabsContent value="library"><ReportLibrary /></TabsContent>
           <TabsContent value="executive"><ExecutiveTab /></TabsContent>
           <TabsContent value="agent-performance"><AgentPerformanceTab /></TabsContent>
           <TabsContent value="pipeline"><PipelineTab /></TabsContent>
@@ -882,6 +1010,6 @@ export default function ReportsPage() {
           <TabsContent value="retention"><RetentionTab /></TabsContent>
         </div>
       </Tabs>
-    </div>
+    </PageShell>
   );
 }
