@@ -17,7 +17,7 @@ import {
   type Request,
   type Response,
 } from "express";
-import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import multer from "multer";
@@ -553,6 +553,62 @@ router.get(
   },
 );
 
+// Single statement with its carrier name and line-item match counts, for
+// the statement detail page.
+router.get(
+  "/commissions/statements/:id",
+  requireAuth,
+  requirePermission("commission", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+    const [row] = await db
+      .select({
+        statement: commissionStatementsTable,
+        carrierName: carriersTable.name,
+      })
+      .from(commissionStatementsTable)
+      .leftJoin(carriersTable, eq(carriersTable.id, commissionStatementsTable.carrierId))
+      .where(
+        and(
+          eq(commissionStatementsTable.id, id),
+          eq(commissionStatementsTable.orgId, authReq.orgId),
+        ),
+      )
+      .limit(1);
+    if (!row) {
+      res.status(404).json({ error: "Statement not found" });
+      return;
+    }
+
+    const [counts] = await db
+      .select({
+        lineItemCount: sql<number>`count(*)::int`,
+        unmatchedCount: sql<number>`count(*) FILTER (WHERE ${commissionLineItemsTable.matchStatus} = 'unmatched')::int`,
+      })
+      .from(commissionLineItemsTable)
+      .where(
+        and(
+          eq(commissionLineItemsTable.statementId, id),
+          eq(commissionLineItemsTable.orgId, authReq.orgId),
+        ),
+      );
+    const lineItemCount = Number(counts?.lineItemCount ?? 0);
+    const unmatchedCount = Number(counts?.unmatchedCount ?? 0);
+
+    res.json({
+      ...row.statement,
+      carrierName: row.carrierName ?? null,
+      lineItemCount,
+      // "manual" matches count as matched, same as the detail page's
+      // client-side fallback.
+      matchedCount: lineItemCount - unmatchedCount,
+      unmatchedCount,
+    });
+  },
+);
+
 router.get(
   "/commissions/statements/:id/line-items",
   requireAuth,
@@ -824,6 +880,102 @@ router.post(
       return;
     }
     res.json(row);
+  },
+);
+
+// ─── Org-wide KPI summary ─────────────────────────────────────────────
+//
+// GET /commissions/summary[?period=YYYY-MM] — the stat cards on the
+// commissions page. Figures come from agent_commission_payouts for one
+// calendar month:
+//   - `period` query param when given, else
+//   - the month of the most recent payout period (carrier statements land
+//     after the month closes, so the current month is usually still empty),
+//     else the current month.
+// Paid/pending use the same rule as /commissions/me: a "paid" payout
+// contributes its paid amount; any other status contributes its earned
+// amount to pending. Missed payments counts unresolved alerts (not
+// period-bound: an open alert stays actionable until resolved).
+
+function monthBounds(year: number, month: number): { start: string; end: string } {
+  const start = `${year}-${String(month).padStart(2, "0")}-01`;
+  const end = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+  return { start, end };
+}
+
+router.get(
+  "/commissions/summary",
+  requireAuth,
+  requirePermission("commission", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const periodParam = onlyParam(req.query.period);
+    if (periodParam !== undefined && !/^\d{4}-(0[1-9]|1[0-2])$/.test(periodParam)) {
+      res.status(400).json({ error: "period must be YYYY-MM" });
+      return;
+    }
+
+    let year: number;
+    let month: number;
+    if (periodParam) {
+      [year, month] = periodParam.split("-").map(Number) as [number, number];
+    } else {
+      const [latest] = await db
+        .select({ periodStart: sql<string | null>`max(${agentCommissionPayoutsTable.periodStart})::text` })
+        .from(agentCommissionPayoutsTable)
+        .where(eq(agentCommissionPayoutsTable.orgId, authReq.orgId));
+      const anchor = latest?.periodStart
+        ? new Date(`${latest.periodStart}T00:00:00Z`)
+        : new Date();
+      year = anchor.getUTCFullYear();
+      month = anchor.getUTCMonth() + 1;
+    }
+    const { start, end } = monthBounds(year, month);
+
+    const [[totals], [missed]] = await Promise.all([
+      db
+        .select({
+          earned: sql<string>`coalesce(sum(${agentCommissionPayoutsTable.earned}), 0)::text`,
+          paid: sql<string>`coalesce(sum(${agentCommissionPayoutsTable.paid}) FILTER (WHERE ${agentCommissionPayoutsTable.status} = 'paid'), 0)::text`,
+          pending: sql<string>`coalesce(sum(${agentCommissionPayoutsTable.earned}) FILTER (WHERE ${agentCommissionPayoutsTable.status} <> 'paid'), 0)::text`,
+          agents: sql<number>`count(DISTINCT ${agentCommissionPayoutsTable.agentId})::int`,
+        })
+        .from(agentCommissionPayoutsTable)
+        .where(
+          and(
+            eq(agentCommissionPayoutsTable.orgId, authReq.orgId),
+            gte(agentCommissionPayoutsTable.periodStart, start),
+            lte(agentCommissionPayoutsTable.periodStart, end),
+          ),
+        ),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(missedPaymentAlertsTable)
+        .where(
+          and(
+            eq(missedPaymentAlertsTable.orgId, authReq.orgId),
+            isNull(missedPaymentAlertsTable.resolvedAt),
+          ),
+        ),
+    ]);
+
+    const periodLabel = new Date(Date.UTC(year, month - 1, 1)).toLocaleString("en-US", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+
+    res.json({
+      period: `${year}-${String(month).padStart(2, "0")}`,
+      periodLabel,
+      periodStart: start,
+      periodEnd: end,
+      earnedThisPeriod: Number(Number(totals?.earned ?? 0).toFixed(2)),
+      paidThisPeriod: Number(Number(totals?.paid ?? 0).toFixed(2)),
+      pendingThisPeriod: Number(Number(totals?.pending ?? 0).toFixed(2)),
+      agentsOnPayouts: Number(totals?.agents ?? 0),
+      missedPaymentsCount: Number(missed?.count ?? 0),
+    });
   },
 );
 
