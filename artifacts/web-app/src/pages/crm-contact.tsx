@@ -43,6 +43,7 @@ import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import CreateLeadDialog from "@/pages/crm/CreateLeadDialog";
 import ApplicationsTab from "@/pages/crm/ApplicationsTab";
+import { BookAppointmentButton } from "@/components/calendar/BookAppointmentButton";
 import {
   useContactCallSummaries,
   type CallSummary,
@@ -908,6 +909,7 @@ export default function ContactDetailPage() {
           <div className="flex flex-wrap gap-2 shrink-0">
             {c.phone && !c.optOutSms && <Button size="sm" variant="outline" onClick={() => setSmsOpen(true)}><MessageSquare className="h-4 w-4 mr-1" />SMS</Button>}
             {c.email && !c.optOutEmail && <Button size="sm" variant="outline" onClick={() => setEmailOpen(true)}><Mail className="h-4 w-4 mr-1" />Email</Button>}
+            <BookAppointmentButton contactId={id} contactName={contactName} />
             <Button size="sm" variant="outline" onClick={() => setLeadOpen(true)}><Plus className="h-4 w-4 mr-1" />Create Lead</Button>
             <Button size="sm" variant="outline" onClick={() => setLogOpen(true)}><ActivityIcon className="h-4 w-4 mr-1" />Log</Button>
             <Button size="sm" variant="outline" onClick={openEdit}><Edit className="h-4 w-4 mr-1" />Edit</Button>

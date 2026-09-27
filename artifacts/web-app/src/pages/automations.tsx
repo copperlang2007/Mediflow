@@ -84,6 +84,7 @@ const ACTION_OPTIONS = [
   { value: "change_contact_status", label: "Change contact status" },
   { value: "enroll_sequence", label: "Enroll in sequence" },
   { value: "change_deal_stage", label: "Change deal stage" },
+  { value: "create_appointment", label: "Book appointment" },
 ];
 
 const RESULT_ICONS = {
@@ -144,6 +145,26 @@ function ActionConfigEditor({ action, onChange }: { action: AutomationAction; on
       return (
         <div className="mt-2">
           <Input placeholder="Pipeline Stage ID" value={(action.config.stageId as string) ?? ""} onChange={(e) => update("stageId", e.target.value)} className="text-xs h-7" />
+        </div>
+      );
+    case "create_appointment":
+      return (
+        <div className="space-y-2 mt-2">
+          <Input placeholder="Appointment title" value={(action.config.title as string) ?? ""} onChange={(e) => update("title", e.target.value)} className="text-xs h-7" />
+          <div className="grid grid-cols-3 gap-2">
+            <Input placeholder="Days from now (1)" value={(action.config.startOffsetDays as string) ?? ""} onChange={(e) => update("startOffsetDays", e.target.value)} className="text-xs h-7" />
+            <Input type="time" placeholder="Start (client's time)" value={(action.config.startTime as string) ?? ""} onChange={(e) => update("startTime", e.target.value)} className="text-xs h-7" />
+            <Input placeholder="Minutes (30)" value={(action.config.durationMinutes as string) ?? ""} onChange={(e) => update("durationMinutes", e.target.value)} className="text-xs h-7" />
+          </div>
+          <Select value={(action.config.type as string) ?? "consultation"} onValueChange={(v) => update("type", v)}>
+            <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Type" /></SelectTrigger>
+            <SelectContent>
+              {["enrollment", "review", "renewal", "consultation", "other"].map((s) => (
+                <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[11px] text-muted-foreground">Books a pending appointment for the trigger's client and agent, at that time in the client's timezone.</p>
         </div>
       );
     case "send_notification":

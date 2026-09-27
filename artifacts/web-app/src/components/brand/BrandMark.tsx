@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { cn } from "@/lib/utils";
+import { useBranding } from "@/lib/branding/BrandingProvider";
 
 /**
  * agencyBRIDGE identity — the suspension-bridge mark and the
@@ -80,7 +81,13 @@ export function BrandMark({
   );
 }
 
-/** Mark + "agencyBRIDGE" wordmark. `compact` shows the mark only. */
+/**
+ * Mark + "agencyBRIDGE" wordmark. `compact` shows the mark only.
+ *
+ * White-label aware (stage2/calendar-branding): inside a BrandingProvider the
+ * agency's product name, tagline, mark and full logo replace the defaults
+ * one by one; outside one (sign-in, landing) it is always agencyBRIDGE.
+ */
 export function BrandLockup({
   size = 36,
   tone = "brand",
@@ -98,16 +105,52 @@ export function BrandLockup({
   wordmarkClassName?: string;
   subtitleClassName?: string;
 }) {
+  const { resolved } = useBranding();
+  const shownSubtitle = resolved.tagline ?? subtitle;
+
+  // A full logo lockup replaces mark + wordmark when there is room for it.
+  // It sits on a light chip so a dark logo stays visible on the navy sidebar.
+  if (!compact && resolved.logoSrc) {
+    return (
+      <div className={cn("flex items-center min-w-0", className)}>
+        <span className={cn("inline-flex items-center rounded-lg", tone === "light" && "bg-white/95 px-2 py-1")}>
+          <img
+            src={resolved.logoSrc}
+            alt={resolved.productName}
+            style={{ height: Math.round(size * 0.8) }}
+            className="max-w-[180px] object-contain"
+          />
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className={cn("flex items-center gap-3 min-w-0", className)}>
-      <BrandMark size={size} tone={tone} decorative={!compact} />
+      {resolved.markSrc ? (
+        <img
+          src={resolved.markSrc}
+          alt={compact ? resolved.productName : ""}
+          width={size}
+          height={size}
+          className="shrink-0 rounded-[7px] object-contain"
+        />
+      ) : (
+        <BrandMark size={size} tone={tone} decorative={!compact} title={resolved.productName} />
+      )}
       {!compact && (
         <div className="flex flex-col leading-tight overflow-hidden">
           <span className={cn("font-display font-bold tracking-tight truncate", wordmarkClassName)}>
-            agency<span className="font-extrabold">BRIDGE</span>
+            {resolved.customName ? (
+              resolved.productName
+            ) : (
+              <>
+                agency<span className="font-extrabold">BRIDGE</span>
+              </>
+            )}
           </span>
-          {subtitle && (
-            <span className={cn("text-[11px] opacity-60 truncate", subtitleClassName)}>{subtitle}</span>
+          {shownSubtitle && (
+            <span className={cn("text-[11px] opacity-60 truncate", subtitleClassName)}>{shownSubtitle}</span>
           )}
         </div>
       )}
