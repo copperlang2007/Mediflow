@@ -552,6 +552,7 @@ function ClerkProviderWithRoutes() {
               </Route>
               <Route path="/knowledge-base">
                 <ProtectedLayout><KnowledgeBasePage /></ProtectedLayout>
+              </Route>
               {/* --- stage2/calendar-branding --- */}
               <Route path="/calendar">
                 <ProtectedLayout><CalendarPage /></ProtectedLayout>

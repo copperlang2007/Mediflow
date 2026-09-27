@@ -2899,6 +2899,139 @@ export interface DialTicket {
   callbackUrl: string;
 }
 
+export interface KbArticleStage2 {
+  id: string;
+  orgId: string;
+  category: string;
+  title: string;
+  content: string;
+  keywords: string[];
+  isActive: boolean;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KbArticleInputStage2 {
+  /** @maxLength 80 */
+  category?: string;
+  /** @maxLength 200 */
+  title?: string;
+  /** @maxLength 20000 */
+  content?: string;
+  /**
+   * @maxItems 50
+   * @items.maxLength 60
+   */
+  keywords?: string[];
+  isActive?: boolean;
+}
+
+export type CampaignAudienceStatusesItem =
+  (typeof CampaignAudienceStatusesItem)[keyof typeof CampaignAudienceStatusesItem];
+
+export const CampaignAudienceStatusesItem = {
+  lead: "lead",
+  prospect: "prospect",
+  enrolled: "enrolled",
+  retained: "retained",
+  lost: "lost",
+} as const;
+
+export type CampaignAudiencePlanTypesItem =
+  (typeof CampaignAudiencePlanTypesItem)[keyof typeof CampaignAudiencePlanTypesItem];
+
+export const CampaignAudiencePlanTypesItem = {
+  MA: "MA",
+  PDP: "PDP",
+  MAPD: "MAPD",
+  supp: "supp",
+  other: "other",
+} as const;
+
+/**
+ * Audience filter over contacts. Health conditions and race are never filterable.
+ */
+export interface CampaignAudience {
+  statuses?: CampaignAudienceStatusesItem[];
+  planTypes?: CampaignAudiencePlanTypesItem[];
+  carrierIds?: string[];
+  states?: string[];
+  sources?: string[];
+  tags?: string[];
+  /**
+   * @minimum 1
+   * @maximum 12
+   */
+  birthdayMonth?: number;
+}
+
+export type CampaignInputChannel =
+  (typeof CampaignInputChannel)[keyof typeof CampaignInputChannel];
+
+export const CampaignInputChannel = {
+  email: "email",
+  sms: "sms",
+} as const;
+
+export interface CampaignInput {
+  channel?: CampaignInputChannel;
+  name?: string;
+  /** @nullable */
+  templateId?: string | null;
+  /** @nullable */
+  subject?: string | null;
+  /** @nullable */
+  body?: string | null;
+  audience?: CampaignAudience;
+}
+
+export type CampaignChannel =
+  (typeof CampaignChannel)[keyof typeof CampaignChannel];
+
+export const CampaignChannel = {
+  email: "email",
+  sms: "sms",
+} as const;
+
+export type CampaignStatus =
+  (typeof CampaignStatus)[keyof typeof CampaignStatus];
+
+export const CampaignStatus = {
+  draft: "draft",
+  scheduled: "scheduled",
+  sending: "sending",
+  sent: "sent",
+  cancelled: "cancelled",
+} as const;
+
+export interface Campaign {
+  id?: string;
+  channel?: CampaignChannel;
+  name?: string;
+  status?: CampaignStatus;
+  /** @nullable */
+  subject?: string | null;
+  /** @nullable */
+  body?: string | null;
+  audience?: CampaignAudience;
+  /** @nullable */
+  templateName?: string | null;
+  /** @nullable */
+  scheduledAt?: string | null;
+  /** @nullable */
+  sentAt?: string | null;
+  recipientCount?: number;
+  sentCount?: number;
+  deliveredCount?: number;
+  openedCount?: number;
+  clickedCount?: number;
+  bouncedCount?: number;
+  failedCount?: number;
+  skippedCount?: number;
+  unsubscribedCount?: number;
+}
+
 export type GetUsersParams = {
   role?: string;
   isActive?: boolean;
@@ -3364,6 +3497,102 @@ export type ListOnboardingsParams = {
   offset?: number;
 };
 
+export type GetEnrollmentsSummaryParams = {
+  carrierId?: string;
+  agentId?: string;
+  planType?: GetEnrollmentsSummaryPlanType;
+  status?: string;
+  effectuated?: GetEnrollmentsSummaryEffectuated;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  /**
+   * Client name or policy number
+   */
+  search?: string;
+};
+
+export type GetEnrollmentsSummaryPlanType =
+  (typeof GetEnrollmentsSummaryPlanType)[keyof typeof GetEnrollmentsSummaryPlanType];
+
+export const GetEnrollmentsSummaryPlanType = {
+  MA: "MA",
+  PDP: "PDP",
+  MAPD: "MAPD",
+  supp: "supp",
+  other: "other",
+} as const;
+
+export type GetEnrollmentsSummaryEffectuated =
+  (typeof GetEnrollmentsSummaryEffectuated)[keyof typeof GetEnrollmentsSummaryEffectuated];
+
+export const GetEnrollmentsSummaryEffectuated = {
+  true: "true",
+  false: "false",
+} as const;
+
+export type GetEnrollmentsSummary200 = {
+  total?: number;
+  active?: number;
+  pending?: number;
+  ended?: number;
+  effectuated?: number;
+  notEffectuated?: number;
+  /** Effective date within the next 60 days */
+  startingSoon?: number;
+};
+
+export type GetReconciliationOverview200StatementsItem = {
+  [key: string]: unknown;
+};
+
+export type GetReconciliationOverview200Totals = { [key: string]: unknown };
+
+export type GetReconciliationOverview200UnmatchedItemsItem = {
+  [key: string]: unknown;
+};
+
+export type GetReconciliationOverview200MissedPaymentsItem = {
+  [key: string]: unknown;
+};
+
+export type GetReconciliationOverview200 = {
+  statements?: GetReconciliationOverview200StatementsItem[];
+  totals?: GetReconciliationOverview200Totals;
+  unmatchedItems?: GetReconciliationOverview200UnmatchedItemsItem[];
+  missedPayments?: GetReconciliationOverview200MissedPaymentsItem[];
+  asOf?: string;
+};
+
+export type GetMyAgentBackoffice200 = { [key: string]: unknown };
+
+export type GetAgentBackoffice200 = { [key: string]: unknown };
+
+export type ListKbArticlesParams = {
+  search?: string;
+  category?: string;
+  includeInactive?: ListKbArticlesIncludeInactive;
+};
+
+export type ListKbArticlesIncludeInactive =
+  (typeof ListKbArticlesIncludeInactive)[keyof typeof ListKbArticlesIncludeInactive];
+
+export const ListKbArticlesIncludeInactive = {
+  true: "true",
+  false: "false",
+} as const;
+
+export type ListKbArticles200Stats = {
+  total?: number;
+  active?: number;
+  categories?: number;
+  keywords?: number;
+};
+
+export type ListKbArticles200 = {
+  articles?: KbArticleStage2[];
+  stats?: ListKbArticles200Stats;
+};
+
 export type ListAppointmentsParams = {
   from: string;
   to: string;
@@ -3562,3 +3791,105 @@ export type CreateAgencyBody = {
 };
 
 export type CreateAgency201 = { [key: string]: unknown };
+
+export type ListCampaignsParams = {
+  channel?: ListCampaignsChannel;
+};
+
+export type ListCampaignsChannel =
+  (typeof ListCampaignsChannel)[keyof typeof ListCampaignsChannel];
+
+export const ListCampaignsChannel = {
+  email: "email",
+  sms: "sms",
+} as const;
+
+export type GetCampaignOverviewParams = {
+  channel?: GetCampaignOverviewChannel;
+};
+
+export type GetCampaignOverviewChannel =
+  (typeof GetCampaignOverviewChannel)[keyof typeof GetCampaignOverviewChannel];
+
+export const GetCampaignOverviewChannel = {
+  email: "email",
+  sms: "sms",
+} as const;
+
+export type GetCampaignOverview200 = { [key: string]: unknown };
+
+export type GetCampaignConfig200 = { [key: string]: unknown };
+
+export type UpdateCampaignSettingsBody = {
+  /** @nullable */
+  senderName?: string | null;
+  /** @nullable */
+  physicalAddress?: string | null;
+  /** @nullable */
+  replyToEmail?: string | null;
+  defaultTimeZone?: string;
+};
+
+export type UpdateCampaignSettings200 = { [key: string]: unknown };
+
+export type GetCampaignActivityParams = {
+  channel?: GetCampaignActivityChannel;
+};
+
+export type GetCampaignActivityChannel =
+  (typeof GetCampaignActivityChannel)[keyof typeof GetCampaignActivityChannel];
+
+export const GetCampaignActivityChannel = {
+  email: "email",
+  sms: "sms",
+} as const;
+
+export type GetCampaignActivity200Item = { [key: string]: unknown };
+
+export type PreviewCampaignAudienceBodyChannel =
+  (typeof PreviewCampaignAudienceBodyChannel)[keyof typeof PreviewCampaignAudienceBodyChannel];
+
+export const PreviewCampaignAudienceBodyChannel = {
+  email: "email",
+  sms: "sms",
+} as const;
+
+export type PreviewCampaignAudienceBody = {
+  channel: PreviewCampaignAudienceBodyChannel;
+  audience?: CampaignAudience;
+};
+
+export type PreviewCampaignAudience200 = {
+  matched?: number;
+  eligible?: number;
+  optedOut?: number;
+  missingAddress?: number;
+};
+
+export type GetCampaignAudienceOptions200 = { [key: string]: unknown };
+
+export type ListCampaignOptOutsParams = {
+  channel?: ListCampaignOptOutsChannel;
+};
+
+export type ListCampaignOptOutsChannel =
+  (typeof ListCampaignOptOutsChannel)[keyof typeof ListCampaignOptOutsChannel];
+
+export const ListCampaignOptOutsChannel = {
+  email: "email",
+  sms: "sms",
+} as const;
+
+export type ListCampaignOptOuts200 = { [key: string]: unknown };
+
+export type ResubscribeCampaignContactBody = {
+  contactId: string;
+  confirm: true;
+  /** @minLength 5 */
+  reason: string;
+};
+
+export type SendCampaignBody = {
+  /** @nullable */
+  scheduledAt?: string | null;
+};
