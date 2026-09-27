@@ -8,7 +8,7 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
-import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 
 const router: IRouter = Router();
@@ -22,7 +22,7 @@ const CreateDocumentSchema = z.object({
 });
 
 router.use(
-  auditMiddleware("storage", undefined, {
+  routerAuditMiddleware(router, "storage", undefined, {
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.docId ?? req.params.id;

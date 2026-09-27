@@ -10,7 +10,7 @@
  *   - SSN + EIN are AES-256-GCM-encrypted before write via lib/encryption/pii.ts.
  *   - SSN/EIN/DOB are masked in responses for non-privileged roles.
  *   - Zod validates every body — no raw req.body reads.
- *   - Audit-log integration via auditMiddleware("agent_onboarding", ...) +
+ *   - Audit-log integration via routerAuditMiddleware(router, "agent_onboarding", ...) +
  *     auditMiddleware("carrier_contracting", ...).
  */
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -62,7 +62,7 @@ import {
   requireRole,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
-import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { auditMiddleware, routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import { PHI_PRIVILEGED_ROLES, type Role } from "../lib/permissions";
 import {
@@ -87,7 +87,7 @@ const MASKED_EIN = "**-*******";
 const router: IRouter = Router();
 
 router.use(
-  auditMiddleware("agent_onboarding", undefined, {
+  routerAuditMiddleware(router, "agent_onboarding", undefined, {
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.agentId;
