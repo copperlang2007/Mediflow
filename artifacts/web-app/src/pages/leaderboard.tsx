@@ -37,7 +37,10 @@ import {
   ToggleGroupItem,
 } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Trophy } from "lucide-react";
+import { Trophy, Users, PhoneIncoming, PhoneCall, Inbox, Lock } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { PageHeader, KpiCard, SectionCard, EmptyState } from "@/components/shared";
+import { PageShell, KpiGrid, TableFrame } from "@/components/ops";
 
 // Window options for the activity metrics (label → hours).
 const WINDOWS = [
@@ -52,7 +55,7 @@ function ReadyDot({ ready }: { ready: boolean }) {
       <TooltipTrigger asChild>
         <span
           className={`inline-block h-2.5 w-2.5 rounded-full ${
-            ready ? "bg-green-500" : "bg-slate-300"
+            ready ? "bg-success" : "bg-muted-foreground/30"
           }`}
           data-testid={ready ? "ready-dot-yes" : "ready-dot-no"}
           aria-label={ready ? "Ready to sell" : "Not ready to sell"}
@@ -65,14 +68,32 @@ function ReadyDot({ ready }: { ready: boolean }) {
   );
 }
 
+const MEDAL: Record<number, string> = {
+  1: "bg-warning/20 text-amber-700 dark:text-warning",
+  2: "bg-slate-200 text-slate-700 dark:bg-secondary dark:text-secondary-foreground",
+  3: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+};
+
 function LeaderboardRow({ entry }: { entry: AgentLeaderboardEntry }) {
   return (
     <TableRow data-testid={`leaderboard-row-${entry.agentId}`}>
-      <TableCell className="text-center tabular-nums font-semibold text-muted-foreground">
-        {entry.rank}
+      <TableCell className="text-center">
+        <span
+          className={cn(
+            "inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold tabular-nums",
+            MEDAL[entry.rank] ?? "text-muted-foreground",
+          )}
+        >
+          {entry.rank}
+        </span>
       </TableCell>
       <TableCell className="font-medium">
-        {entry.lastName}, {entry.firstName}
+        <div className="flex items-center gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-navy-100 text-navy-800 text-xs font-semibold dark:bg-secondary dark:text-secondary-foreground">
+            {`${entry.firstName?.[0] ?? ""}${entry.lastName?.[0] ?? ""}`.toUpperCase()}
+          </span>
+          {entry.lastName}, {entry.firstName}
+        </div>
       </TableCell>
       <TableCell className="text-center">
         <ReadyDot ready={entry.readyToSell} />
@@ -98,38 +119,39 @@ export default function LeaderboardPage() {
 
   const query = useAgentLeaderboard(sinceHours, Boolean(isAdmin));
   const rows = query.data?.data ?? [];
+  const windowLabel = WINDOWS.find((w) => w.value === String(sinceHours))?.label ?? "";
+  const totalInbounds = rows.reduce((s, r) => s + r.inboundsRouted, 0);
+  const totalCallbacks = rows.reduce((s, r) => s + r.callbacksResolved, 0);
+  const totalOpen = rows.reduce((s, r) => s + r.openLeads, 0);
+  const readyCount = rows.filter((r) => r.readyToSell).length;
 
   if (!meLoading && !isAdmin) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            You don't have access to the agent leaderboard.
-          </CardContent>
-        </Card>
-      </div>
+      <PageShell>
+        <SectionCard>
+          <EmptyState
+            icon={Lock}
+            title="You don't have access to the agent leaderboard."
+            description="The leaderboard is available to agency admins and compliance managers."
+          />
+        </SectionCard>
+      </PageShell>
     );
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-5">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Trophy className="h-6 w-6 text-amber-500" />
-            Agent Leaderboard
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Inbound-routing activity ranked over the selected window — inbounds
-            routed, callbacks resolved, and current open-lead load
-          </p>
-        </div>
+    <PageShell>
+      <PageHeader
+        title="Agent Leaderboard"
+        subtitle="Who's been taking inbound calls and closing callbacks, and how many open leads each agent has now"
+      >
         <ToggleGroup
           type="single"
           value={String(sinceHours)}
           onValueChange={(v) => {
             if (v) setSinceHours(Number(v));
           }}
+          className="rounded-lg bg-muted p-1"
           data-testid="leaderboard-window-toggle"
         >
           {WINDOWS.map((w) => (
@@ -137,33 +159,42 @@ export default function LeaderboardPage() {
               key={w.value}
               value={w.value}
               aria-label={w.label}
+              className="h-8 px-3 data-[state=on]:bg-background data-[state=on]:shadow"
             >
               {w.label}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
-      </div>
+      </PageHeader>
 
-      <Card>
-        <CardContent className="p-0">
+      <KpiGrid>
+        <KpiCard label="Agents ranked" value={rows.length} icon={Users} color="navy" loading={query.isLoading} hint={`${readyCount} ready to sell`} />
+        <KpiCard label={`Inbounds routed · ${windowLabel}`} value={totalInbounds} icon={PhoneIncoming} color="blue" loading={query.isLoading} hint={totalInbounds === 0 ? "No inbound calls in this window" : "Calls sent to an agent"} />
+        <KpiCard label={`Callbacks resolved · ${windowLabel}`} value={totalCallbacks} icon={PhoneCall} color="green" loading={query.isLoading} hint="Promised call-backs completed" />
+        <KpiCard label="Open leads right now" value={totalOpen} icon={Inbox} color="orange" loading={query.isLoading} hint="Across every ranked agent" />
+      </KpiGrid>
+
+      <SectionCard title="Rankings" description="Ranked by inbound calls routed; ties go to the agent with fewer open leads" icon={Trophy} iconClassName="text-warning">
           {query.isLoading ? (
-            <div className="p-4 space-y-2" data-testid="leaderboard-loading">
+            <div className="space-y-2" data-testid="leaderboard-loading">
               {[...Array(5)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
               ))}
             </div>
           ) : rows.length === 0 ? (
-            <div
-              className="py-16 text-center text-sm text-muted-foreground"
-              data-testid="leaderboard-empty"
-            >
-              No active agents to rank.
+            <div data-testid="leaderboard-empty">
+              <EmptyState
+                icon={Trophy}
+                title="No active agents to rank."
+                description="Once agents are active and taking inbound calls, they'll be ranked here."
+              />
             </div>
           ) : (
+            <TableFrame>
             <Table data-testid="leaderboard-table">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-center w-12">#</TableHead>
+                  <TableHead className="text-center w-16">Rank</TableHead>
                   <TableHead>Agent</TableHead>
                   <TableHead className="text-center">Ready</TableHead>
                   <TableHead className="text-center">Inbounds routed</TableHead>
@@ -179,9 +210,9 @@ export default function LeaderboardPage() {
                 ))}
               </TableBody>
             </Table>
+            </TableFrame>
           )}
-        </CardContent>
-      </Card>
-    </div>
+      </SectionCard>
+    </PageShell>
   );
 }

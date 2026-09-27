@@ -35,7 +35,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { BarChart3, PhoneMissed, Radio, TriangleAlert } from "lucide-react";
+import { BarChart3, PhoneMissed, Radio, TriangleAlert, Users, Route, PhoneOff, Lock, History, ShieldCheck } from "lucide-react";
+import { PageHeader, KpiCard, MiniStat, SectionCard, StatusPill, EmptyState } from "@/components/shared";
+import { PageShell, KpiGrid, TableFrame } from "@/components/ops";
 
 const STATUS_LABEL: Record<string, string> = {
   available: "Available",
@@ -82,9 +84,9 @@ function PresenceDot({ agent }: { agent: PresenceAgent }) {
       className={cn(
         "h-2.5 w-2.5 rounded-full shrink-0",
         agent.availableNow
-          ? "bg-emerald-500"
+          ? "bg-success"
           : agent.status === "on_call" || agent.status === "wrap"
-            ? "bg-amber-500"
+            ? "bg-warning"
             : "bg-muted-foreground/40",
       )}
     />
@@ -103,14 +105,14 @@ function SummaryCard({
   alarm?: boolean;
 }) {
   return (
-    <div className="rounded-md border px-3 py-2.5">
-      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+    <div className="rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
+      <div className="text-xs text-muted-foreground">
         {label}
       </div>
       <div
         className={cn(
-          "text-2xl font-bold tabular-nums",
-          alarm && "text-amber-600 dark:text-amber-500",
+          "font-display text-2xl font-bold tabular-nums",
+          alarm && "text-amber-600 dark:text-warning",
         )}
       >
         {value}
@@ -139,8 +141,8 @@ function BreakdownTable({
   rows: BreakdownRow[];
 }) {
   return (
-    <div className="rounded-md border">
-      <div className="px-3 py-2 border-b text-xs font-semibold">{title}</div>
+    <TableFrame>
+      <div className="px-4 py-2.5 border-b border-border text-sm font-semibold font-display">{title}</div>
       {rows.length > 0 ? (
         <Table>
           <TableHeader>
@@ -168,10 +170,10 @@ function BreakdownTable({
         </Table>
       ) : (
         <p className="text-xs text-muted-foreground py-5 text-center">
-          No data.
+          No calls in this window.
         </p>
       )}
-    </div>
+    </TableFrame>
   );
 }
 
@@ -190,18 +192,14 @@ function CallbacksPanel({ enabled }: { enabled: boolean }) {
   const rows: LeadCallback[] = callbacks.data?.data ?? [];
 
   return (
-    <Card>
-      <CardContent className="p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <PhoneMissed className="h-4 w-4 text-rose-500" />
-          <span className="font-semibold text-sm">Callback SLA queue</span>
-          <Badge variant="secondary" className="ml-1">
-            {rows.length} open
-          </Badge>
-          <span className="text-[11px] text-muted-foreground ml-auto">
-            dropped inbounds auto-resolved when capacity returns
-          </span>
-        </div>
+    <SectionCard
+      title="Callbacks owed"
+      description="Callers we missed and promised to ring back. They're cleared automatically when an agent frees up."
+      icon={PhoneMissed}
+      iconClassName="text-destructive"
+      actions={<StatusPill tone={rows.length > 0 ? "warning" : "success"}>{rows.length} open</StatusPill>}
+      contentClassName="space-y-3"
+    >
         {callbacks.isLoading ? (
           <div className="space-y-2" data-testid="callbacks-loading">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -209,6 +207,7 @@ function CallbacksPanel({ enabled }: { enabled: boolean }) {
             ))}
           </div>
         ) : rows.length > 0 ? (
+          <TableFrame>
           <Table>
             <TableHeader>
               <TableRow>
@@ -259,13 +258,16 @@ function CallbacksPanel({ enabled }: { enabled: boolean }) {
               })}
             </TableBody>
           </Table>
+          </TableFrame>
         ) : (
-          <p className="text-sm text-muted-foreground py-6 text-center">
-            No open callbacks.
-          </p>
+          <EmptyState
+            compact
+            icon={ShieldCheck}
+            title="No callbacks owed — nice"
+            description="Every inbound caller was answered or has already been called back."
+          />
         )}
-      </CardContent>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -278,47 +280,88 @@ export default function AdminQueuePage() {
 
   if (!meLoading && !isAdmin) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            You don&apos;t have access to the live queue.
-          </CardContent>
-        </Card>
-      </div>
+      <PageShell>
+        <SectionCard>
+          <EmptyState
+            icon={Lock}
+            title="You don't have access to the live queue."
+            description="The live call queue is available to agency admins."
+          />
+        </SectionCard>
+      </PageShell>
     );
   }
 
   const availableCount = presence.data?.availableCount ?? 0;
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold">Live Queue</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Real-time agent availability and recent inbound routing decisions.
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Live Call Queue"
+        subtitle="Who's free to take a call right now, where inbound calls went, and who we still owe a call back"
+      >
+        <StatusPill tone="success" className="gap-1.5 text-sm px-3 py-1">
+          <span className="h-2 w-2 rounded-full bg-success animate-pulse" /> Updates every 15 seconds
+        </StatusPill>
+      </PageHeader>
+
+      <KpiGrid>
+        <KpiCard
+          label="Agents available now"
+          value={availableCount}
+          icon={Users}
+          color="green"
+          loading={presence.isLoading}
+          hint={`${presence.data?.agents.length ?? 0} agents checked in`}
+        />
+        <KpiCard
+          label={`Calls routed · ${WINDOW_OPTIONS.find((o) => o.hours === sinceHours)?.label}`}
+          value={analytics.data?.stats.routed ?? 0}
+          icon={Route}
+          color="navy"
+          loading={analytics.isLoading}
+          hint={analytics.data ? `${pct(analytics.data.stats.routedRate)} of ${analytics.data.stats.total} calls` : undefined}
+        />
+        <KpiCard
+          label="Missed — no agent free"
+          value={analytics.data?.stats.noAgent ?? 0}
+          icon={PhoneOff}
+          color="orange"
+          loading={analytics.isLoading}
+          hint={(analytics.data?.stats.total ?? 0) === 0 ? "No inbound calls in this window" : (analytics.data?.stats.noAgent ?? 0) === 0 ? "Every call found an agent" : "Callers routed to a callback"}
+        />
+        <KpiCard
+          label="Coverage gaps"
+          value={analytics.data?.coverageGaps.length ?? 0}
+          icon={TriangleAlert}
+          color="blue"
+          loading={analytics.isLoading}
+          hint="Carrier + state with nobody available"
+        />
+      </KpiGrid>
 
       {/* Analytics */}
-      <Card>
-        <CardContent className="p-4 space-y-4">
-          <div className="flex items-center gap-2">
-            <BarChart3 className="h-4 w-4 text-sky-500" />
-            <span className="font-semibold text-sm">Routing analytics</span>
-            <div className="ml-auto flex gap-1">
-              {WINDOW_OPTIONS.map((opt) => (
-                <Button
-                  key={opt.hours}
-                  size="sm"
-                  variant={sinceHours === opt.hours ? "secondary" : "ghost"}
-                  className="h-7 px-2.5 text-xs"
-                  onClick={() => setSinceHours(opt.hours)}
-                >
-                  {opt.label}
-                </Button>
-              ))}
-            </div>
+      <SectionCard
+        title="Routing analytics"
+        description="How inbound calls were handed out"
+        icon={BarChart3}
+        contentClassName="space-y-4"
+        actions={
+          <div className="flex gap-1 rounded-lg bg-muted p-1">
+            {WINDOW_OPTIONS.map((opt) => (
+              <Button
+                key={opt.hours}
+                size="sm"
+                variant="ghost"
+                className={cn("h-7 px-2.5 text-xs", sinceHours === opt.hours && "bg-background shadow hover:bg-background")}
+                onClick={() => setSinceHours(opt.hours)}
+              >
+                {opt.label}
+              </Button>
+            ))}
           </div>
+        }
+      >
 
           {analytics.isLoading ? (
             <div
@@ -388,13 +431,14 @@ export default function AdminQueuePage() {
               {/* Coverage gaps */}
               <div>
                 <div className="flex items-center gap-2 mb-2">
-                  <TriangleAlert className="h-4 w-4 text-amber-500" />
-                  <span className="font-semibold text-sm">Coverage gaps</span>
-                  <span className="text-[11px] text-muted-foreground">
-                    carrier × state with no available agent
+                  <TriangleAlert className="h-4 w-4 text-warning" />
+                  <span className="font-semibold text-sm font-display">Coverage gaps</span>
+                  <span className="text-xs text-muted-foreground">
+                    carrier + state combinations with no available agent
                   </span>
                 </div>
                 {analytics.data.coverageGaps.length > 0 ? (
+                  <TableFrame>
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -432,34 +476,39 @@ export default function AdminQueuePage() {
                       ))}
                     </TableBody>
                   </Table>
+                  </TableFrame>
                 ) : (
-                  <p className="text-sm text-muted-foreground py-6 text-center">
-                    No coverage gaps in this window.
-                  </p>
+                  <EmptyState
+                    compact
+                    icon={ShieldCheck}
+                    title={analytics.data.stats.total === 0 ? "No coverage gaps in this window" : "No coverage gaps in this window — nice"}
+                    description={analytics.data.stats.total === 0 ? "No inbound calls came in yet, so there's nothing to flag." : "Every carrier and state that called had someone available."}
+                  />
                 )}
               </div>
             </>
           ) : (
-            <p className="text-sm text-muted-foreground py-6 text-center">
-              No routing data yet.
-            </p>
+            <EmptyState
+              compact
+              icon={BarChart3}
+              title="No routing data yet"
+              description="Once inbound calls start coming in, you'll see how they were routed here."
+            />
           )}
-        </CardContent>
-      </Card>
+      </SectionCard>
 
       {/* Callback SLA queue */}
       <CallbacksPanel enabled={Boolean(isAdmin)} />
 
       {/* Presence */}
-      <Card>
-        <CardContent className="p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <Radio className="h-4 w-4 text-emerald-500" />
-            <span className="font-semibold text-sm">Agent presence</span>
-            <Badge variant="secondary" className="ml-1">
-              {availableCount} available
-            </Badge>
-          </div>
+      <SectionCard
+        title="Agent presence"
+        description="Green is ready for a call, amber is on a call or wrapping up"
+        icon={Radio}
+        iconClassName="text-success"
+        actions={<StatusPill tone={availableCount > 0 ? "success" : "neutral"}>{availableCount} available</StatusPill>}
+        contentClassName="space-y-3"
+      >
           {presence.isLoading ? (
             <div className="space-y-2" data-testid="presence-loading">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -471,7 +520,7 @@ export default function AdminQueuePage() {
               {presence.data.agents.map((a) => (
                 <div
                   key={a.agentId}
-                  className="flex items-center gap-2 rounded-md border px-3 py-2"
+                  className="flex items-center gap-2 rounded-lg border border-border px-3 py-2.5"
                 >
                   <PresenceDot agent={a} />
                   <span className="text-sm truncate flex-1">
@@ -484,26 +533,25 @@ export default function AdminQueuePage() {
               ))}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground py-4 text-center">
-              No agents have checked in yet.
-            </p>
+            <EmptyState
+              compact
+              icon={Users}
+              title="No agents have checked in yet."
+              description="Agents appear here as soon as they set themselves available in Mediflow."
+            />
           )}
-        </CardContent>
-      </Card>
+      </SectionCard>
 
       {/* Recent decisions */}
-      <Card>
-        <CardContent className="p-0">
-          <div className="flex items-center justify-between px-4 py-3 border-b">
-            <span className="font-semibold text-sm">Recent routing decisions</span>
-          </div>
+      <SectionCard title="Recent routing decisions" description="The last 50 inbound calls and who they went to" icon={History}>
           {routing.isLoading ? (
-            <div className="p-4 space-y-2" data-testid="routing-loading">
+            <div className="space-y-2" data-testid="routing-loading">
               {Array.from({ length: 5 }).map((_, i) => (
                 <Skeleton key={i} className="h-10 w-full" />
               ))}
             </div>
           ) : routing.data && routing.data.data.length > 0 ? (
+            <TableFrame>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -526,11 +574,9 @@ export default function AdminQueuePage() {
                     <TableCell>{d.stateCode}</TableCell>
                     <TableCell>
                       {d.status === "routed" ? (
-                        <Badge variant="secondary">routed</Badge>
+                        <StatusPill tone="success">Routed</StatusPill>
                       ) : (
-                        <Badge variant="outline" className="text-muted-foreground">
-                          no agent
-                        </Badge>
+                        <StatusPill tone="warning">No agent</StatusPill>
                       )}
                     </TableCell>
                     <TableCell>
@@ -551,13 +597,15 @@ export default function AdminQueuePage() {
                 ))}
               </TableBody>
             </Table>
+            </TableFrame>
           ) : (
-            <p className="text-sm text-muted-foreground py-16 text-center">
-              No routing decisions recorded yet.
-            </p>
+            <EmptyState
+              icon={History}
+              title="No routing decisions recorded yet."
+              description="Each inbound call is logged here with the agent it went to and how many agents could have taken it."
+            />
           )}
-        </CardContent>
-      </Card>
-    </div>
+      </SectionCard>
+    </PageShell>
   );
 }
