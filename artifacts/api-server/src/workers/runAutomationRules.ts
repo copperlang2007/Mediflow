@@ -54,6 +54,16 @@ interface AutomationAction {
 
 // ---- Action execution ----
 
+/** True when the contact has opted out of the given channel. */
+async function contactOptedOut(orgId: string, contactId: string, channel: "email" | "sms"): Promise<boolean> {
+  const [c] = await db
+    .select({ optOutEmail: contactsTable.optOutEmail, optOutSms: contactsTable.optOutSms })
+    .from(contactsTable)
+    .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId)));
+  if (!c) return false;
+  return channel === "email" ? c.optOutEmail : c.optOutSms;
+}
+
 async function executeAction(
   action: AutomationAction,
   {
@@ -200,6 +210,11 @@ async function executeAction(
           if (a?.email) resolvedTo = a.email;
         }
       }
+      if (resolvedTo && resourceType === "contact" && resourceId
+          && (await contactOptedOut(orgId, resourceId, "email"))) {
+        logger.info({ action: "send_email", resourceId }, "send_email skipped — contact opted out of email");
+        break;
+      }
       if (resolvedTo && subject && html) {
         await enqueue(JOB_NAMES.SEND_SCHEDULED_EMAIL, {
           to: resolvedTo,
@@ -228,6 +243,11 @@ async function executeAction(
             .where(and(eq(contactsTable.id, resourceId), eq(contactsTable.orgId, orgId)));
           if (c?.phone) resolvedTo = c.phone;
         }
+      }
+      if (resolvedTo && resourceType === "contact" && resourceId
+          && (await contactOptedOut(orgId, resourceId, "sms"))) {
+        logger.info({ action: "send_sms", resourceId }, "send_sms skipped — contact opted out of SMS");
+        break;
       }
       if (resolvedTo && body) {
         await enqueue(JOB_NAMES.SEND_SCHEDULED_SMS, { to: resolvedTo, body });

@@ -268,8 +268,11 @@ export async function sendSequenceStepWorker(
     switch (step.stepType) {
       case "email": {
         const to = contact.email;
-        if (!to) {
-          logger.warn({ contactId, stepIndex }, "Contact has no email — skipping email step");
+        if (!to || contact.optOutEmail) {
+          logger.warn(
+            { contactId, stepIndex, optOut: contact.optOutEmail },
+            "Contact has no email or opted out — skipping email step",
+          );
           break;
         }
         const subject = String(cfg.subject ?? "");
