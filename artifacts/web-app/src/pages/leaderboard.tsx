@@ -159,7 +159,7 @@ export default function LeaderboardPage() {
               key={w.value}
               value={w.value}
               aria-label={w.label}
-              className="h-8 px-3 data-[state=on]:bg-background data-[state=on]:shadow"
+              className="h-8 px-3 text-muted-foreground data-[state=on]:bg-card data-[state=on]:font-semibold data-[state=on]:text-foreground data-[state=on]:shadow data-[state=on]:ring-1 data-[state=on]:ring-border"
             >
               {w.label}
             </ToggleGroupItem>

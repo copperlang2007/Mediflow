@@ -11,7 +11,7 @@ import {
 import type { AiContext } from "@/components/ai-assistant";
 import { AiAssistantPanel, openAiAssistant } from "@/components/ai-assistant";
 import { PresenceToggle } from "@/components/layout/PresenceToggle";
-import { ViewAsAgencyControl } from "@/components/layout/ViewAsAgencyControl";
+import { ViewAsAgencyControl, ViewAsAgencyDialog } from "@/components/layout/ViewAsAgencyControl";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
 import {
   DEV_NAV_GROUP,
@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -45,11 +46,13 @@ import {
   ChevronDown,
   ChevronLeft,
   CreditCard,
+  Eye,
   FlaskConical,
   HelpCircle,
   LayoutDashboard,
   LogOut,
   Menu,
+  Search,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -173,8 +176,8 @@ function DemoBanner() {
     >
       <FlaskConical className="h-4 w-4 shrink-0" />
       <span className="font-semibold">Demo</span>
-      <span className="text-sky-800/80 dark:text-sky-300/80 truncate">
-        Sample agency, invented data. Nothing here is a real person.
+      <span className="min-w-0 text-sky-800/80 dark:text-sky-300/80">
+        Sample agency, invented data.<span className="hidden sm:inline"> Nothing here is a real person.</span>
       </span>
     </div>
   );
@@ -184,6 +187,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState<boolean>(readCollapsed);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [viewAsOpen, setViewAsOpen] = useState(false);
   const [location] = useLocation();
   const { user } = useUser();
   const { signOut } = useClerk();
@@ -236,6 +241,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const canSearch = !userRole || CONTACT_READERS.includes(userRole);
   const isOwner = userRole === "super_admin" || userRole === "agency_admin";
+  const isSuperAdmin = userRole === "super_admin";
   const roleLabel = userRole ? (ROLE_LABELS[userRole] ?? userRole) : null;
   const initials =
     `${user?.firstName?.[0] ?? ""}${user?.lastName?.[0] ?? ""}`.toUpperCase() || "U";
@@ -372,17 +378,36 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <Menu className="h-5 w-5" />
           </Button>
 
-          {canSearch ? <GlobalSearch /> : <div className="flex-1" />}
+          {/* Search: inline from md up; an icon that opens a search sheet below. */}
+          {canSearch ? (
+            <>
+              <GlobalSearch className="hidden md:block" />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="md:hidden shrink-0"
+                onClick={() => setSearchOpen(true)}
+                aria-label="Search clients"
+                title="Search clients"
+              >
+                <Search className="h-5 w-5" />
+              </Button>
+              <div className="flex-1 md:hidden" />
+            </>
+          ) : (
+            <div className="flex-1" />
+          )}
 
+          {/* Role chip only where there's room; otherwise it's in the account menu. */}
           {roleLabel && (
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-muted/60 border border-border shrink-0">
+            <div className="hidden xl:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-muted/60 border border-border shrink-0">
               <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-xs font-medium text-muted-foreground">{roleLabel}</span>
+              <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">{roleLabel}</span>
             </div>
           )}
 
-          <div className="flex items-center gap-1 sm:gap-2 ml-auto">
-            <ViewAsAgencyControl enabled={userRole === "super_admin"} />
+          <div className="flex min-w-0 items-center gap-0.5 sm:gap-2 ml-auto shrink-0">
+            <ViewAsAgencyControl enabled={isSuperAdmin} />
 
             {/* Notifications */}
             {!viewingAgency && (
@@ -443,7 +468,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className="flex items-center gap-2.5 rounded-full pl-1 pr-1 md:pr-3 py-1 hover:bg-muted/60 transition-colors"
+                  className="flex shrink-0 items-center gap-2.5 rounded-full pl-1 pr-1 xl:pr-3 py-1 hover:bg-muted/60 transition-colors"
                   aria-label="Account menu"
                 >
                   <Avatar className="h-9 w-9 border-2 border-accent/20">
@@ -452,21 +477,36 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       {initials}
                     </AvatarFallback>
                   </Avatar>
-                  <span className="hidden md:flex flex-col items-start leading-tight min-w-0">
+                  <span className="hidden xl:flex flex-col items-start leading-tight min-w-0">
                     <span className="text-sm font-semibold truncate max-w-40">{user?.fullName ?? "User"}</span>
                     {roleLabel && <span className="text-[11px] text-muted-foreground">{roleLabel}</span>}
                   </span>
-                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground hidden md:block" />
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground hidden xl:block" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-60">
+              <DropdownMenuContent align="end" className="w-64 max-w-[calc(100vw-1rem)]">
                 <DropdownMenuLabel className="font-normal">
                   <p className="text-sm font-semibold truncate">{user?.fullName ?? "User"}</p>
                   <p className="text-xs text-muted-foreground truncate">
                     {user?.primaryEmailAddress?.emailAddress}
                   </p>
+                  {roleLabel && (
+                    <p className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground xl:hidden">
+                      <ShieldCheck className="h-3 w-3" />
+                      {roleLabel}
+                    </p>
+                  )}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                {isSuperAdmin && !viewingAgency && (
+                  <DropdownMenuItem
+                    className="cursor-pointer xl:hidden"
+                    onClick={() => setViewAsOpen(true)}
+                  >
+                    <Eye className="h-4 w-4 mr-2" />
+                    View an agency…
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem asChild>
                   <Link href="/settings">
                     <User className="h-4 w-4 mr-2" />
@@ -508,9 +548,32 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 overflow-y-auto">{children}</main>
+        {/* Page content. Bottom padding keeps the last card clear of the
+            floating AI button (56px at bottom-6) and any device safe area. */}
+        <main
+          className={cn(
+            "flex-1 overflow-y-auto overflow-x-hidden",
+            !viewingAgency && "pb-[calc(5.5rem+env(safe-area-inset-bottom))]",
+          )}
+        >
+          {children}
+        </main>
       </div>
+
+      {/* Small-screen search sheet (the inline box shows from md up). */}
+      {canSearch && (
+        <Sheet open={searchOpen} onOpenChange={setSearchOpen}>
+          <SheetContent side="top" className="p-4 pt-12">
+            <SheetTitle className="sr-only">Search clients</SheetTitle>
+            <SheetDescription className="sr-only">Find a client by name, phone or email.</SheetDescription>
+            {searchOpen && (
+              <GlobalSearch autoFocus className="max-w-none" onNavigate={() => setSearchOpen(false)} />
+            )}
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {isSuperAdmin && <ViewAsAgencyDialog open={viewAsOpen} onOpenChange={setViewAsOpen} />}
 
       {/* Floating AI Assistant (existing /api/ai/chat feature) */}
       {!viewingAgency && <AiAssistantPanel context={aiContext} />}

@@ -223,7 +223,7 @@ export default function WorkspacesPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">{a.slug}</td>
+                      <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground whitespace-nowrap">{a.slug}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{a.users}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{a.agents}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{a.clients}</td>

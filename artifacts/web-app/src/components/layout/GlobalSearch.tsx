@@ -15,7 +15,16 @@ import { formatPhone } from "@/lib/phone";
  * Only rendered for roles that can read contacts; the server enforces the
  * same rule, so this is purely about not showing a box that would 403.
  */
-export function GlobalSearch({ className }: { className?: string }) {
+export function GlobalSearch({
+  className,
+  autoFocus,
+  onNavigate,
+}: {
+  className?: string;
+  autoFocus?: boolean;
+  /** Called after the search sends the user somewhere (e.g. to close a sheet). */
+  onNavigate?: () => void;
+}) {
   const [, navigate] = useLocation();
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -46,10 +55,11 @@ export function GlobalSearch({ className }: { className?: string }) {
     const q = query.trim();
     setOpen(false);
     navigate(q ? `/crm?q=${encodeURIComponent(q)}` : "/crm");
+    onNavigate?.();
   };
 
   return (
-    <div ref={wrapRef} className={cn("relative flex-1 max-w-md", className)}>
+    <div ref={wrapRef} className={cn("relative flex-1 min-w-0 max-w-md", className)}>
       <form
         role="search"
         onSubmit={(e) => {
@@ -69,6 +79,7 @@ export function GlobalSearch({ className }: { className?: string }) {
           onKeyDown={(e) => {
             if (e.key === "Escape") setOpen(false);
           }}
+          autoFocus={autoFocus}
           placeholder="Search clients by name, phone or email…"
           aria-label="Search clients"
           className="h-10 pl-9 bg-muted/60 border-transparent focus-visible:bg-card focus-visible:ring-1 focus-visible:ring-accent"
@@ -91,6 +102,7 @@ export function GlobalSearch({ className }: { className?: string }) {
                       setOpen(false);
                       setQuery("");
                       navigate(`/crm/contacts/${c.id}`);
+                      onNavigate?.();
                     }}
                     className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-muted"
                   >
