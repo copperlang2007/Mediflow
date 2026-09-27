@@ -253,6 +253,26 @@ export interface VerifyResult {
 }
 
 /**
+ * The leading DER element of `bytes` (a SEQUENCE), dropping any padding after
+ * it. Throws when the header is malformed or declares more bytes than exist.
+ */
+export function derPrefix(bytes: Buffer): Buffer {
+  if (bytes.length < 2 || bytes[0] !== 0x30) throw new Error("signature is not a DER SEQUENCE");
+  let length = bytes[1];
+  let offset = 2;
+  if (length & 0x80) {
+    const n = length & 0x7f;
+    if (n < 1 || n > 4 || bytes.length < 2 + n) throw new Error("unsupported DER length");
+    length = 0;
+    for (let i = 0; i < n; i++) length = length * 256 + bytes[2 + i];
+    offset = 2 + n;
+  }
+  const total = offset + length;
+  if (total > bytes.length) throw new Error("DER length exceeds the /Contents window");
+  return bytes.subarray(0, total);
+}
+
+/**
  * Verify a PKCS#7/CMS signature embedded in a signed PDF.
  *
  * Tamper-evidence only — we check that the bytes outside the /Contents
@@ -268,11 +288,20 @@ export function verifyPdfSignature(pdfBuffer: Buffer): VerifyResult {
   } catch (err) {
     return { valid: false, reason: `extractSignature failed: ${(err as Error).message}` };
   }
-  const { signedData, signature } = extracted;
+  const { signedData, ByteRange } = extracted;
 
-  // `signature` is a binary-string of the DER CMS blob. Convert back to a
-  // forge buffer for ASN.1 parsing.
-  const cmsBinary = signature as unknown as string;
+  // Re-read the CMS blob ourselves. @signpdf's extractSignature strips
+  // trailing "00" pairs to drop the zero padding, which also truncates a DER
+  // blob whose last real byte is 0x00 (~1 in 256 signatures) and made valid
+  // PDFs fail with "Too few bytes to read ASN.1 value". Take the whole
+  // /Contents window and cut it at the length the DER header declares.
+  let cmsBinary: string;
+  try {
+    const hex = pdfBuffer.subarray(ByteRange[0] + ByteRange[1] + 1, ByteRange[2] - 1).toString("latin1");
+    cmsBinary = derPrefix(Buffer.from(hex, "hex")).toString("binary");
+  } catch (err) {
+    return { valid: false, reason: `CMS parse failed: ${(err as Error).message}` };
+  }
   let p7Msg: forge.pkcs7.PkcsSignedData;
   try {
     const asn1 = forge.asn1.fromDer(forge.util.createBuffer(cmsBinary));
