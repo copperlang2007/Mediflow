@@ -229,9 +229,8 @@ export async function storeApplication(
   }
 
   // The policy was first stored without a Sunfire code: re-key that record so
-  // its history continues on one application instead of splitting in two. If
-  // a record already holds the code (the same Sunfire application reached us
-  // under another EnrollHere policy id), fold the code-less history into it.
+  // its history continues on one application instead of splitting in two. A
+  // code already held by another policy's record is never taken over.
   if (p.confirmationCode && p.policyId) {
     const fallbackKey = `policy:${p.policyId}`;
     const rows = await tx.select({
@@ -248,10 +247,11 @@ export async function storeApplication(
     const codeless = rows.find((r) => r.key === fallbackKey);
     const coded = rows.find((r) => r.key === p.confirmationCode);
     // A record holding this code for ANOTHER EnrollHere policy is a code
-    // collision (vendor-side), even for the same person: merging would
-    // overwrite that record's policy id and cross two policies' histories.
-    // Keep this policy on its own fallback key and flag it.
-    if (coded && coded.policyId !== p.policyId) {
+    // collision (vendor-side), even for the same person: merging would cross
+    // two policies' histories. Keep this policy on its own fallback key and
+    // flag it. A coded record with no policy id yet is this application
+    // arriving without one earlier; it learns the id from this delivery.
+    if (coded && coded.policyId && coded.policyId !== p.policyId) {
       logger.warn({ orgId, applicationId: coded.id }, "EnrollHere: Sunfire code already used by another policy; kept separate");
       applicationKey = fallbackKey;
     } else if (codeless && !coded) {
