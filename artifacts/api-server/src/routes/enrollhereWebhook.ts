@@ -35,21 +35,23 @@
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import crypto, { randomUUID } from "crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   db,
   activitiesTable,
   organizationsTable,
   agentsTable,
+  contactsTable,
+  externalContactLinksTable,
   integrationEventsTable,
 } from "@workspace/db";
 import { verifyWebhookSignature } from "../lib/dialer/signature";
 import { canonicalJson, flattenPayload, interpretPayloadContact, normalizeKey, payloadKeyPaths, pick } from "../lib/integrations/payload";
-import { loadAgentsByEmail, upsertContact } from "../lib/contactImport";
+import { fillBlanks, findDeletedPerson, loadAgentsByEmail, loadMatcher, upsertContact } from "../lib/contactImport";
 import { normalizePhone } from "../lib/csvImport";
 import { logger } from "../lib/logger";
 import { captureWorkerError } from "../lib/sentry";
-import { isPolicyEvent, parsePolicyEvent } from "../lib/integrations/enrollhere/policyEvent";
+import { isPolicyEvent, mapPolicyStatus, parsePolicyEvent } from "../lib/integrations/enrollhere/policyEvent";
 import { storeApplication, upsertPolicyEnrollment } from "../lib/integrations/enrollhere/applicationStore";
 
 const router: IRouter = Router();
@@ -361,6 +363,9 @@ function bodyHash(body: Record<string, unknown>, volatile: Set<string> = VOLATIL
   return `sha256:${crypto.createHash("sha256").update(canonicalJson(stableForHash(body, volatile) as never)).digest("hex")}`;
 }
 
+/** external_contact_links source for EnrollHere policy id → contact. */
+const POLICY_LINK_SOURCE = "enrollhere-policy";
+
 async function handlePolicyEvent(req: RawBodyRequest, res: Response, orgId: string): Promise<void> {
   const body = req.body as Record<string, unknown>;
   const parsed = parsePolicyEvent(body);
@@ -394,8 +399,55 @@ async function handlePolicyEvent(req: RawBodyRequest, res: Response, orgId: stri
         : null;
       if (!contact.leadSource) contact.leadSource = "EnrollHere";
 
-      const { contactId, created, matchedOn, warnings: mergeWarnings } = await upsertContact(tx, orgId, contact, agentId);
+      // Each policy is linked to its person. A person the agency deleted stays
+      // deleted: later events for their policy are recorded but change nothing,
+      // and a hard delete leaves the link behind (contact null) as a tombstone.
+      const [link] = parsed.policyId
+        ? await tx.select().from(externalContactLinksTable).where(and(
+          eq(externalContactLinksTable.orgId, orgId),
+          eq(externalContactLinksTable.source, POLICY_LINK_SOURCE),
+          eq(externalContactLinksTable.externalId, parsed.policyId),
+        )).limit(1)
+        : [];
+      let contactId: string;
+      let created = false;
+      let matchedOn: string | null;
+      let mergeWarnings: { field: string; message: string }[];
+      if (link) {
+        if (!link.contactId) return { skipped: true as const };
+        const [target] = await tx.select({ deletedAt: contactsTable.deletedAt }).from(contactsTable)
+          .where(and(eq(contactsTable.id, link.contactId), eq(contactsTable.orgId, orgId))).limit(1);
+        if (!target || target.deletedAt) return { skipped: true as const };
+        contactId = link.contactId;
+        matchedOn = "EnrollHere policy";
+        mergeWarnings = await fillBlanks(tx, orgId, contactId, contact, agentId);
+      } else {
+        if (!(await loadMatcher(orgId, [contact], tx)).find(contact)) {
+          const deletedId = await findDeletedPerson(tx, orgId, contact);
+          if (deletedId) {
+            if (parsed.policyId) {
+              await tx.insert(externalContactLinksTable).values({
+                id: randomUUID(), orgId, source: POLICY_LINK_SOURCE, externalId: parsed.policyId, contactId: deletedId,
+              }).onConflictDoNothing();
+            }
+            return { skipped: true as const };
+          }
+        }
+        ({ contactId, created, matchedOn, warnings: mergeWarnings } = await upsertContact(tx, orgId, contact, agentId));
+        if (parsed.policyId) {
+          await tx.insert(externalContactLinksTable).values({
+            id: randomUUID(), orgId, source: POLICY_LINK_SOURCE, externalId: parsed.policyId, contactId,
+          }).onConflictDoNothing();
+        }
+      }
+
       const enrollmentId = await upsertPolicyEnrollment(tx, orgId, contactId, agentId, parsed);
+      // Coverage in force makes a lead or prospect an enrolled client (so
+      // retention and AEP renewals include them); later statuses are left alone.
+      if (enrollmentId && mapPolicyStatus(parsed.policyStatus).effectuated) {
+        await tx.update(contactsTable).set({ status: "enrolled" })
+          .where(and(eq(contactsTable.id, contactId), inArray(contactsTable.status, ["lead", "prospect"])));
+      }
       const stored = await storeApplication(tx, orgId, parsed, { contactId, enrollmentId });
 
       const label = parsed.eventType.replace(/^PE_/, "").replace(/_/g, " ").toLowerCase();
@@ -429,6 +481,11 @@ async function handlePolicyEvent(req: RawBodyRequest, res: Response, orgId: stri
       return { duplicate: false as const, contactId, created, matchedOn, enrollmentId, stored, activityId, mergeWarnings };
     });
 
+    if ("skipped" in result) {
+      logger.info({ orgId, eventType: parsed.eventType }, "EnrollHere webhook: policy event for a deleted contact; skipped");
+      res.status(200).json({ ok: true, duplicate: false, skipped: "contact_deleted" });
+      return;
+    }
     if (result.duplicate) {
       res.status(200).json({ ok: true, duplicate: true });
       return;

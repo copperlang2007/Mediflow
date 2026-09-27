@@ -792,6 +792,28 @@ export async function insertContact(
  * Create-or-merge one contact arriving from an integration (webhook or feed),
  * with the same duplicate rules and fill-blanks-only merge as the CSV import.
  */
+/**
+ * A match that identifies the person, not just someone in their household:
+ * the Medicare ID, or matching dates of birth on both records.
+ */
+export function isStrongMatch(reason: string, dobA: string | null | undefined, dobB: string | null | undefined): boolean {
+  return reason === "Medicare ID" || (!!dobA && !!dobB && dobA === dobB);
+}
+
+/**
+ * The soft-deleted contact this person clearly is, if any: the Medicare ID, or
+ * a matching birth date AND a matching email or phone. Feeds use it so a
+ * person the agency deleted is never recreated as a new live contact.
+ */
+export async function findDeletedPerson(tx: Tx, orgId: string, c: InterpretedContact): Promise<string | null> {
+  const gone = (await loadMatcher(orgId, [c], tx, { deleted: true })).find(c);
+  if (!gone) return null;
+  const sameContact = (!!c.email && !!gone.match.email && c.email.toLowerCase() === gone.match.email.toLowerCase())
+    || (!!c.phone && !!gone.match.phone && c.phone === gone.match.phone);
+  return gone.reason === "Medicare ID" || (isStrongMatch(gone.reason, c.dob, gone.match.dob) && sameContact)
+    ? gone.match.id : null;
+}
+
 export async function upsertContact(
   tx: Tx,
   orgId: string,

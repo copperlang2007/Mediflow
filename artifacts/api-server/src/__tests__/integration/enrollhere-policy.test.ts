@@ -293,15 +293,64 @@ describe("EnrollHere policy events", () => {
     await tdb.update(enrollmentApplicationVersionsTable).set({ payloadEncrypted: saved }).where(eq(enrollmentApplicationVersionsTable.id, v!.id));
   });
 
+  it("marks a new in-force policyholder as enrolled", async () => {
+    const [c] = await tdb.select({ status: contactsTable.status }).from(contactsTable).where(eq(contactsTable.id, contactId));
+    expect(c!.status).toBe("enrolled");
+  });
+
+  it("a code-less update continues the coded application", async () => {
+    const noCode = sample();
+    noCode.event = "PE_POLICY_UPDATED";
+    noCode.policy.manualStatus = "POL_INFORCE";
+    delete noCode.policy.enrollment.identifiers.bySource.sunfire;
+    delete noCode.policy.identifiers.bySource.sunfire;
+    const res = await post(noCode);
+    expect(res.body).toMatchObject({ applicationId });
+    expect(await tdb.select().from(enrollmentApplicationsTable)
+      .where(eq(enrollmentApplicationsTable.applicationKey, `policy:${sample().policy.id}`))).toHaveLength(0);
+  });
+
+  it("an update that moves the plan year lands on the same enrollment", async () => {
+    const before = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.contactId, contactId));
+    const moved = sample();
+    moved.event = "PE_POLICY_UPDATED";
+    moved.policy.enrollment.details.effectiveDate = { date: "2027-01-01T12:00:00.000Z" };
+    const res = await post(moved);
+    expect(res.status).toBe(200);
+    const after = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.contactId, contactId));
+    expect(after).toHaveLength(before.length);
+    expect(after.find((e) => e.id === res.body.enrollmentId)).toMatchObject({ planYear: 2027, effectiveDate: "2027-01-01" });
+  });
+
   it("a deleted contact's application can't be opened, and a purge removes it", async () => {
     await tdb.update(contactsTable).set({ deletedAt: new Date() }).where(eq(contactsTable.id, contactId));
     const res = await request(app).get(`/api/applications/${applicationId}/full`).set(withAuth(admin.id));
     expect(res.status).toBe(404);
 
+    // Later events for the deleted person's policy change nothing.
+    const later = sample();
+    later.event = "PE_POLICY_UPDATED";
+    later.policy.manualStatus = "POL_TERMINATED";
+    expect((await post(later)).body).toMatchObject({ ok: true, skipped: "contact_deleted" });
+    // Nor does a new policy for them.
+    const other = sample();
+    other.policy.id = "policy-after-delete";
+    other.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF77770000"];
+    delete other.policy.identifiers.bySource.sunfire;
+    expect((await post(other)).body).toMatchObject({ skipped: "contact_deleted" });
+    expect(await tdb.select().from(contactsTable).where(eq(contactsTable.email, "alex.johnson@example.com"))).toHaveLength(1);
+
     await tdb.delete(activitiesTable).where(eq(activitiesTable.contactId, contactId));
     await tdb.delete(contactsTable).where(eq(contactsTable.id, contactId));
     expect(await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, applicationId))).toHaveLength(0);
     expect(await tdb.select().from(enrollmentApplicationVersionsTable).where(eq(enrollmentApplicationVersionsTable.applicationId, applicationId))).toHaveLength(0);
+
+    // After the purge the policy link remains as a tombstone.
+    const again = sample();
+    again.event = "PE_POLICY_UPDATED";
+    again.policy.manualStatus = "POL_CANCELLED";
+    expect((await post(again)).body).toMatchObject({ skipped: "contact_deleted" });
+    expect(await tdb.select().from(contactsTable).where(eq(contactsTable.email, "alex.johnson@example.com"))).toHaveLength(0);
   });
 });
 
@@ -320,6 +369,9 @@ describe("policy event parsing", () => {
     expect(policyDate({ date: "2026-02-30T12:00:00.000Z" })).toBeNull();
     expect(policyDate({ date: "2026-99-01" })).toBeNull();
     expect(policyDate({ date: "2026-01-01T12:00:00.000Z" })).toBe("2026-01-01");
+    // Policy dates read a two-digit year as 20xx; birth dates as a plausible past year.
+    expect(policyDate("1/1/27")).toBe("2027-01-01");
+    expect(policyDate("4/12/55", "past")).toBe("1955-04-12");
   });
 
   it("fills missing person fields from the lead when the consumer is empty or partial", async () => {

@@ -31,14 +31,18 @@ const at = (o: unknown, ...path: string[]): unknown => {
   return cur;
 };
 
-/** `{ date: "2026-01-01T12:00:00.000Z", … }` or a plain string → `yyyy-mm-dd`. */
-export function policyDate(v: unknown): string | null {
+/**
+ * `{ date: "2026-01-01T12:00:00.000Z", … }` or a plain string → `yyyy-mm-dd`.
+ * `twoDigitYear` resolves a `1/1/27`-style year: "past" for birth dates,
+ * "2000s" (the default) for policy dates.
+ */
+export function policyDate(v: unknown, twoDigitYear: "past" | "2000s" = "2000s"): string | null {
   const raw = isObj(v) ? str(v.date) : str(v);
   if (!raw) return null;
   // Both paths validate the calendar date: an impossible value (2026-02-30)
   // is treated as absent rather than failing the whole event in Postgres.
   const iso = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  return parseFlexibleDate(iso ? iso[1]! : raw, "past");
+  return parseFlexibleDate(iso ? iso[1]! : raw, twoDigitYear);
 }
 
 function policyInstant(v: unknown): Date | null {
@@ -138,7 +142,7 @@ export function parsePolicyEvent(body: Obj): ParsedPolicyEvent {
   put("state", str(fromPerson("address", "state")));
   put("zip", str(fromPerson("address", "zip")));
   put("county", str(fromPerson("address", "county")));
-  put("dob", policyDate(fromPerson("birthDate")));
+  put("dob", policyDate(fromPerson("birthDate"), "past"));
   if (medicareNumber) put("medicare_id", medicareNumber);
   put("assigned_agent_email", str(agent.email));
 

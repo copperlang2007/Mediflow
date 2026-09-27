@@ -12,7 +12,7 @@
  *     race/ethnicity exist only inside the encrypted payload.
  */
 import { randomUUID } from "crypto";
-import { and, eq, max, sql } from "drizzle-orm";
+import { and, eq, isNull, max, ne, sql } from "drizzle-orm";
 import {
   enrollmentsTable,
   enrollmentApplicationsTable,
@@ -44,6 +44,35 @@ export async function upsertPolicyEnrollment(
   let carrierId = p.carrierName ? await resolveCarrier(tx, orgId, p.carrierName, new Map(), []) : null;
   const { status, effectuated } = mapPolicyStatus(p.policyStatus);
   const planYear = Number(p.effectiveDate.slice(0, 4));
+
+  // The policy's own enrollment, found through its stored application: an
+  // update lands there even when the carrier, plan type or plan year changed.
+  const prior = await priorEnrollmentFor(tx, orgId, contactId, p.policyId);
+  if (prior) {
+    const target = { carrierId: carrierId ?? prior.carrierId, planYear, planType: p.planType };
+    const [clash] = await tx.select({ id: enrollmentsTable.id }).from(enrollmentsTable).where(and(
+      eq(enrollmentsTable.contactId, contactId),
+      eq(enrollmentsTable.planYear, target.planYear),
+      eq(enrollmentsTable.planType, target.planType),
+      target.carrierId ? eq(enrollmentsTable.carrierId, target.carrierId) : isNull(enrollmentsTable.carrierId),
+      ne(enrollmentsTable.id, prior.id),
+    )).limit(1);
+    if (!clash) {
+      await tx.update(enrollmentsTable).set({
+        ...target,
+        status,
+        effectuated,
+        effectiveDate: p.effectiveDate,
+        planId: sql`coalesce(${enrollmentsTable.planId}, ${p.planId})`,
+        planName: sql`coalesce(${enrollmentsTable.planName}, ${p.planName})`,
+        policyNumber: sql`coalesce(${enrollmentsTable.policyNumber}, ${p.policyNumber})`,
+        applicationDate: sql`coalesce(${enrollmentsTable.applicationDate}, ${p.signatureDate}::date)`,
+        agentId: sql`coalesce(${enrollmentsTable.agentId}, ${agentId})`,
+      }).where(eq(enrollmentsTable.id, prior.id));
+      await syncContactCoverageProjection(contactId, orgId, tx);
+      return prior.id;
+    }
+  }
 
   // The carrier is part of the enrollment key, so a delivery that gains or
   // loses it would otherwise start a second row for the same policy.
@@ -97,6 +126,21 @@ export async function upsertPolicyEnrollment(
   return row?.id ?? null;
 }
 
+/** The enrollment an earlier delivery of this policy created, if it's still this contact's. */
+async function priorEnrollmentFor(tx: Tx, orgId: string, contactId: string, policyId: string | null) {
+  if (!policyId) return null;
+  const [row] = await tx.select({ id: enrollmentsTable.id, carrierId: enrollmentsTable.carrierId })
+    .from(enrollmentApplicationsTable)
+    .innerJoin(enrollmentsTable, eq(enrollmentsTable.id, enrollmentApplicationsTable.enrollmentId))
+    .where(and(
+      eq(enrollmentApplicationsTable.orgId, orgId),
+      eq(enrollmentApplicationsTable.source, APPLICATION_SOURCE),
+      eq(enrollmentApplicationsTable.externalPolicyId, policyId),
+      eq(enrollmentsTable.contactId, contactId),
+    )).limit(1);
+  return row ?? null;
+}
+
 export interface StoredApplication {
   applicationId: string;
   version: number;
@@ -110,13 +154,25 @@ export async function storeApplication(
   p: ParsedPolicyEvent,
   links: { contactId: string | null; enrollmentId: string | null },
 ): Promise<StoredApplication | null> {
-  const applicationKey = p.confirmationCode ?? (p.policyId ? `policy:${p.policyId}` : null);
+  let applicationKey = p.confirmationCode ?? (p.policyId ? `policy:${p.policyId}` : null);
   if (!applicationKey) return null;
 
   // Serialize writers for one policy so two deliveries can't both take
   // version N+1. Locked on the policy id when there is one, so a delivery that
   // first carries the confirmation code still serializes with earlier ones.
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`enrollment-app:${orgId}:${p.policyId ?? applicationKey}`}, 0))`);
+
+  // A delivery without the Sunfire code continues the record this policy
+  // already has (whatever it is keyed on) rather than starting a second one.
+  if (!p.confirmationCode && p.policyId) {
+    const [known] = await tx.select({ key: enrollmentApplicationsTable.applicationKey }).from(enrollmentApplicationsTable)
+      .where(and(
+        eq(enrollmentApplicationsTable.orgId, orgId),
+        eq(enrollmentApplicationsTable.source, APPLICATION_SOURCE),
+        eq(enrollmentApplicationsTable.externalPolicyId, p.policyId),
+      )).limit(1);
+    if (known) applicationKey = known.key;
+  }
 
   // The policy was first stored without a Sunfire code: re-key that record so
   // its history continues on one application instead of splitting in two.
