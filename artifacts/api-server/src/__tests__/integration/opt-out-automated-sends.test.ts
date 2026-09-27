@@ -179,4 +179,22 @@ describe("automation send actions on a contact", () => {
     expect(jobs("send-scheduled-email")).toHaveLength(1);
     expect(jobs("send-scheduled-sms")).toHaveLength(1);
   });
+
+  it("treats plus-tag and Gmail dot variants as the opted-out contact's address", async () => {
+    const c = await contactWith({ optOutEmail: true });
+    await handle.db.update(contactsTable).set({ email: "John.Smith@gmail.com" }).where(eq(contactsTable.id, c.id));
+    await seedAutomationRule(handle.db, {
+      orgId: org.id,
+      triggerType: "custom_optout_variants",
+      conditions: [],
+      actions: [
+        { type: "send_email", config: { to: "johnsmith+news@googlemail.com", subject: "Hi", html: "<p>Hi</p>" } },
+        { type: "send_email", config: { to: "john.smith+promo@gmail.com", subject: "Hi", html: "<p>Hi</p>" } },
+      ],
+    });
+    await runAutomationRulesWorker({
+      orgId: org.id, trigger: "custom_optout_variants", resourceType: "contact", resourceId: c.id,
+    });
+    expect(jobs("send-scheduled-email")).toHaveLength(0);
+  });
 });
