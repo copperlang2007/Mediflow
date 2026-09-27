@@ -337,6 +337,13 @@
       "when": 1790700000000,
       "tag": "0047_ghl_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1790800000000,
+      "tag": "0048_enrollment_applications",
+      "breakpoints": true
     }
   ]
 }

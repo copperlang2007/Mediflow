@@ -26,7 +26,7 @@
 import { and, eq, isNull, lt, or, sql, TransactionRollbackError } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db, contactsTable, externalContactLinksTable, ghlSyncStateTable } from "@workspace/db";
-import { fillBlanks, loadMatcher, upsertContact, type Tx } from "../../contactImport";
+import { fillBlanks, loadMatcher, upsertContact, type Tx, isStrongMatch } from "../../contactImport";
 import { interpretPayloadContact } from "../payload";
 import { searchContacts, GHL_PAGE_LIMIT, type GhlContact } from "./client";
 import { logger } from "../../logger";
@@ -327,14 +327,6 @@ export async function runGhlSync(
     ghlSyncRunsTotal.inc({ status: "error" });
     throw err;
   }
-}
-
-/**
- * A match that identifies the person, not just someone in their household:
- * the Medicare ID, or matching dates of birth on both records.
- */
-function isStrongMatch(reason: string, dobA: string | null | undefined, dobB: string | null | undefined): boolean {
-  return reason === "Medicare ID" || (!!dobA && !!dobB && dobA === dobB);
 }
 
 /**

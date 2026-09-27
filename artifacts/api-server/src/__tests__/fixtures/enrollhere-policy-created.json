@@ -1,0 +1,83 @@
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "event": "PE_POLICY_CREATED",
+  "policy": {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "agency": { "id": "IIAobm" },
+    "lead": {
+      "id": "ci-11111111-2222-3333-4444-555555555555",
+      "firstName": "Alex", "lastName": "Johnson",
+      "email": "alex.johnson@example.com", "phone": "+15551234567",
+      "address": {},
+      "birthDate": { "date": "1955-04-12T12:00:00.000Z", "timestamp": -463622400000, "day": 12, "month": 4, "year": 1955 },
+      "medicare": { "number": "1EG4TE5MK72" },
+      "benefits": [], "language": "English"
+    },
+    "enrollment": {
+      "id": "enr-aaaa1111-bbbb-2222-cccc-333333333333",
+      "agency": { "id": "AGENCY001" },
+      "agent": { "id": "agent-uuid-001", "firstName": "Chris", "lastName": "Smith", "npn": "12345678", "email": "chris.smith@sampleagency.com", "agencyId": "AGENCY001" },
+      "consumer": {
+        "id": "ci-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "firstName": "Alex", "lastName": "Johnson",
+        "email": "alex.johnson@example.com", "phone": "+15551234567",
+        "address": { "line1": "123 Main St", "zip": "90210", "city": "Beverly Hills", "county": "LOS ANGELES", "state": "CA" },
+        "birthDate": { "date": "1955-04-12T12:00:00.000Z", "timestamp": -463622400000, "day": 12, "month": 4, "year": 1955 },
+        "medicare": { "number": "1EG4TE5MK72" },
+        "benefits": [], "language": "English"
+      },
+      "carrier": { "id": "EH", "name": "Carrier EH" },
+      "plan": { "id": "H1234-001", "name": "Sample Dual Integrated (HMO D-SNP)", "policyType": "P_HMO", "planType": "PT_MAPD", "snp": "DSNP" },
+      "medicareInfo": {
+        "number": "1EG4TE5MK72",
+        "chf": {}, "copd": {}, "cvd": {}, "diabetes": {},
+        "pcp": { "wishDesignatePCP": true, "isEstablishedPatient": true, "id": "PCP001", "name": "DOE, JANE" },
+        "otherDrugCoverage": { "has": false }, "otherGroupCoverage": { "has": false }, "otherMedicareCoverage": {}
+      },
+      "medicaidInfo": { "has": true },
+      "premium": {},
+      "details": {
+        "partAEffectiveDate": { "date": "2025-01-01T12:00:00.000Z" },
+        "partBEffectiveDate": { "date": "2025-01-01T12:00:00.000Z" },
+        "effectiveDate": { "date": "2026-01-01T12:00:00.000Z", "timestamp": 1767268800000, "day": 1, "month": 1, "year": 2026 },
+        "signatureDate": { "date": "2025-12-01T12:00:00.000Z", "timestamp": 1764580800000, "day": 1, "month": 12, "year": 2025 },
+        "signaturePeriod": "OEP",
+        "policyStatus": "POL_SUBMITTED",
+        "faceValue": {}, "issueAge": { "notPresent": true }
+      },
+      "identifiers": {
+        "bySource": { "sunfire": { "ids": ["SF12345678"] }, "dialerLead": { "ids": ["lead-uuid-0001-0002-0003-000000000004"] } },
+        "identifierGroupId": "idg-00000000-1111-2222-3333-444444444444",
+        "internalIds": { "enrollmentId": "enr-aaaa1111-bbbb-2222-cccc-333333333333", "commissionIds": [] }
+      },
+      "baseCategory": "BC_MEDICARE"
+    },
+    "agent": { "id": "agent-uuid-001", "firstName": "Chris", "lastName": "Smith", "npn": "12345678", "email": "chris.smith@sampleagency.com", "agencyId": "AGENCY001" },
+    "participants": [{ "role": "PR_SELLING_AGENT", "isPrimary": true, "agent": { "id": "agent-uuid-001", "email": "chris.smith@sampleagency.com" } }],
+    "createdAt": { "date": "2025-12-01T12:00:00.000Z" },
+    "submittedAt": { "date": "2025-12-01T12:00:00.000Z", "timestamp": 1764580800000 },
+    "approvedAt": { "date": "2025-12-10T00:00:00.000Z" },
+    "effectiveDate": { "date": "2026-01-01T12:00:00.000Z", "timestamp": 1767268800000 },
+    "lastActivityAt": { "date": "2026-03-15T16:00:00.000Z", "timestamp": 1773583200000 },
+    "inforceAt": { "date": "2025-12-10T00:00:00.000Z" },
+    "automaticStatus": "POL_INFORCE",
+    "manualStatus": "POL_INFORCE",
+    "statusCategory": "PSCAT_ACTIVE",
+    "identifiers": {
+      "bySource": {
+        "sunfire": { "ids": ["SF12345678"] },
+        "dialerLead": { "ids": ["lead-uuid-0001-0002-0003-000000000004"] },
+        "policyId": { "ids": ["POL00012345"] }
+      },
+      "list": { "ids": ["SF12345678", "lead-uuid-0001-0002-0003-000000000004", "POL00012345"] }
+    },
+    "baseCategory": "BC_MEDICARE",
+    "customFields": {}
+  },
+  "headers": {
+    "host": "services.leadconnectorhq.com",
+    "content-type": "application/json",
+    "x-request-id": "458b62a2-a755-4263-84a9-c58f831729d5",
+    "x-b3-traceid": "3188ea4b54443d9cb35f9a9748a4b7c6"
+  }
+}
