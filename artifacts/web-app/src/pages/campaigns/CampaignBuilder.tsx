@@ -369,7 +369,7 @@ export function CampaignBuilderDialog({
                   <button
                     key={f.token}
                     type="button"
-                    className="rounded border border-border px-1.5 py-0.5 font-mono hover:bg-muted"
+                    className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] hover:bg-muted"
                     onClick={() => setBody((b) => `${b}${f.token}`)}
                     title={f.label}
                   >

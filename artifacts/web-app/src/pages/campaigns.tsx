@@ -178,7 +178,8 @@ function CampaignRow({
         <div className="min-w-0">
           <p className="font-display font-semibold truncate">{c.name}</p>
           <p className="mt-0.5 text-xs text-muted-foreground truncate">
-            {c.templateName ?? "Custom message"} · {describeAudience(c.audience)} · {c.recipientCount} recipient{c.recipientCount === 1 ? "" : "s"}
+            {c.templateName ?? "Custom message"} · {describeAudience(c.audience)}
+            {c.status !== "draft" && ` · ${c.recipientCount} recipient${c.recipientCount === 1 ? "" : "s"}`}
           </p>
         </div>
       </div>

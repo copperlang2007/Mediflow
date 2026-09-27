@@ -5,6 +5,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, MiniStat, SectionCard, StatusPill } from "@/components/shared";
 import { describeAudience, fmtDate, useCampaignDetail } from "./api";
 
+const CAMPAIGN_TONE = {
+  draft: "neutral",
+  scheduled: "navy",
+  sending: "warning",
+  sent: "success",
+  cancelled: "danger",
+} as const;
+
 const RECIPIENT_LABEL: Record<string, string> = {
   queued: "Waiting",
   sent: "Sent",
@@ -54,7 +62,7 @@ export function CampaignDetail({
             </p>
           </div>
         </div>
-        <StatusPill status={c.status} />
+        <StatusPill tone={CAMPAIGN_TONE[c.status]} className="lowercase">{c.status}</StatusPill>
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">

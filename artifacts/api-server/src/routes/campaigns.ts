@@ -622,7 +622,18 @@ router.get(
       .where(and(eq(campaignRecipientsTable.campaignId, c.id), eq(campaignRecipientsTable.orgId, authReq.orgId)))
       .orderBy(desc(campaignRecipientsTable.updatedAt))
       .limit(200);
-    res.json({ ...serialize(c), recipients });
+    let templateName: string | null = null;
+    if (c.emailTemplateId || c.smsTemplateId) {
+      const table = c.channel === "email" ? emailTemplatesTable : smsTemplatesTable;
+      const tid = (c.channel === "email" ? c.emailTemplateId : c.smsTemplateId) ?? "";
+      const [t] = await db
+        .select({ name: table.name })
+        .from(table)
+        .where(and(eq(table.id, tid), eq(table.orgId, authReq.orgId)))
+        .limit(1);
+      templateName = t?.name ?? null;
+    }
+    res.json({ ...serialize(c, templateName), recipients });
   },
 );
 
