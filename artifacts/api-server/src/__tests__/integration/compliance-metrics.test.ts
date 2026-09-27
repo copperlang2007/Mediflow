@@ -217,6 +217,17 @@ describe("public unsubscribe link", () => {
     expect(log.some((l) => l.email === "member@example.com")).toBe(true);
     const audit = await db.select().from(auditLogTable).where(and(eq(auditLogTable.resourceId, contact.id), eq(auditLogTable.action, "email_unsubscribe")));
     expect(audit).toHaveLength(1);
+
+    // A repeat click, retry or mail-client prefetch records nothing new.
+    const again = await request(app)
+      .post(`/api/public/unsubscribe?t=${encodeURIComponent(token)}`)
+      .type("form")
+      .send({ "List-Unsubscribe": "One-Click" });
+    expect(again.status).toBe(200);
+    const logAfter = await db.select().from(optOutsTable).where(and(eq(optOutsTable.orgId, org.id), eq(optOutsTable.email, "member@example.com")));
+    expect(logAfter).toHaveLength(1);
+    const auditAfter = await db.select().from(auditLogTable).where(and(eq(auditLogTable.resourceId, contact.id), eq(auditLogTable.action, "email_unsubscribe")));
+    expect(auditAfter).toHaveLength(1);
   });
 
   it("rejects a forged token", async () => {
@@ -315,6 +326,13 @@ describe("retention sweep and ended enrollments", () => {
 });
 
 describe("weekly compliance report body", () => {
+  it("strips headings, rules and quotes from AI commentary", async () => {
+    const { sanitizeCommentary } = await import("../../workers/weeklyComplianceReport");
+    const out = sanitizeCommentary("## Executive summary\nAll good.\n---\n> quoted\n  ### Actions\n- item one");
+    expect(out).toBe("Executive summary\nAll good.\n\nquoted\nActions\n- item one");
+    expect(out.split("\n").some((l) => /^\s*#/.test(l))).toBe(false);
+  });
+
   it("is computed from the data and lists gaps per agent", async () => {
     const { buildWeeklyComplianceMarkdown } = await import("../../workers/weeklyComplianceReport");
     const base = {

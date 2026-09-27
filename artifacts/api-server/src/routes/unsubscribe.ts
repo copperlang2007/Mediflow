@@ -70,8 +70,16 @@ router.post(UNSUBSCRIBE_PATH, async (req: Request, res: Response): Promise<void>
       const [contact] = await tx
         .update(contactsTable)
         .set({ optOutEmail: true })
-        .where(and(eq(contactsTable.id, claims.contactId), eq(contactsTable.orgId, claims.orgId)))
+        .where(
+          and(
+            eq(contactsTable.id, claims.contactId),
+            eq(contactsTable.orgId, claims.orgId),
+            eq(contactsTable.optOutEmail, false),
+          ),
+        )
         .returning({ id: contactsTable.id, email: contactsTable.email });
+      // Already unsubscribed (a repeat click, a retry or a mail-client
+      // prefetch): record nothing new, so the log shows one opt-out.
       if (!contact) return;
 
       await tx.insert(optOutsTable).values({

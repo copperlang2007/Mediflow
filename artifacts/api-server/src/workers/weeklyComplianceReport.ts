@@ -297,6 +297,24 @@ async function collectReportData(orgId: string, now: Date): Promise<WeeklyReport
   };
 }
 
+/**
+ * Strip markdown structure (headings, rules, quotes) from the AI commentary so
+ * it renders as plain paragraphs under its labelled heading and can never look
+ * like a computed section of the report.
+ */
+export function sanitizeCommentary(text: string): string {
+  return text
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/^\s{0,3}#{1,6}\s*/, "")
+        .replace(/^\s*>+\s?/, "")
+        .replace(/^\s*([-*_])(\s*\1){2,}\s*$/, ""),
+    )
+    .join("\n")
+    .trim();
+}
+
 /** Optional advisory commentary. Returns null on any failure. */
 async function generateAdvisoryCommentary(orgId: string, reportBody: string): Promise<string | null> {
   const aiClient = getAiClient();
@@ -340,7 +358,7 @@ async function generateReportForOrg(orgId: string): Promise<void> {
   let report = buildWeeklyComplianceMarkdown(data);
   const commentary = await generateAdvisoryCommentary(orgId, report);
   if (commentary) {
-    report += `\n\n## Advisory commentary (AI-generated — not part of the computed report)\n${commentary}`;
+    report += `\n\n## Advisory commentary (AI-generated — not part of the computed report)\n${sanitizeCommentary(commentary)}`;
   }
 
   const pdfBuffer = await buildComplianceReportPdf(report, "Weekly Compliance Report", data.reportDate);
