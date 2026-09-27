@@ -42,6 +42,7 @@ import {
   organizationsTable,
   agentsTable,
   contactsTable,
+  enrollmentsTable,
   externalContactLinksTable,
   integrationEventsTable,
 } from "@workspace/db";
@@ -446,11 +447,23 @@ async function handlePolicyEvent(req: RawBodyRequest, res: Response, orgId: stri
       }
 
       const enrollmentId = await upsertPolicyEnrollment(tx, orgId, contactId, agentId, parsed);
-      // Coverage in force makes a lead or prospect an enrolled client (so
-      // retention and AEP renewals include them); later statuses are left alone.
-      if (enrollmentId && mapPolicyStatus(parsed.policyStatus).effectuated) {
+      // Lifecycle follows coverage. In force: a lead or prospect becomes an
+      // enrolled client (so retention and AEP renewals include them). Ended:
+      // an enrolled client with no other in-force coverage stops being one:
+      // "lost" after a termination, back to "prospect" when it never took
+      // effect (cancelled, declined). Other statuses (retained, lost,
+      // do_not_contact) are the agency's call and are left alone.
+      const lifecycle = mapPolicyStatus(parsed.policyStatus);
+      if (enrollmentId && lifecycle.effectuated) {
         await tx.update(contactsTable).set({ status: "enrolled" })
           .where(and(eq(contactsTable.id, contactId), inArray(contactsTable.status, ["lead", "prospect"])));
+      } else if (enrollmentId && parsed.policyStatus && lifecycle.status !== "pending") {
+        const [stillCovered] = await tx.select({ id: enrollmentsTable.id }).from(enrollmentsTable)
+          .where(and(eq(enrollmentsTable.contactId, contactId), eq(enrollmentsTable.effectuated, true))).limit(1);
+        if (!stillCovered) {
+          await tx.update(contactsTable).set({ status: lifecycle.status === "terminated" ? "lost" : "prospect" })
+            .where(and(eq(contactsTable.id, contactId), eq(contactsTable.status, "enrolled")));
+        }
       }
       const stored = await storeApplication(tx, orgId, parsed, { contactId, enrollmentId });
 

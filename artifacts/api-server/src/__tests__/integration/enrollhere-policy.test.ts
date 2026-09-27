@@ -400,6 +400,66 @@ describe("EnrollHere policy events", () => {
     expect(appA).toMatchObject({ externalPolicyId: "policy-collide-a", contactId: a.body.contactId, currentVersion: 1 });
   });
 
+  it("never lets a policy that isn't in force undo a manual in-force enrollment", async () => {
+    const pol = sample();
+    pol.policy.id = "policy-vs-manual";
+    pol.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF40000001"];
+    delete pol.policy.identifiers.bySource.sunfire;
+    Object.assign(pol.policy.enrollment.consumer, { firstName: "Morgan", lastName: "Manual", email: "manual@example.com", phone: "+15557770000", medicare: {} });
+    pol.policy.enrollment.medicareInfo.number = "";
+    pol.policy.lead = undefined;
+    delete pol.policy.enrollment.carrier;
+    pol.policy.manualStatus = "POL_CANCELLED";
+    // The agency already entered this coverage by hand.
+    const seed = await post({ ...JSON.parse(JSON.stringify(pol)), policy: { ...pol.policy, id: "seed-only", manualStatus: "POL_INFORCE" } });
+    const cid = seed.body.contactId;
+    await tdb.update(enrollmentsTable).set({ notes: "Manual entry" }).where(eq(enrollmentsTable.id, seed.body.enrollmentId));
+    await tdb.delete(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, seed.body.applicationId));
+    const res = await post(pol);
+    expect(res.body.enrollmentId).toBe(seed.body.enrollmentId);
+    const [e] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.id, seed.body.enrollmentId));
+    expect(e).toMatchObject({ status: "active", effectuated: true, notes: "Manual entry" });
+    const [c] = await tdb.select({ status: contactsTable.status }).from(contactsTable).where(eq(contactsTable.id, cid));
+    expect(c!.status).toBe("enrolled");
+  });
+
+  it("an enrolled client whose only policy is terminated is no longer enrolled", async () => {
+    const pol = sample();
+    pol.policy.id = "policy-terminated";
+    pol.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF50000001"];
+    delete pol.policy.identifiers.bySource.sunfire;
+    Object.assign(pol.policy.enrollment.consumer, { firstName: "Casey", lastName: "Ended", email: "ended@example.com", phone: "+15558880000", medicare: {} });
+    pol.policy.enrollment.medicareInfo.number = "";
+    pol.policy.lead = undefined;
+    const created = await post(pol);
+    const statusOf = async () => (await tdb.select({ s: contactsTable.status }).from(contactsTable).where(eq(contactsTable.id, created.body.contactId)))[0]!.s;
+    expect(await statusOf()).toBe("enrolled");
+    const ended = JSON.parse(JSON.stringify(pol));
+    ended.event = "PE_POLICY_UPDATED";
+    ended.policy.manualStatus = "POL_TERMINATED";
+    await post(ended);
+    expect(await statusOf()).toBe("lost");
+  });
+
+  it("a name-only partial update keeps the Medicare number on the summary", async () => {
+    const pol = sample();
+    pol.policy.id = "policy-name-only";
+    pol.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF60000001"];
+    delete pol.policy.identifiers.bySource.sunfire;
+    Object.assign(pol.policy.enrollment.consumer, { firstName: "Avery", lastName: "Keep", email: "keep@example.com", phone: "+15559990000", medicare: { number: "1EG4TE5MK66" } });
+    pol.policy.lead = undefined;
+    const created = await post(pol);
+    const partial = JSON.parse(JSON.stringify(pol));
+    partial.event = "PE_POLICY_UPDATED";
+    partial.policy.manualStatus = "POL_SUBMITTED";
+    partial.policy.enrollment.consumer = { firstName: "Avery", lastName: "Keep", email: "keep@example.com", phone: "+15559990000" };
+    delete partial.policy.enrollment.medicareInfo;
+    delete partial.policy.enrollment.medicaidInfo;
+    await post(partial);
+    const [a] = await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, created.body.applicationId));
+    expect(a!.medicareIdEncrypted).not.toBeNull();
+  });
+
   it("a deleted contact's application can't be opened, and a purge removes it", async () => {
     await tdb.update(contactsTable).set({ deletedAt: new Date() }).where(eq(contactsTable.id, contactId));
     const res = await request(app).get(`/api/applications/${applicationId}/full`).set(withAuth(admin.id));

@@ -92,22 +92,20 @@ export async function upsertPolicyEnrollment(
       await tx.update(enrollmentsTable).set({ carrierId }).where(eq(enrollmentsTable.id, carrierless.id));
     }
   }
-  // The slot may already hold a DIFFERENT policy's enrollment (e.g. a plan
-  // switch within the same carrier). That policy's in-force coverage is not
-  // undone by another policy that was cancelled or declined.
-  const [ownedByOther] = p.policyId ? await tx.select({ id: enrollmentApplicationsTable.id })
-    .from(enrollmentsTable)
-    .innerJoin(enrollmentApplicationsTable, eq(enrollmentApplicationsTable.enrollmentId, enrollmentsTable.id))
+  // This path only runs when the policy's own enrollment wasn't found above,
+  // so an in-force row already in the slot belongs to something else: a
+  // manual or CSV entry, or another policy (a plan switch within the same
+  // carrier). A policy that is not in force never undoes that coverage.
+  const [inForceElsewhere] = await tx.select({ id: enrollmentsTable.id }).from(enrollmentsTable)
     .where(and(
       eq(enrollmentsTable.contactId, contactId),
       eq(enrollmentsTable.planYear, planYear),
       eq(enrollmentsTable.planType, p.planType),
       carrierId ? eq(enrollmentsTable.carrierId, carrierId) : isNull(enrollmentsTable.carrierId),
       eq(enrollmentsTable.effectuated, true),
-      ne(enrollmentApplicationsTable.externalPolicyId, p.policyId),
-    )).limit(1) : [];
+    )).limit(1);
   // An update that carries no status at all leaves the status alone.
-  const keepStatus = !p.policyStatus || (!!ownedByOther && !effectuated);
+  const keepStatus = !p.policyStatus || (!!inForceElsewhere && !effectuated);
 
   const [row] = await tx.insert(enrollmentsTable).values({
     id: randomUUID(),
@@ -284,10 +282,11 @@ export async function storeApplication(
     submittedAt: keep(t.submittedAt),
     agentEmail: keep(t.agentEmail),
     agentNpn: keep(t.agentNpn),
-    // Identifiers follow the latest payload that describes the person: an
-    // update that carries the person without a number clears it, so a stale
-    // one can't stay readable. A payload with no person leaves them alone.
-    ...(p.personPresent ? {
+    // Identifiers follow the latest payload that carries the Medicare/Medicaid
+    // sections: one that carries them without a number clears it, so a stale
+    // number can't stay readable. A payload without those sections (e.g. a
+    // name-only partial update) leaves them alone.
+    ...(p.identifiersPresent ? {
       medicareIdEncrypted: promoted.medicareIdEncrypted,
       medicareIdHash: promoted.medicareIdHash,
       medicaidNumberEncrypted: promoted.medicaidNumberEncrypted,

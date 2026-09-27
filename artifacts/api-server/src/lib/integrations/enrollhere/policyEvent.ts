@@ -93,8 +93,8 @@ export interface ParsedPolicyEvent {
   submittedAt: Date | null;
   medicareNumber: string | null;
   medicaidNumber: string | null;
-  /** The payload carried a consumer or lead: its identifiers are authoritative. */
-  personPresent: boolean;
+  /** The payload carried the Medicare/Medicaid sections: its identifiers are authoritative. */
+  identifiersPresent: boolean;
   /** The payload as stored (encrypted): the body minus any relay wrapper. */
   storedPayload: Obj;
 }
@@ -173,7 +173,8 @@ export function parsePolicyEvent(body: Obj): ParsedPolicyEvent {
     submittedAt: policyInstant(policy.submittedAt),
     medicareNumber,
     medicaidNumber,
-    personPresent: people.length > 0,
+    identifiersPresent: people.some((person) => isObj(person.medicare) || isObj(person.medicaid))
+      || isObj(enrollment.medicareInfo) || isObj(enrollment.medicaidInfo),
     storedPayload,
   };
 }
