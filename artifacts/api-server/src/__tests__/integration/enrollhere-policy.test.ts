@@ -68,6 +68,13 @@ afterAll(async () => {
   await shutdownTestDb();
 });
 
+/** Make a sample describe a different beneficiary (no shared Medicare ID). */
+function otherPerson(b: Record<string, any>, firstName: string, email: string, phone: string): void {
+  Object.assign(b.policy.enrollment.consumer, { firstName, lastName: `${firstName}son`, email, phone, medicare: {} });
+  b.policy.enrollment.medicareInfo.number = "";
+  b.policy.lead = undefined;
+}
+
 const post = (body: unknown) =>
   request(app).post(`/api/integrations/enrollhere/v1/${org.id}/events`).set("X-Webhook-Secret", SECRET).send(body as object);
 
@@ -89,6 +96,7 @@ describe("EnrollHere policy events", () => {
     });
     expect(c!.dob!.toISOString().slice(0, 10)).toBe("1955-04-12");
     expect(c!.medicareIdEncrypted).not.toBeNull();
+    expect(c!.status).toBe("enrolled"); // in-force coverage makes a new policyholder an enrolled client
 
     const [e] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.contactId, contactId));
     expect(e).toMatchObject({
@@ -180,6 +188,7 @@ describe("EnrollHere policy events", () => {
     noSunfire.policy.enrollment.medicareInfo.number = "";
     noSunfire.policy.enrollment.consumer.email = "sam@example.com";
     noSunfire.policy.enrollment.consumer.phone = "+15551110000";
+    noSunfire.policy.lead = undefined; // a different person (the lead would carry Alex's MBI)
     const res = await post(noSunfire);
     expect(res.status).toBe(200);
     const [a] = await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, res.body.applicationId));
@@ -208,6 +217,7 @@ describe("EnrollHere policy events", () => {
   it("re-keys a code-less application when the Sunfire code arrives, keeping one history", async () => {
     const first = sample();
     first.policy.id = "policy-late-code";
+    otherPerson(first, "Jamie", "jamie@example.com", "+15551212000");
     delete first.policy.enrollment.identifiers.bySource.sunfire;
     delete first.policy.identifiers.bySource.sunfire;
     const created = await post(first);
@@ -216,6 +226,7 @@ describe("EnrollHere policy events", () => {
     const later = sample();
     later.event = "PE_POLICY_UPDATED";
     later.policy.id = "policy-late-code";
+    otherPerson(later, "Jamie", "jamie@example.com", "+15551212000");
     later.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF99990000"];
     delete later.policy.identifiers.bySource.sunfire;
     const res = await post(later);
@@ -256,8 +267,7 @@ describe("EnrollHere policy events", () => {
     early.policy.id = "policy-carrier-later";
     early.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF55550000"];
     delete early.policy.identifiers.bySource.sunfire;
-    Object.assign(early.policy.enrollment.consumer, { firstName: "Robin", email: "robin@example.com", phone: "+15552220000" });
-    early.policy.lead = undefined;
+    otherPerson(early, "Robin", "robin@example.com", "+15552220000");
     const withCarrier = JSON.parse(JSON.stringify(early));
     delete early.policy.enrollment.carrier;
     const first = await post(early);
@@ -293,9 +303,9 @@ describe("EnrollHere policy events", () => {
     await tdb.update(enrollmentApplicationVersionsTable).set({ payloadEncrypted: saved }).where(eq(enrollmentApplicationVersionsTable.id, v!.id));
   });
 
-  it("marks a new in-force policyholder as enrolled", async () => {
+  it("a client whose only policy was cancelled is no longer enrolled", async () => {
     const [c] = await tdb.select({ status: contactsTable.status }).from(contactsTable).where(eq(contactsTable.id, contactId));
-    expect(c!.status).toBe("enrolled");
+    expect(c!.status).toBe("prospect");
   });
 
   it("a code-less update continues the coded application", async () => {
@@ -341,7 +351,7 @@ describe("EnrollHere policy events", () => {
     expect(e).toMatchObject({ status: "active", effectuated: true });
   });
 
-  it("folds a code-less record into the one already holding its Sunfire code", async () => {
+  it("keeps two policies that share a Sunfire code on separate records", async () => {
     const base = sample();
     Object.assign(base.policy.enrollment.consumer, { firstName: "Taylor", email: "taylor@example.com", phone: "+15554440000" });
     base.policy.lead = undefined;
@@ -350,22 +360,17 @@ describe("EnrollHere policy events", () => {
     coded.policy.id = "policy-old-id";
     coded.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF20000001"];
     const codedRes = await post(coded);
-    const codeless = JSON.parse(JSON.stringify(base));
-    codeless.policy.id = "policy-new-id";
-    delete codeless.policy.enrollment.identifiers.bySource.sunfire;
-    await post(codeless);
     const late = JSON.parse(JSON.stringify(base));
-    late.event = "PE_POLICY_UPDATED";
     late.policy.id = "policy-new-id";
     late.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF20000001"];
     const res = await post(late);
-    expect(res.body).toMatchObject({ applicationId: codedRes.body.applicationId, applicationVersion: 3 });
-    expect(await tdb.select().from(enrollmentApplicationsTable)
-      .where(eq(enrollmentApplicationsTable.applicationKey, "policy:policy-new-id"))).toHaveLength(0);
-    const versions = await tdb.select().from(enrollmentApplicationVersionsTable)
-      .where(eq(enrollmentApplicationVersionsTable.applicationId, codedRes.body.applicationId));
-    expect(versions.map((v) => v.version).sort()).toEqual([1, 2, 3]);
+    expect(res.body.applicationId).not.toBe(codedRes.body.applicationId);
+    const [old] = await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, codedRes.body.applicationId));
+    expect(old).toMatchObject({ externalPolicyId: "policy-old-id", currentVersion: 1 });
+    const [mine] = await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, res.body.applicationId));
+    expect(mine).toMatchObject({ applicationKey: "policy:policy-new-id", externalPolicyId: "policy-new-id" });
   });
+
 
   it("an update with no status leaves the enrollment's status alone", async () => {
     const [before] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.contactId, contactId));
@@ -458,6 +463,27 @@ describe("EnrollHere policy events", () => {
     await post(partial);
     const [a] = await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, created.body.applicationId));
     expect(a!.medicareIdEncrypted).not.toBeNull();
+  });
+
+  it("a later update to the second policy in a slot doesn't cancel the first", async () => {
+    const first = sample();
+    first.policy.id = "policy-slot2-a";
+    first.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF11000001"];
+    delete first.policy.identifiers.bySource.sunfire;
+    Object.assign(first.policy.enrollment.consumer, { firstName: "Drew", email: "drew@example.com", phone: "+15553331111" });
+    first.policy.lead = undefined;
+    const a = await post(first);
+    const second = JSON.parse(JSON.stringify(first));
+    second.policy.id = "policy-slot2-b";
+    second.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF11000002"];
+    second.policy.manualStatus = "POL_CANCELLED";
+    await post(second);
+    const again = JSON.parse(JSON.stringify(second));
+    again.event = "PE_POLICY_UPDATED";
+    again.policy.manualStatus = "POL_WITHDRAWN";
+    await post(again);
+    const [e] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.id, a.body.enrollmentId));
+    expect(e).toMatchObject({ status: "active", effectuated: true });
   });
 
   it("a deleted contact's application can't be opened, and a purge removes it", async () => {

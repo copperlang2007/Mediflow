@@ -141,7 +141,12 @@ export async function upsertPolicyEnrollment(
   return row?.id ?? null;
 }
 
-/** The enrollment an earlier delivery of this policy created, if it's still this contact's. */
+/**
+ * The enrollment an earlier delivery of this policy created, if it's still this
+ * contact's and this policy's alone. A row another policy's application also
+ * points at (two policies in one coverage slot) is not "ours" to move or
+ * restatus freely: that case goes through the slot path and its guard.
+ */
 async function priorEnrollmentFor(tx: Tx, orgId: string, contactId: string, policyId: string | null) {
   if (!policyId) return null;
   const [row] = await tx.select({ id: enrollmentsTable.id, carrierId: enrollmentsTable.carrierId })
@@ -153,7 +158,13 @@ async function priorEnrollmentFor(tx: Tx, orgId: string, contactId: string, poli
       eq(enrollmentApplicationsTable.externalPolicyId, policyId),
       eq(enrollmentsTable.contactId, contactId),
     )).limit(1);
-  return row ?? null;
+  if (!row) return null;
+  const [shared] = await tx.select({ id: enrollmentApplicationsTable.id }).from(enrollmentApplicationsTable)
+    .where(and(
+      eq(enrollmentApplicationsTable.enrollmentId, row.id),
+      ne(enrollmentApplicationsTable.externalPolicyId, policyId),
+    )).limit(1);
+  return shared ? null : row;
 }
 
 export interface StoredApplication {
@@ -209,11 +220,12 @@ export async function storeApplication(
       ));
     const codeless = rows.find((r) => r.key === fallbackKey);
     const coded = rows.find((r) => r.key === p.confirmationCode);
-    // A record holding this code for another policy AND another person is a
-    // vendor-side code collision, not the same application: never merge PHI
-    // across people. Keep this policy on its own fallback key.
-    if (coded && coded.policyId !== p.policyId && coded.contactId !== links.contactId) {
-      logger.warn({ orgId, applicationId: coded.id }, "EnrollHere: Sunfire code already used by another person's policy; kept separate");
+    // A record holding this code for ANOTHER EnrollHere policy is a code
+    // collision (vendor-side), even for the same person: merging would
+    // overwrite that record's policy id and cross two policies' histories.
+    // Keep this policy on its own fallback key and flag it.
+    if (coded && coded.policyId && coded.policyId !== p.policyId) {
+      logger.warn({ orgId, applicationId: coded.id }, "EnrollHere: Sunfire code already used by another policy; kept separate");
       applicationKey = fallbackKey;
     } else if (codeless && !coded) {
       await tx.update(enrollmentApplicationsTable).set({ applicationKey: p.confirmationCode })
