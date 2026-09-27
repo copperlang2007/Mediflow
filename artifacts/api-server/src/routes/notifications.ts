@@ -6,7 +6,7 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
-import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import {
   addSseSubscriber,
   removeSseSubscriber,
@@ -17,7 +17,7 @@ import { safeLimit } from "../lib/listGuards";
 const router: IRouter = Router();
 
 router.use(
-  auditMiddleware("notification", undefined, {
+  routerAuditMiddleware(router, "notification", undefined, {
     includeReads: true,
     getResourceId: (req) => {
       const raw = req.params.id;

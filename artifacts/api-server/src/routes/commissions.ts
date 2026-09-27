@@ -39,7 +39,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { requireMfa } from "../middlewares/requireMfa";
-import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import {
   parseStatement,
@@ -55,7 +55,7 @@ const upload = multer({
 });
 
 router.use(
-  auditMiddleware("commission", undefined, {
+  routerAuditMiddleware(router, "commission", undefined, {
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.id;

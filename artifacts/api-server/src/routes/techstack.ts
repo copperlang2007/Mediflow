@@ -14,7 +14,7 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
-import { auditMiddleware } from "../middlewares/auditMiddleware";
+import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 
 const router: IRouter = Router();
 
@@ -55,7 +55,7 @@ const UpdatePlatformReqSchema = z.object({
 });
 
 router.use(
-  auditMiddleware("agent", undefined, {
+  routerAuditMiddleware(router, "agent", undefined, {
     includeReads: false,
     getResourceId: (req) => {
       const raw = req.params.aid ?? req.params.id;
