@@ -6,7 +6,7 @@
  *
  * super_admin only, MFA-gated like the existing GET /admin/agencies.
  *
- * There are no temporary passwords: sign-in is Clerk. A new agency is created
+ * Sign-in is handled by Clerk, so nothing like a temporary login is issued. A new agency is created
  * empty and its first administrator is invited through the normal invitation
  * flow (routes/invitations.ts) — the same hashed single-use token, the same
  * seat accounting, the same accept screen. The super_admin who provisions the
