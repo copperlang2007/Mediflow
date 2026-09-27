@@ -30,7 +30,6 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   ArrowLeft, Mail, MessageSquare, Plus, Send,
   StickyNote, PhoneCall, Activity as ActivityIcon, CheckSquare, FolderOpen,
@@ -43,6 +42,8 @@ import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import CreateLeadDialog from "@/pages/crm/CreateLeadDialog";
 import ApplicationsTab from "@/pages/crm/ApplicationsTab";
+import { ContactAvatar } from "@/pages/crm/ui";
+import { EmptyState, SectionCard, StatusPill } from "@/components/shared";
 import {
   useContactCallSummaries,
   type CallSummary,
@@ -52,15 +53,6 @@ import {
 // ──────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────
-
-const CONTACT_STATUS_STYLES: Record<string, string> = {
-  lead: "bg-blue-100 text-blue-800",
-  prospect: "bg-purple-100 text-purple-800",
-  enrolled: "bg-green-100 text-green-800",
-  retained: "bg-emerald-100 text-emerald-800",
-  lost: "bg-red-100 text-red-800",
-  do_not_contact: "bg-slate-100 text-slate-600",
-};
 
 const PLAN_TYPE_LABELS: Record<string, string> = {
   MA: "Medicare Advantage", PDP: "Part D", MAPD: "MAPD", supp: "Supplement", other: "Other",
@@ -79,9 +71,6 @@ const ACTIVITY_ICONS: Record<string, React.ReactNode> = {
   sequence_step: <Workflow className="h-4 w-4 text-indigo-400" />,
 };
 
-function initials(first: string, last: string) {
-  return `${first?.[0] ?? ""}${last?.[0] ?? ""}`.toUpperCase();
-}
 
 // ──────────────────────────────────────────────
 // Modals
@@ -356,9 +345,12 @@ function TimelineTab({ contactId }: { contactId: string }) {
           ))}
         </div>
       ) : entries.length === 0 ? (
-        <div className="text-center py-12 text-sm text-muted-foreground">
-          No activity yet — log a note or send a message to get started.
-        </div>
+        <EmptyState
+          compact
+          icon={ActivityIcon}
+          title="Nothing logged yet"
+          description="Calls, notes, texts and emails with this person will build up here. Log a note or send a message to start."
+        />
       ) : (
         <div className="relative">
           <div className="absolute left-5 top-0 bottom-0 w-px bg-border" />
@@ -488,7 +480,13 @@ function DealsTab({ contactId }: { contactId: string }) {
       {isLoading ? (
         <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)}</div>
       ) : deals.length === 0 ? (
-        <div className="text-center py-10 text-sm text-muted-foreground">No deals yet</div>
+        <EmptyState
+          compact
+          icon={DollarSign}
+          title="No deals yet"
+          description="A deal tracks one sale for this person through your pipeline, from first contact to enrolled."
+          action={{ label: "Start a deal", onClick: () => setAddOpen(true) }}
+        />
       ) : (
         <div className="space-y-2">
           {deals.map((rowRaw) => {
@@ -496,17 +494,21 @@ function DealsTab({ contactId }: { contactId: string }) {
             const deal = row.deal as Record<string, unknown> | undefined;
             if (!deal) return null;
             const dealStatus = String(deal.status ?? "open");
-            const statusColor = dealStatus === "won" ? "text-green-600" : dealStatus === "lost" ? "text-red-600" : "text-blue-600";
             return (
-              <div key={String(deal.id)} className="flex items-center gap-4 p-4 rounded-xl border bg-card">
-                <div className="flex-1">
-                  <p className="font-medium text-sm">{String(deal.title)}</p>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
-                    <span className={cn("font-medium capitalize", statusColor)}>{dealStatus}</span>
-                    {deal.valueEst != null && <span><DollarSign className="h-3 w-3 inline" />{Number(deal.valueEst).toLocaleString()}</span>}
-                    <span><Clock className="h-3 w-3 inline mr-0.5" />{format(new Date(String(deal.createdAt)), "MMM d, yyyy")}</span>
-                  </div>
+              <div key={String(deal.id)} className="flex items-center gap-3 p-4 rounded-xl border border-border bg-card">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success">
+                  <DollarSign className="h-5 w-5" />
                 </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm truncate">{String(deal.title)}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                    <Clock className="h-3 w-3" />Opened {format(new Date(String(deal.createdAt)), "MMM d, yyyy")}
+                  </p>
+                </div>
+                {deal.valueEst != null && (
+                  <span className="text-sm font-semibold tabular-nums">${Number(deal.valueEst).toLocaleString()}</span>
+                )}
+                <StatusPill status={dealStatus} tone={dealStatus === "open" ? "info" : undefined} />
               </div>
             );
           })}
@@ -557,32 +559,31 @@ function TasksTab({ contactId }: { contactId: string }) {
   const { data: tasksRaw, isLoading } = useGetContactTasks(contactId);
   const tasks: GetContactTasks200Item[] = tasksRaw ?? [];
 
-  const STATUS_STYLES: Record<string, string> = {
-    open: "bg-blue-100 text-blue-800",
-    in_progress: "bg-amber-100 text-amber-800",
-    completed: "bg-green-100 text-green-800",
-    cancelled: "bg-slate-100 text-slate-600",
-  };
 
   return (
     <div>
       {isLoading ? (
         <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)}</div>
       ) : tasks.length === 0 ? (
-        <div className="text-center py-10 text-sm text-muted-foreground">No tasks assigned to this contact</div>
+        <EmptyState
+          compact
+          icon={CheckSquare}
+          title="No tasks for this person"
+          description="Follow-ups and reminders linked to this contact will show here."
+        />
       ) : (
         <div className="space-y-2">
           {tasks.map((taskRaw) => {
             const t = taskRaw as Record<string, unknown>;
             const status = String(t.status ?? "open");
             return (
-              <div key={String(t.id)} className="flex items-center gap-3 p-3 rounded-lg border bg-card">
-                <CheckSquare className="h-5 w-5 text-muted-foreground shrink-0" />
-                <div className="flex-1">
+              <div key={String(t.id)} className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card">
+                <CheckSquare className="h-5 w-5 text-accent shrink-0" />
+                <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium">{String(t.title ?? "")}</p>
                   {t.dueDate != null && <p className="text-xs text-muted-foreground">Due {format(new Date(String(t.dueDate)), "MMM d, yyyy")}</p>}
                 </div>
-                <Badge className={cn("text-xs border-0", STATUS_STYLES[status] ?? "")}>{status}</Badge>
+                <StatusPill status={status} tone={status === "open" ? "info" : undefined} />
               </div>
             );
           })}
@@ -600,19 +601,18 @@ function SequencesTab({ contactId }: { contactId: string }) {
   const { data: enrollmentsRaw, isLoading } = useGetContactEnrollments(contactId);
   const enrollments: GetContactEnrollments200Item[] = enrollmentsRaw ?? [];
 
-  const STATUS_STYLES: Record<string, string> = {
-    active: "bg-green-100 text-green-800",
-    completed: "bg-slate-100 text-slate-600",
-    cancelled: "bg-red-100 text-red-800",
-    paused: "bg-amber-100 text-amber-800",
-  };
 
   return (
     <div>
       {isLoading ? (
         <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)}</div>
       ) : enrollments.length === 0 ? (
-        <div className="text-center py-10 text-sm text-muted-foreground">Not enrolled in any sequences</div>
+        <EmptyState
+          compact
+          icon={Workflow}
+          title="Not in any sequences"
+          description="When this person is added to an automatic follow-up series, you'll see where they are in it here."
+        />
       ) : (
         <div className="space-y-2">
           {enrollments.map((rowRaw) => {
@@ -621,15 +621,15 @@ function SequencesTab({ contactId }: { contactId: string }) {
             if (!enroll) return null;
             const status = String(enroll.status ?? "active");
             return (
-              <div key={String(enroll.id)} className="flex items-center gap-3 p-3 rounded-lg border bg-card">
-                <Workflow className="h-5 w-5 text-indigo-500 shrink-0" />
+              <div key={String(enroll.id)} className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card">
+                <Workflow className="h-5 w-5 text-accent shrink-0" />
                 <div className="flex-1">
                   <p className="text-sm font-medium">{String(row.sequenceName ?? "Unknown Sequence")}</p>
                   <p className="text-xs text-muted-foreground">
                     Step {Number(enroll.nextStepIndex ?? 0)} · Enrolled {formatDistanceToNow(new Date(String(enroll.enrolledAt)))} ago
                   </p>
                 </div>
-                <Badge className={cn("text-xs border-0", STATUS_STYLES[status] ?? "")}>{status}</Badge>
+                <StatusPill status={status} tone={status === "completed" ? "neutral" : status === "paused" ? "warning" : undefined} />
               </div>
             );
           })}
@@ -770,10 +770,12 @@ function CallSummariesTab({ contactId }: { contactId: string }) {
 
   if (summaries.length === 0) {
     return (
-      <div className="text-center py-10 text-sm text-muted-foreground">
-        No post-call summaries yet — they appear here after a dialer call
-        transcript is parsed.
-      </div>
+      <EmptyState
+        compact
+        icon={Phone}
+        title="No call summaries yet"
+        description="After a call through the dialer, a short summary of what was discussed appears here."
+      />
     );
   }
 
@@ -873,106 +875,160 @@ export default function ContactDetailPage() {
     } catch (error) { toast.error(error instanceof Error ? error.message : "Failed to update contact"); }
   };
 
+  const detailGroups: Array<{ title: string; rows: Array<[string, string | number | null | undefined]> }> = [
+    {
+      title: "Contact",
+      rows: [
+        ["First name", c.firstName],
+        ["Last name", c.lastName],
+        ["Email", c.email],
+        ["Phone", c.phone],
+        ["Preferred language", c.preferredLanguage],
+        ["SMS preference", c.optOutSms ? "Opted out" : "Not opted out"],
+        ["Email preference", c.optOutEmail ? "Opted out" : "Not opted out"],
+      ],
+    },
+    {
+      title: "Medicare & plan",
+      rows: [
+        ["Date of birth", c.dob?.slice(0, 10)],
+        ["Medicare ID", c.medicareId],
+        ["Plan type", c.currentPlanType ? PLAN_TYPE_LABELS[c.currentPlanType] ?? c.currentPlanType : null],
+        ["Plan year", c.planYear],
+        ["Primary care provider", c.pcpName],
+        ["Provider NPI", c.pcpNpi],
+        ["Health conditions", c.healthConditions?.join(", ")],
+      ],
+    },
+    {
+      title: "Location & source",
+      rows: [
+        ["County", c.county],
+        ["State", c.stateCode],
+        ["ZIP code", c.zipCode],
+        ["Lead source", c.leadSource],
+        ["Tags", c.tags?.join(", ")],
+      ],
+    },
+  ];
+
+  const chips: Array<{ icon: typeof Heart; text: string }> = [
+    ...(c.currentPlanType ? [{ icon: Heart, text: `${PLAN_TYPE_LABELS[c.currentPlanType] ?? c.currentPlanType}${c.planYear ? ` · ${c.planYear}` : ""}` }] : []),
+    ...((c.county || c.stateCode) ? [{ icon: MapPin, text: [c.county, c.stateCode].filter(Boolean).join(", ") }] : []),
+    ...(c.leadSource ? [{ icon: User, text: `Source: ${c.leadSource}` }] : []),
+    ...(c.dob ? [{ icon: Calendar, text: `Born ${format(new Date(c.dob), "MMM d, yyyy")}` }] : []),
+  ];
+
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <Button variant="ghost" size="sm" className="-ml-2" onClick={() => nav("/crm")}>
-        <ArrowLeft className="h-4 w-4 mr-1" />Back to CRM
+    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+      <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={() => nav("/crm")}>
+        <ArrowLeft className="h-4 w-4 mr-1" />Back to Clients &amp; Leads
       </Button>
 
-      {/* Contact Header */}
-      <div className="rounded-2xl border bg-card p-6">
-        <div className="flex flex-wrap items-start gap-6">
-          <Avatar className="h-16 w-16 shrink-0">
-            <AvatarFallback className="text-xl bg-primary/10 text-primary">{initials(c.firstName, c.lastName)}</AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-3 mb-1">
-              <h1 className="text-2xl font-bold">{contactName}</h1>
-              <Badge className={cn("text-sm border-0", CONTACT_STATUS_STYLES[c.status] ?? "")}>{c.status.replace(/_/g, " ")}</Badge>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1 text-sm text-muted-foreground mt-2">
-              {c.phone && <span>📞 {c.phone}</span>}
-              {c.email && <span className="flex items-center gap-1"><Mail className="h-3.5 w-3.5 shrink-0" /><span className="break-all">{c.email}</span></span>}
-              {c.medicareId && <span className="flex items-center gap-1"><Shield className="h-3.5 w-3.5" />ID: {c.medicareId}</span>}
-              {c.dob && <span className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />DOB: {format(new Date(c.dob), "MMM d, yyyy")}</span>}
-              {c.currentPlanType && <span className="flex items-center gap-1"><Heart className="h-3.5 w-3.5" />{PLAN_TYPE_LABELS[c.currentPlanType] ?? c.currentPlanType}{c.planYear ? ` (${c.planYear})` : ""}</span>}
-              {(c.county || c.stateCode) && <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{[c.county, c.stateCode].filter(Boolean).join(", ")}</span>}
-              {c.leadSource && <span className="flex items-center gap-1"><User className="h-3.5 w-3.5" />Source: {c.leadSource}</span>}
-            </div>
-            {c.tags && c.tags.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mt-3">
-                {c.tags.map((tag) => <span key={tag} className="text-xs bg-muted px-2 py-0.5 rounded-full">{tag}</span>)}
+      {/* Contact header */}
+      <section className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+        <div className="p-5 sm:p-6">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-start">
+            <div className="flex min-w-0 flex-1 items-start gap-4">
+              <ContactAvatar first={c.firstName} last={c.lastName} size="xl" />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <h1 className="font-display text-2xl font-bold tracking-tight">{contactName}</h1>
+                  <StatusPill status={c.status} />
+                  {c.optOutSms && <StatusPill tone="danger">No texts (opted out)</StatusPill>}
+                  {c.optOutEmail && <StatusPill tone="danger">No emails (opted out)</StatusPill>}
+                </div>
+                {/* Email and phone on their own line, each kept whole. */}
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                  {c.email && (
+                    <a href={`mailto:${c.email}`} className="inline-flex min-w-0 max-w-full items-center gap-1.5 hover:text-foreground">
+                      <Mail className="h-4 w-4 shrink-0" /><span className="truncate" title={c.email}>{c.email}</span>
+                    </a>
+                  )}
+                  {c.phone && (
+                    <a href={`tel:${c.phone}`} className="inline-flex items-center gap-1.5 whitespace-nowrap hover:text-foreground">
+                      <Phone className="h-4 w-4 shrink-0" />{c.phone}
+                    </a>
+                  )}
+                  {c.medicareId && (
+                    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                      <Shield className="h-4 w-4 shrink-0" />Medicare ID {c.medicareId}
+                    </span>
+                  )}
+                </div>
+                {chips.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {chips.map(({ icon: Icon, text }) => (
+                      <span key={text} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs text-foreground whitespace-nowrap">
+                        <Icon className="h-3.5 w-3.5 text-muted-foreground" />{text}
+                      </span>
+                    ))}
+                    {(c.tags ?? []).map((tag) => (
+                      <span key={`tag-${tag}`} className="inline-flex items-center rounded-full bg-accent/10 px-2.5 py-1 text-xs text-accent whitespace-nowrap">{tag}</span>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-2 shrink-0">
-            {c.phone && !c.optOutSms && <Button size="sm" variant="outline" onClick={() => setSmsOpen(true)}><MessageSquare className="h-4 w-4 mr-1" />SMS</Button>}
-            {c.email && !c.optOutEmail && <Button size="sm" variant="outline" onClick={() => setEmailOpen(true)}><Mail className="h-4 w-4 mr-1" />Email</Button>}
-            <Button size="sm" variant="outline" onClick={() => setLeadOpen(true)}><Plus className="h-4 w-4 mr-1" />Create Lead</Button>
-            <Button size="sm" variant="outline" onClick={() => setLogOpen(true)}><ActivityIcon className="h-4 w-4 mr-1" />Log</Button>
-            <Button size="sm" variant="outline" onClick={openEdit}><Edit className="h-4 w-4 mr-1" />Edit</Button>
+            </div>
+            <div className="flex flex-wrap gap-2 xl:flex-nowrap xl:justify-end">
+              {c.phone && !c.optOutSms && <Button size="sm" onClick={() => setSmsOpen(true)}><MessageSquare className="h-4 w-4 mr-1.5" />SMS</Button>}
+              {c.email && !c.optOutEmail && <Button size="sm" variant="outline" onClick={() => setEmailOpen(true)}><Mail className="h-4 w-4 mr-1.5" />Email</Button>}
+              <Button size="sm" variant="outline" onClick={() => setLogOpen(true)}><ActivityIcon className="h-4 w-4 mr-1.5" />Log</Button>
+              <Button size="sm" variant="outline" onClick={() => setLeadOpen(true)}><Plus className="h-4 w-4 mr-1.5" />Create Lead</Button>
+              <Button size="sm" variant="outline" onClick={openEdit}><Edit className="h-4 w-4 mr-1.5" />Edit</Button>
+            </div>
           </div>
         </div>
-        {(c.optOutSms || c.optOutEmail) && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {c.optOutSms && <Badge variant="destructive" className="text-xs">SMS Opt-Out</Badge>}
-            {c.optOutEmail && <Badge variant="destructive" className="text-xs">Email Opt-Out</Badge>}
-          </div>
-        )}
-      </div>
+      </section>
 
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+        {/* Activity & records */}
+        <div className="min-w-0 xl:col-span-2">
+          <Tabs defaultValue="timeline" className="space-y-4">
+            <TabsList className="flex-wrap h-auto gap-1 bg-card border border-border shadow-sm p-1 rounded-xl">
+              <TabsTrigger value="timeline" className="gap-1.5"><ActivityIcon className="h-4 w-4" />Timeline</TabsTrigger>
+              <TabsTrigger value="call-summaries" className="gap-1.5"><Phone className="h-4 w-4" />Call summaries</TabsTrigger>
+              <TabsTrigger value="deals" className="gap-1.5"><DollarSign className="h-4 w-4" />Deals</TabsTrigger>
+              <TabsTrigger value="tasks" className="gap-1.5"><CheckSquare className="h-4 w-4" />Tasks</TabsTrigger>
+              <TabsTrigger value="sequences" className="gap-1.5"><Workflow className="h-4 w-4" />Sequences</TabsTrigger>
+              <TabsTrigger value="applications" className="gap-1.5"><FileText className="h-4 w-4" />Applications</TabsTrigger>
+            </TabsList>
+            <TabsContent value="timeline"><SectionCard><TimelineTab contactId={id} /></SectionCard></TabsContent>
+            <TabsContent value="call-summaries"><SectionCard><CallSummariesTab contactId={id} /></SectionCard></TabsContent>
+            <TabsContent value="deals"><SectionCard><DealsTab contactId={id} /></SectionCard></TabsContent>
+            <TabsContent value="tasks"><SectionCard><TasksTab contactId={id} /></SectionCard></TabsContent>
+            <TabsContent value="sequences"><SectionCard><SequencesTab contactId={id} /></SectionCard></TabsContent>
+            <TabsContent value="applications"><SectionCard><ApplicationsTab contactId={id} /></SectionCard></TabsContent>
+          </Tabs>
+        </div>
 
-      <Card>
-        <CardContent className="p-6">
-          <h2 className="text-lg font-semibold mb-4">Contact details</h2>
-          <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {([
-              ["First name", c.firstName],
-              ["Last name", c.lastName],
-              ["Email", c.email],
-              ["Phone", c.phone],
-              ["Date of birth", c.dob?.slice(0, 10)],
-              ["Medicare ID", c.medicareId],
-              ["Plan type", c.currentPlanType ? PLAN_TYPE_LABELS[c.currentPlanType] ?? c.currentPlanType : null],
-              ["Plan year", c.planYear],
-              ["County", c.county],
-              ["State", c.stateCode],
-              ["ZIP code", c.zipCode],
-              ["Preferred language", c.preferredLanguage],
-              ["Primary care provider", c.pcpName],
-              ["Provider NPI", c.pcpNpi],
-              ["Health conditions", c.healthConditions?.join(", ")],
-              ["Lead source", c.leadSource],
-              ["Tags", c.tags?.join(", ")],
-              ["SMS preference", c.optOutSms ? "Opted out" : "Not opted out"],
-              ["Email preference", c.optOutEmail ? "Opted out" : "Not opted out"],
-            ] as Array<[string, string | number | null | undefined]>).map(([label, value]) => (
-              <div key={label} className="min-w-0">
-                <dt className="text-sm text-muted-foreground">{label}</dt>
-                <dd className="mt-1 text-sm break-words whitespace-pre-wrap">{value === null || value === undefined || value === "" ? "Not provided" : value}</dd>
+        {/* Contact details — label above value so long emails and
+            addresses wrap cleanly instead of breaking mid-word. */}
+        <SectionCard title="Contact details" className="self-start" actions={
+          <Button size="sm" variant="ghost" className="h-8" onClick={openEdit} aria-label="Edit contact details"><Edit className="h-4 w-4" /></Button>
+        }>
+          <div className="space-y-5">
+            {detailGroups.map((group) => (
+              <div key={group.title}>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">{group.title}</p>
+                <dl className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-x-6 gap-y-3">
+                  {group.rows.map(([label, value]) => {
+                    const empty = value === null || value === undefined || value === "";
+                    return (
+                      <div key={label} className="min-w-0">
+                        <dt className="text-xs text-muted-foreground">{label}</dt>
+                        <dd className={cn("mt-0.5 text-sm [overflow-wrap:anywhere] whitespace-pre-wrap", empty && "text-muted-foreground/70")}>
+                          {empty ? "Not provided" : value}
+                        </dd>
+                      </div>
+                    );
+                  })}
+                </dl>
               </div>
             ))}
-          </dl>
-        </CardContent>
-      </Card>
-
-      {/* Tabs */}
-      <Tabs defaultValue="timeline" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="timeline"><ActivityIcon className="h-4 w-4 mr-1" />Timeline</TabsTrigger>
-          <TabsTrigger value="call-summaries"><Phone className="h-4 w-4 mr-1" />Call summaries</TabsTrigger>
-          <TabsTrigger value="deals"><DollarSign className="h-4 w-4 mr-1" />Deals</TabsTrigger>
-          <TabsTrigger value="tasks"><CheckSquare className="h-4 w-4 mr-1" />Tasks</TabsTrigger>
-          <TabsTrigger value="sequences"><Workflow className="h-4 w-4 mr-1" />Sequences</TabsTrigger>
-          <TabsTrigger value="applications"><FileText className="h-4 w-4 mr-1" />Applications</TabsTrigger>
-        </TabsList>
-        <TabsContent value="timeline"><TimelineTab contactId={id} /></TabsContent>
-        <TabsContent value="call-summaries"><CallSummariesTab contactId={id} /></TabsContent>
-        <TabsContent value="deals"><DealsTab contactId={id} /></TabsContent>
-        <TabsContent value="tasks"><TasksTab contactId={id} /></TabsContent>
-        <TabsContent value="sequences"><SequencesTab contactId={id} /></TabsContent>
-        <TabsContent value="applications"><ApplicationsTab contactId={id} /></TabsContent>
-      </Tabs>
+          </div>
+        </SectionCard>
+      </div>
 
       {/* Modals */}
       <SendSmsModal contactId={id} contactName={contactName} open={smsOpen} onClose={() => setSmsOpen(false)} />

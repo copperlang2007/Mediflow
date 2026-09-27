@@ -14,7 +14,9 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { MessageSquare, Send, CheckCircle2 } from "lucide-react";
+import { MessageSquare, Send, CheckCircle2, Smartphone, Mail } from "lucide-react";
+import { EmptyState, StatusPill } from "@/components/shared";
+import { ContactAvatar } from "./ui";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -119,68 +121,91 @@ export default function InboxTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Select value={channelFilter} onValueChange={setChannelFilter}>
-          <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-40 bg-card" aria-label="Channel"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All channels</SelectItem>
-            <SelectItem value="sms">SMS</SelectItem>
+            <SelectItem value="sms">Text (SMS)</SelectItem>
             <SelectItem value="email">Email</SelectItem>
           </SelectContent>
         </Select>
-        {inboxData && <Badge variant="secondary">{inboxData.total} unread</Badge>}
+        {inboxData && (
+          <StatusPill tone={inboxData.total > 0 ? "info" : "neutral"}>
+            {inboxData.total} unread message{inboxData.total === 1 ? "" : "s"}
+          </StatusPill>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         {/* Thread list */}
-        <div className="lg:col-span-2 space-y-2">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Conversations</p>
+        <section className="lg:col-span-2 rounded-xl border border-border bg-card shadow-sm overflow-hidden self-start">
+          <div className="px-4 py-3 border-b border-border">
+            <h3 className="font-display font-semibold">Conversations</h3>
+            <p className="text-xs text-muted-foreground">Texts and emails with your contacts</p>
+          </div>
           {isLoading ? (
-            <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-16 rounded-lg" />)}</div>
+            <div className="space-y-2 p-3">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)}</div>
           ) : threadList.length === 0 ? (
-            <div className="flex flex-col items-center py-12 text-center">
-              <MessageSquare className="h-10 w-10 text-muted-foreground/20 mb-2" />
-              <p className="text-sm text-muted-foreground">No conversations yet</p>
-            </div>
+            <EmptyState
+              compact
+              icon={MessageSquare}
+              title="No conversations yet"
+              description="When you text or email a contact — or they reply — the conversation shows up here."
+            />
           ) : (
-            threadList.map((row) => {
-              const rowExtra = row as ThreadWithContact & { unreadCount?: number; lastMessage?: string };
-              const unread = rowExtra.unreadCount ?? 0;
-              return (
-                <div
-                  key={row.thread.id}
-                  className={cn("p-3 rounded-lg border cursor-pointer transition-colors", selectedThread === row.thread.id ? "bg-primary/5 border-primary/20" : "bg-card hover:bg-muted/20")}
-                  onClick={() => setSelectedThread(row.thread.id)}
-                >
-                  <div className="flex items-center gap-2">
-                    <div className={cn("h-2 w-2 rounded-full flex-shrink-0", row.thread.channel === "sms" ? "bg-blue-500" : "bg-purple-500")} />
-                    <p className="font-medium text-sm">{row.contactFirstName} {row.contactLastName}</p>
-                    {unread > 0 && <Badge className="ml-auto text-xs bg-red-500 text-white border-0">{unread}</Badge>}
-                  </div>
-                  {rowExtra.lastMessage && <p className="text-xs text-muted-foreground truncate mt-0.5 pl-4">{rowExtra.lastMessage}</p>}
-                  <p className="text-xs text-muted-foreground/60 mt-0.5 pl-4 uppercase tracking-wide">{row.thread.channel}</p>
-                </div>
-              );
-            })
+            <ul className="divide-y divide-border max-h-[640px] overflow-y-auto">
+              {threadList.map((row) => {
+                const rowExtra = row as ThreadWithContact & { unreadCount?: number; lastMessage?: string };
+                const unread = rowExtra.unreadCount ?? 0;
+                const ChannelIcon = row.thread.channel === "sms" ? Smartphone : Mail;
+                const active = selectedThread === row.thread.id;
+                return (
+                  <li key={row.thread.id}>
+                    <button
+                      type="button"
+                      className={cn(
+                        "flex w-full items-center gap-3 px-4 py-3 text-left transition-colors",
+                        active ? "bg-accent/10" : "hover:bg-muted/40",
+                      )}
+                      onClick={() => setSelectedThread(row.thread.id)}
+                    >
+                      <ContactAvatar first={row.contactFirstName} last={row.contactLastName} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className={cn("text-sm truncate", unread > 0 ? "font-semibold" : "font-medium")}>
+                            {row.contactFirstName} {row.contactLastName}
+                          </p>
+                          {unread > 0 && (
+                            <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] font-semibold text-accent-foreground">{unread}</span>
+                          )}
+                        </div>
+                        <p className="flex items-center gap-1 text-xs text-muted-foreground truncate">
+                          <ChannelIcon className="h-3 w-3 shrink-0" />
+                          {rowExtra.lastMessage ?? (row.thread.channel === "sms" ? "Text message" : "Email")}
+                        </p>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           )}
-        </div>
+        </section>
 
         {/* Conversation panel */}
         <div className="lg:col-span-3">
           {selectedThread ? (
-            <div className="border rounded-xl bg-card flex flex-col h-[640px]">
+            <div className="border border-border rounded-xl bg-card shadow-sm flex flex-col h-[640px] overflow-hidden">
               {/* Header */}
-              <div className="flex items-center gap-2 px-4 py-3 border-b">
-                <div
-                  className={cn(
-                    "h-2 w-2 rounded-full",
-                    activeChannel === "sms" ? "bg-blue-500" : "bg-purple-500",
-                  )}
+              <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+                <ContactAvatar
+                  first={activeThreadRow?.contactFirstName}
+                  last={activeThreadRow?.contactLastName}
+                  size="sm"
                 />
-                <p className="text-sm font-medium">{activeContactName || "Conversation"}</p>
-                <Badge variant="outline" className="text-[10px] uppercase tracking-wide ml-1">
-                  {activeChannel}
-                </Badge>
+                <p className="font-display font-semibold">{activeContactName || "Conversation"}</p>
+                <StatusPill tone="info">{activeChannel === "sms" ? "SMS" : "Email"}</StatusPill>
                 <span className="ml-auto text-xs text-muted-foreground">
                   {messages.length} message{messages.length !== 1 ? "s" : ""}
                 </span>
@@ -290,15 +315,18 @@ export default function InboxTab() {
               </div>
             </div>
           ) : (
-            <div className="border rounded-xl bg-muted/20 p-8 flex flex-col items-center justify-center text-center h-48">
-              <MessageSquare className="h-10 w-10 text-muted-foreground/20 mb-2" />
-              <p className="text-sm text-muted-foreground">Select a conversation to view full history and reply</p>
+            <div className="rounded-xl border border-dashed border-border bg-card">
+              <EmptyState
+                icon={MessageSquare}
+                title="Pick a conversation"
+                description="Choose someone on the left to read the full history and reply."
+              />
             </div>
           )}
 
           {!selectedThread && inboxItems.length > 0 && (
             <div className="mt-4 space-y-2">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Unread Messages</p>
+              <p className="font-display font-semibold">Unread messages</p>
               {inboxItems.map((rowRaw) => {
                 const row = rowRaw as Record<string, unknown>;
                 const msg = row.message as Record<string, unknown> | undefined;

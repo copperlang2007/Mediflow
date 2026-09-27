@@ -27,6 +27,7 @@ import {
 import { CheckSquare, Plus } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { EmptyState, StatusPill } from "@/components/shared";
 
 export default function TasksTab({ agentId }: { agentId: string }) {
   const qc = useQueryClient();
@@ -85,10 +86,7 @@ export default function TasksTab({ agentId }: { agentId: string }) {
         </Button>
       </div>
       {(tasks ?? []).length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <CheckSquare className="h-10 w-10 mx-auto mb-2 opacity-20" />
-          <p className="text-sm">No tasks assigned</p>
-        </div>
+        <EmptyState compact icon={CheckSquare} title="No tasks for this agent" description="Tasks assigned to this agent — like finishing paperwork — will show up here." />
       ) : (
         <div className="space-y-2">
           {(tasks ?? []).map((task) => (
@@ -101,12 +99,10 @@ export default function TasksTab({ agentId }: { agentId: string }) {
                   </p>
                 )}
               </div>
-              <Badge variant="secondary" className={`text-xs ${PRIORITY_STYLES[task.priority] ?? ""}`}>
-                {task.priority}
-              </Badge>
-              <Badge variant="secondary" className="text-xs capitalize">
-                {task.status.replace("_", " ")}
-              </Badge>
+              <StatusPill tone={task.priority === "urgent" || task.priority === "high" ? "danger" : task.priority === "medium" ? "warning" : "neutral"}>
+                {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
+              </StatusPill>
+              <StatusPill status={task.status} tone={task.status === "open" ? "info" : undefined} />
             </div>
           ))}
         </div>

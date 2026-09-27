@@ -28,6 +28,7 @@ import {
 import { ShieldCheck, Plus } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { EmptyState } from "@/components/shared";
 
 export default function AhipTab({ agentId }: { agentId: string }) {
   const qc = useQueryClient();
@@ -61,10 +62,7 @@ export default function AhipTab({ agentId }: { agentId: string }) {
       </div>
 
       {(records ?? []).length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <ShieldCheck className="h-10 w-10 mx-auto mb-2 opacity-20" />
-          <p className="text-sm">No AHIP records</p>
-        </div>
+        <EmptyState compact icon={ShieldCheck} title="No AHIP records yet" description="AHIP is the yearly Medicare training agents need before selling. Add this year's completion when it's done." />
       ) : (
         <div className="space-y-2">
           {[...(records ?? [])].sort((a, b) => b.certificationYear - a.certificationYear).map((rec) => (

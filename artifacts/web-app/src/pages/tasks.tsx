@@ -29,11 +29,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { CheckSquare, Plus, Search, Filter, Clock, FileText, Zap, Pencil, Trash2, LayoutTemplate, ListChecks } from "lucide-react";
+import { CheckSquare, Plus, Search, Filter, Clock, FileText, Zap, Pencil, Trash2, LayoutTemplate, ListChecks, Circle, Loader, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { EmptyState, KpiCard, PageHeader, StatusPill, type StatusTone } from "@/components/shared";
+import { ListCard } from "@/pages/crm/ui";
 import type { TaskTemplate, TaskTemplatePriority } from "@workspace/api-client-react";
 
 const STATUS_STYLES: Record<string, string> = {
@@ -49,6 +51,19 @@ const PRIORITY_STYLES: Record<string, string> = {
   medium: "bg-amber-100 text-amber-800",
   low: "bg-slate-100 text-slate-600",
 };
+
+const PRIORITY_TONES: Record<string, StatusTone> = {
+  urgent: "danger",
+  high: "danger",
+  medium: "warning",
+  low: "neutral",
+};
+
+/** Real head-count for one task status (reads `total` from a 1-row page). */
+function useTaskCount(status: string) {
+  const { data, isLoading } = useGetTasks({ status, limit: 1 });
+  return { count: data?.total, isLoading };
+}
 
 const TEMPLATE_TYPE_LABELS: Record<string, string> = {
   custom: "Custom",
@@ -363,7 +378,7 @@ function TasksView() {
   const [fromTemplateOpen, setFromTemplateOpen] = useState(false);
   const [form, setForm] = useState({ title: "", description: "", dueDate: "", priority: "medium" as string });
 
-  const { data, isLoading } = useGetTasks({ status: statusFilter === "all" ? undefined : statusFilter, limit: 100 });
+  const { data, isLoading, error: tasksError } = useGetTasks({ status: statusFilter === "all" ? undefined : statusFilter, limit: 100 });
   const { data: templates } = useGetTaskTemplates();
   const { mutateAsync: createTask, isPending } = useCreateTask();
   const { mutateAsync: updateTask } = useUpdateTask();
@@ -386,70 +401,74 @@ function TasksView() {
     }
   };
 
-  const counts = {
-    open: (data?.tasks ?? []).filter((t) => t.status === "open").length,
-    in_progress: (data?.tasks ?? []).filter((t) => t.status === "in_progress").length,
-    completed: (data?.tasks ?? []).filter((t) => t.status === "completed").length,
-  };
+  const openCount = useTaskCount("open");
+  const inProgressCount = useTaskCount("in_progress");
+  const completedCount = useTaskCount("completed");
 
   return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Open", value: counts.open, style: "bg-blue-50 border-blue-100", textStyle: "text-blue-700" },
-          { label: "In Progress", value: counts.in_progress, style: "bg-amber-50 border-amber-100", textStyle: "text-amber-700" },
-          { label: "Completed", value: counts.completed, style: "bg-green-50 border-green-100", textStyle: "text-green-700" },
-        ].map((stat) => (
-          <div key={stat.label} className={cn("rounded-lg border p-3", stat.style)}>
-            <p className={cn("text-2xl font-bold", stat.textStyle)}>{stat.value}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{stat.label}</p>
-          </div>
-        ))}
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <KpiCard variant="white" color="blue" icon={Circle} label="To do" value={openCount.count ?? "—"} loading={openCount.isLoading} />
+        <KpiCard variant="white" color="orange" icon={Loader} label="In progress" value={inProgressCount.count ?? "—"} loading={inProgressCount.isLoading} />
+        <KpiCard variant="white" color="green" icon={CheckCircle2} label="Done" value={completedCount.count ?? "—"} loading={completedCount.isLoading} />
       </div>
 
-      <div className="flex gap-2 flex-wrap items-center">
-        <div className="relative flex-1 min-w-[180px] max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search tasks…" className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-40">
-            <Filter className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
-            <SelectValue placeholder="All statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="open">Open</SelectItem>
-            <SelectItem value="in_progress">In Progress</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="cancelled">Cancelled</SelectItem>
-          </SelectContent>
-        </Select>
-        <div className="flex gap-2 ml-auto">
-          {(templates ?? []).length > 0 && (
-            <Button size="sm" variant="outline" onClick={() => setFromTemplateOpen(true)}>
-              <LayoutTemplate className="h-3.5 w-3.5 mr-1.5" />
-              From Template
-            </Button>
-          )}
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4 mr-1.5" />
-            New Task
-          </Button>
-        </div>
-      </div>
-
-      <Card>
-        <CardContent className="p-0">
+      <ListCard
+        toolbar={
+          <>
+            <div className="relative flex-1 md:max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input aria-label="Search tasks" placeholder="Search tasks…" className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-44" aria-label="Filter by status">
+                <Filter className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
+                <SelectValue placeholder="All statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="open">Open</SelectItem>
+                <SelectItem value="in_progress">In Progress</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="flex gap-2 md:ml-auto">
+              {(templates ?? []).length > 0 && (
+                <Button variant="outline" onClick={() => setFromTemplateOpen(true)}>
+                  <LayoutTemplate className="h-4 w-4 mr-1.5" />
+                  From Template
+                </Button>
+              )}
+              <Button onClick={() => setAddOpen(true)}>
+                <Plus className="h-4 w-4 mr-1.5" />
+                New Task
+              </Button>
+            </div>
+          </>
+        }
+      >
           {isLoading ? (
-            <div className="p-4 space-y-3">
+            <div className="space-y-3">
               {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
             </div>
+          ) : tasksError ? (
+            <EmptyState
+              icon={CheckSquare}
+              title="We couldn't load tasks"
+              description={(tasksError as { status?: number }).status === 403
+                ? "Your account doesn't have access to the task list. Ask an admin if you think it should."
+                : "Something went wrong loading your tasks. Please try again in a moment."}
+            />
           ) : filtered.length === 0 ? (
-            <div className="py-16 text-center">
-              <CheckSquare className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
-              <p className="text-sm font-medium text-muted-foreground">No tasks found</p>
-              <div className="flex justify-center gap-2 mt-4">
+            <EmptyState
+              icon={CheckSquare}
+              title={search || statusFilter !== "all" ? "No tasks match" : "You're all caught up"}
+              description={search || statusFilter !== "all"
+                ? "Try a different search or status."
+                : "No tasks right now. Add one to remember a call, a follow-up or paperwork."}
+            >
+              <div className="flex justify-center gap-2">
                 {(templates ?? []).length > 0 && (
                   <Button size="sm" variant="outline" onClick={() => setFromTemplateOpen(true)}>
                     <LayoutTemplate className="h-4 w-4 mr-1.5" />
@@ -461,23 +480,26 @@ function TasksView() {
                   Create Task
                 </Button>
               </div>
-            </div>
+            </EmptyState>
           ) : (
-            <div className="divide-y divide-border">
-              {filtered.map((task) => (
-                <div key={task.id} className="flex items-start gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
+            <div className="rounded-lg border border-border divide-y divide-border">
+              {filtered.map((task) => {
+                const overdue = !!task.dueDate && new Date(task.dueDate) < new Date() && task.status !== "completed" && task.status !== "cancelled";
+                return (
+                <div key={task.id} className="flex items-start gap-3 px-4 py-3 hover:bg-muted/30 transition-colors">
                   <button
                     className={cn(
                       "h-5 w-5 rounded-full border-2 shrink-0 mt-0.5 flex items-center justify-center transition-colors",
                       task.status === "completed"
-                        ? "bg-green-500 border-green-500"
-                        : "border-muted-foreground/30 hover:border-primary",
+                        ? "bg-success border-success"
+                        : "border-muted-foreground/40 hover:border-accent",
                     )}
                     aria-label={task.status === "completed" ? "Reopen " + task.title : "Complete " + task.title}
                     onClick={async () => {
                       const newStatus = task.status === "completed" ? "open" : "completed";
                       try {
                         await updateTask({ id: task.id, data: { status: newStatus } });
+                        toast.success(newStatus === "completed" ? "Task done" : "Task reopened");
                         void qc.invalidateQueries({ queryKey: getGetTasksQueryKey() });
                       } catch {
                         toast.error("Failed to update");
@@ -500,32 +522,28 @@ function TasksView() {
                     {task.dueDate && (
                       <p className={cn(
                         "text-xs flex items-center gap-1 mt-0.5",
-                        new Date(task.dueDate) < new Date() && task.status !== "completed"
-                          ? "text-red-600"
-                          : "text-muted-foreground"
+                        overdue ? "text-destructive font-medium" : "text-muted-foreground",
                       )}>
                         <Clock className="h-3 w-3" />
                         Due {format(new Date(task.dueDate), "MMM d, yyyy")}
-                        {new Date(task.dueDate) < new Date() && task.status !== "completed" && " · Overdue"}
+                        {overdue && " · Overdue"}
                       </p>
                     )}
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <Badge variant="secondary" className={`text-xs ${PRIORITY_STYLES[task.priority] ?? ""}`}>
-                      {task.priority}
-                    </Badge>
-                    <Badge variant="secondary" className={`text-xs capitalize ${STATUS_STYLES[task.status] ?? ""}`}>
-                      {task.status.replace("_", " ")}
-                    </Badge>
+                  <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
+                    <StatusPill tone={PRIORITY_TONES[task.priority] ?? "neutral"}>
+                      {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
+                    </StatusPill>
+                    <StatusPill status={task.status} tone={task.status === "open" ? "info" : undefined} />
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
-        </CardContent>
-      </Card>
+          {data && <p className="mt-3 px-1 text-sm text-muted-foreground">Showing {filtered.length} of {data.total} tasks</p>}
+      </ListCard>
 
-      {data && <p className="text-xs text-muted-foreground text-center">{data.total} total tasks</p>}
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="sm:max-w-md">
@@ -607,16 +625,16 @@ function TemplatesView() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
+          <h2 className="font-display text-lg font-semibold">
+            {templates?.length ?? 0} template{templates?.length !== 1 ? "s" : ""}
+          </h2>
           <p className="text-sm text-muted-foreground">
-            {templates?.length ?? 0} template{templates?.length !== 1 ? "s" : ""} defined
-          </p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Templates define reusable task structures with optional automation triggers
+            Reusable tasks — some are created automatically when something happens, like a license nearing expiry.
           </p>
         </div>
-        <Button size="sm" onClick={() => { setEditingTemplate(null); setFormOpen(true); }}>
+        <Button onClick={() => { setEditingTemplate(null); setFormOpen(true); }}>
           <Plus className="h-4 w-4 mr-1.5" />
           New Template
         </Button>
@@ -628,17 +646,12 @@ function TemplatesView() {
         </div>
       ) : (templates ?? []).length === 0 ? (
         <Card>
-          <CardContent className="py-16 text-center">
-            <LayoutTemplate className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
-            <p className="text-sm font-medium text-muted-foreground">No templates yet</p>
-            <p className="text-xs text-muted-foreground mt-1 mb-4">
-              Create templates to standardize tasks across agents and automate task creation.
-            </p>
-            <Button size="sm" onClick={() => { setEditingTemplate(null); setFormOpen(true); }}>
-              <Plus className="h-4 w-4 mr-1.5" />
-              Create First Template
-            </Button>
-          </CardContent>
+          <EmptyState
+            icon={LayoutTemplate}
+            title="No templates yet"
+            description="Templates save you retyping the same tasks, and can create them for agents automatically."
+            action={{ label: "Create first template", onClick: () => { setEditingTemplate(null); setFormOpen(true); } }}
+          />
         </Card>
       ) : (
         <div className="space-y-2">
@@ -649,17 +662,11 @@ function TemplatesView() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-semibold">{template.name}</p>
-                      <Badge variant="secondary" className={cn("text-[10px]", PRIORITY_STYLES[template.priority])}>
-                        {template.priority}
-                      </Badge>
-                      <Badge variant="secondary" className="text-[10px] bg-slate-100 text-slate-600 capitalize">
-                        {TEMPLATE_TYPE_LABELS[template.type] ?? template.type}
-                      </Badge>
-                      {!template.isActive && (
-                        <Badge variant="secondary" className="text-[10px] bg-slate-100 text-slate-500">
-                          Inactive
-                        </Badge>
-                      )}
+                      <StatusPill tone={PRIORITY_TONES[template.priority] ?? "neutral"}>
+                        {template.priority.charAt(0).toUpperCase() + template.priority.slice(1)}
+                      </StatusPill>
+                      <StatusPill tone="navy">{TEMPLATE_TYPE_LABELS[template.type] ?? template.type}</StatusPill>
+                      {!template.isActive && <StatusPill tone="neutral">Inactive</StatusPill>}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">{template.title}</p>
                     {template.description && (
@@ -667,7 +674,7 @@ function TemplatesView() {
                     )}
                     {template.triggerEvent && (
                       <div className="flex items-center gap-1.5 mt-2">
-                        <Zap className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                        <Zap className="h-3.5 w-3.5 text-warning shrink-0" />
                         <span className="text-xs text-muted-foreground">
                           Auto-trigger: {TRIGGER_EVENT_LABELS[template.triggerEvent] ?? template.triggerEvent}
                           {template.dueDaysFromTrigger != null && ` · due in ${template.dueDaysFromTrigger}d`}
@@ -741,35 +748,35 @@ export default function TasksPage() {
   const [view, setView] = useState<View>("tasks");
 
   return (
-    <div className="p-6 space-y-5 max-w-5xl mx-auto">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Tasks</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Task management and onboarding checklists</p>
-        </div>
-        <div className="flex rounded-lg border border-border overflow-hidden shrink-0">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+      <PageHeader title="Tasks" subtitle="Your to-do list — follow-ups, paperwork and onboarding checklists">
+        <div className="flex rounded-xl border border-border bg-card p-1 shadow-sm" role="tablist" aria-label="Tasks view">
           <button
+            role="tab"
+            aria-selected={view === "tasks"}
             onClick={() => setView("tasks")}
             className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors",
-              view === "tasks" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+              "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+              view === "tasks" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted",
             )}
           >
             <ListChecks className="h-4 w-4" />
             Tasks
           </button>
           <button
+            role="tab"
+            aria-selected={view === "templates"}
             onClick={() => setView("templates")}
             className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors",
-              view === "templates" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+              "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+              view === "templates" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted",
             )}
           >
             <LayoutTemplate className="h-4 w-4" />
             Templates
           </button>
         </div>
-      </div>
+      </PageHeader>
 
       {view === "tasks" ? <TasksView /> : <TemplatesView />}
     </div>

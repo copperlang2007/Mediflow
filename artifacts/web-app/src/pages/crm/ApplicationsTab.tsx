@@ -8,13 +8,12 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { customFetch } from "@workspace/api-client-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FileText, ShieldAlert } from "lucide-react";
+import { EmptyState, StatusPill } from "@/components/shared";
 
 interface ApplicationSummary {
   id: string;
@@ -141,36 +140,55 @@ export default function ApplicationsTab({ contactId }: { contactId: string }) {
     staleTime: 30_000,
   });
 
-  if (isLoading) return <Skeleton className="h-32 w-full" />;
+  if (isLoading) return <Skeleton className="h-32 w-full rounded-xl" />;
   const apps = data?.applications ?? [];
   if (apps.length === 0) {
-    return <p className="text-sm text-muted-foreground py-6 text-center">No applications received from EnrollHere yet.</p>;
+    return (
+      <EmptyState
+        icon={FileText}
+        title="No applications yet"
+        description="When an enrollment application for this person comes in from EnrollHere or Sunfire, it will be listed here."
+      />
+    );
   }
 
   return (
     <div className="space-y-3">
-      {apps.map((a) => (
-        <Card key={a.id}>
-          <CardContent className="p-4 flex flex-wrap items-start justify-between gap-3">
-            <div className="space-y-1 min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <FileText className="h-4 w-4 text-muted-foreground" />
-                <span className="font-medium">{a.planName ?? "Unnamed plan"}</span>
-                {a.policyStatus && <Badge variant="secondary">{pretty(a.policyStatus, /^POL_/)}</Badge>}
-                {a.snpType && <Badge variant="outline">{a.snpType}</Badge>}
+      {apps.map((a) => {
+        const status = pretty(a.policyStatus, /^POL_/);
+        return (
+          <div key={a.id} className="rounded-xl border border-border bg-card p-4 flex flex-wrap items-start justify-between gap-3">
+            <div className="flex min-w-0 gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-accent">
+                <FileText className="h-5 w-5" />
               </div>
-              <p className="text-sm text-muted-foreground">
-                {[a.carrierName, a.effectiveDate ? `effective ${a.effectiveDate}` : null, a.confirmationCode ? `Sunfire ${a.confirmationCode}` : null, `version ${a.currentVersion}`]
-                  .filter(Boolean).join(" · ")}
-              </p>
-              {a.agentEmail && <p className="text-xs text-muted-foreground">Agent: {a.agentEmail}</p>}
+              <div className="space-y-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{a.planName ?? "Unnamed plan"}</span>
+                  {status && <StatusPill status={status}>{status}</StatusPill>}
+                  {a.snpType && <StatusPill tone="navy">{a.snpType}</StatusPill>}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {[a.carrierName, a.effectiveDate ? `Effective ${a.effectiveDate}` : null, a.confirmationCode ? `Sunfire ${a.confirmationCode}` : null, `Version ${a.currentVersion}`]
+                    .filter(Boolean).join(" · ")}
+                </p>
+                {a.agentEmail && <p className="text-xs text-muted-foreground break-all">Agent: {a.agentEmail}</p>}
+              </div>
             </div>
             {data?.canViewFull && (
-              <Button size="sm" variant="outline" onClick={() => setOpenId(a.id)}>Full application</Button>
+              <Button size="sm" variant="outline" onClick={() => setOpenId(a.id)}>
+                <ShieldAlert className="h-3.5 w-3.5 mr-1.5" />Full application
+              </Button>
             )}
-          </CardContent>
-        </Card>
-      ))}
+          </div>
+        );
+      })}
+      {data?.canViewFull && (
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+          The full application contains health information. Every time it is opened, that is recorded in the audit log.
+        </p>
+      )}
       {openId && <FullApplicationDialog applicationId={openId} onClose={() => setOpenId(null)} />}
     </div>
   );

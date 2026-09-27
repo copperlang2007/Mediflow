@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Award, Plus } from "lucide-react";
 import { toast } from "sonner";
+import { EmptyState } from "@/components/shared";
 
 export default function CertificationsTab({ agentId }: { agentId: string }) {
   const qc = useQueryClient();
@@ -61,10 +62,7 @@ export default function CertificationsTab({ agentId }: { agentId: string }) {
       </div>
 
       {(certs ?? []).length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <Award className="h-10 w-10 mx-auto mb-2 opacity-20" />
-          <p className="text-sm">No certifications recorded</p>
-        </div>
+        <EmptyState compact icon={Award} title="No certifications yet" description="Carrier certifications this agent has passed will be listed here." />
       ) : (
         <div className="space-y-2">
           {(certs ?? []).map((cert) => (

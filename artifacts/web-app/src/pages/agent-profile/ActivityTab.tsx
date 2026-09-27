@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { FileText } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/shared";
 
 export default function ActivityTab({ agentId }: { agentId: string }) {
   const { data, isLoading } = useGetAuditLog({ limit: 100 });
@@ -28,10 +29,7 @@ export default function ActivityTab({ agentId }: { agentId: string }) {
     <div className="p-6 space-y-4">
       <p className="text-sm text-muted-foreground">{entries.length} event{entries.length !== 1 ? "s" : ""}</p>
       {entries.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <FileText className="h-10 w-10 mx-auto mb-2 opacity-20" />
-          <p className="text-sm">No activity recorded</p>
-        </div>
+        <EmptyState compact icon={FileText} title="No activity yet" description="Changes to this agent — status updates, new licenses, completed tasks — are logged here." />
       ) : (
         <div className="relative border-l-2 border-border ml-3 space-y-0">
           {entries.map((entry) => {
