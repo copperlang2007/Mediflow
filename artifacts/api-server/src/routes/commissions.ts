@@ -17,7 +17,7 @@ import {
   type Request,
   type Response,
 } from "express";
-import { and, asc, desc, eq, gte, isNotNull, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import multer from "multer";
@@ -542,9 +542,17 @@ router.get(
     if (from) conditions.push(gte(commissionStatementsTable.statementDate, from));
     if (to) conditions.push(lte(commissionStatementsTable.statementDate, to));
 
+    // Carrier name joined in (org-scoped) so the list can show it.
     const rows = await db
-      .select()
+      .select({ ...getTableColumns(commissionStatementsTable), carrierName: carriersTable.name })
       .from(commissionStatementsTable)
+      .leftJoin(
+        carriersTable,
+        and(
+          eq(commissionStatementsTable.carrierId, carriersTable.id),
+          eq(carriersTable.orgId, authReq.orgId),
+        ),
+      )
       .where(and(...conditions))
       .orderBy(desc(commissionStatementsTable.statementDate))
       .limit(safeLimit(req.query.limit))

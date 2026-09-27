@@ -8,17 +8,19 @@
  * and only ever returns that agent's payouts.
  *
  * Gated to the `agent` role (the agent-facing counterpart to the admin
- * "Commissions" item). Admins linked to an agent record may also view it —
- * they'll see their own statements. A user with no linked agent gets a
+ * "Commissions" item). Anyone else who lands here (e.g. an admin following an
+ * old link) gets a friendly explanation that this is the agent's personal
+ * view, with a link to the agency-wide Commissions page — not an opaque
+ * "no access" message that looks broken. A user with no linked agent gets a
  * clean "no statements" panel instead of an opaque 403/404.
  */
+import { Link } from "wouter";
 import { useGetMe } from "@workspace/api-client-react";
 import {
   useMyCommissions,
   type MyCommissionStatement,
 } from "@/lib/commissions/myCommissions";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -28,15 +30,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Wallet, CheckCircle2, Clock } from "lucide-react";
+import { Wallet, CheckCircle2, Clock, UserRound, Link2Off, AlertCircle, ArrowRight } from "lucide-react";
 import { format } from "date-fns";
+import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState } from "@/components/shared";
+import { PageShell, KpiGrid, TableFrame } from "@/components/ops";
 
-// Roles allowed to see this page. Agents are the primary audience; admins
-// are permitted too (they'll see their own statements if linked).
 // Agent self-serve portal: scoped to the `agent` role to match the nav item
 // exactly (admins/managers use the org-wide /commissions view). Keeping these
 // aligned avoids a role being able to reach the route but not see the nav.
 const ALLOWED_ROLES = ["agent"] as const;
+
+// Roles that manage commissions for the whole agency — they get pointed to
+// the org-wide page instead.
+const ORG_COMMISSION_ROLES = new Set(["super_admin", "agency_admin", "compliance_manager", "agent_support", "developer"]);
 
 const PAID_STATUS = "paid";
 
@@ -62,46 +68,11 @@ function formatPeriod(start: string, end: string): string {
 function StatusBadge({ status }: { status: string }) {
   const isPaid = status === PAID_STATUS;
   return (
-    <Badge
-      variant={isPaid ? "default" : "secondary"}
-      className={isPaid ? "bg-green-600 hover:bg-green-600" : ""}
-      data-testid={`statement-status-${status}`}
-    >
-      {status}
-    </Badge>
-  );
-}
-
-function SummaryCard({
-  label,
-  value,
-  count,
-  icon: Icon,
-  accent,
-  testId,
-}: {
-  label: string;
-  value: string;
-  count: number;
-  icon: typeof Wallet;
-  accent: string;
-  testId: string;
-}) {
-  return (
-    <Card data-testid={testId}>
-      <CardContent className="pt-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm text-muted-foreground">{label}</p>
-            <p className="text-2xl font-bold tabular-nums mt-1">{value}</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {count} statement{count === 1 ? "" : "s"}
-            </p>
-          </div>
-          <Icon className={`h-8 w-8 ${accent}`} />
-        </div>
-      </CardContent>
-    </Card>
+    <span data-testid={`statement-status-${status}`}>
+      <StatusPill status={status} tone={isPaid ? "success" : "warning"}>
+        {isPaid ? "Paid" : status === "open" ? "Pending" : undefined}
+      </StatusPill>
+    </span>
   );
 }
 
@@ -112,7 +83,7 @@ function StatementRow({ statement }: { statement: MyCommissionStatement }) {
       <TableCell className="font-medium">
         {formatPeriod(statement.periodStart, statement.periodEnd)}
       </TableCell>
-      <TableCell className="text-right tabular-nums">
+      <TableCell className={`text-right tabular-nums font-semibold ${isPaid ? "text-success" : ""}`}>
         {formatMoney(isPaid ? statement.paid : statement.earned)}
       </TableCell>
       <TableCell className="text-center">
@@ -127,6 +98,13 @@ function StatementRow({ statement }: { statement: MyCommissionStatement }) {
   );
 }
 
+const HEADER = (
+  <PageHeader
+    title="My Commissions"
+    subtitle="What you've been paid, and what's still on its way"
+  />
+);
+
 export default function MyCommissionsPage() {
   const { data: me, isLoading: meLoading } = useGetMe();
   const allowed = !!me && ALLOWED_ROLES.includes(me.role as never);
@@ -136,14 +114,31 @@ export default function MyCommissionsPage() {
   const summary = query.data?.summary;
 
   if (!meLoading && !allowed) {
+    const managesOrg = !!me && ORG_COMMISSION_ROLES.has(me.role);
     return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            You don't have access to commission statements.
-          </CardContent>
-        </Card>
-      </div>
+      <PageShell>
+        {HEADER}
+        <SectionCard>
+          <EmptyState
+            icon={UserRound}
+            title="This is each agent's personal commission view"
+            description={
+              managesOrg
+                ? "Agents see their own statements here once they sign in. To see commissions for the whole agency — statements, payouts and anything unpaid — use the Commissions page."
+                : "Agents see their own commission statements here once they sign in. Your role doesn't have a personal commission account."
+            }
+          >
+            {managesOrg && (
+              <Button asChild size="sm">
+                <Link href="/commissions">
+                  Open agency Commissions
+                  <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                </Link>
+              </Button>
+            )}
+          </EmptyState>
+        </SectionCard>
+      </PageShell>
     );
   }
 
@@ -153,32 +148,33 @@ export default function MyCommissionsPage() {
   if (query.isError) {
     const status = (query.error as { status?: number } | null)?.status;
     return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <Card>
-          <CardContent
-            className="py-10 text-center text-sm text-muted-foreground"
-            data-testid="my-commissions-error"
-          >
-            {status === 404
-              ? "No commission account is linked to your profile yet. Contact your agency admin if you expect to see commissions here."
-              : "Couldn't load your commissions right now. Please try again shortly."}
-          </CardContent>
-        </Card>
-      </div>
+      <PageShell>
+        {HEADER}
+        <SectionCard>
+          <div data-testid="my-commissions-error">
+            {status === 404 ? (
+              <EmptyState
+                icon={Link2Off}
+                title="Your commission account isn't set up yet"
+                description="No commission account is linked to your profile yet. Contact your agency admin if you expect to see commissions here."
+              />
+            ) : (
+              <EmptyState
+                icon={AlertCircle}
+                title="We couldn't load your commissions"
+                description="Couldn't load your commissions right now. Please try again shortly."
+                action={{ label: "Try again", onClick: () => void query.refetch() }}
+              />
+            )}
+          </div>
+        </SectionCard>
+      </PageShell>
     );
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Wallet className="h-6 w-6 text-emerald-600" />
-          My Commissions
-        </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Your commission statements and paid-vs-pending totals
-        </p>
-      </div>
+    <PageShell>
+      {HEADER}
 
       {query.isLoading ? (
         <div className="space-y-5" data-testid="my-commissions-loading">
@@ -190,35 +186,42 @@ export default function MyCommissionsPage() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <SummaryCard
-              label="Paid"
-              value={formatMoney(summary?.totalPaid ?? 0)}
-              count={summary?.paidCount ?? 0}
-              icon={CheckCircle2}
-              accent="text-green-600"
-              testId="summary-paid"
-            />
-            <SummaryCard
-              label="Pending"
-              value={formatMoney(summary?.totalPending ?? 0)}
-              count={summary?.pendingCount ?? 0}
-              icon={Clock}
-              accent="text-amber-500"
-              testId="summary-pending"
-            />
-          </div>
+          <KpiGrid cols={2}>
+            <div data-testid="summary-paid">
+              <KpiCard
+                label="Paid to you"
+                value={formatMoney(summary?.totalPaid ?? 0)}
+                icon={CheckCircle2}
+                color="green"
+                hint={`${summary?.paidCount ?? 0} statement${(summary?.paidCount ?? 0) === 1 ? "" : "s"} paid`}
+              />
+            </div>
+            <div data-testid="summary-pending">
+              <KpiCard
+                label="On its way"
+                value={formatMoney(summary?.totalPending ?? 0)}
+                icon={Clock}
+                color="blue"
+                hint={`${summary?.pendingCount ?? 0} statement${(summary?.pendingCount ?? 0) === 1 ? "" : "s"} earned, not yet paid`}
+              />
+            </div>
+          </KpiGrid>
 
-          <Card>
-            <CardContent className="p-0">
-              {statements.length === 0 ? (
-                <div
-                  className="py-16 text-center text-sm text-muted-foreground"
-                  data-testid="my-commissions-empty"
-                >
-                  You have no commission statements yet.
-                </div>
-              ) : (
+          <SectionCard
+            title="Your statements"
+            description="One line per pay period, newest first"
+            icon={Wallet}
+          >
+            {statements.length === 0 ? (
+              <div data-testid="my-commissions-empty">
+                <EmptyState
+                  icon={Wallet}
+                  title="You have no commission statements yet."
+                  description="When a carrier pays on one of your policies and your agency reconciles the statement, it will show up here."
+                />
+              </div>
+            ) : (
+              <TableFrame>
                 <Table data-testid="my-commissions-table">
                   <TableHeader>
                     <TableRow>
@@ -234,11 +237,11 @@ export default function MyCommissionsPage() {
                     ))}
                   </TableBody>
                 </Table>
-              )}
-            </CardContent>
-          </Card>
+              </TableFrame>
+            )}
+          </SectionCard>
         </>
       )}
-    </div>
+    </PageShell>
   );
 }
