@@ -29,8 +29,8 @@ GitHub Secrets / the hosting provider as below.
 
 | Setting | Where | Value |
 |---|---|---|
-| `GHL_PRIVATE_INTEGRATION_TOKEN` | **GitHub Secret** (GCP) / Render env | the token |
-| `GHL_LOCATION_ID` | GitHub **Variable** / Render env | the location id |
+| `GHL_PRIVATE_INTEGRATION_TOKEN` | **GitHub Secret** (GCP; `GHL_BEARER_TOKEN` also accepted there) / Render env (this exact name) | the token |
+| `GHL_LOCATION_ID` | GitHub **Variable** (GCP; a Secret of the same name also works there) / Render env | the location id |
 | `GHL_SYNC_ORG_IDS` | GitHub **Variable** / Render env | the agencyBRIDGE org id(s) to sync into |
 
 Several agencies: list their org ids in `GHL_SYNC_ORG_IDS`; the app reads

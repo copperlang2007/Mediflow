@@ -104,6 +104,59 @@ describe("MFA required for admin roles (HIPAA technical safeguard)", () => {
     expect(res.body.message).toMatch(/multi-factor/i);
   });
 
+  it("ignores MFA_REQUIRED=false in production: MFA is still enforced", async () => {
+    process.env.MFA_REQUIRED = "false";
+    try {
+      const res = await request(app)
+        .post("/api/automations/rules")
+        .set(withMfaAuth(adminNoMfa.id, false))
+        .send({ name: "Bypass attempt", triggerType: "lead_created", actions: [{ type: "create_task", config: {} }] });
+      expect(res.status).toBe(403);
+      expect(res.body).toMatchObject({ error: "mfa_required" });
+    } finally {
+      process.env.MFA_REQUIRED = "true";
+    }
+  });
+
+  it("ignores MFA_REQUIRED=false for a super admin viewing another agency in production", async () => {
+    const { db } = await bootTestDb();
+    const other = await seedOrg(db, { id: "mfa-org-other" });
+    const superNoMfa = await seedUser(db, { orgId: org.id, role: "super_admin" });
+    const previousMfaRequired = process.env.MFA_REQUIRED;
+    process.env.MFA_REQUIRED = "false";
+    try {
+      const denied = await request(app)
+        .get("/api/contacts")
+        .set(withMfaAuth(superNoMfa.id, false))
+        .set("X-MediFlow-View-Org", other.id);
+      expect(denied.status).toBe(403);
+      expect(denied.body).toMatchObject({ error: "mfa_required" });
+      const allowed = await request(app)
+        .get("/api/contacts")
+        .set(withMfaAuth(superNoMfa.id, true))
+        .set("X-MediFlow-View-Org", other.id);
+      expect(allowed.status).toBe(200);
+    } finally {
+      if (previousMfaRequired === undefined) {
+        delete process.env.MFA_REQUIRED;
+      } else {
+        process.env.MFA_REQUIRED = previousMfaRequired;
+      }
+    }
+  });
+
+  it("still lets local development switch MFA off", async () => {
+    const { mfaEnforced } = await import("../../middlewares/requireMfa");
+    process.env.NODE_ENV = "development";
+    process.env.MFA_REQUIRED = "false";
+    try {
+      expect(mfaEnforced()).toBe(false);
+    } finally {
+      process.env.NODE_ENV = "production";
+      process.env.MFA_REQUIRED = "true";
+    }
+  });
+
   it("allows GET /automations/rules for an agency_admin without MFA (reads not gated)", async () => {
     const res = await request(app)
       .get("/api/automations/rules")
@@ -163,7 +216,8 @@ describe("MFA required for admin roles (HIPAA technical safeguard)", () => {
     expect(res.status).not.toBe(403);
   });
 
-  it("respects MFA_REQUIRED=false override (local dev escape hatch)", async () => {
+  it("respects MFA_REQUIRED=false override outside production (local dev escape hatch)", async () => {
+    process.env.NODE_ENV = "development";
     process.env.MFA_REQUIRED = "false";
     try {
       const res = await request(app)
@@ -179,6 +233,7 @@ describe("MFA required for admin roles (HIPAA technical safeguard)", () => {
       // mfa_required.
       expect(res.body.error).not.toBe("mfa_required");
     } finally {
+      process.env.NODE_ENV = "production";
       process.env.MFA_REQUIRED = "true";
     }
   });

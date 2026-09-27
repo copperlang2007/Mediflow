@@ -13,6 +13,18 @@ const MFA_REQUIRED_ROLES = new Set([
   "developer",
 ]);
 
+/**
+ * Whether the MFA gate is enforced. Only the test suite (synthetic auth
+ * headers carry no MFA claim) and local development may switch it off with
+ * MFA_REQUIRED=false. Production always enforces: the flag is ignored there,
+ * so an inherited or mistyped env var can't silently disable MFA on PHI routes.
+ */
+export function mfaEnforced(): boolean {
+  if (process.env.NODE_ENV === "test") return false;
+  if (process.env.MFA_REQUIRED === "false" && process.env.NODE_ENV !== "production") return false;
+  return true;
+}
+
 export function requireMfa(
   req: Request,
   res: Response,
@@ -23,15 +35,7 @@ export function requireMfa(
     next();
     return;
   }
-  // In test mode (synthetic x-test-* headers from testApp), skip — the
-  // helper headers don't carry MFA claims. Real Clerk sessions do.
-  if (process.env.NODE_ENV === "test") {
-    next();
-    return;
-  }
-  // Skip enforcement when explicitly disabled (e.g. local dev without
-  // Clerk's 2FA configured). Default in prod is enforce.
-  if (process.env.MFA_REQUIRED === "false") {
+  if (!mfaEnforced()) {
     next();
     return;
   }
