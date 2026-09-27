@@ -56,6 +56,19 @@ export function isPolicyEvent(body: unknown): boolean {
   return isObj(body) && typeof body.event === "string" && /^PE_/.test(body.event) && isObj(body.policy);
 }
 
+/**
+ * Coverage has ended or never took effect: cancelled, terminated, declined,
+ * or a negative in-force form (POL_INACTIVE, POL_NOT_INFORCE).
+ */
+export function isEndedStatus(raw: string | null): boolean {
+  if (!raw) return false;
+  if (NEGATIVE_INFORCE.test(raw.toUpperCase())) return true;
+  const { status } = mapPolicyStatus(raw);
+  return status === "cancelled" || status === "terminated" || status === "declined";
+}
+
+const NEGATIVE_INFORCE = /(^|_)(NOT|NON|IN)_?(ACTIVE|INFORCE|IN_FORCE|EFFECTUATED)/;
+
 export type EnrollmentStatus = "pending" | "active" | "terminated" | "cancelled" | "declined";
 
 /** EnrollHere policy status (`POL_INFORCE`, `POL_SUBMITTED`, …) → our enrollment status. */
@@ -63,7 +76,7 @@ export function mapPolicyStatus(raw: string | null): { status: EnrollmentStatus;
   const s = (raw ?? "").toUpperCase();
   // Negative forms (POL_INACTIVE, POL_NOT_INFORCE, NON_EFFECTUATED) contain the
   // positive words; never let them count as active coverage.
-  if (/(^|_)(NOT|NON|IN)_?(ACTIVE|INFORCE|IN_FORCE|EFFECTUATED)/.test(s)) return { status: "pending", effectuated: false };
+  if (NEGATIVE_INFORCE.test(s)) return { status: "pending", effectuated: false };
   if (/INFORCE|IN_FORCE|ACTIVE|EFFECTUATED/.test(s)) return { status: "active", effectuated: true };
   if (/CANCEL|WITHDRAW|RESCIND/.test(s)) return { status: "cancelled", effectuated: false };
   if (/TERMINAT|DISENROLL|LAPSE/.test(s)) return { status: "terminated", effectuated: false };
@@ -98,6 +111,8 @@ export interface ParsedPolicyEvent {
   /** The payload as stored (encrypted): the body minus any relay wrapper. */
   storedPayload: Obj;
 }
+
+const hasKey = (o: unknown, key: string): boolean => isObj(o) && key in o;
 
 function firstId(o: unknown, ...path: string[]): string | null {
   const ids = at(o, ...path);
@@ -173,8 +188,10 @@ export function parsePolicyEvent(body: Obj): ParsedPolicyEvent {
     submittedAt: policyInstant(policy.submittedAt),
     medicareNumber,
     medicaidNumber,
-    identifiersPresent: people.some((person) => isObj(person.medicare) || isObj(person.medicaid))
-      || isObj(enrollment.medicareInfo) || isObj(enrollment.medicaidInfo),
+    // A section counts only if it declares the number field (even empty):
+    // `medicareInfo` also carries health flags with no number at all.
+    identifiersPresent: people.some((person) => hasKey(person.medicare, "number") || hasKey(person.medicaid, "number"))
+      || hasKey(enrollment.medicareInfo, "number") || hasKey(enrollment.medicaidInfo, "number") || hasKey(enrollment.medicaidInfo, "id"),
     storedPayload,
   };
 }

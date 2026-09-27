@@ -72,6 +72,14 @@ export async function upsertPolicyEnrollment(
       await syncContactCoverageProjection(contactId, orgId, tx);
       return prior.id;
     }
+    // The new slot already holds another enrollment: leave this policy on its
+    // own row rather than re-linking it to someone else's.
+    logger.warn({ orgId, contactId, enrollmentId: prior.id }, "EnrollHere: policy moved onto an occupied enrollment slot; left in place");
+    if (p.policyStatus) {
+      await tx.update(enrollmentsTable).set({ status, effectuated }).where(eq(enrollmentsTable.id, prior.id));
+      await syncContactCoverageProjection(contactId, orgId, tx);
+    }
+    return prior.id;
   }
 
   // The carrier is part of the enrollment key, so a delivery that gains or
@@ -88,24 +96,30 @@ export async function upsertPolicyEnrollment(
     carrierId = existing[0]!.carrierId; // lands on the one row already there
   } else if (carrierId && !existing.some((e) => e.carrierId === carrierId)) {
     const carrierless = existing.find((e) => e.carrierId === null);
-    if (carrierless) {
+    // Only a row no other policy's application points at: another policy's
+    // carrier-less enrollment is not this one arriving late.
+    const [othersRow] = carrierless && p.policyId ? await tx.select({ id: enrollmentApplicationsTable.id })
+      .from(enrollmentApplicationsTable)
+      .where(and(eq(enrollmentApplicationsTable.enrollmentId, carrierless.id), ne(enrollmentApplicationsTable.externalPolicyId, p.policyId)))
+      .limit(1) : [];
+    if (carrierless && !othersRow) {
       await tx.update(enrollmentsTable).set({ carrierId }).where(eq(enrollmentsTable.id, carrierless.id));
     }
   }
   // This path only runs when the policy's own enrollment wasn't found above,
-  // so an in-force row already in the slot belongs to something else: a
-  // manual or CSV entry, or another policy (a plan switch within the same
-  // carrier). A policy that is not in force never undoes that coverage.
-  const [inForceElsewhere] = await tx.select({ id: enrollmentsTable.id }).from(enrollmentsTable)
+  // so a row already in the slot belongs to something else: a manual or CSV
+  // entry, or another policy (a plan switch within the same carrier). A
+  // policy that is not in force never overwrites that row's status; one in
+  // force does (EnrollHere is authoritative when it reports coverage).
+  const [elsewhere] = await tx.select({ id: enrollmentsTable.id }).from(enrollmentsTable)
     .where(and(
       eq(enrollmentsTable.contactId, contactId),
       eq(enrollmentsTable.planYear, planYear),
       eq(enrollmentsTable.planType, p.planType),
       carrierId ? eq(enrollmentsTable.carrierId, carrierId) : isNull(enrollmentsTable.carrierId),
-      eq(enrollmentsTable.effectuated, true),
     )).limit(1);
   // An update that carries no status at all leaves the status alone.
-  const keepStatus = !p.policyStatus || (!!inForceElsewhere && !effectuated);
+  const keepStatus = !p.policyStatus || (!!elsewhere && !effectuated);
 
   const [row] = await tx.insert(enrollmentsTable).values({
     id: randomUUID(),
@@ -230,6 +244,9 @@ export async function storeApplication(
     } else if (codeless && !coded) {
       await tx.update(enrollmentApplicationsTable).set({ applicationKey: p.confirmationCode })
         .where(eq(enrollmentApplicationsTable.id, codeless.id));
+    } else if (codeless && coded && codeless.contactId && coded.contactId && codeless.contactId !== coded.contactId) {
+      logger.warn({ orgId, codelessId: codeless.id, codedId: coded.id }, "EnrollHere: code-less and coded records belong to different contacts; not folding");
+      applicationKey = fallbackKey;
     } else if (codeless && coded) {
       const v = enrollmentApplicationVersionsTable;
       // Payloads the coded record already has are dropped; the rest are
@@ -246,6 +263,10 @@ export async function storeApplication(
               FROM enrollment_application_versions WHERE application_id = ${codeless.id}) r
         WHERE u.id = r.id`);
       await tx.delete(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, codeless.id));
+      // Timeline entries that pointed at the removed record now point at the kept one.
+      await tx.execute(sql`
+        UPDATE activities SET metadata = jsonb_set(metadata, '{applicationId}', to_jsonb(${coded.id}::text))
+        WHERE org_id = ${orgId} AND metadata->>'applicationId' = ${codeless.id}`);
       const [{ newTop } = { newTop: null }] = await tx.select({ newTop: max(v.version) }).from(v).where(eq(v.applicationId, coded.id));
       if (newTop) await tx.update(enrollmentApplicationsTable).set({ currentVersion: newTop }).where(eq(enrollmentApplicationsTable.id, coded.id));
     }
@@ -282,7 +303,8 @@ export async function storeApplication(
     lastEventType: p.eventType,
     // A partial update (status only) must not blank what an earlier delivery set.
     confirmationCode: keep(t.confirmationCode),
-    externalPolicyId: keep(t.externalPolicyId),
+    // A record keeps the policy id it was created for.
+    externalPolicyId: sql`coalesce(${t.externalPolicyId}, excluded.external_policy_id)`,
     carrierName: keep(t.carrierName),
     planId: keep(t.planId),
     planName: keep(t.planName),

@@ -303,9 +303,9 @@ describe("EnrollHere policy events", () => {
     await tdb.update(enrollmentApplicationVersionsTable).set({ payloadEncrypted: saved }).where(eq(enrollmentApplicationVersionsTable.id, v!.id));
   });
 
-  it("a client whose only policy was cancelled is no longer enrolled", async () => {
+  it("a client whose only policy was cancelled is a former client", async () => {
     const [c] = await tdb.select({ status: contactsTable.status }).from(contactsTable).where(eq(contactsTable.id, contactId));
-    expect(c!.status).toBe("prospect");
+    expect(c!.status).toBe("lost");
   });
 
   it("a code-less update continues the coded application", async () => {
@@ -484,6 +484,54 @@ describe("EnrollHere policy events", () => {
     await post(again);
     const [e] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.id, a.body.enrollmentId));
     expect(e).toMatchObject({ status: "active", effectuated: true });
+  });
+
+  it("health flags without a number don't clear the Medicare number", async () => {
+    const pol = sample();
+    pol.policy.id = "policy-health-flags";
+    pol.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF70000001"];
+    delete pol.policy.identifiers.bySource.sunfire;
+    Object.assign(pol.policy.enrollment.consumer, { firstName: "Hale", lastName: "Flags", email: "flags@example.com", phone: "+15551230000", medicare: { number: "1EG4TE5MK55" } });
+    pol.policy.lead = undefined;
+    const created = await post(pol);
+    const upd = JSON.parse(JSON.stringify(pol));
+    upd.event = "PE_POLICY_UPDATED";
+    upd.policy.enrollment.consumer = { firstName: "Hale", lastName: "Flags", email: "flags@example.com", phone: "+15551230000" };
+    upd.policy.enrollment.medicareInfo = { chf: { has: true }, diabetes: { has: true } };
+    delete upd.policy.enrollment.medicaidInfo;
+    await post(upd);
+    const [a] = await tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, created.body.applicationId));
+    expect(a!.medicareIdEncrypted).not.toBeNull();
+  });
+
+  it("a cancelled policy doesn't overwrite a manual pending enrollment either", async () => {
+    const pol = sample();
+    pol.policy.id = "policy-vs-pending";
+    pol.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF80000001"];
+    delete pol.policy.identifiers.bySource.sunfire;
+    otherPerson(pol, "Parker", "parker@example.com", "+15557771111");
+    pol.policy.manualStatus = "POL_SUBMITTED";
+    const seed = await post({ ...pol, policy: { ...pol.policy, id: "seed-pending" } });
+    await tdb.delete(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.id, seed.body.applicationId));
+    pol.policy.manualStatus = "POL_CANCELLED";
+    await post(pol);
+    const [e] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.id, seed.body.enrollmentId));
+    expect(e).toMatchObject({ status: "pending" });
+  });
+
+  it("an inactive policy ends an enrolled client's membership", async () => {
+    const pol = sample();
+    pol.policy.id = "policy-inactive";
+    pol.policy.enrollment.identifiers.bySource.sunfire.ids = ["SF90000001"];
+    delete pol.policy.identifiers.bySource.sunfire;
+    otherPerson(pol, "Indy", "indy@example.com", "+15557772222");
+    const created = await post(pol);
+    const upd = JSON.parse(JSON.stringify(pol));
+    upd.event = "PE_POLICY_UPDATED";
+    upd.policy.manualStatus = "POL_INACTIVE";
+    await post(upd);
+    const [c] = await tdb.select({ s: contactsTable.status }).from(contactsTable).where(eq(contactsTable.id, created.body.contactId));
+    expect(c!.s).toBe("lost");
   });
 
   it("a deleted contact's application can't be opened, and a purge removes it", async () => {
