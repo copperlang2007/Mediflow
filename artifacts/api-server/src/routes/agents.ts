@@ -23,6 +23,7 @@ import { auditMiddleware, scopeToRouter } from "../middlewares/auditMiddleware";
 import { randomUUID } from "crypto";
 import { createChecklistRun } from "./checklists";
 import { safeLimit, safeOffset } from "../lib/listGuards";
+import { computeComplianceScore } from "../lib/agents/complianceScore";
 
 const InitialLicenseSchema = z.object({
   stateCode: z.string().length(2).toUpperCase(),
@@ -529,93 +530,7 @@ router.get(
       return;
     }
 
-    const currentYear = new Date().getFullYear();
-
-    const [licenses, certs, ahip, onboardingRun] = await Promise.all([
-      db
-        .select()
-        .from(stateLicensesTable)
-        .where(eq(stateLicensesTable.agentId, agent.id)),
-      db
-        .select()
-        .from(carrierCertificationsTable)
-        .where(eq(carrierCertificationsTable.agentId, agent.id)),
-      db
-        .select()
-        .from(ahipRecordsTable)
-        .where(
-          and(
-            eq(ahipRecordsTable.agentId, agent.id),
-            eq(ahipRecordsTable.certificationYear, currentYear),
-          ),
-        )
-        .limit(1),
-      db
-        .select({ id: checklistRunsTable.id })
-        .from(checklistRunsTable)
-        .where(
-          and(
-            eq(checklistRunsTable.agentId, agent.id),
-            eq(checklistRunsTable.orgId, authReq.orgId),
-            sql`${checklistRunsTable.type} = 'onboarding'`,
-          ),
-        )
-        .orderBy(sql`${checklistRunsTable.startedAt} desc`)
-        .limit(1),
-    ]);
-
-    let onboardingTaskScore = 0;
-    let onboardingCompletedItems = 0;
-    let onboardingTotalItems = 0;
-
-    if (onboardingRun[0]) {
-      const items = await db
-        .select({ status: checklistItemsTable.status })
-        .from(checklistItemsTable)
-        .where(eq(checklistItemsTable.runId, onboardingRun[0].id));
-
-      onboardingTotalItems = items.length;
-      onboardingCompletedItems = items.filter(
-        (i) => i.status === "completed" || i.status === "skipped",
-      ).length;
-      onboardingTaskScore =
-        onboardingTotalItems > 0
-          ? (onboardingCompletedItems / onboardingTotalItems) * 100
-          : 0;
-    }
-
-    const activeLicenses = licenses.filter((l) => l.status === "active").length;
-    const activeCerts = certs.filter((c) => c.status === "passed").length;
-    const ahipCompleted = ahip[0]?.status === "passed";
-
-    const licenseScore =
-      licenses.length > 0 ? (activeLicenses / licenses.length) * 100 : 0;
-    const certScore =
-      certs.length > 0 ? (activeCerts / certs.length) * 100 : 0;
-    const ahipScore = ahipCompleted ? 100 : 0;
-
-    const totalScore =
-      licenseScore * 0.4 +
-      certScore * 0.3 +
-      ahipScore * 0.2 +
-      onboardingTaskScore * 0.1;
-
-    const payload = {
-      agentId: agent.id,
-      totalScore: Math.round(totalScore * 10) / 10,
-      licenseScore: Math.round(licenseScore * 10) / 10,
-      certificationScore: Math.round(certScore * 10) / 10,
-      ahipScore,
-      onboardingScore: Math.round(onboardingTaskScore * 10) / 10,
-      activeLicenses,
-      totalLicenses: licenses.length,
-      activeCertifications: activeCerts,
-      totalCertifications: certs.length,
-      ahipCompleted,
-      onboardingComplete: onboardingTotalItems > 0 && onboardingCompletedItems >= onboardingTotalItems,
-      onboardingCompletedItems,
-      onboardingTotalItems,
-    };
+    const payload = await computeComplianceScore(agent.id, authReq.orgId);
 
     complianceScoreCache.set(cacheKey, { payload, expiresAt: Date.now() + COMPLIANCE_CACHE_TTL_MS });
     res.json(payload);

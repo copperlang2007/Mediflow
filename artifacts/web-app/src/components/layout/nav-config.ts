@@ -27,6 +27,7 @@ import {
   CreditCard,
   Database,
   DollarSign,
+  FileStack,
   FileText,
   FolderOpen,
   Globe,
@@ -57,7 +58,6 @@ import {
   Wallet,
   Workflow,
   Wrench,
-  Zap,
 } from "lucide-react";
 
 export type Role =
@@ -107,6 +107,8 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ALL_ROLES },
       { href: "/crm", label: "Clients & Leads", icon: Users, roles: BACK_OFFICE },
+      // Book of business (enrollments). Server gate: contact:read.
+      { href: "/policies", label: "Policies", icon: FileStack, roles: BACK_OFFICE },
       { href: "/tasks", label: "Tasks", icon: CheckSquare, roles: ALL_ROLES, badge: "overdueTasks" },
       { href: "/onboarding", label: "My Onboarding", icon: ClipboardCheck, roles: ["agent"] },
       { href: "/calendar", label: "Calendar", icon: CalendarDays, roles: ALL_ROLES, upcoming: true },
@@ -121,9 +123,9 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/queue/wall", label: "Queue Wallboard", icon: MonitorPlay, roles: ADMINS },
       { href: "/readiness", label: "Ready to Sell", icon: Target, roles: ADMIN_COMPLIANCE },
       { href: "/aep", label: "AEP Center", icon: CalendarClock, roles: ADMIN_COMPLIANCE },
-      { href: "/automations", label: "Automations", icon: Zap, roles: ADMINS },
       { href: "/quoting", label: "Quoting Engine", icon: Search, roles: BACK_OFFICE },
-      { href: "/workflows", label: "Workflow Automation", icon: Workflow, roles: ADMINS, upcoming: true },
+      // The one automation page (/automations redirects here). Rule edits are owner-only server-side.
+      { href: "/workflows", label: "Workflow Automation", icon: Workflow, roles: ADMINS },
       { href: "/campaigns", label: "Omnichannel Campaigns", icon: Mail, roles: ADMINS, upcoming: true },
     ],
   },
@@ -133,7 +135,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/churn", label: "Retention & Churn Risk", icon: TrendingDown, roles: ADMIN_COMPLIANCE },
       { href: "/documents", label: "Documents", icon: FolderOpen, roles: ALL_ROLES },
       { href: "/client-portal", label: "Client Portal", icon: Globe, roles: ADMINS },
-      { href: "/knowledge-base", label: "Knowledge Base", icon: BookOpen, roles: ALL_ROLES, upcoming: true },
+      // Every staff role reads; owners write (kb_article RBAC).
+      { href: "/knowledge-base", label: "Knowledge Base", icon: BookOpen, roles: ALL_ROLES },
     ],
   },
   {
@@ -142,7 +145,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/commissions", label: "Commissions", icon: DollarSign, roles: BACK_OFFICE },
       { href: "/my-commissions", label: "My Commissions", icon: Wallet, roles: ["agent"] },
       { href: "/clawbacks", label: "Clawbacks", icon: RotateCcw, roles: BACK_OFFICE },
-      { href: "/reconciliation", label: "Reconciliation", icon: Scale, roles: ADMINS, upcoming: true },
+      // Same audience as Commissions (commission:read); uploads stay owner-only.
+      { href: "/reconciliation", label: "Reconciliation", icon: Scale, roles: BACK_OFFICE },
     ],
   },
   {
@@ -163,7 +167,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/admin-onboarding", label: "Contracting", icon: Handshake, roles: ADMIN_COMPLIANCE },
       { href: "/leaderboard", label: "Leaderboard", icon: Trophy, roles: ADMIN_COMPLIANCE },
       { href: "/reports", label: "Reports", icon: BarChart2, roles: BACK_OFFICE },
-      { href: "/backoffice", label: "Back Office", icon: Briefcase, roles: ADMINS, upcoming: true },
+      // Staff pick any agent (agent:read); agents see only their own.
+      { href: "/backoffice", label: "Agent Back Office", icon: Briefcase, roles: ALL_ROLES },
     ],
   },
   {
@@ -176,7 +181,8 @@ export const NAV_GROUPS: NavGroup[] = [
       // matrix restricts it to the same two roles server-side.
       { href: "/settings/billing", label: "Billing", icon: CreditCard, roles: ADMINS },
       { href: "/admin-compliance", label: "HIPAA / SOC 2", icon: Lock, roles: ADMIN_COMPLIANCE },
-      { href: "/data-migration", label: "Import / Migration", icon: ArrowLeftRight, roles: ADMINS },
+      // Import / Export hub; the import wizards stay at /data-migration.
+      { href: "/data-tools", label: "Import / Export", icon: ArrowLeftRight, roles: ADMINS },
       { href: "/admin/health", label: "System Health", icon: Activity, roles: ADMINS },
       { href: "/branding", label: "Branding", icon: Palette, roles: ADMINS, upcoming: true },
       { href: "/settings", label: "Settings", icon: Settings, roles: ALL_ROLES },

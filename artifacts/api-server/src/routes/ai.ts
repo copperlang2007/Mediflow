@@ -50,6 +50,7 @@ import {
   buildContactContext,
   buildDashboardContext,
 } from "../lib/aiContext";
+import { buildKnowledgeBaseContext } from "../lib/kbContext";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { buildComplianceReportPdf } from "../lib/complianceReportPdf";
 import { logger } from "../lib/logger";
@@ -154,11 +155,21 @@ router.post(
       logger.warn({ err }, "Failed to build AI page context — proceeding without it");
     }
 
+    // Agency Knowledge Base: matching active articles, as delimited
+    // reference material with a strict size cap (lib/kbContext.ts).
+    let kbContext = "";
+    try {
+      kbContext = await buildKnowledgeBaseContext(authReq.orgId, message);
+    } catch (err) {
+      logger.warn({ err }, "Failed to build Knowledge Base context — proceeding without it");
+    }
+
     const systemPrompt = [
       MEDIFLOW_SYSTEM_PREAMBLE,
       `\nUser role: ${authReq.userRole}`,
       `Organization ID: ${authReq.orgId}`,
       pageContext ? `\n--- CURRENT PAGE CONTEXT ---\n${pageContext}\n--- END CONTEXT ---` : "",
+      kbContext ? `\n${kbContext}` : "",
     ].filter(Boolean).join("\n");
 
     // Parse slash commands to structured prompts with entity resolution
