@@ -124,7 +124,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/automations", label: "Automations", icon: Zap, roles: ADMINS },
       { href: "/quoting", label: "Quoting Engine", icon: Search, roles: BACK_OFFICE, upcoming: true },
       { href: "/workflows", label: "Workflow Automation", icon: Workflow, roles: ADMINS, upcoming: true },
-      { href: "/campaigns", label: "Omnichannel Campaigns", icon: Mail, roles: ADMINS, upcoming: true },
+      // Same audience as the `communication:read` permission; sending is admin-only server-side.
+      { href: "/campaigns", label: "Omnichannel Campaigns", icon: Mail, roles: BACK_OFFICE },
     ],
   },
   {
