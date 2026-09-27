@@ -63,6 +63,9 @@ const DECISION_STATUSES = new Set<Status>([
   "changes_requested",
 ]);
 
+/** Fields that define what was reviewed; editing them voids an approval. */
+const CONTENT_FIELDS = ["title", "materialType", "description", "fileUrl", "carrierName"] as const;
+
 /** "Expiring soon" horizon for approved pieces. */
 const EXPIRING_SOON_DAYS = 30;
 
@@ -301,6 +304,32 @@ router.patch(
       return;
     }
 
+    // Separation of duties: the person who submitted a piece cannot be the
+    // one who approves or rejects it — an auditor needs two people on record.
+    if (
+      data.status !== undefined &&
+      DECISION_STATUSES.has(data.status) &&
+      existing.submittedByUserId === authReq.userId
+    ) {
+      res.status(403).json({
+        error: "You submitted this material, so a different reviewer must record the decision.",
+      });
+      return;
+    }
+
+    // An approval covers the exact content that was reviewed. Changing the
+    // content of an approved piece without resubmitting it would leave an
+    // unreviewed asset carrying an "approved" stamp.
+    const contentChanged = CONTENT_FIELDS.some(
+      (f) => data[f] !== undefined && data[f] !== existing[f],
+    );
+    if (existing.status === "approved" && contentChanged && data.status !== "submitted") {
+      res.status(409).json({
+        error: "Approved material is locked. Resubmit it for review to change its content.",
+      });
+      return;
+    }
+
     const patch: Partial<typeof marketingMaterialsTable.$inferInsert> = {
       updatedAt: new Date(),
     };
@@ -325,7 +354,10 @@ router.patch(
         patch.reviewedByUserId = authReq.userId;
         patch.reviewedAt = new Date();
       } else if (data.status === "submitted") {
+        // Whoever resubmits owns what is now under review — including any
+        // content they swapped in — so separation of duties applies to them.
         patch.submittedAt = new Date();
+        patch.submittedByUserId = authReq.userId;
         patch.reviewedByUserId = null;
         patch.reviewedAt = null;
       }

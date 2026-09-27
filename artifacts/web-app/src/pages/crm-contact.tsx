@@ -849,6 +849,10 @@ export default function ContactDetailPage() {
       county: c.county,
       leadSource: c.leadSource,
       status: c.status,
+      // Keep the contact's values as-is so an untouched consent record is not
+      // treated as a change by the diff below.
+      tcpaConsentAt: c.tcpaConsentAt,
+      tcpaConsentSource: c.tcpaConsentSource,
     });
     setEditOpen(true);
   };
@@ -859,6 +863,10 @@ export default function ContactDetailPage() {
       toast.error("First and last name are required");
       return;
     }
+    if (editForm.tcpaConsentAt && !editForm.tcpaConsentSource?.trim()) {
+      toast.error("Record where the texting consent was captured");
+      return;
+    }
     try {
       // Submit only changes, so role-masked identifiers are never written back.
       const data = Object.fromEntries(
@@ -866,6 +874,11 @@ export default function ContactDetailPage() {
           value !== c[key as keyof Contact],
         ),
       ) as UpdateContactBody;
+      // The consent record is saved as a pair so date and source never drift apart.
+      if ("tcpaConsentAt" in data || "tcpaConsentSource" in data) {
+        data.tcpaConsentAt = editForm.tcpaConsentAt ?? null;
+        data.tcpaConsentSource = editForm.tcpaConsentAt ? editForm.tcpaConsentSource ?? null : null;
+      }
       if (Object.keys(data).length > 0) await updateContact({ id, data });
       toast.success("Contact updated");
       setEditOpen(false);
@@ -946,6 +959,7 @@ export default function ContactDetailPage() {
               ["Tags", c.tags?.join(", ")],
               ["SMS preference", c.optOutSms ? "Opted out" : "Not opted out"],
               ["Email preference", c.optOutEmail ? "Opted out" : "Not opted out"],
+              ["Texting consent (TCPA)", c.tcpaConsentAt ? `${c.tcpaConsentAt.slice(0, 10)} — ${c.tcpaConsentSource ?? "source not recorded"}` : "Not recorded"],
             ] as Array<[string, string | number | null | undefined]>).map(([label, value]) => (
               <div key={label} className="min-w-0">
                 <dt className="text-sm text-muted-foreground">{label}</dt>
@@ -1031,6 +1045,29 @@ export default function ContactDetailPage() {
                   {Object.entries(PLAN_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="contact-edit-consent-date">Texting Consent Date</Label>
+              <Input
+                id="contact-edit-consent-date"
+                type="date"
+                max={new Date().toISOString().slice(0, 10)}
+                value={editForm.tcpaConsentAt?.slice(0, 10) ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setEditForm((f) => ({ ...f, tcpaConsentAt: v ? new Date(`${v}T00:00:00`).toISOString() : null }));
+                }}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="contact-edit-consent-source">Consent Source</Label>
+              <Input
+                id="contact-edit-consent-source"
+                placeholder="Form URL, call ID or paper form ref"
+                maxLength={500}
+                value={editForm.tcpaConsentSource ?? ""}
+                onChange={(e) => setEditForm((f) => ({ ...f, tcpaConsentSource: e.target.value || null }))}
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Status</Label>

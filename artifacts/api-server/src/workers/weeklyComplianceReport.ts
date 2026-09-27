@@ -1,16 +1,24 @@
 /**
  * Weekly Compliance Report Worker.
  *
- * Runs every Monday at 06:00 UTC. For each active organization, generates
- * an AI-powered compliance intelligence report and:
- *  1. Persists the Markdown report to object storage.
+ * Runs every Monday at 06:00 UTC. For each organization it builds a
+ * deterministic compliance report from the database and:
+ *  1. Renders it to PDF and persists it to object storage.
  *  2. Inserts a documentsTable record so it appears in the Document Library.
- *  3. Notifies all agency_admin / compliance_manager users in the org.
+ *  3. Notifies all super_admin / agency_admin / compliance_manager users.
  *
- * The report is generated via the same prompt used in POST /ai/compliance-report.
+ * The report of record is computed, not written by a model: every number comes
+ * from a query below and is reproducible from the database on the report date.
+ * Scores use the one canonical formula (lib/compliance/agentComplianceScore.ts)
+ * and the plan year being sold (lib/compliance/planYear.ts).
+ *
+ * When a BAA-covered AI provider is configured, a short advisory commentary is
+ * appended in its own clearly labelled section. It is optional: an AI outage
+ * or misconfiguration never prevents the report from being produced, and the
+ * commentary never replaces or edits the computed figures.
  */
 
-import { desc, eq, inArray, and, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, like, lt, lte, notInArray, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -18,8 +26,9 @@ import {
   agentsTable,
   stateLicensesTable,
   carrierCertificationsTable,
-  ahipRecordsTable,
+  carriersTable,
   taskInstancesTable,
+  complaintsTable,
   documentsTable,
   notificationsTable,
   usersTable,
@@ -27,28 +36,139 @@ import {
 import { buildAiClient } from "../lib/ai/buildAiClient";
 import type { ChatCompletionClient } from "../lib/ai/bedrockAnthropicClient";
 import { resolveAiModel } from "../lib/aiProvider";
-
-// This worker drafts compliance reports from agent PHI, so it MUST go
-// through the same guarded construction as every other AI path —
-// `lib/ai/buildAiClient.ts`, gated by `resolveAiProvider()`, which hard-fails
-// in production on a provider with no BAA.
-let _aiClient: ChatCompletionClient | null = null;
-function getOpenAI(): ChatCompletionClient | null {
-  if (_aiClient) return _aiClient;
-  _aiClient = buildAiClient();
-  return _aiClient;
-}
 import { ObjectStorageService } from "../lib/objectStorage";
 import { buildComplianceReportPdf } from "../lib/complianceReportPdf";
 import { logger } from "../lib/logger";
+import {
+  agencyComplianceScore,
+  getAgentComplianceScores,
+  type AgentComplianceScore,
+} from "../lib/compliance/agentComplianceScore";
 
 const storageService = new ObjectStorageService();
 
-async function generateReportForOrg(orgId: string): Promise<void> {
-  const now = new Date();
-  const in90 = new Date(now.getTime() + 90 * 86_400_000);
-  const dateStr = now.toISOString().slice(0, 10);
+/** Agents scoring below this are listed as needing attention. */
+export const ATTENTION_SCORE_THRESHOLD = 80;
+const EXPIRY_WINDOW_DAYS = 90;
 
+// The commentary is built from agent names + credential gaps, so it MUST go
+// through the guarded construction every other AI path uses — buildAiClient,
+// which hard-fails in production on a provider with no BAA.
+let _aiClient: ChatCompletionClient | null | undefined;
+function getAiClient(): ChatCompletionClient | null {
+  if (_aiClient === undefined) _aiClient = buildAiClient();
+  return _aiClient;
+}
+
+export interface WeeklyReportAgent {
+  name: string;
+  status: string;
+  npn: string | null;
+  score: AgentComplianceScore;
+  overdueTasks: number;
+}
+
+export interface ExpiringCredential {
+  agentName: string;
+  label: string;
+  expiryDate: Date;
+}
+
+export interface WeeklyReportData {
+  reportDate: string;
+  now: Date;
+  planYear: number;
+  agents: WeeklyReportAgent[];
+  expiringLicenses: ExpiringCredential[];
+  expiringCerts: ExpiringCredential[];
+  complaints: { open: number; overdue: number; critical: number };
+  openCallComplianceFindings: number;
+}
+
+const days = (from: Date, to: Date) => Math.ceil((to.getTime() - from.getTime()) / 86_400_000);
+const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
+
+function agentGaps(a: WeeklyReportAgent, planYear: number): string[] {
+  const s = a.score;
+  const gaps: string[] = [];
+  if (s.totalLicenses === 0) gaps.push("no state licenses on file");
+  else if (s.activeLicenses < s.totalLicenses) {
+    gaps.push(`${s.totalLicenses - s.activeLicenses} of ${s.totalLicenses} licenses not active`);
+  }
+  if (!s.ahipCompleted) gaps.push(`no ${planYear} AHIP`);
+  if (s.totalCertifications === 0) gaps.push(`no ${planYear} carrier certifications`);
+  else if (s.activeCertifications < s.totalCertifications) {
+    gaps.push(`${s.totalCertifications - s.activeCertifications} of ${s.totalCertifications} ${planYear} certifications not passed`);
+  }
+  if (!a.npn) gaps.push("NPN missing");
+  if (a.overdueTasks > 0) gaps.push(`${a.overdueTasks} overdue task${a.overdueTasks === 1 ? "" : "s"}`);
+  return gaps;
+}
+
+/**
+ * Render the report body. Pure — every line derives from `data` — so the same
+ * inputs always produce the same report. Uses only the Markdown subset
+ * buildComplianceReportPdf renders (##, -, ---, paragraphs).
+ */
+export function buildWeeklyComplianceMarkdown(data: WeeklyReportData): string {
+  const { agents, planYear, now } = data;
+  const active = agents.filter((a) => a.status === "active");
+  const agencyScore = agencyComplianceScore(active.map((a) => a.score));
+  const ahipDone = active.filter((a) => a.score.ahipCompleted).length;
+  const attention = agents
+    .filter((a) => a.score.totalScore < ATTENTION_SCORE_THRESHOLD || agentGaps(a, planYear).length > 0)
+    .sort((a, b) => a.score.totalScore - b.score.totalScore);
+  const good = agents.filter((a) => !attention.includes(a));
+
+  const lines: string[] = [];
+  lines.push(`Report date: ${data.reportDate}. Credentials are evaluated for plan year ${planYear}.`);
+  lines.push("");
+  lines.push("## Summary");
+  lines.push(`- Agency compliance score (active agents): ${active.length > 0 ? `${agencyScore}/100` : "n/a — no active agents"}`);
+  lines.push(`- Active agents: ${active.length}; onboarding agents: ${agents.length - active.length}`);
+  lines.push(`- Active agents with ${planYear} AHIP: ${ahipDone} of ${active.length}`);
+  lines.push(`- Agents needing attention: ${attention.length}`);
+  lines.push(`- Licenses expiring in the next ${EXPIRY_WINDOW_DAYS} days: ${data.expiringLicenses.length}`);
+  lines.push(`- Carrier certifications expiring in the next ${EXPIRY_WINDOW_DAYS} days: ${data.expiringCerts.length}`);
+  lines.push(`- Open complaints: ${data.complaints.open} (${data.complaints.overdue} past resolution due date, ${data.complaints.critical} critical)`);
+  lines.push(`- Open call-compliance findings from the dialer: ${data.openCallComplianceFindings}`);
+  lines.push("");
+
+  lines.push("## Agents needing attention");
+  if (attention.length === 0) lines.push("None.");
+  for (const a of attention) {
+    const gaps = agentGaps(a, planYear);
+    lines.push(`- ${a.name} (${a.status}) — score ${a.score.totalScore}/100${gaps.length > 0 ? ` — ${gaps.join("; ")}` : ""}`);
+  }
+  lines.push("");
+
+  lines.push(`## Licenses expiring within ${EXPIRY_WINDOW_DAYS} days`);
+  if (data.expiringLicenses.length === 0) lines.push("None.");
+  for (const l of data.expiringLicenses) {
+    lines.push(`- ${l.agentName} — ${l.label} — expires ${fmtDate(l.expiryDate)} (${days(now, l.expiryDate)} days)`);
+  }
+  lines.push("");
+
+  lines.push(`## Carrier certifications expiring within ${EXPIRY_WINDOW_DAYS} days`);
+  if (data.expiringCerts.length === 0) lines.push("None.");
+  for (const c of data.expiringCerts) {
+    lines.push(`- ${c.agentName} — ${c.label} — expires ${fmtDate(c.expiryDate)} (${days(now, c.expiryDate)} days)`);
+  }
+  lines.push("");
+
+  lines.push("## Agents in good standing");
+  lines.push(good.length === 0 ? "None." : good.map((a) => a.name).join(", "));
+  lines.push("");
+  lines.push("---");
+  lines.push(
+    "Method: licensing 40 pts (share of licenses active and unexpired), carrier certifications 30 pts " +
+      `(share of ${planYear} certifications passed/waived and unexpired), AHIP 20 pts (${planYear} passed/waived), ` +
+      "onboarding 10 pts (share of onboarding checklist complete). Terminated and suspended agents are excluded.",
+  );
+  return lines.join("\n");
+}
+
+async function collectReportData(orgId: string, now: Date): Promise<WeeklyReportData | null> {
   const agents = await db
     .select({
       id: agentsTable.id,
@@ -58,101 +178,202 @@ async function generateReportForOrg(orgId: string): Promise<void> {
       npn: agentsTable.npn,
     })
     .from(agentsTable)
-    .where(eq(agentsTable.orgId, orgId))
-    .limit(100);
+    .where(and(eq(agentsTable.orgId, orgId), inArray(agentsTable.status, ["onboarding", "active"])));
 
-  if (agents.length === 0) return;
+  if (agents.length === 0) return null;
 
-  const agentDataLines: string[] = [];
-  for (const agent of agents) {
-    const [licenses, certs, ahip, overdueTasks] = await Promise.all([
-      db.select().from(stateLicensesTable).where(eq(stateLicensesTable.agentId, agent.id)).limit(20),
-      db.select().from(carrierCertificationsTable).where(eq(carrierCertificationsTable.agentId, agent.id)).limit(20),
-      db.select().from(ahipRecordsTable).where(eq(ahipRecordsTable.agentId, agent.id)).orderBy(desc(ahipRecordsTable.certificationYear)).limit(1),
-      db.select({ count: sql<number>`count(*)` }).from(taskInstancesTable).where(and(eq(taskInstancesTable.agentId, agent.id), eq(taskInstancesTable.status, "open"))),
-    ]);
+  const agentIds = agents.map((a) => a.id);
+  const inWindow = new Date(now.getTime() + EXPIRY_WINDOW_DAYS * 86_400_000);
+  const nameById = new Map(agents.map((a) => [a.id, `${a.firstName} ${a.lastName}`]));
 
-    const expLicenses = licenses.filter((l) => l.expiryDate && new Date(l.expiryDate) <= in90);
-    const expCerts = certs.filter((c) => c.status !== "passed" && c.certificationYear < now.getFullYear());
-    const ahipStatus = ahip[0]?.status ?? "none";
-    const overdueCount = Number(overdueTasks[0]?.count ?? 0);
+  const scores = await getAgentComplianceScores({ orgId, agentIds, now });
+  const planYear = scores[0]?.planYear;
+  if (planYear === undefined) return null;
 
-    agentDataLines.push(
-      `Agent: ${agent.firstName} ${agent.lastName} (${agent.status}) — NPN: ${agent.npn ?? "missing"} — Licenses expiring: ${expLicenses.length} — Certs expiring: ${expCerts.length} — AHIP: ${ahipStatus} — Overdue tasks: ${overdueCount}`,
-    );
-  }
+  const [overdueTasks, licenses, certs, complaintRows, findings] = await Promise.all([
+    db
+      .select({ agentId: taskInstancesTable.agentId, count: sql<number>`count(*)` })
+      .from(taskInstancesTable)
+      .where(
+        and(
+          eq(taskInstancesTable.orgId, orgId),
+          inArray(taskInstancesTable.agentId, agentIds),
+          inArray(taskInstancesTable.status, ["open", "in_progress"]),
+          lt(taskInstancesTable.dueDate, now),
+        ),
+      )
+      .groupBy(taskInstancesTable.agentId),
+    db
+      .select({
+        agentId: stateLicensesTable.agentId,
+        stateCode: stateLicensesTable.stateCode,
+        licenseType: stateLicensesTable.licenseType,
+        expiryDate: stateLicensesTable.expiryDate,
+      })
+      .from(stateLicensesTable)
+      .where(
+        and(
+          inArray(stateLicensesTable.agentId, agentIds),
+          eq(stateLicensesTable.status, "active"),
+          gt(stateLicensesTable.expiryDate, now),
+          lte(stateLicensesTable.expiryDate, inWindow),
+        ),
+      )
+      .orderBy(stateLicensesTable.expiryDate),
+    db
+      .select({
+        agentId: carrierCertificationsTable.agentId,
+        carrierName: carriersTable.name,
+        year: carrierCertificationsTable.certificationYear,
+        expiryDate: carrierCertificationsTable.expiryDate,
+      })
+      .from(carrierCertificationsTable)
+      .innerJoin(carriersTable, eq(carrierCertificationsTable.carrierId, carriersTable.id))
+      .where(
+        and(
+          inArray(carrierCertificationsTable.agentId, agentIds),
+          eq(carrierCertificationsTable.certificationYear, planYear),
+          inArray(carrierCertificationsTable.status, ["passed", "waived"]),
+          gt(carrierCertificationsTable.expiryDate, now),
+          lte(carrierCertificationsTable.expiryDate, inWindow),
+        ),
+      )
+      .orderBy(carrierCertificationsTable.expiryDate),
+    db
+      .select({ severity: complaintsTable.severity, dueAt: complaintsTable.dueAt })
+      .from(complaintsTable)
+      .where(
+        and(
+          eq(complaintsTable.orgId, orgId),
+          notInArray(complaintsTable.status, ["resolved", "closed"]),
+        ),
+      ),
+    // Oversight tasks raised from dialer compliance events carry a
+    // `dialer-compliance:` dedup key (lib/dialer/oversight.ts).
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(taskInstancesTable)
+      .where(
+        and(
+          eq(taskInstancesTable.orgId, orgId),
+          isNotNull(taskInstancesTable.retentionReviewKey),
+          like(taskInstancesTable.retentionReviewKey, "dialer-compliance:%"),
+          inArray(taskInstancesTable.status, ["open", "in_progress"]),
+        ),
+      ),
+  ]);
 
-  const reportPrompt = [
-    `You are generating a Weekly Compliance Intelligence Report for a Medicare insurance agency.`,
-    `Report date: ${dateStr}`,
-    ``,
-    `Below is a summary of all agents and their current compliance status. Analyze this data and produce:`,
-    `1. An executive summary (2-3 sentences)`,
-    `2. Top 5 priority compliance issues ranked by urgency`,
-    `3. A ranked table of agents with the most critical compliance gaps`,
-    `4. Recommended immediate action items for the compliance manager`,
-    `5. Agents in good standing (brief mention)`,
-    ``,
-    `Format the report as Markdown with clear headers (##) and bullet points.`,
-    ``,
-    `AGENT COMPLIANCE DATA (${agents.length} agents):`,
-    ...agentDataLines,
-  ].join("\n");
+  const overdueByAgent = new Map(overdueTasks.map((t) => [t.agentId, Number(t.count)]));
+  const scoreByAgent = new Map(scores.map((s) => [s.agentId, s]));
 
-  const aiClient = getOpenAI();
-  if (!aiClient) {
-    logger.warn({ orgId }, "Weekly compliance report skipped — AI integration not configured");
-    return;
-  }
+  return {
+    reportDate: now.toISOString().slice(0, 10),
+    now,
+    planYear,
+    agents: agents
+      .filter((a) => scoreByAgent.has(a.id))
+      .map((a) => ({
+        name: `${a.firstName} ${a.lastName}`,
+        status: a.status,
+        npn: a.npn,
+        score: scoreByAgent.get(a.id)!,
+        overdueTasks: overdueByAgent.get(a.id) ?? 0,
+      })),
+    expiringLicenses: licenses.map((l) => ({
+      agentName: nameById.get(l.agentId) ?? "Unknown agent",
+      label: `${l.stateCode} ${l.licenseType}`,
+      expiryDate: l.expiryDate!,
+    })),
+    expiringCerts: certs.map((c) => ({
+      agentName: nameById.get(c.agentId) ?? "Unknown agent",
+      label: `${c.carrierName} (${c.year})`,
+      expiryDate: c.expiryDate!,
+    })),
+    complaints: {
+      open: complaintRows.length,
+      overdue: complaintRows.filter((c) => c.dueAt && c.dueAt < now).length,
+      critical: complaintRows.filter((c) => c.severity === "critical").length,
+    },
+    openCallComplianceFindings: Number(findings[0]?.count ?? 0),
+  };
+}
 
-  let fullReport = "";
+/**
+ * Strip markdown structure (headings, rules, quotes) from the AI commentary so
+ * it renders as plain paragraphs under its labelled heading and can never look
+ * like a computed section of the report.
+ */
+export function sanitizeCommentary(text: string): string {
+  return text
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/^\s{0,3}#{1,6}\s*/, "")
+        .replace(/^\s*>+\s?/, "")
+        .replace(/^\s*([-*_])(\s*\1){2,}\s*$/, ""),
+    )
+    .join("\n")
+    .trim();
+}
+
+/** Optional advisory commentary. Returns null on any failure. */
+async function generateAdvisoryCommentary(orgId: string, reportBody: string): Promise<string | null> {
+  const aiClient = getAiClient();
+  if (!aiClient) return null;
   try {
+    let text = "";
     const stream = await aiClient.chat.completions.create({
       model: resolveAiModel(),
-      max_completion_tokens: 8192,
-      messages: [{ role: "user", content: reportPrompt }],
+      max_completion_tokens: 1200,
       stream: true,
+      messages: [
+        {
+          role: "user",
+          content: [
+            "You are assisting the compliance manager of a Medicare insurance agency.",
+            "Below is this week's computed compliance report. Do NOT restate, recompute or alter any figure.",
+            "Write at most 5 short bullet points ('- ' prefix, plain text, no headings, no tables) naming the",
+            "most important actions this week, ordered by regulatory risk. Refer only to facts in the report.",
+            "",
+            reportBody,
+          ].join("\n"),
+        },
+      ],
     });
     for await (const chunk of stream) {
       const content = chunk.choices[0]?.delta?.content;
-      if (content) fullReport += content;
+      if (content) text += content;
     }
+    return text.trim() || null;
   } catch (err) {
-    logger.error({ err, orgId }, "Weekly compliance report AI generation failed");
-    return;
+    logger.warn({ err, orgId }, "Weekly compliance report: advisory commentary failed (report still produced)");
+    return null;
+  }
+}
+
+async function generateReportForOrg(orgId: string): Promise<void> {
+  const now = new Date();
+  const data = await collectReportData(orgId, now);
+  if (!data) return;
+
+  let report = buildWeeklyComplianceMarkdown(data);
+  const commentary = await generateAdvisoryCommentary(orgId, report);
+  if (commentary) {
+    report += `\n\n## Advisory commentary (AI-generated — not part of the computed report)\n${sanitizeCommentary(commentary)}`;
   }
 
-  if (!fullReport) return;
+  const pdfBuffer = await buildComplianceReportPdf(report, "Weekly Compliance Report", data.reportDate);
 
-  // Generate PDF from the markdown report content
-  let pdfBuffer: Buffer;
-  try {
-    pdfBuffer = await buildComplianceReportPdf(
-      fullReport,
-      "Weekly Compliance Intelligence Report",
-      dateStr,
-    );
-  } catch (err) {
-    logger.error({ err, orgId }, "Failed to generate compliance report PDF");
-    return;
-  }
-
-  const filename = `weekly-compliance-report-${dateStr}.pdf`;
-  let storageKey: string;
-  try {
-    storageKey = await storageService.uploadDocument(pdfBuffer, filename, orgId, {
-      contentType: "application/pdf",
-    });
-  } catch (err) {
-    logger.error({ err, orgId }, "Failed to upload weekly compliance report PDF");
-    return;
-  }
+  const filename = `weekly-compliance-report-${data.reportDate}.pdf`;
+  const storageKey = await storageService.uploadDocument(pdfBuffer, filename, orgId, {
+    contentType: "application/pdf",
+  });
 
   const docId = randomUUID();
   await db.insert(documentsTable).values({
     id: docId,
     orgId,
-    name: `Weekly Compliance Report — ${dateStr}`,
+    name: `Weekly Compliance Report — ${data.reportDate}`,
     category: "compliance_report",
     storageKey,
     fileSizeBytes: pdfBuffer.byteLength,
@@ -160,7 +381,6 @@ async function generateReportForOrg(orgId: string): Promise<void> {
     uploadedBy: "system",
   });
 
-  // Notify all compliance managers and agency admins in the org
   const recipients = await db
     .select({ id: usersTable.id })
     .from(usersTable)
@@ -172,21 +392,23 @@ async function generateReportForOrg(orgId: string): Promise<void> {
       ),
     );
 
-  for (const user of recipients) {
-    await db.insert(notificationsTable).values({
-      id: randomUUID(),
-      orgId,
-      userId: user.id,
-      type: "compliance",
-      title: "Weekly Compliance Report Ready",
-      body: `The weekly compliance intelligence report for ${dateStr} has been generated and saved to your Document Library.`,
-      priority: "normal",
-      resourceType: "document",
-      resourceId: docId,
-    });
+  if (recipients.length > 0) {
+    await db.insert(notificationsTable).values(
+      recipients.map((user) => ({
+        id: randomUUID(),
+        orgId,
+        userId: user.id,
+        type: "compliance",
+        title: "Weekly Compliance Report Ready",
+        body: `The weekly compliance report for ${data.reportDate} has been generated and saved to your Document Library.`,
+        priority: "normal",
+        resourceType: "document",
+        resourceId: docId,
+      })),
+    );
   }
 
-  logger.info({ orgId, docId, agentCount: agents.length }, "Weekly compliance report generated");
+  logger.info({ orgId, docId, agentCount: data.agents.length }, "Weekly compliance report generated");
 }
 
 export async function weeklyComplianceReportWorker(): Promise<void> {

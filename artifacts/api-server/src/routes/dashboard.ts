@@ -12,6 +12,7 @@ import {
   activitiesTable,
   usersTable,
 } from "@workspace/db";
+import { sellingPlanYear } from "../lib/compliance/planYear";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 
@@ -31,7 +32,7 @@ router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read
   const in30 = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
   const in60 = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
   const in90 = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
-  const currentYear = now.getFullYear();
+  const planYear = sellingPlanYear(now);
 
   const [
     allAgents,
@@ -128,7 +129,8 @@ router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read
       .where(
         and(
           eq(agentsTable.orgId, orgId),
-          eq(ahipRecordsTable.certificationYear, currentYear)
+          eq(agentsTable.status, "active"),
+          eq(ahipRecordsTable.certificationYear, planYear)
         )
       ),
     db
@@ -171,10 +173,14 @@ router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read
     }
   }
 
-  const ahipTotal = ahipRecords.length;
-  const ahipCompleted = ahipRecords.filter(
-    (r) => r.ahip_records.status === "passed"
-  ).length;
+  // Denominator is every ACTIVE agent, not every AHIP row — an agent with no
+  // record for the plan year is uncertified, not invisible.
+  const ahipTotal = agentsByStatus.active;
+  const ahipCompleted = new Set(
+    ahipRecords
+      .filter((r) => r.ahip_records.status === "passed" || r.ahip_records.status === "waived")
+      .map((r) => r.ahip_records.agentId),
+  ).size;
   const ahipRate = ahipTotal > 0 ? (ahipCompleted / ahipTotal) * 100 : 0;
 
   const agentsWithExpiringLicenses = alertLicenses.map((row) => {
@@ -204,6 +210,7 @@ router.get("/dashboard/stats", requireAuth, requirePermission("dashboard", "read
     openLeadsCount: openLeads.length,
     unreadNotificationsCount: unreadNotif.length,
     ahipCompletionRateCurrent: Math.round(ahipRate * 10) / 10,
+    ahipPlanYear: planYear,
     totalContacts: totalContacts.length,
     agentsWithExpiringLicenses,
   });

@@ -108,14 +108,14 @@ describe("drizzle schema vs SQL migrations", () => {
       ALTER TABLE "cert_renewal_alerts" DROP CONSTRAINT "cert_renewal_alerts_cert_id_carrier_certifications_id_fk";
     `);
     await replay("0049_renewal_snoozes");
-    await replay("0050_schema_drift_backfill");
+    await replay("0052_schema_drift_backfill");
 
     const actual = await foreignKeys();
     expect(actual.has(fkKey("renewal_snoozes", ["org_id"], "organizations"))).toBe(true);
     expect(actual.has(fkKey("cert_renewal_alerts", ["cert_id"], "carrier_certifications"))).toBe(true);
 
     // Re-running on an already-complete database is a no-op, not an error.
-    await expect(replay("0050_schema_drift_backfill")).resolves.toBeDefined();
+    await expect(replay("0052_schema_drift_backfill")).resolves.toBeDefined();
   });
 
   it("does not add a second FK when a pushed DB has it under another name", async () => {
@@ -124,7 +124,7 @@ describe("drizzle schema vs SQL migrations", () => {
       ALTER TABLE "cert_renewal_alerts" ADD CONSTRAINT "cert_renewal_alerts_cert_fk"
         FOREIGN KEY ("cert_id") REFERENCES "carrier_certifications"("id") ON DELETE cascade;
     `);
-    await replay("0050_schema_drift_backfill");
+    await replay("0052_schema_drift_backfill");
     expect(await fkCount("cert_renewal_alerts", "carrier_certifications")).toBe(1);
   });
 
@@ -140,7 +140,7 @@ describe("drizzle schema vs SQL migrations", () => {
       INSERT INTO cert_renewal_alerts (id, cert_id, alert_days_before)
         VALUES ('dup-1', 'drift-cert', 30), ('dup-2', 'drift-cert', 30);
     `);
-    await replay("0050_schema_drift_backfill");
+    await replay("0052_schema_drift_backfill");
     const rows = await handle.pg.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM cert_renewal_alerts WHERE cert_id = 'drift-cert'`,
     );

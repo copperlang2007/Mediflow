@@ -66,6 +66,7 @@ import {
 } from "@workspace/db/schema";
 import { bootTestDb, shutdownTestDb } from "../helpers/testApp";
 import { seedOrg, seedContact, type TestDb } from "../helpers/testDb";
+import { CMS_RECORD_RETENTION_DAYS } from "../../lib/compliance/retention";
 
 let retentionEnforcementWorker: typeof import("../../workers/retentionEnforcement").retentionEnforcementWorker;
 let db: TestDb;
@@ -120,9 +121,9 @@ beforeEach(async () => {
 
 describe("retention-enforcement worker — concurrent-run safety", () => {
   it("two concurrent worker runs soft-delete each contact exactly once and write exactly one audit row", async () => {
-    await enableContactRetention(orgId, 30);
-    const c1 = await seedExpiredContact({ orgId, ageDays: 90 });
-    const c2 = await seedExpiredContact({ orgId, ageDays: 90 });
+    await enableContactRetention(orgId, CMS_RECORD_RETENTION_DAYS);
+    const c1 = await seedExpiredContact({ orgId, ageDays: CMS_RECORD_RETENTION_DAYS + 60 });
+    const c2 = await seedExpiredContact({ orgId, ageDays: CMS_RECORD_RETENTION_DAYS + 60 });
 
     // Two overlapping sweeps for the same org. The per-org advisory lock
     // serializes the two transactions: the second blocks until the first
@@ -172,8 +173,8 @@ describe("retention-enforcement worker — concurrent-run safety", () => {
   });
 
   it("a second sequential run is a no-op — no duplicate audit rows", async () => {
-    await enableContactRetention(orgId, 30);
-    const c = await seedExpiredContact({ orgId, ageDays: 90 });
+    await enableContactRetention(orgId, CMS_RECORD_RETENTION_DAYS);
+    const c = await seedExpiredContact({ orgId, ageDays: CMS_RECORD_RETENTION_DAYS + 60 });
 
     await retentionEnforcementWorker();
     await retentionEnforcementWorker();
@@ -209,8 +210,8 @@ describe("retention-enforcement worker — concurrent-run safety", () => {
    * which point B's `deleted_at IS NULL` SELECT returns nothing.
    */
   it("replaying the un-locked soft-delete pattern produces duplicate audit rows (the bug)", async () => {
-    await enableContactRetention(orgId, 30);
-    const c = await seedExpiredContact({ orgId, ageDays: 90 });
+    await enableContactRetention(orgId, CMS_RECORD_RETENTION_DAYS);
+    const c = await seedExpiredContact({ orgId, ageDays: CMS_RECORD_RETENTION_DAYS + 60 });
 
     // Both runs SELECT the active contact before either has soft-deleted.
     const [rowA] = await db
@@ -240,7 +241,7 @@ describe("retention-enforcement worker — concurrent-run safety", () => {
       action: "retention_soft_delete",
       resourceType: "contact",
       resourceId: c.id,
-      changes: { retentionDays: 30 },
+      changes: { retentionDays: CMS_RECORD_RETENTION_DAYS },
     });
 
     // Run B (already past its read-check): ALSO soft-deletes + audit-inserts.
@@ -255,7 +256,7 @@ describe("retention-enforcement worker — concurrent-run safety", () => {
       action: "retention_soft_delete",
       resourceType: "contact",
       resourceId: c.id,
-      changes: { retentionDays: 30 },
+      changes: { retentionDays: CMS_RECORD_RETENTION_DAYS },
     });
 
     const auditRows = await db

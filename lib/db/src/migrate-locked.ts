@@ -39,6 +39,52 @@ const LOCK_RETRY_MS = 500;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Indexes a migration file creates with a plain (write-blocking)
+ * `CREATE INDEX IF NOT EXISTS`, because the migrator wraps each file in a
+ * transaction and CONCURRENTLY cannot run inside one. Before migrating, the
+ * runner builds each one CONCURRENTLY on an existing table, so the migration's
+ * own statement is a no-op and never holds a write lock on a live table (a
+ * blocked write would stall the Twilio STOP webhook). On a fresh database the
+ * table does not exist yet and the migration builds the index as usual.
+ * Each `definition` must match its migration file exactly.
+ */
+const CONCURRENT_PREBUILDS: ReadonlyArray<{ name: string; table: string; definition: string }> = [
+  {
+    name: "contacts_phone_last10_idx",
+    table: "contacts",
+    definition: "((right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10)))",
+  },
+  {
+    name: "opt_outs_phone_last10_channel_idx",
+    table: "opt_outs",
+    definition: "((right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10)), channel)",
+  },
+];
+
+async function prebuildIndexesConcurrently(client: pg.Client): Promise<void> {
+  for (const idx of CONCURRENT_PREBUILDS) {
+    const table = await client.query("SELECT to_regclass($1) AS oid", [`public.${idx.table}`]);
+    if (!table.rows[0]?.oid) continue;
+    const existing = await client.query(
+      `SELECT i.indisvalid AS valid
+         FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
+        WHERE c.relname = $1 AND c.relnamespace = 'public'::regnamespace`,
+      [idx.name],
+    );
+    if (existing.rows[0]?.valid) continue;
+    // A failed earlier CONCURRENTLY build leaves an INVALID index that
+    // IF NOT EXISTS would silently keep — drop it and rebuild.
+    if (existing.rows.length > 0) {
+      await client.query(`DROP INDEX CONCURRENTLY IF EXISTS public.${idx.name}`);
+    }
+    console.log(`[migrate] building ${idx.name} concurrently`);
+    await client.query(
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${idx.name} ON public.${idx.table} ${idx.definition}`,
+    );
+  }
+}
+
 async function acquireLock(client: pg.Client): Promise<void> {
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   for (;;) {
@@ -65,6 +111,7 @@ async function main(): Promise<void> {
   await client.connect();
   try {
     await acquireLock(client);
+    await prebuildIndexesConcurrently(client);
     const db = drizzle(client);
     await migrate(db, {
       migrationsFolder: path.join(here, "../migrations"),
