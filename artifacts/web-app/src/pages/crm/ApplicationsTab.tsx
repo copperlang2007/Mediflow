@@ -157,7 +157,7 @@ export default function ApplicationsTab({ contactId }: { contactId: string }) {
       {apps.map((a) => {
         const status = pretty(a.policyStatus, /^POL_/);
         return (
-          <div key={a.id} className="rounded-xl border border-border bg-card p-4 shadow-sm flex flex-wrap items-start justify-between gap-3">
+          <div key={a.id} className="rounded-xl border border-border bg-card p-4 flex flex-wrap items-start justify-between gap-3">
             <div className="flex min-w-0 gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-accent">
                 <FileText className="h-5 w-5" />
