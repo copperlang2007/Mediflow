@@ -43,7 +43,8 @@ export type Resource =
   | "billing"
   | "invitation"
   | "seat"
-  | "dev_console";
+  | "dev_console"
+  | "kb_article";
 
 export type Action = "read" | "create" | "update" | "delete" | "admin";
 
@@ -239,6 +240,15 @@ const MATRIX: PermissionMatrix = {
   dev_console: {
     read: ["super_admin", "developer"],
     admin: ["super_admin", "developer"],
+  },
+  // Knowledge Base articles (stage 2). Non-PHI reference notes: every staff
+  // role in the org may read them (they also feed the AI assistant); only the
+  // agency's owners may write them.
+  kb_article: {
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "agent", "developer"],
+    create: ["super_admin", "agency_admin"],
+    update: ["super_admin", "agency_admin"],
+    delete: ["super_admin", "agency_admin"],
   },
 };
 

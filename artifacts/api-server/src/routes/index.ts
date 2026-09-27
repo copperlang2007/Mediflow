@@ -48,6 +48,11 @@ import enrollmentsRouter from "./enrollments";
 import billingRouter from "./billing";
 import invitationsRouter from "./invitations";
 import devRouter from "./dev";
+// --- stage2/new-pages-core ---
+import knowledgeBaseRouter from "./knowledgeBase";
+import reconciliationRouter from "./reconciliation";
+import agentBackofficeRouter from "./agentBackoffice";
+import dataExportsRouter from "./dataExports";
 
 const router: IRouter = Router();
 
@@ -105,6 +110,11 @@ router.use(clawbacksRouter);
 router.use(enrollmentsRouter);
 router.use(billingRouter);
 router.use(invitationsRouter);
+// --- stage2/new-pages-core ---
+router.use(knowledgeBaseRouter);
+router.use(reconciliationRouter);
+router.use(agentBackofficeRouter);
+router.use(dataExportsRouter);
 
 // Dev console is mounted only when the env var is set. The router itself
 // also applies the `devOnly` middleware, so even if this guard were
