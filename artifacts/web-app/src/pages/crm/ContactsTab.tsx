@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useLocation } from "wouter";
+import { useEffect, useState } from "react";
+import { useLocation, useSearch } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import type {
   Contact,
@@ -29,7 +29,12 @@ import { CONTACT_STATUS_STYLES, PLAN_TYPE_LABELS, initials } from "./shared";
 export default function ContactsTab() {
   const [, nav] = useLocation();
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
+  // `/crm?q=…` (from the top-bar search) pre-fills the search box.
+  const urlQuery = new URLSearchParams(useSearch()).get("q") ?? "";
+  const [search, setSearch] = useState(urlQuery);
+  useEffect(() => {
+    if (urlQuery) setSearch(urlQuery);
+  }, [urlQuery]);
   const [statusFilter, setStatusFilter] = useState("all");
   const [selected, setSelected] = useState<string[]>([]);
   const [addOpen, setAddOpen] = useState(false);

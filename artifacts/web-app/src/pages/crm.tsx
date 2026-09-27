@@ -2,6 +2,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Users, Inbox, Workflow, Shield, Target, TrendingUp,
 } from "lucide-react";
+import { PageHeader } from "@/components/shared/PageHeader";
 import ContactsTab from "@/pages/crm/ContactsTab";
 import LeadsTab from "@/pages/crm/LeadsTab";
 import PipelineTab from "@/pages/crm/PipelineTab";
@@ -15,13 +16,13 @@ import RetentionTab from "@/pages/crm/RetentionTab";
 
 export default function CRMPage() {
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">CRM</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Contacts, leads, pipelines, inbox, sequences, and retention</p>
-      </div>
+    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+      <PageHeader
+        title="Clients & Leads"
+        subtitle="Everyone you work with — contacts, leads, your sales pipeline, messages and retention"
+      />
       <Tabs defaultValue="contacts" className="space-y-4">
-        <TabsList className="flex-wrap h-auto gap-1 bg-muted/40 p-1">
+        <TabsList className="flex-wrap h-auto gap-1 bg-card border border-border shadow-sm p-1 rounded-xl">
           <TabsTrigger value="contacts" className="gap-1.5"><Users className="h-4 w-4" />Contacts</TabsTrigger>
           <TabsTrigger value="leads" className="gap-1.5"><Target className="h-4 w-4" />Leads</TabsTrigger>
           <TabsTrigger value="pipeline" className="gap-1.5"><TrendingUp className="h-4 w-4" />Pipeline</TabsTrigger>

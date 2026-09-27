@@ -36,7 +36,7 @@ export default defineJourney({
     {
       name: 'access-crm',
       do: async (p) => {
-        await p.getByRole('link', { name: /crm|contacts|beneficiaries/i }).first().click();
+        await p.getByRole('link', { name: /clients|crm|contacts|beneficiaries/i }).first().click();
       },
       expect: async (p, x) => {
         await x(p.getByText(/search|member|beneficiary|contact/i).first()).toBeVisible();
