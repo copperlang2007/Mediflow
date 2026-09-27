@@ -68,7 +68,7 @@ unmapped EnrollHere field can be spotted and added.
 
 ## Deploy
 
-- **GCP:** set the GitHub secret `ENROLLHERE_WEBHOOK_SECRET`. Re-run
+- **GCP:** set the GitHub secret `ENROLLHERE_WEBHOOK_SECRET` (or `ENROLLHERE_WEBHOOK_PASSWORD`). Re-run
   `scripts/deploy/gcp-bootstrap.sh` once so the `mediflow-enrollhere-webhook-secret`
   Secret Manager placeholder exists; the deploy workflow then syncs and mounts it.
 - **Render:** set `ENROLLHERE_WEBHOOK_SECRET` in the service's environment.
