@@ -85,11 +85,21 @@ type CommissionSchedule = {
   carrierId: string;
   carrierName?: string | null;
   planType: string;
-  year: number;
-  initialPercent?: number | null;
-  renewalPercent?: number | null;
-  flatAmount?: number | null;
+  // Column names as the API returns them; numeric columns arrive as strings.
+  contractYear: number;
+  initialPct?: string | number | null;
+  renewalPct?: string | number | null;
+  flatAmount?: string | number | null;
+  effectiveFrom?: string | null;
 };
+
+const SCHEDULE_PLAN_TYPES: { value: string; label: string }[] = [
+  { value: "MAPD", label: "Medicare Advantage + drug (MAPD)" },
+  { value: "MA", label: "Medicare Advantage (MA)" },
+  { value: "PDP", label: "Drug plan (PDP)" },
+  { value: "supp", label: "Medicare Supplement" },
+  { value: "other", label: "Other" },
+];
 
 type CommissionHierarchy = {
   id: string;
@@ -587,6 +597,7 @@ function SchedulesTab() {
     carrierId: "",
     planType: "MAPD",
     year: String(new Date().getFullYear()),
+    effectiveFrom: `${new Date().getFullYear()}-01-01`,
     initialPercent: "",
     renewalPercent: "",
     flatAmount: "",
@@ -600,9 +611,10 @@ function SchedulesTab() {
         body: JSON.stringify({
           carrierId: form.carrierId,
           planType: form.planType,
-          year: parseInt(form.year, 10),
-          initialPercent: form.initialPercent ? parseFloat(form.initialPercent) : undefined,
-          renewalPercent: form.renewalPercent ? parseFloat(form.renewalPercent) : undefined,
+          contractYear: parseInt(form.year, 10),
+          effectiveFrom: form.effectiveFrom,
+          initialPct: form.initialPercent ? parseFloat(form.initialPercent) : undefined,
+          renewalPct: form.renewalPercent ? parseFloat(form.renewalPercent) : undefined,
           flatAmount: form.flatAmount ? parseFloat(form.flatAmount) : undefined,
         }),
       }),
@@ -610,7 +622,7 @@ function SchedulesTab() {
       toast.success("Schedule added");
       void qc.invalidateQueries({ queryKey: ["/api/commission-schedules"] });
       setAddOpen(false);
-      setForm({ carrierId: "", planType: "MAPD", year: String(new Date().getFullYear()), initialPercent: "", renewalPercent: "", flatAmount: "" });
+      setForm({ carrierId: "", planType: "MAPD", year: String(new Date().getFullYear()), effectiveFrom: `${new Date().getFullYear()}-01-01`, initialPercent: "", renewalPercent: "", flatAmount: "" });
     },
     onError: () => toast.error("Failed to create schedule"),
   });
@@ -673,15 +685,15 @@ function SchedulesTab() {
                   <TableRow key={s.id}>
                     <TableCell className="font-medium">{s.carrierName ?? "—"}</TableCell>
                     <TableCell>{s.planType}</TableCell>
-                    <TableCell className="tabular-nums">{s.year}</TableCell>
+                    <TableCell className="tabular-nums">{s.contractYear}</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {s.initialPercent != null ? `${s.initialPercent}%` : "—"}
+                      {s.initialPct != null ? `${Number(s.initialPct)}%` : "—"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {s.renewalPercent != null ? `${s.renewalPercent}%` : "—"}
+                      {s.renewalPct != null ? `${Number(s.renewalPct)}%` : "—"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {s.flatAmount != null ? fmtMoney(s.flatAmount) : "—"}
+                      {s.flatAmount != null ? fmtMoney(Number(s.flatAmount)) : "—"}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -713,16 +725,20 @@ function SchedulesTab() {
                 <Select value={form.planType} onValueChange={(v) => setForm((p) => ({ ...p, planType: v }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {["MAPD", "PDP", "MEDSUPP", "DSNP", "ANCILLARY"].map((p) => (
-                      <SelectItem key={p} value={p}>{p}</SelectItem>
+                    {SCHEDULE_PLAN_TYPES.map((p) => (
+                      <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-1.5">
                 <Label>Year *</Label>
-                <Input type="number" value={form.year} onChange={(e) => setForm((p) => ({ ...p, year: e.target.value }))} required />
+                <Input type="number" value={form.year} onChange={(e) => setForm((p) => ({ ...p, year: e.target.value, effectiveFrom: `${e.target.value}-01-01` }))} required />
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Rates start on *</Label>
+              <Input type="date" value={form.effectiveFrom} onChange={(e) => setForm((p) => ({ ...p, effectiveFrom: e.target.value }))} required />
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1.5">
