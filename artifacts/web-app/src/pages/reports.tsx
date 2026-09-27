@@ -802,7 +802,7 @@ function ExecutiveTab() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard title="Active Agents" value={data.agents.active} icon={<Users className="h-5 w-5 text-accent" />} />
           <StatCard title="In Onboarding" value={data.agents.onboarding} icon={<Activity className="h-5 w-5 text-warning" />} />
-          <StatCard title="Enrolled Members" value={data.members.enrolled.toLocaleString()} icon={<ShieldCheck className="h-5 w-5 text-success" />} />
+          <StatCard title="Members" value={data.members.enrolled.toLocaleString()} subtitle="Enrolled + retained clients" icon={<ShieldCheck className="h-5 w-5 text-success" />} />
           <StatCard title="AHIP Complete" value={`${data.compliance.ahipRate}%`} subtitle={`${data.compliance.ahipPassed} of ${data.compliance.ahipTotal} active + onboarding agents`} icon={<CheckCircle2 className="h-5 w-5 text-navy-700 dark:text-accent" />} />
         </div>
       </div>

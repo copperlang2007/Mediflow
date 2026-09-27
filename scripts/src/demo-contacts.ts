@@ -76,8 +76,11 @@ export function demoContact(i: number): DemoContact {
     // and cannot have written business yet).
     assignedAgentId: isMember || i % 3 !== 0 ? DEMO_AGENTS.carlos : DEMO_AGENTS.linda,
     isMember,
-    // Spread so each carrier has 3–4 members.
-    carrierName: isMember ? MEMBER_CARRIERS[(Math.floor(i / 2) + i) % MEMBER_CARRIERS.length]! : null,
+    // Round-robin over the members (k = 0..13) so Aetna and Humana — the two
+    // carriers with seeded statements — have 4 members each (one per line).
+    carrierName: isMember
+      ? MEMBER_CARRIERS[(2 * Math.floor(i / 4) + (i % 4) - 2) % MEMBER_CARRIERS.length]!
+      : null,
   };
 }
 
@@ -122,7 +125,7 @@ export const LEGACY_LICENSE_EXPIRY = "2026-01-15T00:00:00.000Z";
  */
 export const ACTIVITY_SCRIPT: ReadonlyArray<{ type: "call_log" | "note" | "email"; body: string }> = [
   { type: "call_log", body: "Intro call — interested in comparing Medicare Advantage options." },
-  { type: "note", body: "Prefers a morning appointment; wants her current doctors checked against the network." },
+  { type: "note", body: "Prefers a morning appointment; wants their current doctors checked against the network." },
   { type: "email", body: "Sent the plan comparison summary we discussed." },
   { type: "call_log", body: "Annual review call — happy with the current plan, no changes needed." },
   { type: "note", body: "Asked about adding a standalone Part D plan next year." },

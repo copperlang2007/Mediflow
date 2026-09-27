@@ -380,7 +380,7 @@ export default function Dashboard() {
           href={linkIf("/crm")}
         />
         <MiniStat
-          label={(stats?.licensesExpiredCount ?? 0) > 0 ? "Licenses expired · expiring in 90 days" : "Licenses expiring (90 days)"}
+          label={(stats?.licensesExpiredCount ?? 0) > 0 ? "Licenses expired · due in 90d" : "Licenses expiring (90 days)"}
           value={
             (stats?.licensesExpiredCount ?? 0) > 0
               ? `${(stats?.licensesExpiredCount ?? 0).toLocaleString()} · ${(stats?.licensesExpiringIn90Days ?? 0).toLocaleString()}`
@@ -614,6 +614,18 @@ export default function Dashboard() {
             )
           ) : (
             <ul className="space-y-2">
+              {(stats?.licensesExpiredCount ?? 0) > 0 && (
+                <li className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
+                  <span className="font-medium text-destructive">
+                    {plural(stats?.licensesExpiredCount ?? 0, "license has", "licenses have")} already expired
+                  </span>
+                  {linkIf("/licensing") && (
+                    <Link href="/licensing" className="ml-1 underline underline-offset-2 text-muted-foreground hover:text-foreground">
+                      See Licensing
+                    </Link>
+                  )}
+                </li>
+              )}
               {(stats?.agentsWithExpiringLicenses ?? []).slice(0, 4).map((alert, i) => (
                 <li key={i} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
                   <div className="min-w-0">

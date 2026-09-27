@@ -75,6 +75,8 @@ type CommissionLineItem = {
   periodStart?: string | null;
   periodEnd?: string | null;
   premiumAmount?: number | string | null;
+  /** What the API actually returns (the column is `premium`). */
+  premium?: number | string | null;
   commissionAmount: number | string;
   type?: string | null;
   writingAgentId?: string | null;
@@ -525,7 +527,7 @@ export default function CommissionStatementPage() {
                       {fmtDate(li.periodStart)} – {fmtDate(li.periodEnd)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {fmtMoney(li.premiumAmount)}
+                      {fmtMoney(li.premium ?? li.premiumAmount)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums font-semibold text-success">
                       {fmtMoney(li.commissionAmount)}

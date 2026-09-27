@@ -29,7 +29,7 @@ import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState } from "@/components/shared";
 import { PageShell, KpiGrid, FilterBar } from "@/components/ops";
-import { Users, ShieldCheck, ChevronRight } from "lucide-react";
+import { ShieldCheck, ChevronRight } from "lucide-react";
 
 const LICENSE_STATUS_STYLES: Record<string, string> = {
   active: "bg-success/12 text-success border border-success/25",
@@ -209,7 +209,7 @@ export default function LicensingPage() {
         <KpiCard
           label="Expired licenses"
           value={expiredCount}
-          icon={Users}
+          icon={XCircle}
           color="navy"
           loading={agentsLoading || alertsLoading}
           hint={

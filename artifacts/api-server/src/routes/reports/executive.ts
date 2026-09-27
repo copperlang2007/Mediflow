@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, gte, lte, sql, count, sum, isNull } from "drizzle-orm";
+import { eq, and, gte, lte, sql, count, sum, isNull, inArray } from "drizzle-orm";
 import {
   db,
   agentsTable,
@@ -68,7 +68,7 @@ router.get(
       db.select({ cnt: count(), val: sum(dealsTable.valueEst) }).from(dealsTable).where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "won"), gte(dealsTable.wonAt, start), lte(dealsTable.wonAt, end))),
       db.select({ cnt: count() }).from(dealsTable).where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "lost"), gte(dealsTable.updatedAt, start), lte(dealsTable.updatedAt, end))),
       db.select({ val: sum(dealsTable.valueEst) }).from(dealsTable).where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "open"))),
-      db.select({ cnt: count() }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"))),
+      db.select({ cnt: count() }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.status, ["enrolled", "retained"]), isNull(contactsTable.deletedAt))),
       db.select({ cnt: count() }).from(messagesTable).innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id)).where(and(eq(messageThreadsTable.orgId, authReq.orgId), eq(messagesTable.direction, "outbound"), gte(messagesTable.createdAt, start), lte(messagesTable.createdAt, end))),
       // Shared AHIP definition (lib/agents/ahipCoverage.ts) for the current year.
       getAhipCoverage(authReq.orgId, new Date().getFullYear()),
@@ -97,7 +97,7 @@ router.get(
       ["Win Rate", winRate + "%"],
       ["Won Value ($)", Number(dealsWon[0]?.val ?? 0)],
       ["Active Pipeline Value ($)", Number(activePipeline[0]?.val ?? 0)],
-      ["Enrolled Members", Number(enrolledMembers[0]?.cnt ?? 0)],
+      ["Members (enrolled + retained)", Number(enrolledMembers[0]?.cnt ?? 0)],
       ["Outbound Messages", Number(commsVolume[0]?.cnt ?? 0)],
       ["AHIP Complete (passed or waived)", ahipPassed],
       ["Agents Needing AHIP (active + onboarding)", ahipTotal],
@@ -183,7 +183,7 @@ router.get(
         .where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "open"), isNull(dealsTable.deletedAt))),
 
       db.select({ cnt: count() }).from(contactsTable)
-        .where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"), isNull(contactsTable.deletedAt))),
+        .where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.status, ["enrolled", "retained"]), isNull(contactsTable.deletedAt))),
 
       db.select({ cnt: count() }).from(messagesTable)
         .innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id))
