@@ -29,17 +29,18 @@ All rows live under the org **INSUREitALL Demo** with a fixed UUID
 | --- | --- |
 | Organizations | 1 — INSUREitALL Demo |
 | Users | 4 — Sarah Stevens (super_admin), Marcus Lee (agency_admin), Carlos Reyes (agent), Linda Park (agent) |
-| Agents | 2 — Carlos (CA, TX, FL, NY licenses, NPN 20451817), Linda (FL only, NPN 21339042) |
+| Agents | 2 — Carlos (CA, TX, FL, NY licenses, NPN 20451817), Linda (FL only, NPN 21339042). License expiries are relative to the seed date: Carlos FL expires in 45 days, Carlos NY expired 20 days ago (still stored `active`, so it exercises the shared active/expired definition) |
 | Carriers | 11 — the production default list, each with a sandbox `appointments@*.example` desk email + cc/subject metadata |
 | Carlos onboarding | status=`complete`; one `carrier_contracting_request` per carrier in status=`appointed` with a writing number |
 | Linda onboarding | status=`signing`; 4 selected carriers (Aetna/CVS, Humana, UnitedHealth/AARP, Devoted), 1 in status=`signed`, 3 in `paperwork_generated` — the LIVE walkthrough example |
 | Agent contracting profiles | 2 — Carlos + Linda, both with SSNs encrypted via the production `encryptSsn` helper. SSNs use the SSA-reserved 999-XX-XXXX prefix so they're obviously fake |
-| Contacts | 30 — realistic-but-fake Medicare leads, mix of MA/MAPD/PDP/supp plan types and lead/prospect/enrolled/retained statuses, assigned across Carlos + Linda |
+| Contacts | 30 — realistic-but-fake: 8 leads, 8 prospects, 14 members (enrolled + retained) on the current plan year. Members are serviced by Carlos; leads/prospects split across Carlos + Linda. Defined in `src/demo-contacts.ts` |
 | Pipeline | 1 ("Medicare AEP 2025") with 4 stages |
 | Deals | 8 across the pipeline so the dashboard isn't empty |
-| Activities | 6 (call_log / note / email mix) for the recent-activity feed |
+| Activities | 6 distinct call/note/email entries for the recent-activity feed |
 | Tasks | 3 open tasks across Carlos + Marcus |
-| Commission statements | 2 — Aetna April + Humana April with 4 line items each, all crediting Carlos |
+| Commission statements | 2 — Aetna (two months ago) + Humana (last month), 4 line items each on members holding that carrier's policy, all crediting Carlos. The Humana total is deliberately $574.50 off its lines, so it shows as "Reconciled with variance" |
+| Coherence pass (`src/seed-demo-coherence.ts`) | 14 current-year enrollments (one per member), AHIP + carrier certs for the current year, AEP annual-review tasks (via the production generator), 3 appointments, 3 KB articles, 1 automation rule, 1 document record (no file stored), 1 SMS thread, agent presence, 2 payouts, 2 missed-payment alerts. Runs on every seed (idempotent) so already-seeded demos pick it up |
 
 ## Reset
 

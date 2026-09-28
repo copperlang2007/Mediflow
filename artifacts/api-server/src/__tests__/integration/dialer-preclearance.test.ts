@@ -266,6 +266,17 @@ describe("Phase 4 preclearance — eligibility + consent (exit criterion)", () =
     expect(captured).toHaveLength(0);
   });
 
+  it("BLOCKS an opt-out stored in E.164 when the callee number is formatted", async () => {
+    const f = await seedEligibleFixture({ optOutPhone: "+15035551234" });
+    const svc = makeService(captured, MIDDAY_UTC);
+    const input = makeInput(f);
+    const result = await svc.issueTicket({ ...input, callee: { ...input.callee, phone: "(503) 555-1234" } });
+
+    expect(result.precleared).toBe(false);
+    expect(result.payload.compliance.dncClear).toBe(false);
+    expect(captured).toHaveLength(0);
+  });
+
   it("BLOCKS an outside-calling-hours dial (DST-correct)", async () => {
     const f = await seedEligibleFixture({});
     const svc = makeService(captured, LATE_NIGHT_UTC);

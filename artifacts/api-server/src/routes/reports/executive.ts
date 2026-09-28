@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, gte, lte, count, sum, isNull } from "drizzle-orm";
+import { eq, and, gte, lte, count, sum, isNull, inArray } from "drizzle-orm";
 import {
   db,
   agentsTable,
@@ -85,7 +85,7 @@ router.get(
       db.select({ cnt: count(), val: sum(dealsTable.valueEst) }).from(dealsTable).where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "won"), gte(dealsTable.wonAt, start), lte(dealsTable.wonAt, end))),
       db.select({ cnt: count() }).from(dealsTable).where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "lost"), gte(dealsTable.updatedAt, start), lte(dealsTable.updatedAt, end))),
       db.select({ val: sum(dealsTable.valueEst) }).from(dealsTable).where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "open"))),
-      db.select({ cnt: count() }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"))),
+      db.select({ cnt: count() }).from(contactsTable).where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.status, ["enrolled", "retained"]), isNull(contactsTable.deletedAt))),
       db.select({ cnt: count() }).from(messagesTable).innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id)).where(and(eq(messageThreadsTable.orgId, authReq.orgId), eq(messagesTable.direction, "outbound"), gte(messagesTable.createdAt, start), lte(messagesTable.createdAt, end))),
       getAgentComplianceScores({ orgId: authReq.orgId, statuses: ["active"] }),
     ]);
@@ -104,15 +104,15 @@ router.get(
       ["Period End", end.toISOString().slice(0, 10)],
       ["Active Agents", Number(activeAgents[0]?.cnt ?? 0)],
       ["Onboarding Agents", Number(onboardingAgents[0]?.cnt ?? 0)],
-      ["New Leads (Period)", leadsTotal],
-      ["Prior Period Leads", leadsPrior],
+      ["New Clients & Leads Added (Period)", leadsTotal],
+      ["Prior Period Clients & Leads Added", leadsPrior],
       ["Lead Change %", leadsChangePct != null ? leadsChangePct + "%" : "N/A"],
       ["Deals Won", wonCount],
       ["Deals Lost", lostCount],
       ["Win Rate", winRate + "%"],
       ["Won Value ($)", Number(dealsWon[0]?.val ?? 0)],
       ["Active Pipeline Value ($)", Number(activePipeline[0]?.val ?? 0)],
-      ["Enrolled Members", Number(enrolledMembers[0]?.cnt ?? 0)],
+      ["Members (enrolled + retained)", Number(enrolledMembers[0]?.cnt ?? 0)],
       ["Outbound Messages", Number(commsVolume[0]?.cnt ?? 0)],
       ["AHIP Plan Year", ahip.planYear ?? "N/A"],
       ["Active Agents AHIP-Certified", ahip.passed],
@@ -150,6 +150,7 @@ router.get(
     const priorEnd = new Date(start.getTime() - 1);
 
     const now = new Date();
+    const execNow = now;
     const currentYear = now.getFullYear();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
@@ -196,7 +197,7 @@ router.get(
         .where(and(eq(dealsTable.orgId, authReq.orgId), eq(dealsTable.status, "open"), isNull(dealsTable.deletedAt))),
 
       db.select({ cnt: count() }).from(contactsTable)
-        .where(and(eq(contactsTable.orgId, authReq.orgId), eq(contactsTable.status, "enrolled"), isNull(contactsTable.deletedAt))),
+        .where(and(eq(contactsTable.orgId, authReq.orgId), inArray(contactsTable.status, ["enrolled", "retained"]), isNull(contactsTable.deletedAt))),
 
       db.select({ cnt: count() }).from(messagesTable)
         .innerJoin(messageThreadsTable, eq(messagesTable.threadId, messageThreadsTable.id))

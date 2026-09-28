@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useLocation } from "wouter";
+import { useEffect, useState } from "react";
+import { useLocation, useSearch } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import type {
   Contact,
@@ -9,7 +9,6 @@ import {
   useGetContacts, useCreateContact, useBulkContactAction,
   getGetContactsQueryKey,
 } from "@workspace/api-client-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,20 +16,36 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
-  Users, Plus, Search, Mail, ChevronRight, MoreHorizontal,
+  Users, Plus, Search, Mail, Phone, ChevronRight, MoreHorizontal, UserCheck, UserPlus, Sparkles, UserX,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { cn } from "@/lib/utils";
-import { CONTACT_STATUS_STYLES, PLAN_TYPE_LABELS, initials } from "./shared";
+import { EmptyState, KpiCard, StatusPill } from "@/components/shared";
+import { PLAN_TYPE_LABELS } from "./shared";
+import { ContactAvatar, ListCard, Th } from "./ui";
+import { formatPhone } from "@/lib/phone";
+
+/**
+ * Head-count for one contact status. Asks the list endpoint for a single row
+ * and reads its `total`, so the number always matches the real database.
+ */
+function useStatusCount(status: string) {
+  const { data, isLoading } = useGetContacts({ status, limit: 1 });
+  return { count: data?.total, isLoading };
+}
 
 export default function ContactsTab() {
   const [, nav] = useLocation();
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
+  // `/crm?q=…` (from the top-bar search) pre-fills the search box.
+  const urlQuery = new URLSearchParams(useSearch()).get("q") ?? "";
+  const [search, setSearch] = useState(urlQuery);
+  useEffect(() => {
+    if (urlQuery) setSearch(urlQuery);
+  }, [urlQuery]);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [planFilter, setPlanFilter] = useState("all");
   const [selected, setSelected] = useState<string[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -45,12 +60,24 @@ export default function ContactsTab() {
   const { data, isLoading } = useGetContacts({
     search: search || undefined,
     status: statusFilter === "all" ? undefined : statusFilter,
+    planType: planFilter === "all" ? undefined : planFilter,
     limit: 100,
   });
   const { mutateAsync: createContact, isPending } = useCreateContact();
   const { mutateAsync: bulkMutate } = useBulkContactAction();
 
+  const enrolled = useStatusCount("enrolled");
+  const retained = useStatusCount("retained");
+  const prospects = useStatusCount("prospect");
+  const leads = useStatusCount("lead");
+  const lost = useStatusCount("lost");
+  const clientsCount =
+    enrolled.count === undefined || retained.count === undefined
+      ? undefined
+      : enrolled.count + retained.count;
+
   const contacts: Contact[] = data?.data ?? [];
+  const filtersActive = Boolean(search) || statusFilter !== "all" || planFilter !== "all";
 
   const handleCreate = async () => {
     if (!form.firstName || !form.lastName) { toast.error("First and last name required"); return; }
@@ -105,99 +132,135 @@ export default function ContactsTab() {
   const toggleAll = () => setSelected(selected.length === contacts.length ? [] : contacts.map((c) => c.id));
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search name, phone, email, Medicare ID…" className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="lead">Lead</SelectItem>
-            <SelectItem value="prospect">Prospect</SelectItem>
-            <SelectItem value="enrolled">Enrolled</SelectItem>
-            <SelectItem value="retained">Retained</SelectItem>
-            <SelectItem value="lost">Lost</SelectItem>
-          </SelectContent>
-        </Select>
-        {selected.length > 0 && (
-          <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)}>
-            <MoreHorizontal className="h-4 w-4 mr-1" />Bulk ({selected.length})
-          </Button>
-        )}
-        <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4 mr-1" />New Contact</Button>
+    <div className="space-y-6">
+      {/* Headline counts — straight from the contacts table. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard variant="white" color="green" icon={UserCheck} label="Clients (enrolled)" value={clientsCount ?? "—"} loading={enrolled.isLoading || retained.isLoading} />
+        <KpiCard variant="white" color="blue" icon={Sparkles} label="Prospects" value={prospects.count ?? "—"} loading={prospects.isLoading} />
+        <KpiCard variant="white" color="navy" icon={UserPlus} label="Leads" value={leads.count ?? "—"} loading={leads.isLoading} />
+        <KpiCard variant="white" color="orange" icon={UserX} label="Lost" value={lost.count ?? "—"} loading={lost.isLoading} />
       </div>
 
-      {isLoading ? (
-        <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}</div>
-      ) : contacts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <Users className="h-12 w-12 text-muted-foreground/20 mb-3" />
-          <p className="font-medium text-muted-foreground">No contacts found</p>
-          <p className="text-sm text-muted-foreground/70 mt-1">Add your first contact to get started</p>
-        </div>
-      ) : (
-        <div className="rounded-xl border bg-card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/30 border-b">
-              <tr>
-                <th className="w-10 px-4 py-3 text-left">
-                  <Checkbox checked={selected.length === contacts.length && contacts.length > 0} onCheckedChange={toggleAll} />
-                </th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Contact</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Plan</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden xl:table-cell">Source</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden xl:table-cell">Added</th>
-                <th className="w-8 px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {contacts.map((c) => (
-                <tr key={c.id} className="hover:bg-muted/20 transition-colors cursor-pointer" onClick={() => nav(`/crm/contacts/${c.id}`)}>
-                  <td className="px-4 py-3" onClick={(e) => { e.stopPropagation(); toggleSelect(c.id); }}>
-                    <Checkbox checked={selected.includes(c.id)} onCheckedChange={() => toggleSelect(c.id)} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-8 w-8 shrink-0">
-                        <AvatarFallback className="text-xs bg-primary/10 text-primary">{initials(c.firstName, c.lastName)}</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="font-medium leading-tight">{c.firstName} {c.lastName}</p>
-                        {c.medicareId && <p className="text-xs text-muted-foreground">ID: {c.medicareId}</p>}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 hidden md:table-cell">
-                    <div className="text-xs text-muted-foreground space-y-0.5">
-                      {c.phone && <div className="flex items-center gap-1">📞 {c.phone}</div>}
-                      {c.email && <div className="flex items-center gap-1 max-w-[160px] truncate"><Mail className="h-3 w-3 shrink-0" />{c.email}</div>}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 hidden lg:table-cell">
-                    {c.currentPlanType ? (
-                      <div className="text-xs">
-                        <span className="font-medium">{PLAN_TYPE_LABELS[c.currentPlanType] ?? c.currentPlanType}</span>
-                        {c.planYear && <span className="text-muted-foreground ml-1">({c.planYear})</span>}
-                      </div>
-                    ) : <span className="text-xs text-muted-foreground">—</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge className={cn("text-xs border-0", CONTACT_STATUS_STYLES[c.status] ?? "")}>{c.status.replace(/_/g, " ")}</Badge>
-                  </td>
-                  <td className="px-4 py-3 hidden xl:table-cell text-xs text-muted-foreground">{c.leadSource ?? "—"}</td>
-                  <td className="px-4 py-3 hidden xl:table-cell text-xs text-muted-foreground">{format(new Date(c.createdAt), "MMM d, yyyy")}</td>
-                  <td className="px-4 py-3"><ChevronRight className="h-4 w-4 text-muted-foreground" /></td>
+      <ListCard
+        toolbar={
+          <>
+            <div className="relative flex-1 md:max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input aria-label="Search contacts" placeholder="Search by name, phone, email or Medicare ID…" className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+            <div className="flex flex-wrap items-center gap-2 md:ml-auto">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[150px]" aria-label="Filter by status"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="lead">Lead</SelectItem>
+                  <SelectItem value="prospect">Prospect</SelectItem>
+                  <SelectItem value="enrolled">Enrolled</SelectItem>
+                  <SelectItem value="retained">Retained</SelectItem>
+                  <SelectItem value="lost">Lost</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={planFilter} onValueChange={setPlanFilter}>
+                <SelectTrigger className="w-[170px]" aria-label="Filter by plan"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All plans</SelectItem>
+                  {Object.entries(PLAN_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {selected.length > 0 && (
+                <Button variant="outline" onClick={() => setBulkOpen(true)}>
+                  <MoreHorizontal className="h-4 w-4 mr-1.5" />Actions for {selected.length}
+                </Button>
+              )}
+              <Button onClick={() => setAddOpen(true)}><Plus className="h-4 w-4 mr-1.5" />New Contact</Button>
+            </div>
+          </>
+        }
+      >
+        {isLoading ? (
+          <div className="space-y-2">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-14 w-full rounded-lg" />)}</div>
+        ) : contacts.length === 0 ? (
+          filtersActive ? (
+            <EmptyState
+              icon={Search}
+              title="No one matches that search"
+              description="Try a different name or phone number, or clear the filters to see everyone."
+              action={{ label: "Clear filters", onClick: () => { setSearch(""); setStatusFilter("all"); setPlanFilter("all"); } }}
+            />
+          ) : (
+            <EmptyState
+              icon={Users}
+              title="No contacts yet"
+              description="Everyone you talk to — leads, prospects and enrolled clients — lives here. Add your first contact to get started."
+              action={{ label: "Add a contact", onClick: () => setAddOpen(true) }}
+            />
+          )
+        ) : (
+          <div className="rounded-lg border border-border overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 border-b border-border">
+                <tr>
+                  <th className="w-10 pl-4 py-3 text-left">
+                    <Checkbox aria-label="Select all" checked={selected.length === contacts.length && contacts.length > 0} onCheckedChange={toggleAll} />
+                  </th>
+                  <Th>Client</Th>
+                  <Th>Status</Th>
+                  <Th className="hidden lg:table-cell">Plan</Th>
+                  <Th className="hidden md:table-cell">Phone</Th>
+                  <Th className="hidden xl:table-cell">Source</Th>
+                  <Th className="hidden xl:table-cell">Added</Th>
+                  <th className="w-8 px-4 py-3"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody className="divide-y divide-border">
+                {contacts.map((c) => (
+                  <tr key={c.id} className="hover:bg-muted/30 transition-colors cursor-pointer" onClick={() => nav(`/crm/contacts/${c.id}`)}>
+                    <td className="pl-4 py-3" onClick={(e) => { e.stopPropagation(); toggleSelect(c.id); }}>
+                      <Checkbox aria-label={`Select ${c.firstName} ${c.lastName}`} checked={selected.includes(c.id)} onCheckedChange={() => toggleSelect(c.id)} />
+                    </td>
+                    <td className="px-4 py-3 max-w-[320px]">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <ContactAvatar first={c.firstName} last={c.lastName} />
+                        <div className="min-w-0">
+                          <p className="font-medium leading-tight truncate">{c.firstName} {c.lastName}</p>
+                          {c.email ? (
+                            <p className="text-xs text-muted-foreground truncate flex items-center gap-1" title={c.email}>
+                              <Mail className="h-3 w-3 shrink-0" />{c.email}
+                            </p>
+                          ) : c.medicareId ? (
+                            <p className="text-xs text-muted-foreground truncate">Medicare ID {c.medicareId}</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3"><StatusPill status={c.status} /></td>
+                    <td className="px-4 py-3 hidden lg:table-cell whitespace-nowrap">
+                      {c.currentPlanType ? (
+                        <span className="text-sm">
+                          {PLAN_TYPE_LABELS[c.currentPlanType] ?? c.currentPlanType}
+                          {c.planYear && <span className="text-muted-foreground ml-1">· {c.planYear}</span>}
+                        </span>
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell whitespace-nowrap text-muted-foreground">
+                      {c.phone ? <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 shrink-0" />{formatPhone(c.phone)}</span> : "—"}
+                    </td>
+                    <td className="px-4 py-3 hidden xl:table-cell text-muted-foreground whitespace-nowrap">{c.leadSource ?? "—"}</td>
+                    <td className="px-4 py-3 hidden xl:table-cell text-muted-foreground whitespace-nowrap">{format(new Date(c.createdAt), "MMM d, yyyy")}</td>
+                    <td className="px-4 py-3"><ChevronRight className="h-4 w-4 text-muted-foreground" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {!isLoading && contacts.length > 0 && (
+          <p className="mt-3 px-1 text-sm text-muted-foreground">
+            Showing {contacts.length} of {data?.total ?? contacts.length} contacts
+            {(data?.total ?? 0) > contacts.length && " — search to narrow the list"}
+          </p>
+        )}
+      </ListCard>
 
       {/* Add Contact Dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>

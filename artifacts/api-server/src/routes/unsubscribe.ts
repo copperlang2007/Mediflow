@@ -16,6 +16,7 @@ import { randomUUID } from "crypto";
 import { db, contactsTable, optOutsTable, auditLogTable } from "@workspace/db";
 import { UNSUBSCRIBE_PATH, verifyUnsubscribeToken } from "../lib/compliance/unsubscribe";
 import { logger } from "../lib/logger";
+import { attributeCampaignUnsubscribe } from "../lib/campaigns/service";
 
 const router: IRouter = Router();
 
@@ -38,6 +39,16 @@ function tokenFrom(req: Request): string {
   return typeof t === "string" ? t : "";
 }
 
+/**
+ * Optional campaign recipient id (`r`) that campaign emails append so the
+ * unsubscribe is credited to the campaign. Unsigned: it is only honoured for
+ * a recipient row of the contact the signed token names.
+ */
+function campaignRecipientFrom(req: Request): string | null {
+  const r = req.query.r;
+  return typeof r === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(r) ? r : null;
+}
+
 const INVALID = page(
   "Link not valid",
   "<h1>This unsubscribe link is not valid</h1><p>Reply to the email you received and ask to be removed, and we will take you off the list.</p>",
@@ -45,6 +56,7 @@ const INVALID = page(
 
 router.get(UNSUBSCRIBE_PATH, (req: Request, res: Response): void => {
   const token = tokenFrom(req);
+  const recipient = campaignRecipientFrom(req);
   if (!verifyUnsubscribeToken(token)) {
     res.status(400).type("html").send(INVALID);
     return;
@@ -53,7 +65,7 @@ router.get(UNSUBSCRIBE_PATH, (req: Request, res: Response): void => {
     page(
       "Unsubscribe",
       `<h1>Unsubscribe from emails</h1><p>Confirm below and we will stop sending you these emails.</p>
-<form method="post" action="${UNSUBSCRIBE_PATH}?t=${encodeURIComponent(token)}"><button type="submit">Unsubscribe</button></form>`,
+<form method="post" action="${UNSUBSCRIBE_PATH}?t=${encodeURIComponent(token)}${recipient ? `&r=${encodeURIComponent(recipient)}` : ""}"><button type="submit">Unsubscribe</button></form>`,
     ),
   );
 });
@@ -107,6 +119,16 @@ router.post(UNSUBSCRIBE_PATH, async (req: Request, res: Response): Promise<void>
       page("Something went wrong", "<h1>We could not process that</h1><p>Please try again, or reply to the email and ask to be removed.</p>"),
     );
     return;
+  }
+
+  const recipientId = campaignRecipientFrom(req);
+  if (recipientId) {
+    try {
+      await attributeCampaignUnsubscribe({ orgId: claims.orgId, contactId: claims.contactId, recipientId });
+    } catch (err) {
+      // Reporting only — the opt-out itself is already recorded.
+      logger.warn({ err, contactId: claims.contactId }, "Could not credit unsubscribe to campaign");
+    }
   }
 
   res.type("html").send(

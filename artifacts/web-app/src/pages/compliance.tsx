@@ -8,6 +8,9 @@ import { ShieldCheck, Activity, Clock, Sparkles, Loader2, ChevronDown, Download 
 import { formatDistanceToNow } from "date-fns";
 import { useAuth } from "@clerk/react";
 import { cn } from "@/lib/utils";
+import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState, type StatusTone } from "@/components/shared";
+import { PageShell, KpiGrid } from "@/components/ops";
+import { FilePen, Users } from "lucide-react";
 
 function AiComplianceReport() {
   const { getToken } = useAuth();
@@ -98,13 +101,18 @@ function AiComplianceReport() {
   };
 
   return (
-    <Card>
+    <Card className="rounded-xl shadow-sm">
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" />
-            AI Compliance Report
-          </CardTitle>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div>
+              <CardTitle className="font-display text-lg font-semibold">AI compliance report</CardTitle>
+              <p className="text-sm text-muted-foreground">A plain-English summary of each agent's licenses, certifications, AHIP and overdue tasks, with a PDF copy</p>
+            </div>
+          </div>
           <Button size="sm" onClick={generate} disabled={streaming}>
             {streaming ? (
               <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Generating…</>
@@ -151,52 +159,103 @@ function AiComplianceReport() {
   );
 }
 
+const ACTION_TONES: Record<string, StatusTone> = {
+  create: "success",
+  update: "info",
+  delete: "danger",
+  read: "neutral",
+  export: "warning",
+  login: "navy",
+};
+
+function humanize(s: string): string {
+  const t = s.replace(/[_-]+/g, " ").trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
 export default function CompliancePage() {
   const { data, isLoading } = useGetAuditLog({});
+  const entries = data?.entries ?? [];
+  const people = new Set(entries.map((e) => e.userId ?? "system")).size;
+  const changes = entries.filter((e) => e.action !== "read").length;
+  const latest = entries[0];
 
   return (
-    <div className="p-6 space-y-5 max-w-7xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold">Audit & Compliance</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">HIPAA audit trail and compliance monitoring</p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Audit & Compliance"
+        subtitle="A permanent record of who looked at or changed what — the HIPAA audit trail"
+      />
+
+      <KpiGrid>
+        <KpiCard
+          label="Events recorded"
+          value={data?.total ?? 0}
+          icon={Activity}
+          color="navy"
+          loading={isLoading}
+          hint="All time, for your agency"
+        />
+        <KpiCard
+          label="Changes in this view"
+          value={changes}
+          icon={FilePen}
+          color="blue"
+          loading={isLoading}
+          hint={`Of the latest ${entries.length} events`}
+        />
+        <KpiCard
+          label="People in this view"
+          value={people}
+          icon={Users}
+          color="green"
+          loading={isLoading}
+          hint="Different users behind these events"
+        />
+        <KpiCard
+          label="Most recent"
+          value={<span className="block text-xl leading-snug pt-1.5">{latest ? formatDistanceToNow(new Date(latest.createdAt), { addSuffix: true }) : "—"}</span>}
+          icon={Clock}
+          color="orange"
+          loading={isLoading}
+          hint={latest ? `${humanize(latest.action)} · ${humanize(latest.resourceType)}` : "Nothing recorded yet"}
+        />
+      </KpiGrid>
 
       <AiComplianceReport />
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Activity className="h-4 w-4 text-primary" />
-            Audit Log
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
+      <SectionCard
+        title="Audit log"
+        description="Newest first. Entries can't be edited or deleted."
+        icon={ShieldCheck}
+      >
           {isLoading ? (
-            <div className="p-4 space-y-2">
+            <div className="space-y-2">
               {[...Array(8)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
               ))}
             </div>
-          ) : (data?.entries ?? []).length === 0 ? (
-            <div className="py-14 text-center">
-              <ShieldCheck className="h-12 w-12 mx-auto mb-3 text-muted-foreground/20" />
-              <p className="text-sm text-muted-foreground">No audit events recorded yet</p>
-            </div>
+          ) : entries.length === 0 ? (
+            <EmptyState
+              icon={ShieldCheck}
+              title="No audit events recorded yet"
+              description="As soon as someone views or changes client, agent or commission records, each action is logged here automatically."
+            />
           ) : (
-            <div className="divide-y divide-border">
-              {(data?.entries ?? []).map((entry) => (
-                <div key={entry.id} className="flex items-start gap-4 px-5 py-3.5 hover:bg-muted/30 transition-colors">
-                  <div className="h-8 w-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <ShieldCheck className="h-4 w-4 text-primary" />
+            <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
+              {entries.map((entry) => (
+                <div key={entry.id} className="flex items-start gap-4 px-4 py-3.5 hover:bg-muted/30 transition-colors">
+                  <div className="h-9 w-9 rounded-full bg-navy-100 text-navy-800 dark:bg-secondary dark:text-secondary-foreground flex items-center justify-center shrink-0 text-xs font-semibold">
+                    {(entry.userFullName ?? "S").split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <Badge variant="secondary" className="text-[11px]">{entry.resourceType}</Badge>
-                      <span className="text-sm font-medium">{entry.action}</span>
+                      <span className="text-sm font-medium">{entry.userFullName ?? entry.userId ?? "System"}</span>
+                      <StatusPill tone={ACTION_TONES[entry.action] ?? "neutral"}>{humanize(entry.action)}</StatusPill>
+                      <span className="text-sm text-muted-foreground">{humanize(entry.resourceType)}</span>
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {entry.userFullName ?? entry.userId ?? "System"}
-                      {entry.userRole && ` · ${entry.userRole}`}
+                      {entry.userRole ? humanize(entry.userRole) : "Automated"}
                     </p>
                   </div>
                   <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
@@ -207,8 +266,7 @@ export default function CompliancePage() {
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
-    </div>
+      </SectionCard>
+    </PageShell>
   );
 }

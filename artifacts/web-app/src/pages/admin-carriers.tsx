@@ -57,7 +57,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Search, Mail, AlertCircle } from "lucide-react";
+import { Plus, Search, Mail, AlertCircle, Building2, CheckCircle2, MailWarning, Handshake, Lock } from "lucide-react";
+import { PageHeader, MiniStat, SectionCard, StatusPill, EmptyState } from "@/components/shared";
+import { PageShell, TableFrame } from "@/components/ops";
+import { useProductName } from "@/lib/branding/BrandingProvider";
 
 // ---- Types ------------------------------------------------------------------
 // `AdminCarrier` was a local interface that mirrored the generated `Carrier`
@@ -155,6 +158,7 @@ export function carrierToForm(c: AdminCarrier): CarrierFormValues {
 // ---- Page -------------------------------------------------------------------
 
 export default function AdminCarriersPage() {
+  const productName = useProductName();
   const { isAdmin, isLoading: meLoading } = useIsAdmin();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -189,25 +193,24 @@ export default function AdminCarriersPage() {
 
   if (!meLoading && !isAdmin) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            You don't have access to the carrier admin page.
-          </CardContent>
-        </Card>
-      </div>
+      <PageShell>
+        <SectionCard>
+          <EmptyState
+            icon={Lock}
+            title="You don't have access to the carrier admin page."
+            description="Carriers are managed by agency admins."
+          />
+        </SectionCard>
+      </PageShell>
     );
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-5">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold">Carriers</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Manage carrier roster + appointment-desk email-out routing
-          </p>
-        </div>
+    <PageShell>
+      <PageHeader
+        title="Carriers"
+        subtitle="The insurance carriers you sell, and where contracting requests get emailed for each one"
+      >
         <Button
           onClick={() => setEditing("new")}
           data-testid="add-carrier-btn"
@@ -215,9 +218,23 @@ export default function AdminCarriersPage() {
           <Plus className="h-4 w-4 mr-2" />
           Add carrier
         </Button>
+      </PageHeader>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <MiniStat label="Carriers" value={carriers.length} icon={Building2} loading={carriersQuery.isLoading} />
+        <MiniStat label="Active" value={carriers.filter((c) => c.isActive).length} icon={CheckCircle2} tone="success" loading={carriersQuery.isLoading} />
+        <MiniStat
+          label="Missing a contracting email"
+          value={carriers.filter((c) => !c.appointmentDeskEmail).length}
+          icon={MailWarning}
+          tone={carriers.some((c) => !c.appointmentDeskEmail) ? "warning" : "default"}
+          loading={carriersQuery.isLoading}
+        />
+        <MiniStat label="Inactive" value={carriers.filter((c) => !c.isActive).length} icon={Handshake} loading={carriersQuery.isLoading} />
       </div>
 
-      <div className="relative max-w-sm">
+      <SectionCard title="Carrier list" description="Click a carrier to edit it" icon={Building2}>
+      <div className="relative max-w-sm mb-4">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           placeholder="Search by name or contract #…"
@@ -231,19 +248,25 @@ export default function AdminCarriersPage() {
         />
       </div>
 
-      <Card>
-        <CardContent className="p-0">
           {carriersQuery.isLoading ? (
-            <div className="p-4 space-y-2" data-testid="carriers-loading">
+            <div className="space-y-2" data-testid="carriers-loading">
               {[...Array(5)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
               ))}
             </div>
           ) : pageRows.length === 0 ? (
-            <div className="py-16 text-center text-sm text-muted-foreground">
-              No carriers match your filter.
-            </div>
+            carriers.length === 0 ? (
+              <EmptyState
+                icon={Building2}
+                title="No carriers yet"
+                description={`Add the carriers you're appointed with. Set a contracting email for each and ${productName} will send new agents' contracting packets there.`}
+                action={{ label: "Add carrier", onClick: () => setEditing("new") }}
+              />
+            ) : (
+              <EmptyState icon={Search} title="No carriers match your filter." description="Try a different name or contract number." />
+            )
           ) : (
+            <TableFrame>
             <Table data-testid="carriers-table">
               <TableHeader>
                 <TableRow>
@@ -265,12 +288,11 @@ export default function AdminCarriersPage() {
                 ))}
               </TableBody>
             </Table>
+            </TableFrame>
           )}
-        </CardContent>
-      </Card>
 
       {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <div className="flex items-center justify-between text-xs text-muted-foreground pt-3">
           <span>
             Showing {page * PAGE_SIZE + 1}–
             {Math.min((page + 1) * PAGE_SIZE, total)} of {total}
@@ -295,12 +317,13 @@ export default function AdminCarriersPage() {
           </div>
         </div>
       )}
+      </SectionCard>
 
       <CarrierEditDialog
         editing={editing}
         onClose={() => setEditing(null)}
       />
-    </div>
+    </PageShell>
   );
 }
 
@@ -321,19 +344,22 @@ function CarrierRow({
       onClick={onClick}
       data-testid={`carrier-row-${carrier.id}`}
     >
-      <TableCell className="font-medium">{carrier.name}</TableCell>
+      <TableCell className="font-medium">
+        <div className="flex items-center gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-navy-100 text-navy-800 dark:bg-secondary dark:text-secondary-foreground" aria-hidden>
+            <Building2 className="h-4 w-4" />
+          </span>
+          <span>{carrier.name}</span>
+        </div>
+      </TableCell>
       <TableCell className="text-xs text-muted-foreground">
         {carrier.cmsContractNumber ?? <span className="opacity-50">—</span>}
       </TableCell>
       <TableCell>
         {carrier.isActive ? (
-          <Badge variant="secondary" className="bg-green-100 text-green-800">
-            Active
-          </Badge>
+          <StatusPill tone="success">Active</StatusPill>
         ) : (
-          <Badge variant="outline" className="text-muted-foreground">
-            Inactive
-          </Badge>
+          <StatusPill tone="neutral">Inactive</StatusPill>
         )}
       </TableCell>
       <TableCell className="text-xs">
@@ -343,7 +369,7 @@ function CarrierRow({
             {carrier.appointmentDeskEmail}
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1 text-amber-700">
+          <span className="inline-flex items-center gap-1 text-amber-700 dark:text-warning">
             <AlertCircle className="h-3 w-3" />
             Not configured
           </span>

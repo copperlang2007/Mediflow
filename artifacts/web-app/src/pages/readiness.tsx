@@ -39,7 +39,9 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@/components/ui/toggle-group";
-import { CheckCircle2, XCircle, AlertCircle, Clock } from "lucide-react";
+import { CheckCircle2, XCircle, AlertCircle, Clock, UserCheck, UserX, AlarmClock, CalendarClock, Lock, Target } from "lucide-react";
+import { EmptyState, KpiCard, PageHeader, SectionCard, StatusPill, type StatusTone } from "@/components/shared";
+import { ContactAvatar } from "@/pages/crm/ui";
 
 // Tier → text/border colors (most → least urgent).
 const TIER_STYLES: Record<ExpiryTier, string> = {
@@ -47,6 +49,13 @@ const TIER_STYLES: Record<ExpiryTier, string> = {
   critical: "text-red-700 border-red-300 bg-red-50",
   soon: "text-amber-700 border-amber-300 bg-amber-50",
   upcoming: "text-blue-700 border-blue-300 bg-blue-50",
+};
+
+const TIER_TONE: Record<ExpiryTier, StatusTone> = {
+  expired: "danger",
+  critical: "danger",
+  soon: "warning",
+  upcoming: "info",
 };
 
 const TIER_LABEL: Record<ExpiryTier, string> = {
@@ -77,15 +86,17 @@ function ExpiryRow({ cred }: { cred: ExpiringCredential }) {
   return (
     <TableRow data-testid={`expiry-row-${cred.agentId}-${cred.type}-${cred.label}`}>
       <TableCell className="font-medium">{cred.agentName}</TableCell>
-      <TableCell className="text-xs text-muted-foreground">
+      <TableCell className="text-sm text-muted-foreground">
         {CRED_TYPE_LABEL[cred.type]}
       </TableCell>
       <TableCell>{cred.label}</TableCell>
       <TableCell className="tabular-nums">{formatDate(cred.expiryDate)}</TableCell>
       <TableCell>
-        <Badge variant="outline" className={`tabular-nums ${TIER_STYLES[cred.tier]}`}>
-          {cred.daysUntil}d · {TIER_LABEL[cred.tier]}
-        </Badge>
+        <StatusPill tone={TIER_TONE[cred.tier]} className="tabular-nums">
+          {cred.daysUntil < 0
+            ? `${Math.abs(cred.daysUntil)} days ago`
+            : `in ${cred.daysUntil} day${cred.daysUntil === 1 ? "" : "s"}`} · {TIER_LABEL[cred.tier]}
+        </StatusPill>
       </TableCell>
     </TableRow>
   );
@@ -93,34 +104,30 @@ function ExpiryRow({ cred }: { cred: ExpiringCredential }) {
 
 function ReadyBadge({ ready }: { ready: boolean }) {
   return ready ? (
-    <Badge
-      variant="secondary"
-      className="bg-green-100 text-green-800 gap-1"
-      data-testid="ready-badge-yes"
-    >
-      <CheckCircle2 className="h-3 w-3" />
-      Ready
-    </Badge>
+    <span data-testid="ready-badge-yes">
+      <StatusPill tone="success" className="gap-1">
+        <CheckCircle2 className="h-3 w-3" />
+        Ready
+      </StatusPill>
+    </span>
   ) : (
-    <Badge
-      variant="secondary"
-      className="bg-red-100 text-red-800 gap-1"
-      data-testid="ready-badge-no"
-    >
-      <XCircle className="h-3 w-3" />
-      Not ready
-    </Badge>
+    <span data-testid="ready-badge-no">
+      <StatusPill tone="danger" className="gap-1">
+        <XCircle className="h-3 w-3" />
+        Not ready
+      </StatusPill>
+    </span>
   );
 }
 
 function AhipCell({ current }: { current: boolean }) {
   return current ? (
-    <span className="inline-flex items-center gap-1 text-green-700 text-xs">
+    <span className="inline-flex items-center gap-1 text-success text-sm">
       <CheckCircle2 className="h-3.5 w-3.5" />
       Current
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1 text-amber-700 text-xs">
+    <span className="inline-flex items-center gap-1 text-warning text-sm">
       <AlertCircle className="h-3.5 w-3.5" />
       Missing
     </span>
@@ -130,13 +137,14 @@ function AhipCell({ current }: { current: boolean }) {
 function ReadinessRow({ agent }: { agent: AgentReadiness }) {
   return (
     <TableRow data-testid={`readiness-row-${agent.agentId}`}>
-      <TableCell className="font-medium">
-        {agent.lastName}, {agent.firstName}
-        {agent.npn && (
-          <span className="ml-2 text-xs text-muted-foreground">
-            NPN {agent.npn}
-          </span>
-        )}
+      <TableCell>
+        <div className="flex items-center gap-3">
+          <ContactAvatar first={agent.firstName} last={agent.lastName} size="sm" />
+          <div className="min-w-0">
+            <p className="font-medium">{agent.firstName} {agent.lastName}</p>
+            {agent.npn && <p className="text-xs text-muted-foreground">NPN {agent.npn}</p>}
+          </div>
+        </div>
       </TableCell>
       <TableCell>
         <ReadyBadge ready={agent.readyToSell} />
@@ -156,13 +164,7 @@ function ReadinessRow({ agent }: { agent: AgentReadiness }) {
         ) : (
           <div className="flex flex-wrap gap-1">
             {agent.blockers.map((b) => (
-              <Badge
-                key={b}
-                variant="outline"
-                className="text-amber-700 border-amber-300 text-[11px]"
-              >
-                {b}
-              </Badge>
+              <StatusPill key={b} tone="warning">{b}</StatusPill>
             ))}
           </div>
         )}
@@ -193,11 +195,13 @@ export default function ReadinessPage() {
 
   if (!meLoading && !isAdmin) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
         <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            You don't have access to the readiness board.
-          </CardContent>
+          <EmptyState
+            icon={Lock}
+            title="Ready to Sell is for admins"
+            description="You don't have access to the readiness board. Ask an agency admin or compliance manager if you need it."
+          />
         </Card>
       </div>
     );
@@ -208,49 +212,65 @@ export default function ReadinessPage() {
   const certYear = readinessQuery.data?.certificationYear;
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-5">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold">Ready to Sell</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Per-agent readiness and blockers — drive onboarding completion and
-            grow the routable pool
-            {certYear ? ` · cert year ${certYear}` : ""}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Switch
-            id="not-ready-only"
-            checked={notReadyOnly}
-            onCheckedChange={setNotReadyOnly}
-            data-testid="not-ready-only-toggle"
+    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+      <PageHeader
+        title="Ready to Sell"
+        subtitle={`Which agents can take calls and sell right now, and what's stopping the rest${certYear ? ` · ${certYear} certification year` : ""}`}
+      />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div data-testid="readiness-summary" className="contents">
+          <KpiCard
+            color="green" icon={UserCheck}
+            label="Ready to sell"
+            value={readyCount}
+            hint={`of ${totalCount} agents ready to sell`}
+            loading={readinessQuery.isLoading}
           />
-          <Label htmlFor="not-ready-only" className="text-sm">
-            Not ready only
-          </Label>
         </div>
+        <KpiCard
+          color="orange" icon={UserX}
+          label="Not ready yet"
+          value={Math.max(0, totalCount - readyCount)}
+          hint="See what's blocking them below"
+          loading={readinessQuery.isLoading}
+        />
+        <KpiCard
+          color="navy" icon={AlarmClock}
+          label="Expiring within 7 days"
+          value={expiryCounts.critical}
+          hint="Licenses & certs"
+          loading={expiryQuery.isLoading}
+        />
+        <KpiCard
+          color="blue" icon={CalendarClock}
+          label="Expiring within 30 days"
+          value={expiryCounts.soon}
+          hint="Renew before they lapse"
+          loading={expiryQuery.isLoading}
+        />
       </div>
 
-      {/* Summary */}
-      <Card>
-        <CardContent className="py-4">
-          {readinessQuery.isLoading ? (
-            <Skeleton className="h-6 w-48" />
-          ) : (
-            <p className="text-sm" data-testid="readiness-summary">
-              <span className="text-2xl font-bold tabular-nums">
-                {readyCount}
-              </span>{" "}
-              <span className="text-muted-foreground">
-                of {totalCount} agents ready to sell
-              </span>
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="p-0">
+      <SectionCard
+        title="Agent readiness"
+        description="An agent is ready when they are active, have a current AHIP, at least one state license and at least one carrier certification."
+        icon={Target}
+        contentClassName="px-0 pb-0"
+        actions={
+          <div className="flex items-center gap-2">
+            <Switch
+              id="not-ready-only"
+              checked={notReadyOnly}
+              onCheckedChange={setNotReadyOnly}
+              data-testid="not-ready-only-toggle"
+            />
+            <Label htmlFor="not-ready-only" className="text-sm whitespace-nowrap">
+              Not ready only
+            </Label>
+          </div>
+        }
+      >
+        <div className="border-t border-border">
           {readinessQuery.isLoading ? (
             <div className="p-4 space-y-2" data-testid="readiness-loading">
               {[...Array(5)].map((_, i) => (
@@ -258,14 +278,14 @@ export default function ReadinessPage() {
               ))}
             </div>
           ) : rows.length === 0 ? (
-            <div className="py-16 text-center text-sm text-muted-foreground">
-              {notReadyOnly
-                ? "Every agent is ready to sell."
-                : "No agents found."}
-            </div>
+            notReadyOnly ? (
+              <EmptyState compact icon={CheckCircle2} title="Everyone is ready to sell" description="No agent has anything blocking them right now." />
+            ) : (
+              <EmptyState compact icon={Target} title="No agents yet" description="Once you add agents, you'll see here whether each one is ready to sell." action={{ label: "Go to Agents", href: "/agents" }} />
+            )
           ) : (
             <Table data-testid="readiness-table">
-              <TableHeader>
+              <TableHeader className="bg-muted/50">
                 <TableRow>
                   <TableHead>Agent</TableHead>
                   <TableHead>Ready</TableHead>
@@ -282,21 +302,17 @@ export default function ReadinessPage() {
               </TableBody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
 
       {/* Expiring soon — forward-looking early warning */}
-      <div className="flex items-center justify-between gap-4 flex-wrap pt-2">
-        <div>
-          <h2 className="text-xl font-bold flex items-center gap-2">
-            <Clock className="h-5 w-5 text-amber-600" />
-            Expiring soon
-          </h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Licenses and carrier certs about to lapse — act before the agent
-            silently drops out of the routable pool
-          </p>
-        </div>
+      <SectionCard
+        title="Expiring soon"
+        description="Licenses and carrier certifications about to run out. Renew them before the agent stops getting calls."
+        icon={Clock}
+        iconClassName="text-warning"
+        contentClassName="px-0 pb-0"
+        actions={
         <ToggleGroup
           type="single"
           value={String(withinDays)}
@@ -315,29 +331,24 @@ export default function ReadinessPage() {
             90d
           </ToggleGroupItem>
         </ToggleGroup>
-      </div>
-
+        }
+      >
       {/* Tier summary counts */}
-      <div className="grid grid-cols-3 gap-3" data-testid="expiry-summary">
+      <div className="flex flex-wrap gap-2 px-5 pb-4" data-testid="expiry-summary">
         {(
           [
-            ["critical", expiryCounts.critical, "≤ 7 days"],
-            ["soon", expiryCounts.soon, "≤ 30 days"],
-            ["upcoming", expiryCounts.upcoming, "≤ 60+ days"],
+            ["critical", expiryCounts.critical, "within 7 days"],
+            ["soon", expiryCounts.soon, "within 30 days"],
+            ["upcoming", expiryCounts.upcoming, "later"],
           ] as const
         ).map(([tier, count, sub]) => (
-          <Card key={tier} className={TIER_STYLES[tier]}>
-            <CardContent className="py-4">
-              <p className="text-2xl font-bold tabular-nums">{count}</p>
-              <p className="text-xs font-medium capitalize">{tier}</p>
-              <p className="text-[11px] opacity-80">{sub}</p>
-            </CardContent>
-          </Card>
+          <StatusPill key={tier} tone={TIER_TONE[tier]} className="px-3 py-1 text-sm">
+            <span className="font-semibold tabular-nums mr-1">{count}</span> {TIER_LABEL[tier].toLowerCase()} · {sub}
+          </StatusPill>
         ))}
       </div>
 
-      <Card>
-        <CardContent className="p-0">
+        <div className="border-t border-border">
           {expiryQuery.isLoading ? (
             <div className="p-4 space-y-2" data-testid="expiry-loading">
               {[...Array(3)].map((_, i) => (
@@ -345,15 +356,12 @@ export default function ReadinessPage() {
               ))}
             </div>
           ) : expiring.length === 0 ? (
-            <div
-              className="py-16 text-center text-sm text-muted-foreground"
-              data-testid="expiry-empty"
-            >
-              No credentials expiring within {withinDays} days.
+            <div data-testid="expiry-empty">
+              <EmptyState compact icon={CheckCircle2} title="Nothing expiring soon" description={`No licenses or certifications run out in the next ${withinDays} days.`} />
             </div>
           ) : (
             <Table data-testid="expiry-table">
-              <TableHeader>
+              <TableHeader className="bg-muted/50">
                 <TableRow>
                   <TableHead>Agent</TableHead>
                   <TableHead>Type</TableHead>
@@ -372,8 +380,8 @@ export default function ReadinessPage() {
               </TableBody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
     </div>
   );
 }

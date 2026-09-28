@@ -30,6 +30,10 @@ import {
 import { FolderOpen, Upload, Download, Trash2, Plus, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import { cn } from "@/lib/utils";
+import { PageHeader, MiniStat, SectionCard, StatusPill, EmptyState, type StatusTone } from "@/components/shared";
+import { PageShell } from "@/components/ops";
+import { FileSignature, ShieldCheck, Users } from "lucide-react";
 
 type DocumentRow = {
   id: string;
@@ -59,13 +63,13 @@ const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
   CATEGORIES.map((c) => [c.value, c.label]),
 );
 
-const CATEGORY_BADGE_COLOR: Record<string, string> = {
-  contract: "bg-blue-100 text-blue-800",
-  eo_certificate: "bg-purple-100 text-purple-800",
-  compliance: "bg-amber-100 text-amber-800",
-  license: "bg-teal-100 text-teal-800",
-  training: "bg-indigo-100 text-indigo-800",
-  other: "bg-slate-100 text-slate-700",
+const CATEGORY_TONE: Record<string, StatusTone> = {
+  contract: "navy",
+  eo_certificate: "info",
+  compliance: "warning",
+  license: "success",
+  training: "info",
+  other: "neutral",
 };
 
 function formatBytes(bytes: number | null | undefined): string {
@@ -129,22 +133,35 @@ export default function DocumentsPage() {
     window.open(`${base}/api/documents/${doc.id}/download`, "_blank");
   };
 
+  const filtered = agentFilter !== "all" || categoryFilter !== "all";
+  const countOf = (cat: string) => documents.filter((d) => d.category === cat).length;
+  const agentsWithFiles = new Set(documents.map((d) => d.agentId).filter(Boolean)).size;
+
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-5">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Documents</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Contracts, E&amp;O certificates, and compliance files for your agents
-          </p>
-        </div>
+    <PageShell>
+      <PageHeader
+        title="Documents"
+        subtitle="Contracts, E&O certificates, licenses and compliance files for your agents in one secure place"
+      >
         <Button onClick={() => setUploadOpen(true)}>
-          <Plus className="h-4 w-4 mr-1.5" />
+          <Upload className="h-4 w-4 mr-1.5" />
           Upload document
         </Button>
+      </PageHeader>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <MiniStat label={filtered ? "Documents (filtered)" : "Total documents"} value={docsData?.total ?? 0} icon={FolderOpen} loading={isLoading} />
+        <MiniStat label="Contracts" value={countOf("contract")} icon={FileSignature} loading={isLoading} />
+        <MiniStat label="E&O certificates" value={countOf("eo_certificate")} icon={ShieldCheck} loading={isLoading} />
+        <MiniStat label="Agents with files" value={agentsWithFiles} icon={Users} loading={isLoading} />
       </div>
 
-      <div className="flex flex-wrap gap-3">
+      <SectionCard
+        title="Agent documents"
+        description="Only people allowed to see agent records can open or download these files"
+        icon={FileText}
+      >
+      <div className="flex flex-col gap-3 mb-4 lg:flex-row lg:items-center">
         <Select value={agentFilter} onValueChange={setAgentFilter}>
           <SelectTrigger className="w-56">
             <SelectValue placeholder="All agents" />
@@ -158,105 +175,92 @@ export default function DocumentsPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="All categories" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All categories</SelectItem>
-            {CATEGORIES.map((c) => (
-              <SelectItem key={c.value} value={c.value}>
-                {c.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by category">
+          {[{ value: "all", label: "All" }, ...CATEGORIES].map((c) => (
+            <button
+              key={c.value}
+              type="button"
+              onClick={() => setCategoryFilter(c.value)}
+              aria-pressed={categoryFilter === c.value}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs transition-colors",
+                categoryFilter === c.value
+                  ? "border-navy-800 bg-navy-800 text-white dark:border-primary dark:bg-primary dark:text-primary-foreground"
+                  : "border-border text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
           {isLoading ? (
-            <div className="p-4 space-y-3">
+            <div className="space-y-3">
               {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
+                <Skeleton key={i} className="h-14 w-full" />
               ))}
             </div>
           ) : documents.length === 0 ? (
-            <div className="py-16 text-center">
-              <FolderOpen className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
-              <p className="text-sm font-medium text-muted-foreground">
-                No documents
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {agentFilter !== "all" || categoryFilter !== "all"
+            <EmptyState
+              icon={FolderOpen}
+              title={filtered ? "No documents match these filters" : "No documents yet"}
+              description={
+                filtered
                   ? "Try adjusting your filters"
-                  : "Upload your first document to get started"}
-              </p>
-            </div>
+                  : "Upload an agent's contract, E&O certificate or license and it will be stored here, ready to download when an auditor or carrier asks."
+              }
+              action={filtered ? undefined : { label: "Upload document", onClick: () => setUploadOpen(true) }}
+            />
           ) : (
-            <>
-              <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] items-center gap-4 px-5 py-2.5 border-b border-border">
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Name</span>
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-40">Agent</span>
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-32 text-center">Category</span>
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-20 text-right">Size</span>
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-28 text-right">Uploaded</span>
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide w-24 text-right">Actions</span>
-              </div>
-              <div className="divide-y divide-border">
+              <div className="space-y-2">
                 {documents.map((doc) => (
                   <div
                     key={doc.id}
-                    className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] items-center gap-4 px-5 py-3 hover:bg-muted/30 transition-colors"
+                    className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 hover:bg-muted/30 transition-colors"
                   >
-                    <div className="min-w-0 flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="font-medium text-sm truncate">{doc.name}</span>
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                      <FileText className="h-4 w-4" />
                     </div>
-                    <div className="w-40 text-sm text-muted-foreground truncate">
-                      {doc.agentFirstName ? `${doc.agentFirstName} ${doc.agentLastName ?? ""}`.trim() : "—"}
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-sm truncate">{doc.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {doc.agentFirstName ? `${doc.agentFirstName} ${doc.agentLastName ?? ""}`.trim() : "No agent"}
+                        {" · "}
+                        {formatBytes(doc.fileSizeBytes)}
+                      </p>
                     </div>
-                    <div className="w-32 flex justify-center">
-                      <Badge
-                        variant="secondary"
-                        className={`text-xs capitalize ${CATEGORY_BADGE_COLOR[doc.category] ?? ""}`}
-                      >
-                        {CATEGORY_LABEL[doc.category] ?? doc.category}
-                      </Badge>
-                    </div>
-                    <div className="w-20 text-right tabular-nums text-xs text-muted-foreground">
-                      {formatBytes(doc.fileSizeBytes)}
-                    </div>
-                    <div className="w-28 text-right text-xs text-muted-foreground">
+                    <StatusPill tone={CATEGORY_TONE[doc.category] ?? "neutral"} className="hidden sm:inline-flex">
+                      {CATEGORY_LABEL[doc.category] ?? doc.category}
+                    </StatusPill>
+                    <span className="hidden md:block w-28 text-right text-xs text-muted-foreground">
                       {format(new Date(doc.createdAt), "MMM d, yyyy")}
-                    </div>
-                    <div className="w-24 flex items-center justify-end gap-1">
+                    </span>
+                    <div className="flex items-center justify-end gap-1">
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="h-7 px-2"
+                        className="h-8 px-2"
                         title="Download"
                         onClick={() => handleDownload(doc)}
                       >
-                        <Download className="h-3.5 w-3.5" />
+                        <Download className="h-4 w-4" />
                       </Button>
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="h-7 px-2 text-destructive hover:text-destructive"
+                        className="h-8 px-2 text-destructive hover:text-destructive"
                         title="Delete"
                         onClick={() => handleDelete(doc)}
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
                 ))}
               </div>
-            </>
           )}
-        </CardContent>
-      </Card>
+      </SectionCard>
 
       <UploadDialog
         open={uploadOpen}
@@ -264,7 +268,7 @@ export default function DocumentsPage() {
         agents={agents}
         onUploaded={() => void qc.invalidateQueries({ queryKey: ["/api/documents"] })}
       />
-    </div>
+    </PageShell>
   );
 }
 

@@ -38,8 +38,13 @@ import {
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState, type StatusTone } from "@/components/shared";
+import { PageShell, KpiGrid, TableFrame } from "@/components/ops";
+import { DollarSign, ListChecks, Link2, CalendarCheck, FileSearch, CheckCircle2 } from "lucide-react";
 
 type StatementStatus = "pending" | "parsed" | "reconciled" | "disputed";
+/** What to SHOW — from the API's shared derivation (lib/commissions/statementStatus.ts). */
+type StatementDisplayStatus = StatementStatus | "reconciled_with_variance";
 
 type CommissionStatement = {
   id: string;
@@ -52,8 +57,11 @@ type CommissionStatement = {
   lineItemCount?: number | null;
   matchedCount?: number | null;
   unmatchedCount?: number | null;
-  lastReconcileAt?: string | null;
   reconciledAt?: string | null;
+  lineItemTotal?: number | null;
+  /** Carrier total minus the parsed lines; null when there's nothing to compare. */
+  variance?: number | null;
+  displayStatus?: StatementDisplayStatus;
 };
 
 type LineItemMatchStatus = "matched" | "unmatched" | "manual";
@@ -67,6 +75,8 @@ type CommissionLineItem = {
   periodStart?: string | null;
   periodEnd?: string | null;
   premiumAmount?: number | string | null;
+  /** What the API actually returns (the column is `premium`). */
+  premium?: number | string | null;
   commissionAmount: number | string;
   type?: string | null;
   writingAgentId?: string | null;
@@ -94,17 +104,24 @@ const fmtMoney = (val: number | string | null | undefined): string => {
 const fmtDate = (d: string | null | undefined): string =>
   d ? format(new Date(d), "MMM d, yyyy") : "—";
 
-const STATUS_STYLES: Record<StatementStatus, string> = {
-  pending: "bg-amber-100 text-amber-800 border-amber-200",
-  parsed: "bg-blue-100 text-blue-800 border-blue-200",
-  reconciled: "bg-green-100 text-green-800 border-green-200",
-  disputed: "bg-red-100 text-red-800 border-red-200",
+const STATUS_TONES: Record<StatementDisplayStatus, StatusTone> = {
+  pending: "warning",
+  parsed: "info",
+  reconciled: "success",
+  reconciled_with_variance: "warning",
+  disputed: "danger",
 };
 
-const MATCH_STYLES: Record<LineItemMatchStatus, string> = {
-  matched: "bg-green-100 text-green-800",
-  unmatched: "bg-red-100 text-red-800",
-  manual: "bg-purple-100 text-purple-800",
+const MATCH_TONES: Record<LineItemMatchStatus, StatusTone> = {
+  matched: "success",
+  unmatched: "danger",
+  manual: "navy",
+};
+
+const MATCH_LABELS: Record<LineItemMatchStatus, string> = {
+  matched: "Matched",
+  unmatched: "Needs a match",
+  manual: "Matched by hand",
 };
 
 const PAGE_SIZE = 25;
@@ -138,7 +155,11 @@ function MatchDialog({
 
   const { data: agents, isLoading: agentsLoading } = useGetAgents({ status: "active" });
   const filteredAgents = useMemo<Agent[]>(() => {
-    const list = (agents ?? []) as Agent[];
+    // The agents endpoint returns `{ agents: [...] }`; tolerate a bare array too.
+    const raw = agents as unknown;
+    const list: Agent[] = Array.isArray(raw)
+      ? (raw as Agent[])
+      : ((raw as { agents?: Agent[] } | undefined)?.agents ?? []);
     if (!agentSearch) return list.slice(0, 25);
     const q = agentSearch.toLowerCase();
     return list
@@ -329,22 +350,34 @@ export default function CommissionStatementPage() {
 
   if (isLoading) {
     return (
-      <div className="p-6 max-w-6xl mx-auto space-y-4">
+      <PageShell>
         <Skeleton className="h-8 w-32" />
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-64 w-full" />
-      </div>
+      </PageShell>
     );
   }
 
   if (!statement) {
     return (
-      <div className="p-6 text-center">
-        <p className="text-muted-foreground">Statement not found</p>
-        <Button variant="link" onClick={() => navigate("/commissions")}>Back to Commissions</Button>
-      </div>
+      <PageShell>
+        <SectionCard>
+          <EmptyState
+            icon={FileSearch}
+            title="We couldn't find that statement"
+            description="It may have been removed, or it belongs to a different agency."
+            action={{ label: "Back to Commissions", onClick: () => navigate("/commissions") }}
+          />
+        </SectionCard>
+      </PageShell>
     );
   }
+
+  const hasVariance = statement.variance != null && Math.abs(statement.variance) >= 0.01;
+  // Never show a green "Reconciled" when the lines don't add up to the total.
+  const shownStatus: StatementDisplayStatus =
+    statement.displayStatus ??
+    (statement.status === "reconciled" && hasVariance ? "reconciled_with_variance" : statement.status);
 
   const FILTER_OPTIONS: Array<{ value: "all" | LineItemMatchStatus; label: string }> = [
     { value: "all", label: "All" },
@@ -354,59 +387,72 @@ export default function CommissionStatementPage() {
   ];
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-5">
-      <Button variant="ghost" size="sm" className="-ml-1 text-muted-foreground" onClick={() => navigate("/commissions")}>
+    <PageShell>
+      <Button variant="ghost" size="sm" className="-ml-1 -mb-2 text-muted-foreground" onClick={() => navigate("/commissions")}>
         <ArrowLeft className="h-4 w-4 mr-1.5" />
         Commissions
       </Button>
 
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{statement.carrierName ?? "Statement"}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {fmtDate(statement.periodStart)} – {fmtDate(statement.periodEnd)}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary" className={cn("capitalize border", STATUS_STYLES[statement.status])}>
-            {statement.status}
-          </Badge>
-          {statement.status === "parsed" && (
-            <Button onClick={() => reconcile.mutate()} disabled={reconcile.isPending}>
-              {reconcile.isPending ? "Reconciling…" : "Reconcile"}
-            </Button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Commission statement"
+        title={statement.carrierName ?? "Statement"}
+        subtitle={`Covers ${fmtDate(statement.periodStart)} – ${fmtDate(statement.periodEnd)}`}
+      >
+        <StatusPill
+          status={shownStatus}
+          tone={STATUS_TONES[shownStatus]}
+          className="text-sm px-3 py-1"
+        />
+        {statement.status === "parsed" && (
+          <Button onClick={() => reconcile.mutate()} disabled={reconcile.isPending}>
+            {reconcile.isPending ? "Reconciling…" : "Reconcile"}
+          </Button>
+        )}
+      </PageHeader>
 
-      <Card className="sticky top-2 z-10 shadow-sm">
-        <CardContent className="px-5 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div>
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Total amount</p>
-            <p className="text-xl font-bold tabular-nums">{fmtMoney(statement.totalAmount)}</p>
-          </div>
-          <div>
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Line items</p>
-            <p className="text-xl font-bold tabular-nums">{statement.lineItemCount ?? rows.length}</p>
-          </div>
-          <div>
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Matched / Unmatched</p>
-            <p className="text-xl font-bold tabular-nums">
+      <KpiGrid>
+        <KpiCard label="Statement total" value={fmtMoney(statement.totalAmount)} icon={DollarSign} color="navy" hint="What the carrier says it paid" />
+        <KpiCard label="Line items" value={statement.lineItemCount ?? rows.length} icon={ListChecks} color="blue" hint="One per policy on the statement" />
+        <KpiCard
+          label="Matched / needs a match"
+          value={
+            <>
               {statement.matchedCount ?? rows.filter((r) => r.matchStatus !== "unmatched").length}
-              <span className="text-muted-foreground"> / </span>
+              <span className="text-white/60"> / </span>
               {statement.unmatchedCount ?? rows.filter((r) => r.matchStatus === "unmatched").length}
-            </p>
-          </div>
-          <div>
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Last reconcile</p>
-            <p className="text-sm font-medium">
-              {fmtDate(statement.lastReconcileAt ?? statement.reconciledAt)}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+            </>
+          }
+          icon={Link2}
+          color="green"
+          hint={(statement.unmatchedCount ?? 0) === 0 ? "Every line is linked to a client" : "Match the rest by hand below"}
+        />
+        <KpiCard
+          label="Last reconciled"
+          value={
+            <span className="text-2xl">
+              {statement.reconciledAt
+                ? fmtDate(statement.reconciledAt)
+                : statement.status === "reconciled"
+                  ? "Not recorded"
+                  : "—"}
+            </span>
+          }
+          icon={CalendarCheck}
+          color="orange"
+          hint={
+            statement.status !== "reconciled"
+              ? "Not reconciled yet"
+              : hasVariance
+                ? `Lines are ${fmtMoney(Math.abs(statement.variance ?? 0))} ${(statement.variance ?? 0) > 0 ? "short of" : "over"} the carrier total — needs review`
+                : statement.reconciledAt
+                  ? "Payouts are up to date"
+                  : "Reconciled before times were recorded"
+          }
+        />
+      </KpiGrid>
 
-      <div className="flex items-center gap-2">
+      <SectionCard title="Line items" description="Each policy the carrier paid on, and who it's linked to">
+      <div className="flex flex-wrap items-center gap-2 mb-4">
         {FILTER_OPTIONS.map((opt) => (
           <button
             key={opt.value}
@@ -414,7 +460,7 @@ export default function CommissionStatementPage() {
             className={cn(
               "text-xs px-3 py-1.5 rounded-full border transition-colors",
               filter === opt.value
-                ? "bg-primary text-primary-foreground border-primary"
+                ? "bg-navy-800 text-white border-navy-800 dark:bg-primary dark:text-primary-foreground dark:border-primary"
                 : "border-border text-muted-foreground hover:bg-muted",
             )}
           >
@@ -426,13 +472,26 @@ export default function CommissionStatementPage() {
       {itemsLoading ? (
         <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
       ) : rows.length === 0 ? (
-        <div className="text-center py-16 text-muted-foreground">
-          <Inbox className="h-10 w-10 mx-auto mb-2 opacity-20" />
-          <p className="text-sm">No line items{filter !== "all" ? ` matching ${filter}` : ""}</p>
-        </div>
+        filter === "unmatched" ? (
+          <EmptyState
+            icon={CheckCircle2}
+            title="Nothing left to match — nice"
+            description="Every line on this statement is linked to a client and agent."
+          />
+        ) : (
+          <EmptyState
+            icon={Inbox}
+            title={filter === "all" ? "No line items yet" : "No line items with this match status"}
+            description={
+              filter === "all"
+                ? "Once the statement file has been read, each policy it pays on will appear here."
+                : "Try another filter, or show all line items."
+            }
+          />
+        )
       ) : (
         <>
-          <div className="rounded-lg border border-border overflow-hidden">
+          <TableFrame>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -452,9 +511,13 @@ export default function CommissionStatementPage() {
                   <TableRow key={li.id}>
                     <TableCell className="font-medium">
                       {li.contactName ?? (
-                        <span className="text-muted-foreground italic">
-                          Unmatched{li.memberId && ` · ${li.memberId}`}
-                        </span>
+                        li.matchStatus === "unmatched" ? (
+                          <span className="text-muted-foreground italic">
+                            Unmatched{li.memberId && ` · ${li.memberId}`}
+                          </span>
+                        ) : (
+                          <span>{li.memberId ? `Member ${li.memberId}` : "Linked client"}</span>
+                        )
                       )}
                     </TableCell>
                     <TableCell className="text-xs font-mono text-muted-foreground">
@@ -464,23 +527,21 @@ export default function CommissionStatementPage() {
                       {fmtDate(li.periodStart)} – {fmtDate(li.periodEnd)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {fmtMoney(li.premiumAmount)}
+                      {fmtMoney(li.premium ?? li.premiumAmount)}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">
+                    <TableCell className="text-right tabular-nums font-semibold text-success">
                       {fmtMoney(li.commissionAmount)}
                     </TableCell>
                     <TableCell>
                       {li.type ? (
-                        <Badge variant="secondary" className="text-[10px] uppercase">{li.type}</Badge>
+                        <StatusPill tone={li.type === "chargeback" ? "danger" : "neutral"}>{li.type}</StatusPill>
                       ) : "—"}
                     </TableCell>
                     <TableCell className="text-sm">
                       {li.writingAgentName ?? <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className={cn("capitalize", MATCH_STYLES[li.matchStatus])}>
-                        {li.matchStatus}
-                      </Badge>
+                      <StatusPill tone={MATCH_TONES[li.matchStatus]}>{MATCH_LABELS[li.matchStatus]}</StatusPill>
                     </TableCell>
                     <TableCell className="text-right">
                       {li.matchStatus === "unmatched" && (
@@ -493,8 +554,8 @@ export default function CommissionStatementPage() {
                 ))}
               </TableBody>
             </Table>
-          </div>
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
+          </TableFrame>
+          <div className="flex items-center justify-between text-xs text-muted-foreground pt-3">
             <span>{rows.length} line item{rows.length !== 1 ? "s" : ""}</span>
             <div className="flex items-center gap-1.5">
               <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => setPage(Math.max(1, safePage - 1))} disabled={safePage <= 1}>
@@ -508,6 +569,7 @@ export default function CommissionStatementPage() {
           </div>
         </>
       )}
+      </SectionCard>
 
       <MatchDialog
         lineItem={matchFor}
@@ -519,6 +581,6 @@ export default function CommissionStatementPage() {
           void qc.invalidateQueries({ queryKey: ["/api/commissions/statements", id] });
         }}
       />
-    </div>
+    </PageShell>
   );
 }

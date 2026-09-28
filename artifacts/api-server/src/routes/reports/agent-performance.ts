@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, gte, lte, inArray, count, sum, isNull } from "drizzle-orm";
+import { eq, and, gte, lte, inArray, count, sum, isNull, sql } from "drizzle-orm";
+import { activeLicenseFlagSql, activeLicenseWhere } from "../../lib/licenses/licenseStatus";
 import {
   db,
   agentsTable,
@@ -51,6 +52,9 @@ router.get(
 
     const agentIds = agents.map((a) => a.id);
     if (agentIds.length === 0) { res.json([]); return; }
+
+    const reportNow = new Date();
+    const in30Days = new Date(reportNow.getTime() + 30 * 86_400_000);
 
     // Parallel aggregation queries
     const [

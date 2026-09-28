@@ -16,7 +16,7 @@ export function phoneMatchKey(raw: string | null | undefined): string | null {
   return digits.slice(-10);
 }
 
-/** SQL expression producing the same key for a phone column. */
-export function phoneMatchKeySql(column: AnyColumn): SQL<string> {
+/** SQL expression producing the same key for a phone column (or raw column SQL). */
+export function phoneMatchKeySql(column: AnyColumn | SQL): SQL<string> {
   return sql<string>`right(regexp_replace(coalesce(${column}, ''), '[^0-9]', '', 'g'), 10)`;
 }

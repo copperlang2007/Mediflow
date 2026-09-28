@@ -47,7 +47,22 @@ import clawbacksRouter from "./clawbacks";
 import enrollmentsRouter from "./enrollments";
 import billingRouter from "./billing";
 import invitationsRouter from "./invitations";
+import campaignsRouter from "./campaigns";
 import devRouter from "./dev";
+// --- stage2/portal-dialer ---
+import clientPortalRouter from "./clientPortal";
+import softphoneRouter from "./softphone";
+import supervisorRouter from "./supervisor";
+import quotingRouter from "./quoting";
+// --- stage2/new-pages-core ---
+import knowledgeBaseRouter from "./knowledgeBase";
+import reconciliationRouter from "./reconciliation";
+import agentBackofficeRouter from "./agentBackoffice";
+import dataExportsRouter from "./dataExports";
+// --- stage2/calendar-branding ---
+import appointmentsRouter from "./appointments";
+import brandingRouter from "./branding";
+import workspacesRouter from "./workspaces";
 
 const router: IRouter = Router();
 
@@ -105,6 +120,21 @@ router.use(clawbacksRouter);
 router.use(enrollmentsRouter);
 router.use(billingRouter);
 router.use(invitationsRouter);
+// --- stage2/portal-dialer ---
+router.use(clientPortalRouter);
+router.use(softphoneRouter);
+router.use(supervisorRouter);
+router.use(quotingRouter);
+// --- stage2/new-pages-core ---
+router.use(knowledgeBaseRouter);
+router.use(reconciliationRouter);
+router.use(agentBackofficeRouter);
+router.use(dataExportsRouter);
+// --- stage2/calendar-branding ---
+router.use(appointmentsRouter);
+router.use(brandingRouter);
+router.use(workspacesRouter);
+router.use(campaignsRouter);
 
 // Dev console is mounted only when the env var is set. The router itself
 // also applies the `devOnly` middleware, so even if this guard were

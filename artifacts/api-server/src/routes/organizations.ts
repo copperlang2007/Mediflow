@@ -8,8 +8,21 @@ import {
   requireRole,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { getEntitlements } from "../lib/billing/entitlements";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { requireMfa } from "../middlewares/requireMfa";
+
+/**
+ * `organizations.plan_tier` is a legacy column nothing enforces: the plan the
+ * product actually applies comes from the subscription via getEntitlements()
+ * (the same source /billing/subscription reads). Report THAT tier so
+ * Settings and Billing can never show different plans ("Growth" vs
+ * "Agency $997").
+ */
+async function withEffectivePlan<T extends { id: string; planTier: string }>(org: T): Promise<T> {
+  const ent = await getEntitlements(org.id);
+  return { ...org, planTier: ent.tier };
+}
 
 const UpdateOrgSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -50,7 +63,7 @@ router.get(
       return;
     }
 
-    res.json(org);
+    res.json(await withEffectivePlan(org));
   },
 );
 
@@ -78,7 +91,7 @@ router.patch(
       .where(eq(organizationsTable.id, authReq.orgId))
       .returning();
 
-    res.json(org);
+    res.json(org ? await withEffectivePlan(org) : org);
   },
 );
 

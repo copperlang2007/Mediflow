@@ -62,86 +62,133 @@
   --font-serif: var(--app-font-serif);
   --font-mono: var(--app-font-mono);
 
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+  --color-info: hsl(var(--info));
+  --color-info-foreground: hsl(var(--info-foreground));
+
+  /* agencyBRIDGE fixed navy scale (does not follow the theme). */
+  --color-navy-50: #f4f7fb;
+  --color-navy-100: #e8edf3;
+  --color-navy-200: #c2d4ea;
+  --color-navy-300: #8fb0d4;
+  --color-navy-400: #5b8cbe;
+  --color-navy-500: #3b6fa0;
+  --color-navy-600: #28507f;
+  --color-navy-700: #1e3a5f;
+  --color-navy-800: #16264f;
+  --color-navy-900: #0f1b3d;
+  --color-navy-950: #0a1124;
+
+  --font-display: var(--app-font-display);
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
 }
 
-/* LIGHT MODE — Medicare Agency Platform: Navy Blue + Slate Professional Theme */
+/*
+ * agencyBRIDGE "Navy Trust" design tokens.
+ *
+ * Ported from the agencyBRIDGE prototype (src/styles.css there): deep navy
+ * sidebar and primary, a mid-blue accent for active states and links, and
+ * four KPI card fills (navy, blue, green, orange). Values are HSL triplets so
+ * shadcn components can use `hsl(var(--token) / alpha)`.
+ *
+ * Fonts: Outfit for headings/numbers (`font-display`), Figtree for body.
+ */
 :root {
+  color-scheme: light;
   --button-outline: rgba(0,0,0, .10);
   --badge-outline: rgba(0,0,0, .05);
   --opaque-button-border-intensity: -8;
   --elevate-1: rgba(0,0,0, .03);
   --elevate-2: rgba(0,0,0, .08);
 
-  /* Off-white background */
-  --background: 210 20% 98%;
-  /* Near-black navy text */
+  --background: 214 35% 97%;
   --foreground: 222 47% 11%;
 
-  --border: 215 20% 88%;
+  --border: 214 25% 88%;
 
-  /* White card surface */
   --card: 0 0% 100%;
   --card-foreground: 222 47% 11%;
-  --card-border: 215 20% 88%;
+  --card-border: 214 25% 88%;
 
-  /* Navy sidebar */
-  --sidebar: 221 50% 18%;
-  --sidebar-foreground: 210 40% 92%;
-  --sidebar-border: 221 45% 25%;
-  --sidebar-primary: 199 89% 48%;
+  /* Navy sidebar with a blue active pill */
+  --sidebar: 222 62% 15%;
+  --sidebar-foreground: 214 35% 85%;
+  --sidebar-border: 222 40% 24%;
+  --sidebar-primary: 210 60% 45%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 221 45% 26%;
-  --sidebar-accent-foreground: 210 40% 95%;
-  --sidebar-ring: 199 89% 48%;
+  --sidebar-accent: 222 45% 22%;
+  --sidebar-accent-foreground: 210 40% 96%;
+  --sidebar-ring: 210 60% 55%;
 
   --popover: 0 0% 100%;
   --popover-foreground: 222 47% 11%;
-  --popover-border: 215 20% 88%;
+  --popover-border: 214 25% 88%;
 
-  /* Medicare blue primary */
-  --primary: 221 83% 43%;
-  --primary-foreground: 0 0% 100%;
+  /* Navy primary (buttons), blue accent (links, focus, active) */
+  --primary: 222 62% 15%;
+  --primary-foreground: 210 40% 98%;
 
-  /* Light slate secondary */
-  --secondary: 213 27% 93%;
+  --secondary: 214 30% 94%;
   --secondary-foreground: 222 47% 20%;
 
-  --muted: 213 27% 95%;
-  --muted-foreground: 215 16% 47%;
+  --muted: 214 25% 93%;
+  --muted-foreground: 215 16% 42%;
 
-  --accent: 199 89% 48%;
+  --accent: 210 60% 40%;
   --accent-foreground: 0 0% 100%;
 
-  --destructive: 0 84% 60%;
+  --destructive: 0 72% 51%;
   --destructive-foreground: 0 0% 100%;
 
-  --input: 215 20% 88%;
-  --ring: 221 83% 43%;
+  --success: 142 60% 38%;
+  --success-foreground: 0 0% 100%;
+  --warning: 38 92% 50%;
+  --warning-foreground: 0 0% 100%;
+  --info: 210 60% 45%;
+  --info-foreground: 0 0% 100%;
 
-  /* Chart colors */
-  --chart-1: 221 83% 43%;
-  --chart-2: 199 89% 48%;
-  --chart-3: 142 71% 45%;
+  --input: 214 25% 88%;
+  --ring: 210 60% 40%;
+
+  /* Chart colors — navy/blue family first, then green/orange/red */
+  --chart-1: 210 45% 43%;
+  --chart-2: 222 62% 22%;
+  --chart-3: 142 60% 38%;
   --chart-4: 38 92% 50%;
-  --chart-5: 0 84% 60%;
+  --chart-5: 210 50% 70%;
 
-  --app-font-sans: 'Inter', sans-serif;
+  /* KPI card fills (solid variant of <KpiCard>) */
+  --kpi-navy-from: #1e3a5f;
+  --kpi-navy-to: #0f1b3d;
+  --kpi-blue-from: #3b6fa0;
+  --kpi-blue-to: #1e3a5f;
+  --kpi-green-from: hsl(142 60% 40%);
+  --kpi-green-to: hsl(142 60% 34%);
+  --kpi-orange-from: hsl(38 92% 52%);
+  --kpi-orange-to: hsl(34 92% 48%);
+
+  --app-font-sans: 'Figtree', system-ui, sans-serif;
+  --app-font-display: 'Outfit', system-ui, sans-serif;
   --app-font-serif: Georgia, serif;
   --app-font-mono: 'JetBrains Mono', Menlo, monospace;
-  --radius: 0.5rem;
+  --radius: 0.75rem;
 
-  --shadow-2xs: 0px 1px 2px 0px rgba(15, 23, 42, 0.04);
-  --shadow-xs: 0px 1px 3px 0px rgba(15, 23, 42, 0.06);
-  --shadow-sm: 0px 1px 3px 0px rgba(15, 23, 42, 0.07), 0px 1px 2px -1px rgba(15, 23, 42, 0.05);
-  --shadow: 0px 2px 4px 0px rgba(15, 23, 42, 0.08), 0px 1px 2px -1px rgba(15, 23, 42, 0.06);
-  --shadow-md: 0px 4px 8px -1px rgba(15, 23, 42, 0.08), 0px 2px 4px -2px rgba(15, 23, 42, 0.06);
-  --shadow-lg: 0px 10px 15px -3px rgba(15, 23, 42, 0.08), 0px 4px 6px -4px rgba(15, 23, 42, 0.06);
-  --shadow-xl: 0px 20px 25px -5px rgba(15, 23, 42, 0.10), 0px 8px 10px -6px rgba(15, 23, 42, 0.07);
-  --shadow-2xl: 0px 25px 50px -12px rgba(15, 23, 42, 0.20);
+  --shadow-2xs: 0px 1px 2px 0px rgba(15, 27, 61, 0.04);
+  --shadow-xs: 0px 1px 3px 0px rgba(15, 27, 61, 0.06);
+  --shadow-sm: 0px 1px 3px 0px rgba(15, 27, 61, 0.07), 0px 1px 2px -1px rgba(15, 27, 61, 0.05);
+  --shadow: 0px 2px 4px 0px rgba(15, 27, 61, 0.08), 0px 1px 2px -1px rgba(15, 27, 61, 0.06);
+  --shadow-md: 0px 4px 8px -1px rgba(15, 27, 61, 0.10), 0px 2px 4px -2px rgba(15, 27, 61, 0.07);
+  --shadow-lg: 0px 10px 15px -3px rgba(15, 27, 61, 0.10), 0px 4px 6px -4px rgba(15, 27, 61, 0.07);
+  --shadow-xl: 0px 20px 25px -5px rgba(15, 27, 61, 0.12), 0px 8px 10px -6px rgba(15, 27, 61, 0.08);
+  --shadow-2xl: 0px 25px 50px -12px rgba(15, 27, 61, 0.25);
 
   --tracking-normal: 0em;
   --spacing: 0.25rem;
@@ -162,58 +209,81 @@
   --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 }
 
+/*
+ * Dark: near-black navy page, lifted navy cards and the same agencyBRIDGE
+ * blue family as light mode. Contrast (WCAG 2.1):
+ *   --primary 210 62% 42% with white text        5.5:1 (AA)
+ *   --accent  210 75% 62% with navy text         6.6:1 (AA); as text on --card 6.1:1
+ */
 .dark {
+  color-scheme: dark;
   --button-outline: rgba(255,255,255, .10);
   --badge-outline: rgba(255,255,255, .05);
   --opaque-button-border-intensity: 9;
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
 
-  --background: 222 47% 7%;
-  --foreground: 210 40% 96%;
+  --background: 224 52% 8%;
+  --foreground: 213 45% 93%;
 
-  --border: 217 33% 20%;
+  --border: 221 41% 20%;
 
-  --card: 222 47% 10%;
-  --card-foreground: 210 40% 96%;
-  --card-border: 217 33% 20%;
+  --card: 221 50% 13%;
+  --card-foreground: 213 45% 93%;
+  --card-border: 221 41% 20%;
 
-  --sidebar: 222 47% 6%;
-  --sidebar-foreground: 210 40% 90%;
-  --sidebar-border: 217 33% 18%;
-  --sidebar-primary: 199 89% 52%;
-  --sidebar-primary-foreground: 222 47% 7%;
-  --sidebar-accent: 222 47% 13%;
-  --sidebar-accent-foreground: 210 40% 92%;
-  --sidebar-ring: 199 89% 52%;
+  --sidebar: 224 55% 10%;
+  --sidebar-foreground: 214 30% 80%;
+  --sidebar-border: 221 40% 18%;
+  --sidebar-primary: 210 62% 42%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 221 45% 16%;
+  --sidebar-accent-foreground: 213 45% 93%;
+  --sidebar-ring: 210 75% 62%;
 
-  --popover: 222 47% 10%;
-  --popover-foreground: 210 40% 96%;
-  --popover-border: 217 33% 20%;
+  --popover: 221 50% 13%;
+  --popover-foreground: 213 45% 93%;
+  --popover-border: 221 41% 20%;
 
-  --primary: 221 83% 58%;
+  --primary: 210 62% 42%;
   --primary-foreground: 0 0% 100%;
 
-  --secondary: 217 33% 18%;
-  --secondary-foreground: 210 40% 90%;
+  --secondary: 220 45% 17%;
+  --secondary-foreground: 213 45% 93%;
 
-  --muted: 217 33% 17%;
-  --muted-foreground: 215 20% 60%;
+  --muted: 220 45% 16%;
+  --muted-foreground: 217 21% 66%;
 
-  --accent: 199 89% 52%;
-  --accent-foreground: 222 47% 7%;
+  --accent: 210 75% 62%;
+  --accent-foreground: 222 55% 9%;
 
-  --destructive: 0 70% 55%;
-  --destructive-foreground: 0 0% 100%;
+  --destructive: 0 72% 62%;
+  --destructive-foreground: 222 55% 9%;
 
-  --input: 217 33% 22%;
-  --ring: 221 83% 58%;
+  --success: 158 64% 52%;
+  --success-foreground: 222 55% 9%;
+  --warning: 38 90% 60%;
+  --warning-foreground: 222 55% 9%;
+  --info: 199 80% 60%;
+  --info-foreground: 222 55% 9%;
 
-  --chart-1: 221 83% 58%;
-  --chart-2: 199 89% 52%;
-  --chart-3: 142 71% 50%;
-  --chart-4: 38 92% 55%;
-  --chart-5: 0 70% 55%;
+  --input: 221 41% 20%;
+  --ring: 210 75% 62%;
+
+  --chart-1: 210 75% 62%;
+  --chart-2: 213 50% 78%;
+  --chart-3: 158 64% 52%;
+  --chart-4: 38 90% 60%;
+  --chart-5: 217 21% 66%;
+
+  --kpi-navy-from: #1e3a5f;
+  --kpi-navy-to: #16264f;
+  --kpi-blue-from: #28507f;
+  --kpi-blue-to: #1e3a5f;
+  --kpi-green-from: hsl(158 55% 32%);
+  --kpi-green-to: hsl(158 55% 26%);
+  --kpi-orange-from: hsl(32 80% 44%);
+  --kpi-orange-to: hsl(28 80% 38%);
 
   --shadow-2xs: 0px 1px 2px 0px rgba(0, 0, 0, 0.40);
   --shadow-xs: 0px 1px 3px 0px rgba(0, 0, 0, 0.45);
@@ -247,6 +317,19 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--app-font-display);
+    letter-spacing: -0.02em;
+  }
+
+  /* Ambient blue wash behind the top of the page in dark mode. */
+  .dark body {
+    background-image: radial-gradient(120% 70% at 50% -12%, hsl(210 60% 32% / 0.22), transparent 62%);
+    background-attachment: fixed;
+    background-repeat: no-repeat;
   }
 }
 
@@ -256,12 +339,31 @@
   opacity: 1;
 }
 .cl-formFieldInput:focus {
-  border-color: hsl(221 83% 43%);
+  border-color: hsl(210 60% 40%);
   outline: none;
-  box-shadow: 0 0 0 3px hsl(221 83% 43% / 0.15);
+  box-shadow: 0 0 0 3px hsl(210 60% 40% / 0.15);
 }
 
 @layer utilities {
+  .font-body {
+    font-family: var(--app-font-sans);
+  }
+
+  .bg-navy-gradient {
+    background-image: linear-gradient(135deg, #0f1b3d 0%, #1e3a5f 100%);
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 9999px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+
   input[type="search"]::-webkit-search-cancel-button {
     @apply hidden;
   }

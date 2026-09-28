@@ -69,6 +69,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { PageHeader, SectionCard, StatusPill, EmptyState } from "@/components/shared";
+import { PageShell, TableFrame } from "@/components/ops";
 
 /** Roles an admin may hand out. Mirrors INVITABLE_ROLES on the server. */
 const INVITABLE_ROLES = [
@@ -141,16 +143,14 @@ function SeatMeter({ seats }: { seats: SeatUsage }) {
   const full = seats.available === 0;
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Users className="h-4 w-4" />
-          Seats
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <SectionCard
+      title="Seats"
+      description="Each person who can sign in uses one seat — so does an invitation that hasn't been accepted yet"
+      icon={Users}
+      contentClassName="space-y-3"
+    >
         <div className="flex items-baseline justify-between">
-          <span className="text-2xl font-semibold tabular-nums">
+          <span className="font-display text-3xl font-bold tabular-nums">
             {seats.used}
             <span className="text-muted-foreground text-base font-normal">
               {" / "}
@@ -170,7 +170,7 @@ function SeatMeter({ seats }: { seats: SeatUsage }) {
           </span>
         </div>
 
-        <Progress value={pct} className="h-2" />
+        <Progress value={pct} className="h-2.5" />
 
         <p className="text-xs text-muted-foreground">
           {seats.activeUsers} active{" "}
@@ -196,8 +196,7 @@ function SeatMeter({ seats }: { seats: SeatUsage }) {
             </AlertDescription>
           </Alert>
         )}
-      </CardContent>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -322,17 +321,17 @@ export default function TeamPage() {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-5xl mx-auto space-y-6">
+      <PageShell>
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-40 rounded-xl" />
         <Skeleton className="h-72 rounded-xl" />
-      </div>
+      </PageShell>
     );
   }
 
   if (invitations.isError || members.isError || !invitations.data) {
     return (
-      <div className="p-6 max-w-5xl mx-auto">
+      <PageShell>
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Team unavailable</AlertTitle>
@@ -343,7 +342,7 @@ export default function TeamPage() {
             )}
           </AlertDescription>
         </Alert>
-      </div>
+      </PageShell>
     );
   }
 
@@ -360,19 +359,16 @@ export default function TeamPage() {
   const noSeats = seats.available === 0;
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Team</h1>
-          <p className="text-sm text-muted-foreground">
-            Who can sign in to your agency, and what each seat costs you.
-          </p>
-        </div>
+    <PageShell>
+      <PageHeader
+        title="Team"
+        subtitle="Who can sign in to your agency, and what each seat costs you."
+      >
         <Button onClick={() => setInviteOpen(true)} disabled={noSeats}>
           <UserPlus className="mr-2 h-4 w-4" />
           Invite member
         </Button>
-      </div>
+      </PageHeader>
 
       <SeatMeter seats={seats} />
 
@@ -407,14 +403,12 @@ export default function TeamPage() {
         </Alert>
       )}
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">
-            Members &amp; invitations
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-0 sm:px-6">
-          <div className="overflow-x-auto">
+      <SectionCard
+        title="Members & invitations"
+        description="Everyone with a login, plus invitations still waiting to be accepted"
+        icon={UserPlus}
+      >
+          <TableFrame className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -427,11 +421,12 @@ export default function TeamPage() {
               <TableBody>
                 {rows.length === 0 && (
                   <TableRow>
-                    <TableCell
-                      colSpan={4}
-                      className="py-10 text-center text-sm text-muted-foreground"
-                    >
-                      No members yet. Invite someone to get started.
+                    <TableCell colSpan={4} className="p-0">
+                      <EmptyState
+                        compact
+                        icon={Users}
+                        title="No members yet. Invite someone to get started."
+                      />
                     </TableCell>
                   </TableRow>
                 )}
@@ -440,9 +435,16 @@ export default function TeamPage() {
                   row.kind === "member" ? (
                     <TableRow key={`m-${row.member.id}`}>
                       <TableCell>
-                        <div className="font-medium">{row.member.fullName}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {row.member.email}
+                        <div className="flex items-center gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-navy-100 text-navy-800 text-xs font-semibold dark:bg-secondary dark:text-secondary-foreground" aria-hidden>
+                            {row.member.fullName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                          </span>
+                          <div>
+                            <div className="font-medium">{row.member.fullName}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {row.member.email}
+                            </div>
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell className="text-sm">
@@ -450,9 +452,9 @@ export default function TeamPage() {
                       </TableCell>
                       <TableCell>
                         {row.member.isActive ? (
-                          <Badge variant="default">Active</Badge>
+                          <StatusPill tone="success">Active</StatusPill>
                         ) : (
-                          <Badge variant="secondary">Deactivated</Badge>
+                          <StatusPill tone="neutral">Deactivated</StatusPill>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
@@ -491,10 +493,10 @@ export default function TeamPage() {
                   ) : (
                     <TableRow key={`i-${row.invitation.id}`}>
                       <TableCell>
-                        <div className="font-medium text-muted-foreground">
+                        <div className="font-medium text-muted-foreground pl-12">
                           {row.invitation.email}
                         </div>
-                        <div className="text-xs text-muted-foreground">
+                        <div className="text-xs text-muted-foreground pl-12">
                           Invited, not yet accepted
                         </div>
                       </TableCell>
@@ -503,10 +505,10 @@ export default function TeamPage() {
                           row.invitation.role}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="gap-1">
+                        <StatusPill tone="warning" className="gap-1">
                           <Clock className="h-3 w-3" />
                           Expires {relativeDays(row.invitation.expiresAt)}
-                        </Badge>
+                        </StatusPill>
                       </TableCell>
                       <TableCell className="text-right whitespace-nowrap">
                         <Button
@@ -531,9 +533,8 @@ export default function TeamPage() {
                 )}
               </TableBody>
             </Table>
-          </div>
-        </CardContent>
-      </Card>
+          </TableFrame>
+      </SectionCard>
 
       {/* Invite dialog */}
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
@@ -653,6 +654,6 @@ export default function TeamPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageShell>
   );
 }

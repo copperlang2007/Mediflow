@@ -181,6 +181,15 @@ function MessageContent({ content }: { content: string }) {
   );
 }
 
+/**
+ * Other parts of the UI (the top-bar Help menu, empty states) can open the
+ * assistant without holding a ref to it: call `openAiAssistant()`.
+ */
+export const AI_OPEN_EVENT = "mediflow:open-ai-assistant";
+export function openAiAssistant(): void {
+  window.dispatchEvent(new Event(AI_OPEN_EVENT));
+}
+
 export function AiAssistantPanel({ context }: { context?: AiContext }) {
   // Lazy initializers restore persisted state from localStorage so the panel
   // remembers whether it was open and the chat history survives navigation
@@ -196,6 +205,12 @@ export function AiAssistantPanel({ context }: { context?: AiContext }) {
   useEffect(() => {
     writeBool(STORAGE_KEYS.open, open);
   }, [open]);
+
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener(AI_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(AI_OPEN_EVENT, onOpen);
+  }, []);
 
   // Persist history whenever it settles (skip while a response is streaming
   // — we'd otherwise write on every token, and partial messages aren't
@@ -339,36 +354,43 @@ export function AiAssistantPanel({ context }: { context?: AiContext }) {
       <button
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "fixed bottom-6 right-6 z-50 h-14 w-14 rounded-full shadow-lg flex items-center justify-center transition-all",
-          "bg-primary text-primary-foreground hover:bg-primary/90",
-          open && "rotate-12",
+          "fixed bottom-6 right-6 z-50 h-14 w-14 rounded-full flex items-center justify-center transition-all",
+          "bg-navy-gradient text-white shadow-xl shadow-navy-900/30 ring-4 ring-white/70 dark:ring-white/10",
+          "hover:scale-105 focus-visible:outline-none focus-visible:ring-accent",
         )}
         title="Open AI Assistant"
+        aria-label={open ? "Close AI assistant" : "Open AI assistant"}
       >
-        {open ? <X className="h-5 w-5" /> : <Bot className="h-6 w-6" />}
+        {open ? <X className="h-5 w-5" /> : <Sparkles className="h-6 w-6" />}
+        {!open && (
+          <span
+            aria-hidden="true"
+            className="absolute bottom-0.5 right-0.5 h-3.5 w-3.5 rounded-full bg-success ring-2 ring-white dark:ring-background"
+          />
+        )}
       </button>
 
       {/* Panel */}
       {open && (
         <div className="fixed bottom-24 right-6 z-50 w-[420px] max-w-[calc(100vw-3rem)] rounded-2xl border border-border bg-background shadow-2xl flex flex-col overflow-hidden" style={{ height: "560px" }}>
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 bg-primary text-primary-foreground shrink-0">
+          <div className="flex items-center justify-between px-4 py-3 bg-navy-gradient text-white shrink-0">
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4" />
               <span className="font-semibold text-sm">agencyBRIDGE AI</span>
               {context?.label && (
-                <Badge variant="secondary" className="text-[10px] bg-primary-foreground/20 text-primary-foreground border-0 ml-1">
+                <Badge variant="secondary" className="text-[10px] bg-white/20 text-white border-0 ml-1">
                   {context.label}
                 </Badge>
               )}
             </div>
             <div className="flex items-center gap-1">
               {messages.length > 0 && (
-                <button onClick={clearHistory} className="text-xs text-primary-foreground/70 hover:text-primary-foreground px-2 py-0.5 rounded transition-colors">
+                <button onClick={clearHistory} className="text-xs text-white/70 hover:text-white px-2 py-0.5 rounded transition-colors">
                   Clear
                 </button>
               )}
-              <button onClick={() => setOpen(false)} className="p-1 rounded hover:bg-primary-foreground/10 transition-colors">
+              <button onClick={() => setOpen(false)} aria-label="Minimise AI assistant" className="p-1 rounded hover:bg-white/10 transition-colors">
                 <ChevronDown className="h-4 w-4" />
               </button>
             </div>

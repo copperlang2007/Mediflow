@@ -150,7 +150,11 @@ export const GetMyOrganizationResponse = zod.object({
   id: zod.string(),
   name: zod.string(),
   slug: zod.string(),
-  planTier: zod.string(),
+  planTier: zod
+    .string()
+    .describe(
+      "The plan the product actually enforces (from the subscription \/ entitlements — the same tier \/billing\/subscription reports), not the legacy organizations.plan_tier column.\n",
+    ),
   logoUrl: zod.string().nullish(),
   createdAt: zod.coerce.date(),
 });
@@ -167,7 +171,11 @@ export const UpdateMyOrganizationResponse = zod.object({
   id: zod.string(),
   name: zod.string(),
   slug: zod.string(),
-  planTier: zod.string(),
+  planTier: zod
+    .string()
+    .describe(
+      "The plan the product actually enforces (from the subscription \/ entitlements — the same tier \/billing\/subscription reports), not the legacy organizations.plan_tier column.\n",
+    ),
   logoUrl: zod.string().nullish(),
   createdAt: zod.coerce.date(),
 });
@@ -189,12 +197,26 @@ export const GetDashboardStatsResponse = zod.object({
   licensesExpiringIn90Days: zod.number().int(),
   openTasksCount: zod.number().int(),
   overdueTasks: zod.number().int(),
-  openLeadsCount: zod.number().int(),
+  openLeadsCount: zod
+    .number()
+    .int()
+    .describe(
+      "CRM contacts whose status is Lead (not deleted) — the same number the Clients & Leads page shows. Not the inbound queue's `leads` table.\n",
+    ),
   unreadNotificationsCount: zod.number().int(),
   ahipCompletionRateCurrent: zod
     .number()
     .describe(
-      "Share of active agents with a passed\/waived AHIP for ahipPlanYear.",
+      "Percent of agents who need AHIP (status active or onboarding) with a passed or waived record for ahipPlanYear.\n",
+    ),
+  ahipCompleteCount: zod.number().int().optional(),
+  agentsRequiringAhip: zod.number().int().optional(),
+  licensesExpiredCount: zod
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "Licenses past their expiry date (or stored as expired) for agents still on the team (onboarding, active, suspended).\n",
     ),
   ahipPlanYear: zod
     .number()
@@ -235,6 +257,12 @@ export const GetDashboardActivityResponseItem = zod.object({
   description: zod.string().nullish(),
   userId: zod.string().nullish(),
   userFullName: zod.string().nullish(),
+  contactName: zod
+    .string()
+    .nullish()
+    .describe(
+      "The client the activity is about; null unless the caller has contact:read.",
+    ),
   resourceType: zod.string().nullish(),
   resourceId: zod.string().nullish(),
   createdAt: zod.coerce.date(),
@@ -619,6 +647,12 @@ export const GetAgentLicensesResponse = zod.object({
         "suspended",
         "not_appointed",
       ]),
+      effectiveStatus: zod
+        .enum(["active", "pending", "expired", "suspended", "not_appointed"])
+        .optional()
+        .describe(
+          'The status to show and count. Same as `status`, except a license whose expiry date has passed is always \"expired\". Active means status active AND no expiry or expiry in the future — the shared definition Licensing, the agent profile, Ready to Sell, the back office and the dashboard all use.\n',
+        ),
       renewalSubmittedAt: zod.coerce.date().nullish(),
       documentKey: zod.string().nullish(),
       createdAt: zod.coerce.date(),
@@ -663,6 +697,12 @@ export const CreateAgentLicenseResponse = zod.object({
     "suspended",
     "not_appointed",
   ]),
+  effectiveStatus: zod
+    .enum(["active", "pending", "expired", "suspended", "not_appointed"])
+    .optional()
+    .describe(
+      'The status to show and count. Same as `status`, except a license whose expiry date has passed is always \"expired\". Active means status active AND no expiry or expiry in the future — the shared definition Licensing, the agent profile, Ready to Sell, the back office and the dashboard all use.\n',
+    ),
   renewalSubmittedAt: zod.coerce.date().nullish(),
   documentKey: zod.string().nullish(),
   createdAt: zod.coerce.date(),
@@ -749,6 +789,12 @@ export const UpdateAgentLicenseResponse = zod.object({
     "suspended",
     "not_appointed",
   ]),
+  effectiveStatus: zod
+    .enum(["active", "pending", "expired", "suspended", "not_appointed"])
+    .optional()
+    .describe(
+      'The status to show and count. Same as `status`, except a license whose expiry date has passed is always \"expired\". Active means status active AND no expiry or expiry in the future — the shared definition Licensing, the agent profile, Ready to Sell, the back office and the dashboard all use.\n',
+    ),
   renewalSubmittedAt: zod.coerce.date().nullish(),
   documentKey: zod.string().nullish(),
   createdAt: zod.coerce.date(),
@@ -1051,8 +1097,21 @@ export const GetAhipDashboardQueryParams = zod.object({
 
 export const GetAhipDashboardResponse = zod.object({
   year: zod.number().int(),
-  totalActiveAgents: zod.number().int(),
-  passedCount: zod.number().int(),
+  totalActiveAgents: zod
+    .number()
+    .int()
+    .describe("Deprecated alias of agentsRequiringAhip."),
+  agentsRequiringAhip: zod
+    .number()
+    .int()
+    .optional()
+    .describe("Agents whose status is active or onboarding."),
+  passedCount: zod
+    .number()
+    .int()
+    .describe(
+      "Of those, how many have a passed or waived AHIP record for the year.",
+    ),
   completionRate: zod.number(),
   records: zod.array(
     zod.object({
@@ -4195,6 +4254,7 @@ export const GetAutomationRulesResponse = zod.object({
               "change_contact_status",
               "enroll_sequence",
               "change_deal_stage",
+              "create_appointment",
             ]),
             config: zod.record(zod.string(), zod.unknown()),
           }),
@@ -4237,6 +4297,7 @@ export const CreateAutomationRuleBody = zod.object({
         "change_contact_status",
         "enroll_sequence",
         "change_deal_stage",
+        "create_appointment",
       ]),
       config: zod.record(zod.string(), zod.unknown()),
     }),
@@ -4271,6 +4332,7 @@ export const CreateAutomationRuleResponse = zod.object({
           "change_contact_status",
           "enroll_sequence",
           "change_deal_stage",
+          "create_appointment",
         ]),
         config: zod.record(zod.string(), zod.unknown()),
       }),
@@ -4317,6 +4379,7 @@ export const GetAutomationRuleResponse = zod.object({
           "change_contact_status",
           "enroll_sequence",
           "change_deal_stage",
+          "create_appointment",
         ]),
         config: zod.record(zod.string(), zod.unknown()),
       }),
@@ -4361,6 +4424,7 @@ export const UpdateAutomationRuleBody = zod.object({
           "change_contact_status",
           "enroll_sequence",
           "change_deal_stage",
+          "create_appointment",
         ]),
         config: zod.record(zod.string(), zod.unknown()),
       }),
@@ -4396,6 +4460,7 @@ export const UpdateAutomationRuleResponse = zod.object({
           "change_contact_status",
           "enroll_sequence",
           "change_deal_stage",
+          "create_appointment",
         ]),
         config: zod.record(zod.string(), zod.unknown()),
       }),
@@ -4451,6 +4516,7 @@ export const ToggleAutomationRuleResponse = zod.object({
           "change_contact_status",
           "enroll_sequence",
           "change_deal_stage",
+          "create_appointment",
         ]),
         config: zod.record(zod.string(), zod.unknown()),
       }),
@@ -5953,3 +6019,986 @@ export const PostDialerV1EventsResponse = zod.object({
   status: zod.enum(["accepted", "ignored", "duplicate"]),
   eventId: zod.string(),
 });
+
+/**
+ * Requires contact:read. Org-scoped.
+ * @summary Book-of-business counts (same filters as GET /enrollments)
+ */
+export const GetEnrollmentsSummaryQueryParams = zod.object({
+  carrierId: zod.coerce.string().optional(),
+  agentId: zod.coerce.string().optional(),
+  planType: zod.enum(["MA", "PDP", "MAPD", "supp", "other"]).optional(),
+  status: zod.coerce.string().optional(),
+  effectuated: zod.enum(["true", "false"]).optional(),
+  effectiveFrom: zod.date().optional(),
+  effectiveTo: zod.date().optional(),
+  search: zod.coerce
+    .string()
+    .optional()
+    .describe("Client name or policy number"),
+});
+
+export const GetEnrollmentsSummaryResponse = zod.object({
+  total: zod.number().int().optional(),
+  active: zod.number().int().optional(),
+  pending: zod.number().int().optional(),
+  ended: zod.number().int().optional(),
+  effectuated: zod.number().int().optional(),
+  notEffectuated: zod.number().int().optional(),
+  startingSoon: zod
+    .number()
+    .int()
+    .optional()
+    .describe("Effective date within the next 60 days"),
+});
+
+/**
+ * Requires commission:read. Org-scoped. Never returns carrier member ids.
+ * @summary Statement variance, unmatched line items and open missed payments
+ */
+export const GetReconciliationOverviewResponse = zod.object({
+  statements: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  totals: zod.record(zod.string(), zod.unknown()).optional(),
+  unmatchedItems: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  missedPayments: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  asOf: zod.coerce.date().optional(),
+});
+
+/**
+ * Any authenticated user with a linked agent record. 404 when none is linked.
+ * @summary The caller's own agent back office
+ */
+export const GetMyAgentBackofficeResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * Requires agent:read. Org-scoped.
+ * @summary One agent's back office (profile, readiness, AHIP, licenses, certifications, portals, tasks, documents, checklists)
+ */
+export const GetAgentBackofficeParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetAgentBackofficeResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * Requires contact:update, a recent sign-in and `X-Confirm-Export: true`.
+ * Medicare ID is decrypted only for PHI-privileged roles and masked
+ * otherwise (same as the contacts bulk export). Logged to data_export_log.
+ * @summary Every contact as CSV
+ */
+export const ExportContactsCsvHeader = zod.object({
+  "X-Confirm-Export": zod.enum(["true"]),
+});
+
+export const ExportContactsCsvResponse = zod.unknown();
+
+/**
+ * Requires contact:update, a recent sign-in and `X-Confirm-Export true`. Logged to data_export_log.
+ * @summary Every enrollment (policy) as CSV — no Medicare ID column
+ */
+export const ExportPoliciesCsvHeader = zod.object({
+  "X-Confirm-Export": zod.enum(["true"]),
+});
+
+export const ExportPoliciesCsvResponse = zod.unknown();
+
+/**
+ * Requires agent:update, a recent sign-in and `X-Confirm-Export true`. Logged to data_export_log.
+ * @summary Agent roster as CSV — no contracting PII
+ */
+export const ExportAgentsCsvHeader = zod.object({
+  "X-Confirm-Export": zod.enum(["true"]),
+});
+
+export const ExportAgentsCsvResponse = zod.unknown();
+
+/**
+ * @summary List Knowledge Base articles (all staff roles)
+ */
+export const ListKbArticlesQueryParams = zod.object({
+  search: zod.coerce.string().optional(),
+  category: zod.coerce.string().optional(),
+  includeInactive: zod.enum(["true", "false"]).optional(),
+});
+
+export const ListKbArticlesResponse = zod.object({
+  articles: zod
+    .array(
+      zod.object({
+        id: zod.string(),
+        orgId: zod.string(),
+        category: zod.string(),
+        title: zod.string(),
+        content: zod.string(),
+        keywords: zod.array(zod.string()),
+        isActive: zod.boolean(),
+        createdBy: zod.string().nullish(),
+        createdAt: zod.coerce.date(),
+        updatedAt: zod.coerce.date(),
+      }),
+    )
+    .optional(),
+  stats: zod
+    .object({
+      total: zod.number().int().optional(),
+      active: zod.number().int().optional(),
+      categories: zod.number().int().optional(),
+      keywords: zod.number().int().optional(),
+    })
+    .optional(),
+});
+
+/**
+ * @summary Create an article (super_admin, agency_admin). Never include client data.
+ */
+export const createKbArticleBodyCategoryMax = 80;
+
+export const createKbArticleBodyTitleMax = 200;
+
+export const createKbArticleBodyContentMax = 20000;
+
+export const createKbArticleBodyKeywordsItemMax = 60;
+
+export const createKbArticleBodyKeywordsMax = 50;
+
+export const CreateKbArticleBody = zod.object({
+  category: zod.string().max(createKbArticleBodyCategoryMax).optional(),
+  title: zod.string().max(createKbArticleBodyTitleMax).optional(),
+  content: zod.string().max(createKbArticleBodyContentMax).optional(),
+  keywords: zod
+    .array(zod.string().max(createKbArticleBodyKeywordsItemMax))
+    .max(createKbArticleBodyKeywordsMax)
+    .optional(),
+  isActive: zod.boolean().optional(),
+});
+
+export const CreateKbArticleResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  category: zod.string(),
+  title: zod.string(),
+  content: zod.string(),
+  keywords: zod.array(zod.string()),
+  isActive: zod.boolean(),
+  createdBy: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+export const GetKbArticleParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetKbArticleResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  category: zod.string(),
+  title: zod.string(),
+  content: zod.string(),
+  keywords: zod.array(zod.string()),
+  isActive: zod.boolean(),
+  createdBy: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+export const UpdateKbArticleParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const updateKbArticleBodyCategoryMax = 80;
+
+export const updateKbArticleBodyTitleMax = 200;
+
+export const updateKbArticleBodyContentMax = 20000;
+
+export const updateKbArticleBodyKeywordsItemMax = 60;
+
+export const updateKbArticleBodyKeywordsMax = 50;
+
+export const UpdateKbArticleBody = zod.object({
+  category: zod.string().max(updateKbArticleBodyCategoryMax).optional(),
+  title: zod.string().max(updateKbArticleBodyTitleMax).optional(),
+  content: zod.string().max(updateKbArticleBodyContentMax).optional(),
+  keywords: zod
+    .array(zod.string().max(updateKbArticleBodyKeywordsItemMax))
+    .max(updateKbArticleBodyKeywordsMax)
+    .optional(),
+  isActive: zod.boolean().optional(),
+});
+
+export const UpdateKbArticleResponse = zod.object({
+  id: zod.string(),
+  orgId: zod.string(),
+  category: zod.string(),
+  title: zod.string(),
+  content: zod.string(),
+  keywords: zod.array(zod.string()),
+  isActive: zod.boolean(),
+  createdBy: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+export const DeleteKbArticleParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const DeleteKbArticleResponse = zod.void();
+
+/**
+ * @summary Appointments starting in [from, to) (max 100 days). Agents see only their own.
+ */
+export const ListAppointmentsQueryParams = zod.object({
+  from: zod.date(),
+  to: zod.date(),
+  agentId: zod.coerce.string().optional(),
+  contactId: zod.coerce.string().optional(),
+  status: zod
+    .enum(["confirmed", "pending", "completed", "cancelled", "no_show"])
+    .optional(),
+});
+
+export const ListAppointmentsResponse = zod.object({
+  data: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  summary: zod
+    .object({
+      total: zod.number().int().optional(),
+      confirmed: zod.number().int().optional(),
+      pending: zod.number().int().optional(),
+      completed: zod.number().int().optional(),
+      cancelled: zod.number().int().optional(),
+      no_show: zod.number().int().optional(),
+    })
+    .optional(),
+  scope: zod.enum(["own", "org"]).optional(),
+});
+
+/**
+ * @summary Book an appointment (notes are encrypted at rest)
+ */
+export const createAppointmentBodyTitleMax = 200;
+
+export const createAppointmentBodyNotesMax = 4000;
+
+export const createAppointmentBodyLocationDetailMax = 300;
+
+export const CreateAppointmentBody = zod.object({
+  title: zod.string().max(createAppointmentBodyTitleMax),
+  type: zod
+    .enum(["enrollment", "review", "renewal", "consultation", "other"])
+    .optional(),
+  status: zod
+    .enum(["confirmed", "pending", "completed", "cancelled", "no_show"])
+    .optional(),
+  startsAt: zod.coerce.date(),
+  endsAt: zod.coerce.date(),
+  contactId: zod.string().nullish(),
+  agentId: zod.string().nullish(),
+  notes: zod.string().max(createAppointmentBodyNotesMax).nullish(),
+  locationType: zod.enum(["office", "phone", "video", "home"]).optional(),
+  locationDetail: zod
+    .string()
+    .max(createAppointmentBodyLocationDetailMax)
+    .nullish(),
+  meetingUrl: zod.string().nullish().describe("https:\/\/ only"),
+});
+
+export const CreateAppointmentResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Contact picker (names only). Agents get only contacts assigned to them.
+ */
+export const ListAppointmentContactOptionsQueryParams = zod.object({
+  search: zod.coerce.string().optional(),
+});
+
+export const ListAppointmentContactOptionsResponse = zod.object({
+  data: zod
+    .array(
+      zod.object({
+        id: zod.string().optional(),
+        firstName: zod.string().optional(),
+        lastName: zod.string().optional(),
+        assignedAgentId: zod.string().nullish(),
+      }),
+    )
+    .optional(),
+});
+
+/**
+ * @summary Agent picker. Agents get only themselves.
+ */
+export const ListAppointmentAgentOptionsResponse = zod.object({
+  data: zod
+    .array(
+      zod.object({
+        id: zod.string().optional(),
+        firstName: zod.string().optional(),
+        lastName: zod.string().optional(),
+        isMe: zod.boolean().optional(),
+      }),
+    )
+    .optional(),
+});
+
+/**
+ * @summary One appointment
+ */
+export const GetAppointmentParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetAppointmentResponse = zod.record(zod.string(), zod.unknown());
+
+/**
+ * @summary Edit or reschedule (rescheduling clears the reminder claim)
+ */
+export const UpdateAppointmentParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateAppointmentBody = zod.record(zod.string(), zod.unknown());
+
+export const UpdateAppointmentResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Delete an appointment
+ */
+export const DeleteAppointmentParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const DeleteAppointmentResponse = zod.void();
+
+/**
+ * @summary This agency's white-label settings (null = agencyBRIDGE default). Any member.
+ */
+export const GetOrgBrandingResponse = zod.record(zod.string(), zod.unknown());
+
+/**
+ * @summary Update branding (agency_admin / super_admin). Rejects colours under 3:1 contrast on white.
+ */
+export const updateOrgBrandingBodyProductNameMax = 40;
+
+export const updateOrgBrandingBodyTaglineMax = 80;
+
+export const updateOrgBrandingBodyPrimaryColorRegExp = new RegExp(
+  "^#[0-9a-fA-F]{6}$",
+);
+export const updateOrgBrandingBodyAccentColorRegExp = new RegExp(
+  "^#[0-9a-fA-F]{6}$",
+);
+export const updateOrgBrandingBodyEmailFromNameMax = 60;
+
+export const UpdateOrgBrandingBody = zod.object({
+  productName: zod.string().max(updateOrgBrandingBodyProductNameMax).nullish(),
+  tagline: zod.string().max(updateOrgBrandingBodyTaglineMax).nullish(),
+  primaryColor: zod
+    .string()
+    .regex(updateOrgBrandingBodyPrimaryColorRegExp)
+    .nullish(),
+  accentColor: zod
+    .string()
+    .regex(updateOrgBrandingBodyAccentColorRegExp)
+    .nullish(),
+  displayFont: zod.string().nullish(),
+  bodyFont: zod.string().nullish(),
+  logoUrl: zod.string().nullish(),
+  markUrl: zod.string().nullish(),
+  faviconUrl: zod.string().nullish(),
+  emailFromName: zod
+    .string()
+    .max(updateOrgBrandingBodyEmailFromNameMax)
+    .nullish(),
+});
+
+export const UpdateOrgBrandingResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Reset to the agencyBRIDGE defaults (also clears the logo)
+ */
+export const ResetOrgBrandingResponse = zod.record(zod.string(), zod.unknown());
+
+/**
+ * @summary Every agency with live member, agent, client and pending-invitation counts (super_admin)
+ */
+export const ListAgenciesOverviewResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Create an agency and invite its first admin via the invitation flow (super_admin)
+ */
+export const createAgencyBodyNameMin = 2;
+export const createAgencyBodyNameMax = 120;
+
+export const createAgencyBodySlugRegExp = new RegExp(
+  "^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$",
+);
+
+export const CreateAgencyBody = zod.object({
+  name: zod.string().min(createAgencyBodyNameMin).max(createAgencyBodyNameMax),
+  slug: zod.string().regex(createAgencyBodySlugRegExp),
+  adminEmail: zod.string().email(),
+});
+
+export const CreateAgencyResponse = zod.record(zod.string(), zod.unknown());
+
+/**
+ * @summary List campaigns for the org (optionally one channel)
+ */
+export const ListCampaignsQueryParams = zod.object({
+  channel: zod.enum(["email", "sms"]).optional(),
+});
+
+export const listCampaignsResponseAudienceBirthdayMonthMax = 12;
+
+export const ListCampaignsResponseItem = zod.object({
+  id: zod.string().optional(),
+  channel: zod.enum(["email", "sms"]).optional(),
+  name: zod.string().optional(),
+  status: zod
+    .enum(["draft", "scheduled", "sending", "sent", "cancelled"])
+    .optional(),
+  subject: zod.string().nullish(),
+  body: zod.string().nullish(),
+  audience: zod
+    .object({
+      statuses: zod
+        .array(zod.enum(["lead", "prospect", "enrolled", "retained", "lost"]))
+        .optional(),
+      planTypes: zod
+        .array(zod.enum(["MA", "PDP", "MAPD", "supp", "other"]))
+        .optional(),
+      carrierIds: zod.array(zod.string()).optional(),
+      states: zod.array(zod.string()).optional(),
+      sources: zod.array(zod.string()).optional(),
+      tags: zod.array(zod.string()).optional(),
+      birthdayMonth: zod
+        .number()
+        .int()
+        .min(1)
+        .max(listCampaignsResponseAudienceBirthdayMonthMax)
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "Audience filter over contacts. Health conditions and race are never filterable.",
+    ),
+  templateName: zod.string().nullish(),
+  scheduledAt: zod.coerce.date().nullish(),
+  sentAt: zod.coerce.date().nullish(),
+  recipientCount: zod.number().int().optional(),
+  sentCount: zod.number().int().optional(),
+  deliveredCount: zod.number().int().optional(),
+  openedCount: zod.number().int().optional(),
+  clickedCount: zod.number().int().optional(),
+  bouncedCount: zod.number().int().optional(),
+  failedCount: zod.number().int().optional(),
+  skippedCount: zod.number().int().optional(),
+  unsubscribedCount: zod.number().int().optional(),
+});
+export const ListCampaignsResponse = zod.array(ListCampaignsResponseItem);
+
+/**
+ * @summary Create a draft campaign (communication:create)
+ */
+export const createCampaignBodyAudienceBirthdayMonthMax = 12;
+
+export const CreateCampaignBody = zod.object({
+  channel: zod.enum(["email", "sms"]).optional(),
+  name: zod.string().optional(),
+  templateId: zod.string().nullish(),
+  subject: zod.string().nullish(),
+  body: zod.string().nullish(),
+  audience: zod
+    .object({
+      statuses: zod
+        .array(zod.enum(["lead", "prospect", "enrolled", "retained", "lost"]))
+        .optional(),
+      planTypes: zod
+        .array(zod.enum(["MA", "PDP", "MAPD", "supp", "other"]))
+        .optional(),
+      carrierIds: zod.array(zod.string()).optional(),
+      states: zod.array(zod.string()).optional(),
+      sources: zod.array(zod.string()).optional(),
+      tags: zod.array(zod.string()).optional(),
+      birthdayMonth: zod
+        .number()
+        .int()
+        .min(1)
+        .max(createCampaignBodyAudienceBirthdayMonthMax)
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "Audience filter over contacts. Health conditions and race are never filterable.",
+    ),
+});
+
+export const createCampaignResponseAudienceBirthdayMonthMax = 12;
+
+export const CreateCampaignResponse = zod.object({
+  id: zod.string().optional(),
+  channel: zod.enum(["email", "sms"]).optional(),
+  name: zod.string().optional(),
+  status: zod
+    .enum(["draft", "scheduled", "sending", "sent", "cancelled"])
+    .optional(),
+  subject: zod.string().nullish(),
+  body: zod.string().nullish(),
+  audience: zod
+    .object({
+      statuses: zod
+        .array(zod.enum(["lead", "prospect", "enrolled", "retained", "lost"]))
+        .optional(),
+      planTypes: zod
+        .array(zod.enum(["MA", "PDP", "MAPD", "supp", "other"]))
+        .optional(),
+      carrierIds: zod.array(zod.string()).optional(),
+      states: zod.array(zod.string()).optional(),
+      sources: zod.array(zod.string()).optional(),
+      tags: zod.array(zod.string()).optional(),
+      birthdayMonth: zod
+        .number()
+        .int()
+        .min(1)
+        .max(createCampaignResponseAudienceBirthdayMonthMax)
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "Audience filter over contacts. Health conditions and race are never filterable.",
+    ),
+  templateName: zod.string().nullish(),
+  scheduledAt: zod.coerce.date().nullish(),
+  sentAt: zod.coerce.date().nullish(),
+  recipientCount: zod.number().int().optional(),
+  sentCount: zod.number().int().optional(),
+  deliveredCount: zod.number().int().optional(),
+  openedCount: zod.number().int().optional(),
+  clickedCount: zod.number().int().optional(),
+  bouncedCount: zod.number().int().optional(),
+  failedCount: zod.number().int().optional(),
+  skippedCount: zod.number().int().optional(),
+  unsubscribedCount: zod.number().int().optional(),
+});
+
+/**
+ * @summary KPI totals from real recipient rows; rates are null until tracking is connected
+ */
+export const GetCampaignOverviewQueryParams = zod.object({
+  channel: zod.enum(["email", "sms"]).optional(),
+});
+
+export const GetCampaignOverviewResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Which sending / tracking / compliance settings are configured
+ */
+export const GetCampaignConfigResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Sender name, physical mailing address (CAN-SPAM), reply-to, quiet-hours time zone (communication:update)
+ */
+export const UpdateCampaignSettingsBody = zod.object({
+  senderName: zod.string().nullish(),
+  physicalAddress: zod.string().nullish(),
+  replyToEmail: zod.string().nullish(),
+  defaultTimeZone: zod.string().optional(),
+});
+
+export const UpdateCampaignSettingsResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Recent delivered / opened / clicked / bounced / unsubscribed recipient events
+ */
+export const GetCampaignActivityQueryParams = zod.object({
+  channel: zod.enum(["email", "sms"]).optional(),
+});
+
+export const GetCampaignActivityResponseItem = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+export const GetCampaignActivityResponse = zod.array(
+  GetCampaignActivityResponseItem,
+);
+
+/**
+ * @summary Live recipient count for an audience filter (opt-outs excluded)
+ */
+export const previewCampaignAudienceBodyAudienceBirthdayMonthMax = 12;
+
+export const PreviewCampaignAudienceBody = zod.object({
+  channel: zod.enum(["email", "sms"]),
+  audience: zod
+    .object({
+      statuses: zod
+        .array(zod.enum(["lead", "prospect", "enrolled", "retained", "lost"]))
+        .optional(),
+      planTypes: zod
+        .array(zod.enum(["MA", "PDP", "MAPD", "supp", "other"]))
+        .optional(),
+      carrierIds: zod.array(zod.string()).optional(),
+      states: zod.array(zod.string()).optional(),
+      sources: zod.array(zod.string()).optional(),
+      tags: zod.array(zod.string()).optional(),
+      birthdayMonth: zod
+        .number()
+        .int()
+        .min(1)
+        .max(previewCampaignAudienceBodyAudienceBirthdayMonthMax)
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "Audience filter over contacts. Health conditions and race are never filterable.",
+    ),
+});
+
+export const PreviewCampaignAudienceResponse = zod.object({
+  matched: zod.number().int().optional(),
+  eligible: zod.number().int().optional(),
+  optedOut: zod.number().int().optional(),
+  missingAddress: zod.number().int().optional(),
+});
+
+/**
+ * @summary Distinct states, sources, tags and carriers for the audience builder
+ */
+export const GetCampaignAudienceOptionsResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Email unsubscribes or the SMS STOP list for the org
+ */
+export const ListCampaignOptOutsQueryParams = zod.object({
+  channel: zod.enum(["email", "sms"]).optional(),
+});
+
+export const ListCampaignOptOutsResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
+ * @summary Re-opt-in a contact to EMAIL with explicit confirmation + reason (audited). SMS always 403 — only the consumer texting START can re-opt-in.
+ */
+export const ResubscribeCampaignContactParams = zod.object({
+  channel: zod.enum(["email", "sms"]),
+});
+
+export const resubscribeCampaignContactBodyReasonMin = 5;
+
+export const ResubscribeCampaignContactBody = zod.object({
+  contactId: zod.string(),
+  confirm: zod.literal(true),
+  reason: zod.string().min(resubscribeCampaignContactBodyReasonMin),
+});
+
+export const ResubscribeCampaignContactResponse = zod.unknown();
+
+/**
+ * @summary Campaign detail with up to 200 recipients
+ */
+export const GetCampaignParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const getCampaignResponseAudienceBirthdayMonthMax = 12;
+
+export const GetCampaignResponse = zod.object({
+  id: zod.string().optional(),
+  channel: zod.enum(["email", "sms"]).optional(),
+  name: zod.string().optional(),
+  status: zod
+    .enum(["draft", "scheduled", "sending", "sent", "cancelled"])
+    .optional(),
+  subject: zod.string().nullish(),
+  body: zod.string().nullish(),
+  audience: zod
+    .object({
+      statuses: zod
+        .array(zod.enum(["lead", "prospect", "enrolled", "retained", "lost"]))
+        .optional(),
+      planTypes: zod
+        .array(zod.enum(["MA", "PDP", "MAPD", "supp", "other"]))
+        .optional(),
+      carrierIds: zod.array(zod.string()).optional(),
+      states: zod.array(zod.string()).optional(),
+      sources: zod.array(zod.string()).optional(),
+      tags: zod.array(zod.string()).optional(),
+      birthdayMonth: zod
+        .number()
+        .int()
+        .min(1)
+        .max(getCampaignResponseAudienceBirthdayMonthMax)
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "Audience filter over contacts. Health conditions and race are never filterable.",
+    ),
+  templateName: zod.string().nullish(),
+  scheduledAt: zod.coerce.date().nullish(),
+  sentAt: zod.coerce.date().nullish(),
+  recipientCount: zod.number().int().optional(),
+  sentCount: zod.number().int().optional(),
+  deliveredCount: zod.number().int().optional(),
+  openedCount: zod.number().int().optional(),
+  clickedCount: zod.number().int().optional(),
+  bouncedCount: zod.number().int().optional(),
+  failedCount: zod.number().int().optional(),
+  skippedCount: zod.number().int().optional(),
+  unsubscribedCount: zod.number().int().optional(),
+});
+
+/**
+ * @summary Edit a draft
+ */
+export const UpdateCampaignParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const updateCampaignBodyAudienceBirthdayMonthMax = 12;
+
+export const UpdateCampaignBody = zod.object({
+  channel: zod.enum(["email", "sms"]).optional(),
+  name: zod.string().optional(),
+  templateId: zod.string().nullish(),
+  subject: zod.string().nullish(),
+  body: zod.string().nullish(),
+  audience: zod
+    .object({
+      statuses: zod
+        .array(zod.enum(["lead", "prospect", "enrolled", "retained", "lost"]))
+        .optional(),
+      planTypes: zod
+        .array(zod.enum(["MA", "PDP", "MAPD", "supp", "other"]))
+        .optional(),
+      carrierIds: zod.array(zod.string()).optional(),
+      states: zod.array(zod.string()).optional(),
+      sources: zod.array(zod.string()).optional(),
+      tags: zod.array(zod.string()).optional(),
+      birthdayMonth: zod
+        .number()
+        .int()
+        .min(1)
+        .max(updateCampaignBodyAudienceBirthdayMonthMax)
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "Audience filter over contacts. Health conditions and race are never filterable.",
+    ),
+});
+
+export const updateCampaignResponseAudienceBirthdayMonthMax = 12;
+
+export const UpdateCampaignResponse = zod.object({
+  id: zod.string().optional(),
+  channel: zod.enum(["email", "sms"]).optional(),
+  name: zod.string().optional(),
+  status: zod
+    .enum(["draft", "scheduled", "sending", "sent", "cancelled"])
+    .optional(),
+  subject: zod.string().nullish(),
+  body: zod.string().nullish(),
+  audience: zod
+    .object({
+      statuses: zod
+        .array(zod.enum(["lead", "prospect", "enrolled", "retained", "lost"]))
+        .optional(),
+      planTypes: zod
+        .array(zod.enum(["MA", "PDP", "MAPD", "supp", "other"]))
+        .optional(),
+      carrierIds: zod.array(zod.string()).optional(),
+      states: zod.array(zod.string()).optional(),
+      sources: zod.array(zod.string()).optional(),
+      tags: zod.array(zod.string()).optional(),
+      birthdayMonth: zod
+        .number()
+        .int()
+        .min(1)
+        .max(updateCampaignResponseAudienceBirthdayMonthMax)
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "Audience filter over contacts. Health conditions and race are never filterable.",
+    ),
+  templateName: zod.string().nullish(),
+  scheduledAt: zod.coerce.date().nullish(),
+  sentAt: zod.coerce.date().nullish(),
+  recipientCount: zod.number().int().optional(),
+  sentCount: zod.number().int().optional(),
+  deliveredCount: zod.number().int().optional(),
+  openedCount: zod.number().int().optional(),
+  clickedCount: zod.number().int().optional(),
+  bouncedCount: zod.number().int().optional(),
+  failedCount: zod.number().int().optional(),
+  skippedCount: zod.number().int().optional(),
+  unsubscribedCount: zod.number().int().optional(),
+});
+
+/**
+ * @summary Delete a draft or a cancelled campaign that reached nobody (communication:update)
+ */
+export const DeleteCampaignParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const DeleteCampaignResponse = zod.void();
+
+/**
+ * @summary Send now or schedule (communication:update). 409 when the provider, mailing address or unsubscribe signer is not configured, or the audience is empty.
+ */
+export const SendCampaignParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const SendCampaignBody = zod.object({
+  scheduledAt: zod.coerce.date().nullish(),
+});
+
+export const sendCampaignResponseAudienceBirthdayMonthMax = 12;
+
+export const SendCampaignResponse = zod.object({
+  id: zod.string().optional(),
+  channel: zod.enum(["email", "sms"]).optional(),
+  name: zod.string().optional(),
+  status: zod
+    .enum(["draft", "scheduled", "sending", "sent", "cancelled"])
+    .optional(),
+  subject: zod.string().nullish(),
+  body: zod.string().nullish(),
+  audience: zod
+    .object({
+      statuses: zod
+        .array(zod.enum(["lead", "prospect", "enrolled", "retained", "lost"]))
+        .optional(),
+      planTypes: zod
+        .array(zod.enum(["MA", "PDP", "MAPD", "supp", "other"]))
+        .optional(),
+      carrierIds: zod.array(zod.string()).optional(),
+      states: zod.array(zod.string()).optional(),
+      sources: zod.array(zod.string()).optional(),
+      tags: zod.array(zod.string()).optional(),
+      birthdayMonth: zod
+        .number()
+        .int()
+        .min(1)
+        .max(sendCampaignResponseAudienceBirthdayMonthMax)
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "Audience filter over contacts. Health conditions and race are never filterable.",
+    ),
+  templateName: zod.string().nullish(),
+  scheduledAt: zod.coerce.date().nullish(),
+  sentAt: zod.coerce.date().nullish(),
+  recipientCount: zod.number().int().optional(),
+  sentCount: zod.number().int().optional(),
+  deliveredCount: zod.number().int().optional(),
+  openedCount: zod.number().int().optional(),
+  clickedCount: zod.number().int().optional(),
+  bouncedCount: zod.number().int().optional(),
+  failedCount: zod.number().int().optional(),
+  skippedCount: zod.number().int().optional(),
+  unsubscribedCount: zod.number().int().optional(),
+});
+
+/**
+ * @summary Cancel a scheduled or sending campaign
+ */
+export const CancelCampaignParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const cancelCampaignResponseAudienceBirthdayMonthMax = 12;
+
+export const CancelCampaignResponse = zod.object({
+  id: zod.string().optional(),
+  channel: zod.enum(["email", "sms"]).optional(),
+  name: zod.string().optional(),
+  status: zod
+    .enum(["draft", "scheduled", "sending", "sent", "cancelled"])
+    .optional(),
+  subject: zod.string().nullish(),
+  body: zod.string().nullish(),
+  audience: zod
+    .object({
+      statuses: zod
+        .array(zod.enum(["lead", "prospect", "enrolled", "retained", "lost"]))
+        .optional(),
+      planTypes: zod
+        .array(zod.enum(["MA", "PDP", "MAPD", "supp", "other"]))
+        .optional(),
+      carrierIds: zod.array(zod.string()).optional(),
+      states: zod.array(zod.string()).optional(),
+      sources: zod.array(zod.string()).optional(),
+      tags: zod.array(zod.string()).optional(),
+      birthdayMonth: zod
+        .number()
+        .int()
+        .min(1)
+        .max(cancelCampaignResponseAudienceBirthdayMonthMax)
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "Audience filter over contacts. Health conditions and race are never filterable.",
+    ),
+  templateName: zod.string().nullish(),
+  scheduledAt: zod.coerce.date().nullish(),
+  sentAt: zod.coerce.date().nullish(),
+  recipientCount: zod.number().int().optional(),
+  sentCount: zod.number().int().optional(),
+  deliveredCount: zod.number().int().optional(),
+  openedCount: zod.number().int().optional(),
+  clickedCount: zod.number().int().optional(),
+  bouncedCount: zod.number().int().optional(),
+  failedCount: zod.number().int().optional(),
+  skippedCount: zod.number().int().optional(),
+  unsubscribedCount: zod.number().int().optional(),
+});
+
+/**
+ * @summary Resend delivery/open/click/bounce/complaint events (svix signature, RESEND_WEBHOOK_SECRET)
+ */
+export const CampaignResendWebhookResponse = zod.unknown();
+
+/**
+ * @summary Twilio SMS delivery receipts (X-Twilio-Signature)
+ */
+export const CampaignTwilioStatusCallbackResponse = zod.void();

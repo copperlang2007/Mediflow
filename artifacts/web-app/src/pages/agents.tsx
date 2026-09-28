@@ -36,6 +36,11 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2, AlertCircle, LayoutGrid, List } from "lucide-react";
+import type { Agent } from "@workspace/api-client-react";
+import { EmptyState, PageHeader, StatusPill } from "@/components/shared";
+import { cn } from "@/lib/utils";
+import { formatPhone } from "@/lib/phone";
 
 const STATUS_STYLES: Record<string, string> = {
   onboarding: "bg-amber-100 text-amber-800 border-amber-200",
@@ -72,6 +77,91 @@ function ComplianceBar({ agentId }: { agentId: string }) {
         {Math.round(score)}
       </span>
     </div>
+  );
+}
+
+function scoreColor(score: number) {
+  return score >= 80 ? "text-success" : score >= 50 ? "text-warning" : "text-destructive";
+}
+
+function Check({ ok, label }: { ok: boolean; label: string }) {
+  const Icon = ok ? CheckCircle2 : AlertCircle;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Icon className={cn("h-3.5 w-3.5", ok ? "text-success" : "text-warning")} />
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Agent tile from the agencyBRIDGE Agents page: who they are, their status,
+ * and their real compliance picture (licenses, AHIP, onboarding) at a glance.
+ */
+function AgentCard({ agent, onOpen }: { agent: Agent; onOpen: () => void }) {
+  const { data: score } = useGetAgentComplianceScore(agent.id);
+  const total = score ? Math.round(score.totalScore) : null;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group flex h-full flex-col rounded-xl border border-border bg-card p-5 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <div className="flex items-start gap-3">
+        <Avatar className="h-12 w-12 shrink-0">
+          <AvatarImage src={agent.avatarUrl ?? undefined} />
+          <AvatarFallback className="bg-navy-800 text-white font-semibold dark:bg-secondary dark:text-secondary-foreground">
+            {agent.firstName[0]}{agent.lastName[0]}
+          </AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1">
+          <p className="font-display font-semibold leading-tight truncate">{agent.firstName} {agent.lastName}</p>
+          <p className="text-xs text-muted-foreground truncate" title={agent.email}>{agent.npn ? `NPN ${agent.npn}` : agent.email}</p>
+        </div>
+        <StatusPill status={agent.status} />
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Licenses</p>
+          <p className="font-display text-xl font-bold">{agent.activeLicenseCount ?? "—"}</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Hired</p>
+          <p className="font-display text-base font-bold leading-7 whitespace-nowrap">
+            {agent.hireDate ? new Date(agent.hireDate).toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "—"}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Score</p>
+          <p className={cn("font-display text-xl font-bold", total != null && scoreColor(total))}>{total ?? "—"}</p>
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+          <span>Compliance score</span>
+          <span className="tabular-nums">{total != null ? `${total}%` : "…"}</span>
+        </div>
+        <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+          <div className="h-full rounded-full bg-navy-800 dark:bg-accent" style={{ width: `${total ?? 0}%` }} />
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-border pt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {score ? (
+          <>
+            <Check ok={score.ahipCompleted} label="AHIP" />
+            <span aria-hidden>·</span>
+            <Check ok={score.onboardingComplete} label="Onboarding" />
+            <span aria-hidden>·</span>
+            <span>{score.activeCertifications} certification{score.activeCertifications === 1 ? "" : "s"}</span>
+          </>
+        ) : (
+          <span>Checking compliance…</span>
+        )}
+      </div>
+    </button>
   );
 }
 
@@ -352,7 +442,7 @@ function AddAgentWizard({ open, onClose }: { open: boolean; onClose: () => void 
                 <span className="font-medium">{form.email}</span>
                 {form.phone && <>
                   <span className="text-muted-foreground">Phone</span>
-                  <span className="font-medium">{form.phone}</span>
+                  <span className="font-medium">{formatPhone(form.phone)}</span>
                 </>}
                 {form.npn && <>
                   <span className="text-muted-foreground">NPN</span>
@@ -545,6 +635,17 @@ export default function AgentsPage() {
   const [sortBy, setSortBy] = useState<SortField>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [view, setView] = useState<"cards" | "table">(() => {
+    try {
+      return localStorage.getItem("mediflow:agents-view") === "table" ? "table" : "cards";
+    } catch {
+      return "cards";
+    }
+  });
+  const changeView = (v: "cards" | "table") => {
+    setView(v);
+    try { localStorage.setItem("mediflow:agents-view", v); } catch { /* storage unavailable */ }
+  };
   const [, navigate] = useLocation();
 
   const serverSortFields: SortField[] = ["complianceScore", "status", "hireDate", "email", "name"];
@@ -617,23 +718,17 @@ export default function AgentsPage() {
   );
 
   return (
-    <div className="p-6 space-y-5 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Agents</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Manage your sales agent roster</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={exportCSV}>
-            <Download className="h-3.5 w-3.5 mr-1.5" />
-            Export CSV
-          </Button>
-          <Button onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Agent
-          </Button>
-        </div>
-      </div>
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+      <PageHeader title="Agents" subtitle="Your agents, their licenses and how compliant they are">
+        <Button variant="outline" onClick={exportCSV}>
+          <Download className="h-4 w-4 mr-1.5" />
+          Export CSV
+        </Button>
+        <Button onClick={() => setAddOpen(true)}>
+          <Plus className="h-4 w-4 mr-1.5" />
+          Add Agent
+        </Button>
+      </PageHeader>
 
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
@@ -656,6 +751,24 @@ export default function AgentsPage() {
             ))}
           </SelectContent>
         </Select>
+        <div className="ml-auto flex rounded-xl border border-border bg-card p-1 shadow-sm" role="group" aria-label="Layout">
+          <button
+            type="button"
+            aria-pressed={view === "cards"}
+            onClick={() => changeView("cards")}
+            className={cn("flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm", view === "cards" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}
+          >
+            <LayoutGrid className="h-4 w-4" />Cards
+          </button>
+          <button
+            type="button"
+            aria-pressed={view === "table"}
+            onClick={() => changeView("table")}
+            className={cn("flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm", view === "table" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}
+          >
+            <List className="h-4 w-4" />Table
+          </button>
+        </div>
       </div>
 
       {selected.size > 0 && (
@@ -666,7 +779,38 @@ export default function AgentsPage() {
         />
       )}
 
-      <Card>
+      {!isLoading && sorted.length === 0 ? (
+        <Card>
+          {search || status !== "all" ? (
+            <EmptyState
+              icon={Search}
+              title="No agents match"
+              description="Try a different name, or show all statuses."
+              action={{ label: "Clear filters", onClick: () => { setSearch(""); setStatus("all"); } }}
+            />
+          ) : (
+            <EmptyState
+              icon={Users}
+              title="No agents yet"
+              description="Add the people who sell for your agency. You'll track their licenses, certifications and contracting here."
+              action={{ label: "Add your first agent", onClick: () => setAddOpen(true) }}
+            />
+          )}
+        </Card>
+      ) : view === "cards" ? (
+        isLoading ? (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-56 rounded-xl" />)}
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {sorted.map((agent) => (
+              <AgentCard key={agent.id} agent={agent} onOpen={() => navigate(`/agents/${agent.id}`)} />
+            ))}
+          </div>
+        )
+      ) : (
+      <Card className="overflow-hidden">
         <CardContent className="p-0">
           {isLoading ? (
             <div className="p-4 space-y-3">
@@ -674,19 +818,9 @@ export default function AgentsPage() {
                 <Skeleton key={i} className="h-14 w-full" />
               ))}
             </div>
-          ) : sorted.length === 0 ? (
-            <div className="py-16 text-center">
-              <Users className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
-              <p className="text-sm font-medium text-muted-foreground">No agents found</p>
-              <p className="text-xs text-muted-foreground mt-1">Add your first agent to get started</p>
-              <Button className="mt-4" size="sm" onClick={() => setAddOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Add Agent
-              </Button>
-            </div>
           ) : (
             <>
-              <div className="grid grid-cols-[auto_auto_1fr_auto_auto_auto_auto] items-center gap-4 px-5 py-2.5 border-b border-border">
+              <div className="grid grid-cols-[auto_auto_1fr_auto_auto_auto_auto] items-center gap-4 px-5 py-3 border-b border-border bg-muted/50">
                 <button onClick={toggleAll} className="w-5 flex items-center text-muted-foreground hover:text-foreground">
                   {allSelected
                     ? <CheckSquare className="h-4 w-4 text-primary" />
@@ -727,7 +861,7 @@ export default function AgentsPage() {
                       onClick={() => navigate(`/agents/${agent.id}`)}
                     >
                       <AvatarImage src={agent.avatarUrl ?? undefined} />
-                      <AvatarFallback className="text-xs bg-primary/10 text-primary">
+                      <AvatarFallback className="text-xs bg-navy-100 text-navy-800 font-semibold dark:bg-secondary dark:text-secondary-foreground">
                         {agent.firstName[0]}{agent.lastName[0]}
                       </AvatarFallback>
                     </Avatar>
@@ -742,12 +876,7 @@ export default function AgentsPage() {
                       <p className="text-xs text-muted-foreground truncate">{agent.email}</p>
                     </div>
                     <div className="w-24 hidden md:flex justify-center">
-                      <Badge
-                        variant="secondary"
-                        className={`text-xs shrink-0 capitalize border ${STATUS_STYLES[agent.status] ?? ""}`}
-                      >
-                        {agent.status}
-                      </Badge>
+                      <StatusPill status={agent.status} />
                     </div>
                     <span className="text-xs text-muted-foreground hidden lg:block w-24 text-center tabular-nums">
                       {agent.hireDate ? new Date(agent.hireDate).toLocaleDateString() : "—"}
@@ -777,9 +906,10 @@ export default function AgentsPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
-      {data && (
-        <p className="text-xs text-muted-foreground text-center">
+      {data && sorted.length > 0 && (
+        <p className="text-sm text-muted-foreground">
           Showing {sorted.length} of {data.total} agents
           {selected.size > 0 && ` · ${selected.size} selected`}
         </p>

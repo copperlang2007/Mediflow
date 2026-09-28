@@ -19,6 +19,7 @@ import dialerEventsRouter from "./routes/dialerEvents";
 import queuePublicRouter from "./routes/queuePublic";
 import unsubscribeRouter from "./routes/unsubscribe";
 import enrollhereWebhookRouter from "./routes/enrollhereWebhook";
+import campaignsPublicRouter from "./routes/campaignsPublic";
 import { logger } from "./lib/logger";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "./middlewares/requireAuth";
 import { isDemoMode } from "./lib/demoMode";
@@ -333,6 +334,12 @@ app.use(queuePublicRouter);
 // Clerk-guarded `/api` router, trust from a per-tenant shared secret or
 // X-MB-Signature HMAC. See routes/enrollhereWebhook.ts.
 app.use(enrollhereWebhookRouter);
+
+// Omnichannel campaigns: Resend (svix-signed) / Twilio (X-Twilio-Signature)
+// delivery webhooks. Same posture as the receivers above: no Clerk session,
+// trust from a signature. Campaign email unsubscribes go through the shared
+// endpoint below. See routes/campaignsPublic.ts.
+app.use(campaignsPublicRouter);
 
 // Public email unsubscribe (CAN-SPAM opt-out). Trust comes from the signed
 // token in the link, not a Clerk session. See routes/unsubscribe.ts.

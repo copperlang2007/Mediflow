@@ -502,7 +502,7 @@ export async function reconcileStatement(
 
     await tx
       .update(commissionStatementsTable)
-      .set({ status: "reconciled" })
+      .set({ status: "reconciled", reconciledAt: new Date() })
       .where(eq(commissionStatementsTable.id, statementId));
   });
 

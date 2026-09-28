@@ -42,7 +42,44 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ChevronLeft, AlertTriangle, Send } from "lucide-react";
+import { ChevronLeft, AlertTriangle, Send, Lock, Handshake, Check, UserRound, Building2 } from "lucide-react";
+import { EmptyState, SectionCard, StatusPill, SensitiveValue, type SensitiveKind } from "@/components/shared";
+import { ContactAvatar } from "@/pages/crm/ui";
+import { cn } from "@/lib/utils";
+
+/** The happy path of a contracting run, in order, with plain-language names. */
+const RUN_STEPS: Array<{ status: string; label: string }> = [
+  { status: "profile_in_progress", label: "Agent profile" },
+  { status: "carriers_selected", label: "Carriers picked" },
+  { status: "signing", label: "Signing" },
+  { status: "submitted", label: "Sent to carriers" },
+  { status: "complete", label: "Complete" },
+];
+
+function RunProgress({ status }: { status: string }) {
+  const idx = status === "draft" ? -1 : RUN_STEPS.findIndex((st) => st.status === status);
+  if (idx < 0 && status !== "draft") return null; // cancelled / rejected: the status pill says it
+  return (
+    <ol className="grid grid-cols-5 gap-2" aria-label="Contracting progress">
+      {RUN_STEPS.map((st, i) => {
+        const done = i < idx || status === "complete";
+        const current = i === idx && status !== "complete";
+        return (
+          <li key={st.status} className="min-w-0">
+            <div className={cn("h-1.5 rounded-full", done ? "bg-success" : current ? "bg-accent" : "bg-muted")} />
+            <p className={cn(
+              "mt-1.5 flex items-center gap-1 text-xs truncate",
+              done ? "text-success" : current ? "font-semibold text-foreground" : "text-muted-foreground",
+            )}>
+              {done && <Check className="h-3 w-3 shrink-0" />}
+              {st.label}
+            </p>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 import {
   contractingStatusLabel,
   onboardingStatusLabel,
@@ -70,11 +107,13 @@ export default function AdminOnboardingDetail({ agentId }: { agentId: string }) 
 
   if (!meLoading && !isAdmin) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
         <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            You don't have access to the admin onboarding dashboard.
-          </CardContent>
+          <EmptyState
+            icon={Lock}
+            title="Contracting is for admins"
+            description="You don't have access to the contracting dashboard. Ask an agency admin or compliance manager if you need it."
+          />
         </Card>
       </div>
     );
@@ -82,26 +121,29 @@ export default function AdminOnboardingDetail({ agentId }: { agentId: string }) 
 
   if (obLoading) {
     return (
-      <div className="p-6 max-w-5xl mx-auto space-y-4">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto space-y-4">
         <Skeleton className="h-8 w-72" />
-        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-40 w-full rounded-xl" />
       </div>
     );
   }
 
   if (!onboarding) {
     return (
-      <div className="p-6 max-w-3xl mx-auto space-y-4">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto space-y-4">
         <Link href="/admin-onboarding">
-          <Button variant="ghost" size="sm">
+          <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground">
             <ChevronLeft className="h-4 w-4 mr-1" />
-            Back to dashboard
+            Back to Contracting
           </Button>
         </Link>
         <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            No active onboarding run for this agent.
-          </CardContent>
+          <EmptyState
+            icon={Handshake}
+            title="No contracting in progress"
+            description="This agent doesn't have an active onboarding run. Start one from the Contracting page."
+            action={{ label: "Go to Contracting", href: "/admin-onboarding" }}
+          />
         </Card>
       </div>
     );
@@ -139,94 +181,90 @@ export default function AdminOnboardingDetail({ agentId }: { agentId: string }) 
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-5">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto space-y-6">
       <Link href="/admin-onboarding">
-        <Button variant="ghost" size="sm" data-testid="back-to-dashboard">
+        <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" data-testid="back-to-dashboard">
           <ChevronLeft className="h-4 w-4 mr-1" />
-          Back to dashboard
+          Back to Contracting
         </Button>
       </Link>
 
-      <header className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold">
-            {agent ? `${agent.firstName} ${agent.lastName}` : "Onboarding"}
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {agent?.email}
-          </p>
-          <div className="flex items-center gap-2 mt-2 flex-wrap">
-            <Badge variant="secondary">{onboardingStatusLabel(run.status)}</Badge>
-            {run.poaStatus && run.poaStatus !== "not_applicable" && (
-              <Badge
-                variant={
-                  run.poaStatus === "signed"
-                    ? "default"
-                    : run.poaStatus === "opted_out"
-                      ? "outline"
-                      : "secondary"
-                }
-                data-testid="admin-poa-badge"
+      <header className="rounded-xl border border-border bg-card shadow-sm">
+        <div className="flex flex-col gap-4 p-5 sm:p-6 lg:flex-row lg:items-start">
+          <div className="flex min-w-0 flex-1 items-start gap-4">
+            <ContactAvatar first={agent?.firstName} last={agent?.lastName} size="lg" />
+            <div className="min-w-0">
+              <h1 className="font-display text-2xl font-bold tracking-tight">
+                {agent ? `${agent.firstName} ${agent.lastName}` : "Onboarding"}
+              </h1>
+              {agent?.email && <p className="text-sm text-muted-foreground truncate">{agent.email}</p>}
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
+                <StatusPill status={run.status} tone={run.status === "carriers_selected" ? "warning" : run.status === "signing" ? "navy" : undefined}>
+                  {onboardingStatusLabel(run.status)}
+                </StatusPill>
+                {run.poaStatus && run.poaStatus !== "not_applicable" && (
+                  <span data-testid="admin-poa-badge">
+                    <StatusPill tone={run.poaStatus === "signed" ? "success" : run.poaStatus === "opted_out" ? "neutral" : "warning"}>
+                      {poaStatusLabel(run.poaStatus)}
+                    </StatusPill>
+                  </span>
+                )}
+                <span className="text-xs text-muted-foreground">
+                  Started {new Date(run.startedAt).toLocaleDateString()}
+                </span>
+                {run.completedAt && (
+                  <span className="text-xs text-muted-foreground">
+                    · Completed {new Date(run.completedAt).toLocaleDateString()}
+                  </span>
+                )}
+                {run.poaExpiresAt && run.poaStatus === "signed" && (
+                  <span className="text-xs text-muted-foreground">
+                    · POA expires {new Date(run.poaExpiresAt).toLocaleDateString()}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {canCancel && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCancelOpen(true)}
+                data-testid="cancel-onboarding-btn"
               >
-                {poaStatusLabel(run.poaStatus)}
-              </Badge>
+                Cancel onboarding
+              </Button>
             )}
-            <span className="text-xs text-muted-foreground">
-              Started {new Date(run.startedAt).toLocaleDateString()}
-            </span>
-            {run.completedAt && (
-              <span className="text-xs text-muted-foreground">
-                · Completed {new Date(run.completedAt).toLocaleDateString()}
-              </span>
-            )}
-            {run.poaExpiresAt && run.poaStatus === "signed" && (
-              <span className="text-xs text-muted-foreground">
-                · POA expires {new Date(run.poaExpiresAt).toLocaleDateString()}
-              </span>
+            {canRequestContracting && (
+              <Button
+                onClick={handleRequestContracting}
+                disabled={requestContracting.isPending}
+                data-testid="request-contracting-btn"
+              >
+                <Send className="h-4 w-4 mr-2" />
+                {requestContracting.isPending
+                  ? "Generating paperwork…"
+                  : "Review and request contracting"}
+              </Button>
             )}
           </div>
         </div>
-
-        <div className="flex items-center gap-2">
-          {canCancel && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCancelOpen(true)}
-              data-testid="cancel-onboarding-btn"
-            >
-              Cancel onboarding
-            </Button>
-          )}
-          {canRequestContracting && (
-            <Button
-              onClick={handleRequestContracting}
-              disabled={requestContracting.isPending}
-              data-testid="request-contracting-btn"
-            >
-              <Send className="h-4 w-4 mr-2" />
-              {requestContracting.isPending
-                ? "Generating paperwork…"
-                : "Review and request contracting"}
-            </Button>
-          )}
+        <div className="border-t border-border px-5 py-4 sm:px-6">
+          <RunProgress status={run.status} />
         </div>
       </header>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Contracting profile</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <div className="grid gap-6 lg:grid-cols-5">
+      <SectionCard title="Contracting profile" icon={UserRound} className="lg:col-span-2 self-start">
           {!profile ? (
-            <p className="text-sm text-muted-foreground italic">
-              The agent hasn't started their profile yet.
-            </p>
+            <EmptyState compact icon={UserRound} title="Profile not started" description="The agent hasn't started their contracting profile yet." />
           ) : (
-            <div className="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
-              <Row label="SSN" value={profile.ssn} />
-              <Row label="EIN" value={profile.ein} />
-              <Row label="DOB" value={profile.dob} />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+              <SensitiveRow kind="ssn" label="SSN" value={profile.ssn} />
+              <SensitiveRow kind="ein" label="EIN" value={profile.ein} />
+              <SensitiveRow kind="dob" label="DOB" value={profile.dob} />
               <Row label="Phone" value={profile.phone} />
               <Row label="Email" value={profile.email} />
               <Row label="Entity" value={profile.entityType} />
@@ -248,31 +286,30 @@ export default function AdminOnboardingDetail({ agentId }: { agentId: string }) 
             </div>
           )}
           {profile && (profile.ssn === null || profile.ssn === "***-**-****") && (
-            <p className="text-[11px] text-muted-foreground mt-3 flex items-center gap-1">
-              <AlertTriangle className="h-3 w-3" />
-              SSN and EIN are masked — only super admins, agency admins, and
-              compliance managers can view the plaintext values.
+            <p className="text-xs text-muted-foreground mt-4 flex items-start gap-1.5">
+              <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              SSN, EIN and date of birth are hidden — only super admins, agency
+              admins, and compliance managers can view them.
             </p>
           )}
-        </CardContent>
-      </Card>
+      </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Carrier contracting requests ({active.length})
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
+      <SectionCard
+        title={`Carrier requests (${active.length})`}
+        description="One row per carrier the agent asked to be contracted with"
+        icon={Building2}
+        className="lg:col-span-3 self-start"
+        contentClassName="px-0 pb-0"
+      >
           {active.length === 0 ? (
-            <p className="p-6 text-sm text-muted-foreground italic">
-              The agent hasn't selected any carriers yet.
-            </p>
+            <EmptyState compact icon={Building2} title="No carriers picked yet" description="Once the agent chooses the carriers they want to sell for, each request shows up here." />
           ) : (
-            <CarrierRequestsTable requests={active} agentId={agentId} />
+            <div className="border-t border-border overflow-x-auto">
+              <CarrierRequestsTable requests={active} agentId={agentId} />
+            </div>
           )}
-        </CardContent>
-      </Card>
+      </SectionCard>
+      </div>
 
       <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <AlertDialogContent>
@@ -314,7 +351,7 @@ function CarrierRequestsTable({
 
   return (
     <Table>
-      <TableHeader>
+      <TableHeader className="bg-muted/50">
         <TableRow>
           <TableHead>Carrier</TableHead>
           <TableHead>States</TableHead>
@@ -339,9 +376,7 @@ function CarrierRequestsTable({
               </div>
             </TableCell>
             <TableCell>
-              <Badge variant="outline" className="text-[10px]">
-                {contractingStatusLabel(r.status)}
-              </Badge>
+              <StatusPill status={r.status}>{contractingStatusLabel(r.status)}</StatusPill>
             </TableCell>
             <TableCell>
               <AdminActionCell request={r} agentId={agentId} />
@@ -529,11 +564,20 @@ export function WritingNumberCell({
   );
 }
 
+function SensitiveRow({ kind, label, value }: { kind: SensitiveKind; label: string; value: string | null | undefined }) {
+  return (
+    <div className="min-w-0">
+      <span className="block text-muted-foreground text-xs">{label}</span>
+      <SensitiveValue kind={kind} label={label} value={value} className="text-sm font-medium" />
+    </div>
+  );
+}
+
 function Row({ label, value }: { label: string; value: string | null | undefined }) {
   return (
-    <div className="grid grid-cols-[100px_1fr] gap-2">
-      <span className="text-muted-foreground text-xs">{label}</span>
-      <span className="text-xs font-medium break-words">
+    <div className="min-w-0">
+      <span className="block text-muted-foreground text-xs">{label}</span>
+      <span className="block text-sm font-medium [overflow-wrap:anywhere]">
         {value && String(value).trim().length > 0 ? value : "—"}
       </span>
     </div>

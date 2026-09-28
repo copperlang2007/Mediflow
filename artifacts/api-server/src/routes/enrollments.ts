@@ -249,6 +249,66 @@ const enrollmentColumns = {
   updatedAt: enrollmentsTable.updatedAt,
 };
 
+/**
+ * Filters shared by the list and the book-of-business summary. Every one is
+ * optional and ANDed with the org scope; unknown values are ignored rather
+ * than rejected, matching the original list behaviour.
+ *
+ *   contactId, carrierId, agentId, planYear, status, planType,
+ *   effectuated=true|false, effectiveFrom / effectiveTo (yyyy-mm-dd),
+ *   search (client name or policy number)
+ */
+function enrollmentFilters(
+  q: Record<string, string | undefined>,
+  orgId: string,
+): SQL[] {
+  const conditions: SQL[] = [eq(enrollmentsTable.orgId, orgId)];
+  if (q.contactId) {
+    conditions.push(eq(enrollmentsTable.contactId, q.contactId));
+  }
+  if (q.planYear && /^\d{4}$/.test(q.planYear)) {
+    conditions.push(eq(enrollmentsTable.planYear, Number(q.planYear)));
+  }
+  if (q.status && (STATUSES as readonly string[]).includes(q.status)) {
+    conditions.push(
+      eq(enrollmentsTable.status, q.status as (typeof STATUSES)[number]),
+    );
+  }
+  if (q.carrierId) {
+    conditions.push(eq(enrollmentsTable.carrierId, q.carrierId));
+  }
+  if (q.agentId) {
+    conditions.push(eq(enrollmentsTable.agentId, q.agentId));
+  }
+  if (q.planType && (PLAN_TYPES as readonly string[]).includes(q.planType)) {
+    conditions.push(
+      eq(enrollmentsTable.planType, q.planType as (typeof PLAN_TYPES)[number]),
+    );
+  }
+  if (q.effectuated === "true" || q.effectuated === "false") {
+    conditions.push(eq(enrollmentsTable.effectuated, q.effectuated === "true"));
+  }
+  if (q.effectiveFrom && isoDate.safeParse(q.effectiveFrom).success) {
+    conditions.push(sql`${enrollmentsTable.effectiveDate} >= ${q.effectiveFrom}::date`);
+  }
+  if (q.effectiveTo && isoDate.safeParse(q.effectiveTo).success) {
+    conditions.push(sql`${enrollmentsTable.effectiveDate} <= ${q.effectiveTo}::date`);
+  }
+  const search = q.search?.trim().slice(0, 100);
+  if (search) {
+    const pattern = `%${search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    conditions.push(
+      sql`(${enrollmentsTable.policyNumber} ILIKE ${pattern} OR EXISTS (
+        SELECT 1 FROM ${contactsTable}
+        WHERE ${contactsTable.id} = ${enrollmentsTable.contactId}
+          AND ${contactsTable.orgId} = ${orgId}
+          AND (${contactsTable.firstName} || ' ' || ${contactsTable.lastName}) ILIKE ${pattern}
+      ))`,
+    );
+  }
+  return conditions;
+}
+
 router.get(
   "/enrollments",
   requireAuth,
@@ -256,25 +316,18 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const q = req.query as Record<string, string | undefined>;
-
-    const conditions: SQL[] = [eq(enrollmentsTable.orgId, authReq.orgId)];
-    if (q.contactId) {
-      conditions.push(eq(enrollmentsTable.contactId, q.contactId));
-    }
-    if (q.planYear && /^\d{4}$/.test(q.planYear)) {
-      conditions.push(eq(enrollmentsTable.planYear, Number(q.planYear)));
-    }
-    if (q.status && (STATUSES as readonly string[]).includes(q.status)) {
-      conditions.push(
-        eq(enrollmentsTable.status, q.status as (typeof STATUSES)[number]),
-      );
-    }
-    if (q.carrierId) {
-      conditions.push(eq(enrollmentsTable.carrierId, q.carrierId));
-    }
+    const conditions = enrollmentFilters(q, authReq.orgId);
 
     const rows = await db
-      .select(enrollmentColumns)
+      .select({
+        ...enrollmentColumns,
+        // Display names for the book-of-business list. Joined inside the
+        // caller's org, so a foreign id can never surface a foreign name.
+        contactFirstName: contactsTable.firstName,
+        contactLastName: contactsTable.lastName,
+        agentFirstName: agentsTable.firstName,
+        agentLastName: agentsTable.lastName,
+      })
       .from(enrollmentsTable)
       .leftJoin(
         carriersTable,
@@ -283,12 +336,65 @@ router.get(
           eq(carriersTable.orgId, authReq.orgId),
         ),
       )
+      .leftJoin(
+        contactsTable,
+        and(
+          eq(contactsTable.id, enrollmentsTable.contactId),
+          eq(contactsTable.orgId, authReq.orgId),
+        ),
+      )
+      .leftJoin(
+        agentsTable,
+        and(
+          eq(agentsTable.id, enrollmentsTable.agentId),
+          eq(agentsTable.orgId, authReq.orgId),
+        ),
+      )
       .where(and(...conditions))
-      .orderBy(desc(enrollmentsTable.planYear), desc(enrollmentsTable.effectiveDate))
+      .orderBy(desc(enrollmentsTable.planYear), desc(enrollmentsTable.effectiveDate), desc(enrollmentsTable.id))
       .limit(safeLimit(q.limit, 100))
       .offset(safeOffset(q.offset));
 
     res.json(rows);
+  },
+);
+
+/**
+ * Book-of-business counts for the Policies page, honouring the same filters
+ * as the list (so "Showing 25 of N" is exact). `startingSoon` counts
+ * policies whose effective date falls in the next 60 days.
+ */
+router.get(
+  "/enrollments/summary",
+  requireAuth,
+  requirePermission("contact", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const q = req.query as Record<string, string | undefined>;
+    const conditions = enrollmentFilters(q, authReq.orgId);
+
+    const [row] = await db
+      .select({
+        total: sql<number>`count(*)::int`,
+        active: sql<number>`count(*) FILTER (WHERE ${enrollmentsTable.status} = 'active')::int`,
+        pending: sql<number>`count(*) FILTER (WHERE ${enrollmentsTable.status} = 'pending')::int`,
+        ended: sql<number>`count(*) FILTER (WHERE ${enrollmentsTable.status} IN ('terminated','cancelled','declined'))::int`,
+        effectuated: sql<number>`count(*) FILTER (WHERE ${enrollmentsTable.effectuated})::int`,
+        notEffectuated: sql<number>`count(*) FILTER (WHERE NOT ${enrollmentsTable.effectuated} AND ${enrollmentsTable.status} IN ('pending','active'))::int`,
+        startingSoon: sql<number>`count(*) FILTER (WHERE ${enrollmentsTable.effectiveDate} >= current_date AND ${enrollmentsTable.effectiveDate} <= current_date + 60)::int`,
+      })
+      .from(enrollmentsTable)
+      .where(and(...conditions));
+
+    res.json({
+      total: Number(row?.total ?? 0),
+      active: Number(row?.active ?? 0),
+      pending: Number(row?.pending ?? 0),
+      ended: Number(row?.ended ?? 0),
+      effectuated: Number(row?.effectuated ?? 0),
+      notEffectuated: Number(row?.notEffectuated ?? 0),
+      startingSoon: Number(row?.startingSoon ?? 0),
+    });
   },
 );
 

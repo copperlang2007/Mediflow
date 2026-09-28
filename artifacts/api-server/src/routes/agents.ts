@@ -16,6 +16,7 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { activeLicenseWhere, isLicenseActive } from "../lib/licenses/licenseStatus";
 import { enforceCapacity } from "../middlewares/requirePlan";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { randomUUID } from "crypto";
@@ -162,8 +163,7 @@ router.get(
             .where(
               and(
                 inArray(stateLicensesTable.agentId, agentIds),
-                eq(stateLicensesTable.status, "active"),
-                sql`(${stateLicensesTable.expiryDate} IS NULL OR ${stateLicensesTable.expiryDate} > now())`,
+                activeLicenseWhere(),
               ),
             )
             .groupBy(stateLicensesTable.agentId)
@@ -311,7 +311,7 @@ router.get(
       )
       .limit(1);
 
-    const activeLicenses = licenses.filter((l) => l.status === "active").length;
+    const activeLicenses = licenses.filter((l) => isLicenseActive(l)).length;
     const activeCerts = certs.filter((c) => c.status === "passed").length;
 
     res.json({

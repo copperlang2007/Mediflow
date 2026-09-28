@@ -52,6 +52,7 @@ import { sellingPlanYear } from "../compliance/planYear";
 // Reuse the canonical "satisfied" status set from the router predicate so the
 // two can never drift (read-only import — we do not change its behaviour).
 import { __testing as readyToSellConstants } from "../leadQueue/readyToSell";
+import { activeLicenseWhere, expiredLicenseWhere } from "../licenses/licenseStatus";
 
 /** Credential statuses that count as "satisfied" for certs/AHIP. */
 const CERT_OK_STATUSES = readyToSellConstants.CERT_OK_STATUSES;
@@ -98,6 +99,8 @@ export const BLOCKER = {
   INACTIVE: "Inactive",
   AHIP: "AHIP not current",
   LICENSE: "No active state license",
+  /** Has license rows, but every one is past its expiry date. */
+  LICENSE_EXPIRED: "State license expired",
   CARRIER: "No carrier certifications",
 } as const;
 
@@ -150,13 +153,24 @@ export async function getOrgReadiness(
     .where(
       and(
         inArray(stateLicensesTable.agentId, agentIds),
-        eq(stateLicensesTable.status, "active"),
-        or(
-          isNull(stateLicensesTable.expiryDate),
-          gt(stateLicensesTable.expiryDate, now),
-        ),
+        // Shared definition — Licensing, the agent profile, back office and
+        // the dashboard all count "active" with this same predicate.
+        activeLicenseWhere(now),
       ),
     );
+
+  // Agents whose licenses are all expired get a sharper blocker than "no
+  // license" — the fix is a renewal, not a new application.
+  const expiredRows = await db
+    .select({ agentId: stateLicensesTable.agentId })
+    .from(stateLicensesTable)
+    .where(
+      and(
+        inArray(stateLicensesTable.agentId, agentIds),
+        expiredLicenseWhere(now),
+      ),
+    );
+  const hasExpiredLicense = new Set(expiredRows.map((r) => r.agentId));
 
   // Passed/waived, non-expired carrier certs for the cert year — Gate 4. Join
   // carriers for the display name.
@@ -234,7 +248,11 @@ export async function getOrgReadiness(
     const blockers: string[] = [];
     if (!active) blockers.push(BLOCKER.INACTIVE);
     if (!ahipCurrent) blockers.push(BLOCKER.AHIP);
-    if (licensedStates.length === 0) blockers.push(BLOCKER.LICENSE);
+    if (licensedStates.length === 0) {
+      blockers.push(
+        hasExpiredLicense.has(a.agentId) ? BLOCKER.LICENSE_EXPIRED : BLOCKER.LICENSE,
+      );
+    }
     if (certifiedCarriers.length === 0) blockers.push(BLOCKER.CARRIER);
 
     return {

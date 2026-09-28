@@ -10,6 +10,7 @@ import {
 } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { safeLimit, safeOffset } from "../lib/listGuards";
+import { withEffectiveStatus } from "../lib/licenses/licenseStatus";
 
 const router: IRouter = Router({ mergeParams: true });
 
@@ -95,8 +96,11 @@ router.get(
         .where(eq(stateLicensesTable.agentId, agentId)),
     ]);
 
+    // `effectiveStatus` is the shared active/expired definition
+    // (lib/licenses/licenseStatus.ts) so every page counts the same way.
+    const now = new Date();
     res.json({
-      data: licenses,
+      data: licenses.map((l) => withEffectiveStatus(l, now)),
       total: Number(totalRes[0]?.count ?? 0),
       limit: limitNum,
       offset: offsetNum,
@@ -136,7 +140,7 @@ router.post(
       })
       .returning();
 
-    res.status(201).json(license);
+    res.status(201).json(withEffectiveStatus(license));
   },
 );
 
@@ -184,7 +188,7 @@ router.patch(
       return;
     }
 
-    res.json(license);
+    res.json(withEffectiveStatus(license));
   },
 );
 

@@ -13,6 +13,7 @@
  *    ghl-sync                    every 15 min (GoHighLevel contact feed; also ad-hoc backfill)
  *    import-rows-sweep           hourly (drop queued import rows / PHI of finished or dead jobs)
  *    integration-events-prune    daily 03:10 UTC (webhook idempotency ledger > 90 days)
+ *    appointment-reminders       every 15 min (client reminders for the next 24h)
  *
  *  Ad-hoc (enqueue via `enqueue(JOB_NAMES.X, data)`):
  *    task-auto-assign            on agent creation / status change
@@ -21,6 +22,7 @@
  *    generate-offboarding-pdf    on agent offboard
  *    send-scheduled-email        deferred transactional email
  *    send-scheduled-sms          deferred transactional SMS
+ *    campaign-send               omnichannel campaign fan-out (throttled, self re-enqueues)
  *
  * IMPORTANT: pg-boss v12 requires createQueue() before schedule()/work().
  *
@@ -130,6 +132,12 @@ export const JOB_NAMES = {
   // Day-6 contracting email-out: drains `*:submit` system tasks created by
   // the e-sign completion path. One job per carrier_contracting_request.
   SUBMIT_CONTRACTING_PACKET: "submit-contracting-packet",
+  // stage2/calendar-branding: every 15 min, text/email clients about
+  // appointments in the next 24h (opt-outs, STOP list and calling hours apply).
+  APPOINTMENT_REMINDERS: "appointment-reminders",
+  // Omnichannel campaign fan-out (stage2/campaigns). Idempotent per
+  // recipient (claim-before-send), throttled, re-enqueues itself until done.
+  CAMPAIGN_SEND: "campaign-send",
 } as const;
 
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
@@ -277,6 +285,8 @@ export interface SendScheduledEmailPayload {
    * system mail to staff.
    */
   consumer?: ConsumerContext;
+  /** Display name for the From header (agency white-label email_from_name). */
+  fromName?: string;
 }
 
 export interface SendScheduledSmsPayload {
@@ -444,6 +454,9 @@ export async function startWorkers(): Promise<void> {
   await boss.schedule(JOB_NAMES.IMPORT_ROWS_SWEEP, "17 * * * *", {}, { tz: "UTC" });
   // Webhook idempotency ledger prune — daily 03:10 UTC. Idempotent.
   await boss.schedule(JOB_NAMES.INTEGRATION_EVENTS_PRUNE, "10 3 * * *", {}, { tz: "UTC" });
+  // Appointment reminders — every 15 min at :04/:19/:34/:49. Idempotent via a
+  // conditional claim on appointments.reminder_sent_at.
+  await boss.schedule(JOB_NAMES.APPOINTMENT_REMINDERS, "4,19,34,49 * * * *", {}, { tz: "UTC" });
 
   // ---- Workers ----
 
@@ -601,6 +614,20 @@ export async function startWorkers(): Promise<void> {
     JOB_NAMES.SEND_SCHEDULED_SMS,
     { batchSize: 3, localConcurrency: 3 },
     smsHandler,
+  );
+
+  const campaignSendHandler: WorkHandler<{ campaignId: string; orgId: string }> = async (
+    jobs: Job<{ campaignId: string; orgId: string }>[],
+  ) => {
+    const { campaignSendWorker } = await import("../workers/campaignSend");
+    for (const job of jobs) await campaignSendWorker(job.data);
+  };
+  // Campaign fan-out throttles itself per message; keep one job per node at
+  // a time per batch so provider rate limits are respected.
+  await boss.work<{ campaignId: string; orgId: string }>(
+    JOB_NAMES.CAMPAIGN_SEND,
+    { batchSize: 1, localConcurrency: 2 },
+    campaignSendHandler,
   );
 
   const retentionHandler: WorkHandler<Record<string, never>> = async () => {
@@ -762,6 +789,17 @@ export async function startWorkers(): Promise<void> {
     JOB_NAMES.INTEGRATION_EVENTS_PRUNE,
     { batchSize: 1, localConcurrency: 1 },
     integrationEventsPruneHandler,
+  );
+
+  const appointmentRemindersHandler: WorkHandler<Record<string, never>> = async () => {
+    const { appointmentRemindersWorker } = await import("../workers/appointmentReminders");
+    await appointmentRemindersWorker();
+  };
+  // Scheduled cron — singleton; one sweep pass per node, no fan-out.
+  await boss.work<Record<string, never>>(
+    JOB_NAMES.APPOINTMENT_REMINDERS,
+    { batchSize: 1, localConcurrency: 1 },
+    appointmentRemindersHandler,
   );
 
   logger.info("All background workers registered");

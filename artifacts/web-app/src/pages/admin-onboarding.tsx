@@ -42,7 +42,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search, Plus, ChevronRight, Filter } from "lucide-react";
+import { Search, Plus, ChevronRight, Filter, ClipboardCheck, PenLine, Send, CheckCircle2, Handshake, Lock } from "lucide-react";
+import { EmptyState, MiniStat, PageHeader, StatusPill, type StatusTone } from "@/components/shared";
+import { ContactAvatar } from "@/pages/crm/ui";
 import {
   onboardingStatusLabel,
   useOnboardingList,
@@ -73,6 +75,24 @@ const STATUS_BADGE: Record<OnboardingStatus, string> = {
   cancelled: "bg-red-50 text-red-700 border-red-200",
   rejected: "bg-red-50 text-red-700 border-red-200",
 };
+
+/** Colour for each contracting status in the agencyBRIDGE status pills. */
+export const STATUS_TONE: Record<OnboardingStatus, StatusTone> = {
+  draft: "neutral",
+  profile_in_progress: "info",
+  carriers_selected: "warning",
+  signing: "navy",
+  submitted: "info",
+  complete: "success",
+  cancelled: "danger",
+  rejected: "danger",
+};
+
+/** Real run count for one status (reads `total` from a 1-row page). */
+function useRunCount(status: OnboardingStatus, enabled: boolean) {
+  const { data, isLoading } = useOnboardingList({ status, limit: 1, offset: 0, enabled });
+  return { count: data?.total, isLoading };
+}
 
 export default function AdminOnboardingPage() {
   const [location] = useLocation();
@@ -116,17 +136,10 @@ function AdminOnboardingIndex() {
     return m;
   }, [agentsData]);
 
-  if (!meLoading && !isAdmin) {
-    return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            You don't have access to the admin onboarding dashboard.
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const reviewCount = useRunCount("carriers_selected", Boolean(isAdmin));
+  const signingCount = useRunCount("signing", Boolean(isAdmin));
+  const submittedCount = useRunCount("submitted", Boolean(isAdmin));
+  const completeCount = useRunCount("complete", Boolean(isAdmin));
 
   const rows = data?.data ?? [];
   const filteredRows = useMemo(() => {
@@ -139,24 +152,43 @@ function AdminOnboardingIndex() {
     });
   }, [rows, search, agentName]);
 
+  if (!meLoading && !isAdmin) {
+    return (
+      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
+        <Card>
+          <EmptyState
+            icon={Lock}
+            title="Contracting is for admins"
+            description="You don't have access to the contracting dashboard. Ask an agency admin or compliance manager if you need it."
+          />
+        </Card>
+      </div>
+    );
+  }
+
   const total = data?.total ?? 0;
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-5">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Agent onboarding</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Carrier contracting runs across the org
-          </p>
-        </div>
+    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+      <PageHeader
+        title="Contracting"
+        subtitle="Getting agents contracted with carriers — profile, carrier choice, signatures and submission"
+      >
         <Button onClick={() => setStartOpen(true)} data-testid="start-onboarding-btn">
-          <Plus className="h-4 w-4 mr-2" />
+          <Plus className="h-4 w-4 mr-1.5" />
           Start new onboarding
         </Button>
+      </PageHeader>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <MiniStat icon={ClipboardCheck} label="Waiting for your review" value={reviewCount.count ?? "—"} loading={reviewCount.isLoading} tone={(reviewCount.count ?? 0) > 0 ? "warning" : "default"} />
+        <MiniStat icon={PenLine} label="Signing paperwork" value={signingCount.count ?? "—"} loading={signingCount.isLoading} />
+        <MiniStat icon={Send} label="Sent to carriers" value={submittedCount.count ?? "—"} loading={submittedCount.isLoading} />
+        <MiniStat icon={CheckCircle2} label="Complete" value={completeCount.count ?? "—"} loading={completeCount.isLoading} tone="success" />
       </div>
 
-      <div className="flex items-center gap-3 flex-wrap">
+      <Card className="overflow-hidden">
+      <div className="flex items-center gap-3 flex-wrap p-4">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -180,19 +212,30 @@ function AdminOnboardingIndex() {
         </Select>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
+        <CardContent className="px-4 pb-4 pt-0">
           {isLoading ? (
-            <div className="p-4 space-y-2">
+            <div className="space-y-2">
               {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
             </div>
           ) : filteredRows.length === 0 ? (
-            <div className="py-16 text-center text-sm text-muted-foreground">
-              No onboarding runs match your filters.
-            </div>
+            search || status !== "all" ? (
+              <EmptyState
+                icon={Search}
+                title="Nothing matches"
+                description="No contracting runs match your search or status. Try clearing the filters."
+              />
+            ) : (
+              <EmptyState
+                icon={Handshake}
+                title="No contracting in progress"
+                description="Start an onboarding to walk an agent through their profile, carrier picks and signatures."
+                action={{ label: "Start new onboarding", onClick: () => setStartOpen(true) }}
+              />
+            )
           ) : (
+            <div className="rounded-lg border border-border overflow-hidden">
             <Table>
-              <TableHeader>
+              <TableHeader className="bg-muted/50">
                 <TableRow>
                   <TableHead>Agent</TableHead>
                   <TableHead>Status</TableHead>
@@ -207,12 +250,13 @@ function AdminOnboardingIndex() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
 
       {total > 0 && (
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span>
             Showing {offset + 1}–{Math.min(offset + limit, total)} of {total}
           </span>
@@ -254,25 +298,23 @@ function OnboardingRow({
       <TableCell>
         <Link
           href={`/admin-onboarding/${run.agentId}`}
-          className="text-sm font-medium hover:underline"
+          className="flex items-center gap-3 text-sm font-medium hover:underline"
         >
+          <ContactAvatar first={agentName?.firstName} last={agentName?.lastName} size="sm" />
           {agentName
             ? `${agentName.firstName} ${agentName.lastName}`
             : `Agent ${run.agentId.slice(0, 8)}…`}
         </Link>
       </TableCell>
       <TableCell>
-        <Badge
-          variant="outline"
-          className={`text-[10px] capitalize ${STATUS_BADGE[run.status] ?? ""}`}
-        >
+        <StatusPill tone={STATUS_TONE[run.status] ?? "neutral"}>
           {onboardingStatusLabel(run.status)}
-        </Badge>
+        </StatusPill>
       </TableCell>
-      <TableCell className="text-xs text-muted-foreground">
+      <TableCell className="text-sm text-muted-foreground">
         {new Date(run.startedAt).toLocaleDateString()}
       </TableCell>
-      <TableCell className="text-xs text-muted-foreground">
+      <TableCell className="text-sm text-muted-foreground">
         {new Date(run.updatedAt).toLocaleDateString()}
       </TableCell>
       <TableCell>

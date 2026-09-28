@@ -53,6 +53,10 @@ import {
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState, AgentPicker, type StatusTone } from "@/components/shared";
+import { PageShell, KpiGrid, TableFrame, FilterBar } from "@/components/ops";
+import { CheckCircle2, Wallet, Clock, Users, Network, FileSpreadsheet } from "lucide-react";
+import { useProductName } from "@/lib/branding/BrandingProvider";
 
 // ---------------------------------------------------------------------------
 // Types — local mirror of #39's response shapes (until codegen reruns).
@@ -70,6 +74,9 @@ type CommissionStatement = {
   statementDate?: string | null;
   totalAmount: number | string;
   status: StatementStatus;
+  /** Shared derivation from the API: reconciled + variance ⇒ "reconciled_with_variance". */
+  displayStatus?: StatementStatus | "reconciled_with_variance";
+  variance?: number | null;
   lineItemCount?: number | null;
   matchedCount?: number | null;
   unmatchedCount?: number | null;
@@ -82,11 +89,21 @@ type CommissionSchedule = {
   carrierId: string;
   carrierName?: string | null;
   planType: string;
-  year: number;
-  initialPercent?: number | null;
-  renewalPercent?: number | null;
-  flatAmount?: number | null;
+  // Column names as the API returns them; numeric columns arrive as strings.
+  contractYear: number;
+  initialPct?: string | number | null;
+  renewalPct?: string | number | null;
+  flatAmount?: string | number | null;
+  effectiveFrom?: string | null;
 };
+
+const SCHEDULE_PLAN_TYPES: { value: string; label: string }[] = [
+  { value: "MAPD", label: "MA + drug (MAPD)" },
+  { value: "MA", label: "Medicare Advantage (MA)" },
+  { value: "PDP", label: "Drug plan (PDP)" },
+  { value: "supp", label: "Medicare Supplement" },
+  { value: "other", label: "Other" },
+];
 
 type CommissionHierarchy = {
   id: string;
@@ -182,11 +199,20 @@ function StatCard({
   );
 }
 
-const STATUS_STYLES: Record<StatementStatus, string> = {
-  pending: "bg-amber-100 text-amber-800 border-amber-200",
-  parsed: "bg-blue-100 text-blue-800 border-blue-200",
-  reconciled: "bg-green-100 text-green-800 border-green-200",
-  disputed: "bg-red-100 text-red-800 border-red-200",
+const STATUS_TONES: Record<StatementStatus | "reconciled_with_variance", StatusTone> = {
+  pending: "warning",
+  parsed: "info",
+  reconciled: "success",
+  reconciled_with_variance: "warning",
+  disputed: "danger",
+};
+
+const STATUS_HINTS: Record<StatementStatus | "reconciled_with_variance", string> = {
+  pending: "Uploaded — waiting to be read",
+  parsed: "Read — ready to reconcile",
+  reconciled: "Matched and paid out",
+  reconciled_with_variance: "Matched, but the lines don't add up to the carrier's total — needs review",
+  disputed: "Flagged for follow-up",
 };
 
 // ---------------------------------------------------------------------------
@@ -398,6 +424,7 @@ function PaginationBar({
 // ---------------------------------------------------------------------------
 
 function StatementsTab({ onUpload }: { onUpload: () => void }) {
+  const productName = useProductName();
   const [, navigate] = useLocation();
   const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -440,8 +467,12 @@ function StatementsTab({ onUpload }: { onUpload: () => void }) {
   });
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
+    <SectionCard
+      title="Carrier statements"
+      description="Each statement a carrier sends you, from upload through reconciliation"
+      icon={FileSpreadsheet}
+    >
+      <FilterBar>
         <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
           <SelectTrigger className="w-44 h-9 text-sm">
             <SelectValue />
@@ -454,23 +485,24 @@ function StatementsTab({ onUpload }: { onUpload: () => void }) {
             <SelectItem value="disputed">Disputed</SelectItem>
           </SelectContent>
         </Select>
-      </div>
+      </FilterBar>
 
       {isLoading ? (
         <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
       ) : rows.length === 0 ? (
-        <div className="text-center py-16 text-muted-foreground">
-          <Inbox className="h-10 w-10 mx-auto mb-2 opacity-20" />
-          <p className="text-sm">No statements yet</p>
-          <p className="text-xs mt-1">Upload your first commission statement to get started</p>
-          <Button size="sm" variant="outline" className="mt-4" onClick={onUpload}>
-            <Upload className="h-3.5 w-3.5 mr-1.5" />
-            Upload statement
-          </Button>
-        </div>
+        <EmptyState
+          icon={Inbox}
+          title={statusFilter === "all" ? "No statements yet" : "No statements with this status"}
+          description={
+            statusFilter === "all"
+              ? `Upload a carrier commission statement and ${productName} will read it, match each line to a client and agent, and work out payouts.`
+              : "Try another status, or show all statements."
+          }
+          action={statusFilter === "all" ? { label: "Upload statement", onClick: onUpload } : { label: "Show all", onClick: () => setStatusFilter("all") }}
+        />
       ) : (
         <>
-          <div className="rounded-lg border border-border overflow-hidden">
+          <TableFrame>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -493,13 +525,13 @@ function StatementsTab({ onUpload }: { onUpload: () => void }) {
                     <TableCell className="text-muted-foreground text-sm">
                       {fmtDate(s.periodStart)} – {fmtDate(s.periodEnd)}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">
+                    <TableCell className="text-right tabular-nums font-semibold text-success">
                       {fmtMoney(s.totalAmount)}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className={cn("capitalize border", STATUS_STYLES[s.status])}>
-                        {s.status}
-                      </Badge>
+                      <span title={STATUS_HINTS[s.displayStatus ?? s.status]}>
+                        <StatusPill status={s.displayStatus ?? s.status} tone={STATUS_TONES[s.displayStatus ?? s.status]} />
+                      </span>
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {fmtDate(s.uploadedAt ?? s.createdAt)}
@@ -536,11 +568,11 @@ function StatementsTab({ onUpload }: { onUpload: () => void }) {
                 ))}
               </TableBody>
             </Table>
-          </div>
+          </TableFrame>
           <PaginationBar page={page} totalPages={totalPages} setPage={setPage} total={rows.length} />
         </>
       )}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -549,6 +581,7 @@ function StatementsTab({ onUpload }: { onUpload: () => void }) {
 // ---------------------------------------------------------------------------
 
 function SchedulesTab() {
+  const productName = useProductName();
   const qc = useQueryClient();
   const { data: carriers } = useGetCarriers();
   const [yearFilter, setYearFilter] = useState<string>(String(new Date().getFullYear()));
@@ -572,6 +605,7 @@ function SchedulesTab() {
     carrierId: "",
     planType: "MAPD",
     year: String(new Date().getFullYear()),
+    effectiveFrom: `${new Date().getFullYear()}-01-01`,
     initialPercent: "",
     renewalPercent: "",
     flatAmount: "",
@@ -585,9 +619,10 @@ function SchedulesTab() {
         body: JSON.stringify({
           carrierId: form.carrierId,
           planType: form.planType,
-          year: parseInt(form.year, 10),
-          initialPercent: form.initialPercent ? parseFloat(form.initialPercent) : undefined,
-          renewalPercent: form.renewalPercent ? parseFloat(form.renewalPercent) : undefined,
+          contractYear: parseInt(form.year, 10),
+          effectiveFrom: form.effectiveFrom,
+          initialPct: form.initialPercent ? parseFloat(form.initialPercent) : undefined,
+          renewalPct: form.renewalPercent ? parseFloat(form.renewalPercent) : undefined,
           flatAmount: form.flatAmount ? parseFloat(form.flatAmount) : undefined,
         }),
       }),
@@ -595,14 +630,18 @@ function SchedulesTab() {
       toast.success("Schedule added");
       void qc.invalidateQueries({ queryKey: ["/api/commission-schedules"] });
       setAddOpen(false);
-      setForm({ carrierId: "", planType: "MAPD", year: String(new Date().getFullYear()), initialPercent: "", renewalPercent: "", flatAmount: "" });
+      setForm({ carrierId: "", planType: "MAPD", year: String(new Date().getFullYear()), effectiveFrom: `${new Date().getFullYear()}-01-01`, initialPercent: "", renewalPercent: "", flatAmount: "" });
     },
     onError: () => toast.error("Failed to create schedule"),
   });
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
+    <SectionCard
+      title="Rate cards"
+      description="What each carrier pays per plan type and year — used to spot missing payments"
+      icon={DollarSign}
+    >
+      <FilterBar>
         <Select value={carrierFilter} onValueChange={(v) => { setCarrierFilter(v); setPage(1); }}>
           <SelectTrigger className="w-48 h-9"><SelectValue placeholder="Carrier" /></SelectTrigger>
           <SelectContent>
@@ -624,19 +663,20 @@ function SchedulesTab() {
           <Plus className="h-3.5 w-3.5 mr-1.5" />
           New schedule
         </Button>
-      </div>
+      </FilterBar>
 
       {isLoading ? (
         <Skeleton className="h-32 w-full" />
       ) : rows.length === 0 ? (
-        <div className="text-center py-16 text-muted-foreground">
-          <DollarSign className="h-10 w-10 mx-auto mb-2 opacity-20" />
-          <p className="text-sm">No commission schedules</p>
-          <p className="text-xs mt-1">Add a rate card to start tracking expected commissions</p>
-        </div>
+        <EmptyState
+          icon={DollarSign}
+          title="No rate cards for this filter"
+          description={`Add a carrier's rate card so ${productName} knows what to expect each month and can flag a payment that never arrives.`}
+          action={{ label: "New schedule", onClick: () => setAddOpen(true) }}
+        />
       ) : (
         <>
-          <div className="rounded-lg border border-border overflow-hidden">
+          <TableFrame>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -653,21 +693,21 @@ function SchedulesTab() {
                   <TableRow key={s.id}>
                     <TableCell className="font-medium">{s.carrierName ?? "—"}</TableCell>
                     <TableCell>{s.planType}</TableCell>
-                    <TableCell className="tabular-nums">{s.year}</TableCell>
+                    <TableCell className="tabular-nums">{s.contractYear}</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {s.initialPercent != null ? `${s.initialPercent}%` : "—"}
+                      {s.initialPct != null ? `${Number(s.initialPct)}%` : "—"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {s.renewalPercent != null ? `${s.renewalPercent}%` : "—"}
+                      {s.renewalPct != null ? `${Number(s.renewalPct)}%` : "—"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {s.flatAmount != null ? fmtMoney(s.flatAmount) : "—"}
+                      {s.flatAmount != null ? fmtMoney(Number(s.flatAmount)) : "—"}
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          </div>
+          </TableFrame>
           <PaginationBar page={page} totalPages={totalPages} setPage={setPage} total={rows.length} />
         </>
       )}
@@ -693,16 +733,20 @@ function SchedulesTab() {
                 <Select value={form.planType} onValueChange={(v) => setForm((p) => ({ ...p, planType: v }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {["MAPD", "PDP", "MEDSUPP", "DSNP", "ANCILLARY"].map((p) => (
-                      <SelectItem key={p} value={p}>{p}</SelectItem>
+                    {SCHEDULE_PLAN_TYPES.map((p) => (
+                      <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-1.5">
                 <Label>Year *</Label>
-                <Input type="number" value={form.year} onChange={(e) => setForm((p) => ({ ...p, year: e.target.value }))} required />
+                <Input type="number" value={form.year} onChange={(e) => setForm((p) => ({ ...p, year: e.target.value, effectiveFrom: `${e.target.value}-01-01` }))} required />
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Rates start on *</Label>
+              <Input type="date" value={form.effectiveFrom} onChange={(e) => setForm((p) => ({ ...p, effectiveFrom: e.target.value }))} required />
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1.5">
@@ -727,7 +771,7 @@ function SchedulesTab() {
           </form>
         </DialogContent>
       </Dialog>
-    </div>
+    </SectionCard>
   );
 }
 
@@ -781,32 +825,39 @@ function HierarchiesTab() {
   });
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          placeholder="Filter by agent ID"
-          className="w-64 h-9"
+    <SectionCard
+      title="Upline splits"
+      description="Who earns an override on whose sales, and for how long"
+      icon={Network}
+    >
+      <FilterBar>
+        <AgentPicker
+          aria-label="Filter by agent"
+          className="w-full sm:w-64"
+          triggerClassName="h-9 text-sm"
           value={agentFilter}
-          onChange={(e) => { setAgentFilter(e.target.value); setPage(1); }}
+          onChange={(v) => { setAgentFilter(v); setPage(1); }}
+          noneLabel="All agents"
         />
         <div className="flex-1" />
         <Button size="sm" onClick={() => setAddOpen(true)}>
           <Plus className="h-3.5 w-3.5 mr-1.5" />
           New hierarchy
         </Button>
-      </div>
+      </FilterBar>
 
       {isLoading ? (
         <Skeleton className="h-32 w-full" />
       ) : rows.length === 0 ? (
-        <div className="text-center py-16 text-muted-foreground">
-          <DollarSign className="h-10 w-10 mx-auto mb-2 opacity-20" />
-          <p className="text-sm">No commission hierarchies</p>
-          <p className="text-xs mt-1">Add an upline split to begin tracking overrides</p>
-        </div>
+        <EmptyState
+          icon={Network}
+          title="No upline splits yet"
+          description="If a manager earns a share of an agent's commission, add the split here and payouts will include it automatically."
+          action={{ label: "New hierarchy", onClick: () => setAddOpen(true) }}
+        />
       ) : (
         <>
-          <div className="rounded-lg border border-border overflow-hidden">
+          <TableFrame>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -833,7 +884,7 @@ function HierarchiesTab() {
                 ))}
               </TableBody>
             </Table>
-          </div>
+          </TableFrame>
           <PaginationBar page={page} totalPages={totalPages} setPage={setPage} total={rows.length} />
         </>
       )}
@@ -843,12 +894,24 @@ function HierarchiesTab() {
           <DialogHeader><DialogTitle>New commission hierarchy</DialogTitle></DialogHeader>
           <form onSubmit={(e) => { e.preventDefault(); create.mutate(); }} className="space-y-3">
             <div className="space-y-1.5">
-              <Label>Writing agent ID *</Label>
-              <Input value={form.writingAgentId} onChange={(e) => setForm((p) => ({ ...p, writingAgentId: e.target.value }))} required />
+              <Label>Writing agent *</Label>
+              <AgentPicker
+                aria-label="Writing agent"
+                triggerClassName="h-9 text-sm"
+                value={form.writingAgentId}
+                onChange={(v) => setForm((p) => ({ ...p, writingAgentId: v }))}
+                placeholder="Who wrote the business"
+              />
             </div>
             <div className="space-y-1.5">
-              <Label>Upline agent ID *</Label>
-              <Input value={form.uplineAgentId} onChange={(e) => setForm((p) => ({ ...p, uplineAgentId: e.target.value }))} required />
+              <Label>Upline agent *</Label>
+              <AgentPicker
+                aria-label="Upline agent"
+                triggerClassName="h-9 text-sm"
+                value={form.uplineAgentId}
+                onChange={(v) => setForm((p) => ({ ...p, uplineAgentId: v }))}
+                placeholder="Who earns the override"
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Split % *</Label>
@@ -873,7 +936,7 @@ function HierarchiesTab() {
           </form>
         </DialogContent>
       </Dialog>
-    </div>
+    </SectionCard>
   );
 }
 
@@ -914,8 +977,12 @@ function MissedPaymentsTab() {
   });
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
+    <SectionCard
+      title="Missed payments"
+      description="Policies where a carrier payment was expected but hasn't shown up on a statement"
+      icon={AlertTriangle}
+    >
+      <FilterBar>
         <Label className="text-xs text-muted-foreground">Days overdue ≥</Label>
         <Input
           type="number"
@@ -924,19 +991,19 @@ function MissedPaymentsTab() {
           value={daysFilter}
           onChange={(e) => { setDaysFilter(e.target.value); setPage(1); }}
         />
-      </div>
+      </FilterBar>
 
       {isLoading ? (
         <Skeleton className="h-32 w-full" />
       ) : rows.length === 0 ? (
-        <div className="text-center py-16 text-muted-foreground">
-          <AlertTriangle className="h-10 w-10 mx-auto mb-2 opacity-20" />
-          <p className="text-sm">No missed payments</p>
-          <p className="text-xs mt-1">All expected commissions are accounted for</p>
-        </div>
+        <EmptyState
+          icon={CheckCircle2}
+          title="No missed payments — nice"
+          description="Every commission we expected has turned up on a carrier statement. We check again each time a statement is reconciled."
+        />
       ) : (
         <>
-          <div className="rounded-lg border border-border overflow-hidden">
+          <TableFrame>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -962,9 +1029,9 @@ function MissedPaymentsTab() {
                       {fmtDate(mp.expectedPeriodStart)} – {fmtDate(mp.expectedPeriodEnd)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      <span className={cn("font-semibold", mp.daysOverdue >= 60 ? "text-red-600" : mp.daysOverdue >= 30 ? "text-amber-600" : "text-foreground")}>
-                        {mp.daysOverdue}
-                      </span>
+                      <StatusPill tone={mp.daysOverdue >= 60 ? "danger" : mp.daysOverdue >= 30 ? "warning" : "neutral"}>
+                        {mp.daysOverdue} days
+                      </StatusPill>
                     </TableCell>
                     <TableCell className="text-right">
                       <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setResolveFor(mp)}>
@@ -975,7 +1042,7 @@ function MissedPaymentsTab() {
                 ))}
               </TableBody>
             </Table>
-          </div>
+          </TableFrame>
           <PaginationBar page={page} totalPages={totalPages} setPage={setPage} total={rows.length} />
         </>
       )}
@@ -1010,7 +1077,7 @@ function MissedPaymentsTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </SectionCard>
   );
 }
 
@@ -1036,28 +1103,45 @@ function KpiRow() {
     retry: false,
   });
 
-  const items = [
-    { label: "Earned (period)", value: fmtMoney(data?.earnedThisPeriod), helper: data?.periodLabel },
-    { label: "Paid (period)", value: fmtMoney(data?.paidThisPeriod) },
-    { label: "Pending (period)", value: fmtMoney(data?.pendingThisPeriod) },
-    { label: "Missed payments", value: data?.missedPaymentsCount != null ? String(data.missedPaymentsCount) : "—" },
-    { label: "Agents on payouts", value: data?.agentsOnPayouts != null ? String(data.agentsOnPayouts) : "—" },
-  ];
-
-  if (isLoading) {
-    return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {items.map((_, i) => <Skeleton key={i} className="h-20 rounded-lg" />)}
-      </div>
-    );
-  }
+  const period = data?.periodLabel ?? "this period";
+  const agents = data?.agentsOnPayouts;
+  const missed = data?.missedPaymentsCount;
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-      {items.map((it) => (
-        <StatCard key={it.label} label={it.label} value={it.value} helper={it.helper} />
-      ))}
-    </div>
+    <KpiGrid>
+      <KpiCard
+        label={`Earned · ${period}`}
+        value={fmtMoney(data?.earnedThisPeriod)}
+        icon={DollarSign}
+        color="navy"
+        loading={isLoading}
+        hint={agents != null ? `${agents} agent${agents === 1 ? "" : "s"} on payouts` : undefined}
+      />
+      <KpiCard
+        label="Paid out"
+        value={fmtMoney(data?.paidThisPeriod)}
+        icon={Wallet}
+        color="green"
+        loading={isLoading}
+        hint={`Sent to agents · ${period}`}
+      />
+      <KpiCard
+        label="Waiting to be paid"
+        value={fmtMoney(data?.pendingThisPeriod)}
+        icon={Clock}
+        color="blue"
+        loading={isLoading}
+        hint="Earned, not yet paid out"
+      />
+      <KpiCard
+        label="Missed payments"
+        value={missed != null ? String(missed) : "—"}
+        icon={missed === 0 ? CheckCircle2 : AlertTriangle}
+        color="orange"
+        loading={isLoading}
+        hint={missed === 0 ? "All carrier payments accounted for" : missed != null ? "Open — check the Missed payments tab" : undefined}
+      />
+    </KpiGrid>
   );
 }
 
@@ -1070,24 +1154,21 @@ export default function CommissionsPage() {
   const [tab, setTab] = useState<"statements" | "schedules" | "hierarchies" | "missed">("statements");
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-5">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Commissions</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Statements, rate cards, hierarchy splits, and reconciliation.
-          </p>
-        </div>
+    <PageShell>
+      <PageHeader
+        title="Commissions"
+        subtitle="Carrier statements, rate cards, upline splits and anything that didn't get paid"
+      >
         <Button onClick={() => setUploadOpen(true)}>
           <Upload className="h-4 w-4 mr-1.5" />
           Upload statement
         </Button>
-      </div>
+      </PageHeader>
 
       <KpiRow />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="space-y-4">
-        <TabsList className="bg-muted/60 h-9">
+        <TabsList className="h-10">
           <TabsTrigger value="statements">Statements</TabsTrigger>
           <TabsTrigger value="schedules">Schedules</TabsTrigger>
           <TabsTrigger value="hierarchies">Hierarchies</TabsTrigger>
@@ -1108,6 +1189,6 @@ export default function CommissionsPage() {
       </Tabs>
 
       <UploadStatementDialog open={uploadOpen} onOpenChange={setUploadOpen} />
-    </div>
+    </PageShell>
   );
 }

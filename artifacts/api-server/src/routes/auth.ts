@@ -6,6 +6,7 @@ import { db, usersTable, organizationsTable, userInvitationsTable } from "@works
 import { randomUUID } from "crypto";
 import { logger } from "../lib/logger";
 import { seedDefaultCarriers } from "../lib/carrierSeed";
+import { isDemoMode, demoUserId } from "../lib/demoMode";
 
 const ProvisionSchema = z.object({
   email: z.string().email(),
@@ -26,8 +27,11 @@ const router: IRouter = Router();
  * and `requireAuth` rejects them.
  */
 router.get("/auth/status", async (req: Request, res: Response): Promise<void> => {
-  const auth = getAuth(req);
-  if (!auth?.userId) {
+  // Demo mode (a hard no-op under NODE_ENV=production, see lib/demoMode):
+  // Clerk's middleware is not mounted, so getAuth() would throw. Every demo
+  // request is the seeded demo user, exactly as requireAuth resolves it.
+  const userId = isDemoMode() ? demoUserId() : getAuth(req)?.userId;
+  if (!userId) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
@@ -40,7 +44,7 @@ router.get("/auth/status", async (req: Request, res: Response): Promise<void> =>
       isActive: usersTable.isActive,
     })
     .from(usersTable)
-    .where(eq(usersTable.id, auth.userId))
+    .where(eq(usersTable.id, userId))
     .limit(1);
 
   if (!user) {

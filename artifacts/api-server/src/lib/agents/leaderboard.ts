@@ -53,6 +53,7 @@ import {
   db,
   agentsTable,
   leadsTable,
+  contactsTable,
   leadRoutingTable,
   leadCallbacksTable,
 } from "@workspace/db";
@@ -60,6 +61,7 @@ import { getOrgReadiness } from "./readiness";
 // Single source of truth for "open lead" statuses — shared with the router so
 // the leaderboard's open-lead count can never drift from eligibility ranking.
 import { OPEN_LEAD_STATUSES } from "../leadQueue/readyToSell";
+import { leadContactsWhere } from "../metrics/leads";
 
 export interface AgentLeaderboardEntry {
   agentId: string;
@@ -70,8 +72,17 @@ export interface AgentLeaderboardEntry {
   inboundsRouted: number;
   /** `lead_callbacks` rows this agent resolved in the window. */
   callbacksResolved: number;
-  /** Current open leads assigned to the agent (point-in-time, not windowed). */
+  /**
+   * Open INBOUND-QUEUE leads assigned to the agent (`leads` table, statuses
+   * new/contacted/qualified; point-in-time). The routing workload — shown as
+   * "Open queue leads". Not the CRM lead count.
+   */
   openLeads: number;
+  /**
+   * CRM contacts with status Lead assigned to the agent (shared definition,
+   * lib/metrics/leads.ts) — the number the dashboard and Clients & Leads use.
+   */
+  leadContacts: number;
   /** Ready-to-sell verdict from getOrgReadiness (read-only). */
   readyToSell: boolean;
   /** 1-based rank after sorting (ties share neighbouring ranks by index). */
@@ -171,6 +182,14 @@ export async function getAgentLeaderboard(
     )
     .groupBy(leadsTable.assignedAgentId);
 
+  // CRM leads per agent (contacts with status Lead) — the shared "lead"
+  // definition used by the dashboard and Clients & Leads.
+  const leadContactRows = await db
+    .select({ agentId: contactsTable.assignedAgentId, n: count() })
+    .from(contactsTable)
+    .where(and(leadContactsWhere(orgId), inArray(contactsTable.assignedAgentId, agentIds)))
+    .groupBy(contactsTable.assignedAgentId);
+
   // Ready-to-sell verdict — reuse the canonical readiness read model so the two
   // surfaces can never disagree. READ-ONLY; we only consume `readyToSell`.
   const readiness = await getOrgReadiness(orgId, undefined, now);
@@ -181,6 +200,7 @@ export async function getAgentLeaderboard(
   const routedByAgent = indexCounts(routedRows);
   const callbacksByAgent = indexCounts(callbackRows);
   const openByAgent = indexCounts(openLeadRows);
+  const leadContactsByAgent = indexCounts(leadContactRows);
 
   const entries: Omit<AgentLeaderboardEntry, "rank">[] = agents.map((a) => ({
     agentId: a.agentId,
@@ -190,6 +210,7 @@ export async function getAgentLeaderboard(
     inboundsRouted: routedByAgent.get(a.agentId) ?? 0,
     callbacksResolved: callbacksByAgent.get(a.agentId) ?? 0,
     openLeads: openByAgent.get(a.agentId) ?? 0,
+    leadContacts: leadContactsByAgent.get(a.agentId) ?? 0,
     readyToSell: readyByAgent.get(a.agentId) ?? false,
   }));
 

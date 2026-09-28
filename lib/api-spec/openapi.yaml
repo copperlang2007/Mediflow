@@ -73,6 +73,9 @@ tags:
     description: Native e-signature envelopes for carrier contracting paperwork
   - name: dialer
     description: masterBRIDGE dialer integration — inbound lifecycle events (Option A)
+  # --- stage2/campaigns ---
+  - name: campaigns
+    description: Omnichannel email/SMS marketing campaigns
 
 paths:
   /healthz:
@@ -4713,6 +4716,612 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  # --- stage2/new-pages-core ---
+  # Book of business, reconciliation, agent back office, CSV exports and the
+  # Knowledge Base. Pages call these through customFetch; no generated hooks.
+  /enrollments/summary:
+    get:
+      operationId: getEnrollmentsSummary
+      tags: [enrollments]
+      summary: Book-of-business counts (same filters as GET /enrollments)
+      description: Requires contact:read. Org-scoped.
+      parameters:
+        - { name: carrierId, in: query, schema: { type: string } }
+        - { name: agentId, in: query, schema: { type: string } }
+        - { name: planType, in: query, schema: { type: string, enum: [MA, PDP, MAPD, supp, other] } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: effectuated, in: query, schema: { type: string, enum: ["true", "false"] } }
+        - { name: effectiveFrom, in: query, schema: { type: string, format: date } }
+        - { name: effectiveTo, in: query, schema: { type: string, format: date } }
+        - { name: search, in: query, description: Client name or policy number, schema: { type: string } }
+      responses:
+        "200":
+          description: Counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  active: { type: integer }
+                  pending: { type: integer }
+                  ended: { type: integer }
+                  effectuated: { type: integer }
+                  notEffectuated: { type: integer }
+                  startingSoon: { type: integer, description: Effective date within the next 60 days }
+  /commissions/reconciliation/overview:
+    get:
+      operationId: getReconciliationOverview
+      tags: [commissions]
+      summary: Statement variance, unmatched line items and open missed payments
+      description: Requires commission:read. Org-scoped. Never returns carrier member ids.
+      responses:
+        "200":
+          description: Overview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statements: { type: array, items: { type: object, additionalProperties: true } }
+                  totals: { type: object, additionalProperties: true }
+                  unmatchedItems: { type: array, items: { type: object, additionalProperties: true } }
+                  missedPayments: { type: array, items: { type: object, additionalProperties: true } }
+                  asOf: { type: string, format: date-time }
+  /agents/me/backoffice:
+    get:
+      operationId: getMyAgentBackoffice
+      tags: [agents]
+      summary: The caller's own agent back office
+      description: Any authenticated user with a linked agent record. 404 when none is linked.
+      responses:
+        "200":
+          description: Back office
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "404":
+          description: No agent linked to this user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /agents/{id}/backoffice:
+    get:
+      operationId: getAgentBackoffice
+      tags: [agents]
+      summary: One agent's back office (profile, readiness, AHIP, licenses, certifications, portals, tasks, documents, checklists)
+      description: Requires agent:read. Org-scoped.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Back office
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "404":
+          description: Agent not found in this org
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /reports/contacts/export:
+    get:
+      operationId: exportContactsCsv
+      tags: [reports]
+      summary: Every contact as CSV
+      description: |
+        Requires contact:update, a recent sign-in and `X-Confirm-Export: true`.
+        Medicare ID is decrypted only for PHI-privileged roles and masked
+        otherwise (same as the contacts bulk export). Logged to data_export_log.
+      parameters:
+        - { name: X-Confirm-Export, in: header, required: true, schema: { type: string, enum: ["true"] } }
+      responses:
+        "200": { description: CSV file, content: { text/csv: { schema: { type: string } } } }
+        "428": { description: Export confirmation header missing }
+  /reports/policies/export:
+    get:
+      operationId: exportPoliciesCsv
+      tags: [reports]
+      summary: Every enrollment (policy) as CSV — no Medicare ID column
+      description: Requires contact:update, a recent sign-in and `X-Confirm-Export true`. Logged to data_export_log.
+      parameters:
+        - { name: X-Confirm-Export, in: header, required: true, schema: { type: string, enum: ["true"] } }
+      responses:
+        "200": { description: CSV file, content: { text/csv: { schema: { type: string } } } }
+        "428": { description: Export confirmation header missing }
+  /reports/agents/export:
+    get:
+      operationId: exportAgentsCsv
+      tags: [reports]
+      summary: Agent roster as CSV — no contracting PII
+      description: Requires agent:update, a recent sign-in and `X-Confirm-Export true`. Logged to data_export_log.
+      parameters:
+        - { name: X-Confirm-Export, in: header, required: true, schema: { type: string, enum: ["true"] } }
+      responses:
+        "200": { description: CSV file, content: { text/csv: { schema: { type: string } } } }
+        "428": { description: Export confirmation header missing }
+  /kb/articles:
+    get:
+      operationId: listKbArticles
+      tags: [knowledge-base]
+      summary: List Knowledge Base articles (all staff roles)
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: includeInactive, in: query, schema: { type: string, enum: ["true", "false"] } }
+      responses:
+        "200":
+          description: Articles and org-wide counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  articles: { type: array, items: { $ref: "#/components/schemas/KbArticleStage2" } }
+                  stats:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      active: { type: integer }
+                      categories: { type: integer }
+                      keywords: { type: integer }
+    post:
+      operationId: createKbArticle
+      tags: [knowledge-base]
+      summary: Create an article (super_admin, agency_admin). Never include client data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KbArticleInputStage2" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KbArticleStage2" }
+  /kb/articles/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getKbArticle
+      tags: [knowledge-base]
+      responses:
+        "200":
+          description: Article
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KbArticleStage2" }
+        "404": { description: Not found in this org }
+    patch:
+      operationId: updateKbArticle
+      tags: [knowledge-base]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KbArticleInputStage2" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KbArticleStage2" }
+        "404": { description: Not found in this org }
+    delete:
+      operationId: deleteKbArticle
+      tags: [knowledge-base]
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Not found in this org }
+  # --- stage2/calendar-branding ---
+  # Calendar appointments, agency white-label branding and super_admin
+  # workspace provisioning. Schemas are inline so this block stays contiguous.
+  /appointments:
+    get:
+      operationId: listAppointments
+      tags: [appointments]
+      summary: Appointments starting in [from, to) (max 100 days). Agents see only their own.
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: agentId, in: query, schema: { type: string } }
+        - { name: contactId, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [confirmed, pending, completed, cancelled, no_show] } }
+      responses:
+        "200":
+          description: Appointments plus status counts for the range
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { type: object, additionalProperties: true } }
+                  summary:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      confirmed: { type: integer }
+                      pending: { type: integer }
+                      completed: { type: integer }
+                      cancelled: { type: integer }
+                      no_show: { type: integer }
+                  scope: { type: string, enum: [own, org] }
+        "400": { description: Missing or oversized range, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    post:
+      operationId: createAppointment
+      tags: [appointments]
+      summary: Book an appointment (notes are encrypted at rest)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, startsAt, endsAt]
+              properties:
+                title: { type: string, maxLength: 200 }
+                type: { type: string, enum: [enrollment, review, renewal, consultation, other] }
+                status: { type: string, enum: [confirmed, pending, completed, cancelled, no_show] }
+                startsAt: { type: string, format: date-time }
+                endsAt: { type: string, format: date-time }
+                contactId: { type: [string, "null"] }
+                agentId: { type: [string, "null"] }
+                notes: { type: [string, "null"], maxLength: 4000 }
+                locationType: { type: string, enum: [office, phone, video, home] }
+                locationDetail: { type: [string, "null"], maxLength: 300 }
+                meetingUrl: { type: [string, "null"], description: "https:// only" }
+      responses:
+        "201": { description: Created appointment, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "400": { description: Validation error, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "403": { description: Not permitted (agents book only their own calendar and contacts), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /appointments/contact-options:
+    get:
+      operationId: listAppointmentContactOptions
+      tags: [appointments]
+      summary: Contact picker (names only). Agents get only contacts assigned to them.
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Contacts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        firstName: { type: string }
+                        lastName: { type: string }
+                        assignedAgentId: { type: [string, "null"] }
+  /appointments/agent-options:
+    get:
+      operationId: listAppointmentAgentOptions
+      tags: [appointments]
+      summary: Agent picker. Agents get only themselves.
+      responses:
+        "200":
+          description: Agents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        firstName: { type: string }
+                        lastName: { type: string }
+                        isMe: { type: boolean }
+  /appointments/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getAppointment
+      tags: [appointments]
+      summary: One appointment
+      responses:
+        "200": { description: Appointment, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "404": { description: Not found (or not yours), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    patch:
+      operationId: updateAppointment
+      tags: [appointments]
+      summary: Edit or reschedule (rescheduling clears the reminder claim)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200": { description: Updated appointment, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "404": { description: Not found (or not yours), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    delete:
+      operationId: deleteAppointment
+      tags: [appointments]
+      summary: Delete an appointment
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Not found (or not yours), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /organizations/me/branding:
+    get:
+      operationId: getOrgBranding
+      tags: [organizations]
+      summary: This agency's white-label settings (null = agencyBRIDGE default). Any member.
+      responses:
+        "200": { description: Branding, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+    put:
+      operationId: updateOrgBranding
+      tags: [organizations]
+      summary: Update branding (agency_admin / super_admin). Rejects colours under 3:1 contrast on white.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                productName: { type: [string, "null"], maxLength: 40 }
+                tagline: { type: [string, "null"], maxLength: 80 }
+                primaryColor: { type: [string, "null"], pattern: "^#[0-9a-fA-F]{6}$" }
+                accentColor: { type: [string, "null"], pattern: "^#[0-9a-fA-F]{6}$" }
+                displayFont: { type: [string, "null"] }
+                bodyFont: { type: [string, "null"] }
+                logoUrl: { type: [string, "null"] }
+                markUrl: { type: [string, "null"] }
+                faviconUrl: { type: [string, "null"] }
+                emailFromName: { type: [string, "null"], maxLength: 60 }
+      responses:
+        "200": { description: Saved branding plus contrast warnings, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "400": { description: Invalid value or low contrast (code low_contrast), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    delete:
+      operationId: resetOrgBranding
+      tags: [organizations]
+      summary: Reset to the agencyBRIDGE defaults (also clears the logo)
+      responses:
+        "200": { description: Default branding, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /admin/agencies/overview:
+    get:
+      operationId: listAgenciesOverview
+      tags: [admin]
+      summary: Every agency with live member, agent, client and pending-invitation counts (super_admin)
+      responses:
+        "200": { description: Agencies, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "403": { description: Not super_admin, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /admin/agencies:
+    post:
+      operationId: createAgency
+      tags: [admin]
+      summary: Create an agency and invite its first admin via the invitation flow (super_admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug, adminEmail]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 120 }
+                slug: { type: string, pattern: "^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$" }
+                adminEmail: { type: string, format: email }
+      responses:
+        "201": { description: "Agency, invitation and one-time accept link", content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "409": { description: Slug taken or address already has an account, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { description: APP_BASE_URL not configured, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  # --- end stage2/calendar-branding ---
+
+  # --- stage2/campaigns ---
+  # Omnichannel email/SMS campaigns (routes/campaigns.ts, routes/campaignsPublic.ts).
+  # The web page calls these with customFetch; no generated hooks are required.
+  /campaigns:
+    get:
+      operationId: listCampaigns
+      tags: [campaigns]
+      summary: List campaigns for the org (optionally one channel)
+      parameters:
+        - { name: channel, in: query, required: false, schema: { type: string, enum: [email, sms] } }
+      responses:
+        "200": { description: Campaigns, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Campaign" } } } } }
+    post:
+      operationId: createCampaign
+      tags: [campaigns]
+      summary: Create a draft campaign (communication:create)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CampaignInput" } } }
+      responses:
+        "201": { description: Draft created, content: { application/json: { schema: { $ref: "#/components/schemas/Campaign" } } } }
+        "400": { description: Invalid body, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /campaigns/overview:
+    get:
+      operationId: getCampaignOverview
+      tags: [campaigns]
+      summary: KPI totals from real recipient rows; rates are null until tracking is connected
+      parameters:
+        - { name: channel, in: query, required: false, schema: { type: string, enum: [email, sms] } }
+      responses:
+        "200": { description: Totals, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /campaigns/config:
+    get:
+      operationId: getCampaignConfig
+      tags: [campaigns]
+      summary: Which sending / tracking / compliance settings are configured
+      responses:
+        "200": { description: Config state, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /campaigns/settings:
+    put:
+      operationId: updateCampaignSettings
+      tags: [campaigns]
+      summary: Sender name, physical mailing address (CAN-SPAM), reply-to, quiet-hours time zone (communication:update)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                senderName: { type: [string, "null"] }
+                physicalAddress: { type: [string, "null"] }
+                replyToEmail: { type: [string, "null"] }
+                defaultTimeZone: { type: string }
+      responses:
+        "200": { description: Updated config state, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /campaigns/activity:
+    get:
+      operationId: getCampaignActivity
+      tags: [campaigns]
+      summary: Recent delivered / opened / clicked / bounced / unsubscribed recipient events
+      parameters:
+        - { name: channel, in: query, required: false, schema: { type: string, enum: [email, sms] } }
+      responses:
+        "200": { description: Events, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+  /campaigns/audience/preview:
+    post:
+      operationId: previewCampaignAudience
+      tags: [campaigns]
+      summary: Live recipient count for an audience filter (opt-outs excluded)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel]
+              properties:
+                channel: { type: string, enum: [email, sms] }
+                audience: { $ref: "#/components/schemas/CampaignAudience" }
+      responses:
+        "200":
+          description: Counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matched: { type: integer }
+                  eligible: { type: integer }
+                  optedOut: { type: integer }
+                  missingAddress: { type: integer }
+  /campaigns/audience/options:
+    get:
+      operationId: getCampaignAudienceOptions
+      tags: [campaigns]
+      summary: Distinct states, sources, tags and carriers for the audience builder
+      responses:
+        "200": { description: Options, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /campaigns/opt-outs:
+    get:
+      operationId: listCampaignOptOuts
+      tags: [campaigns]
+      summary: Email unsubscribes or the SMS STOP list for the org
+      parameters:
+        - { name: channel, in: query, required: false, schema: { type: string, enum: [email, sms] } }
+      responses:
+        "200": { description: Opt-outs, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /campaigns/opt-outs/{channel}/resubscribe:
+    post:
+      operationId: resubscribeCampaignContact
+      tags: [campaigns]
+      summary: Re-opt-in a contact to EMAIL with explicit confirmation + reason (audited). SMS always 403 — only the consumer texting START can re-opt-in.
+      parameters:
+        - { name: channel, in: path, required: true, schema: { type: string, enum: [email, sms] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contactId, confirm, reason]
+              properties:
+                contactId: { type: string }
+                confirm: { type: boolean, const: true }
+                reason: { type: string, minLength: 5 }
+      responses:
+        "200": { description: Re-subscribed }
+        "403": { description: SMS re-opt-in is never allowed from the UI }
+  /campaigns/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getCampaign
+      tags: [campaigns]
+      summary: Campaign detail with up to 200 recipients
+      responses:
+        "200": { description: Campaign, content: { application/json: { schema: { $ref: "#/components/schemas/Campaign" } } } }
+        "404": { description: Not found in this org }
+    patch:
+      operationId: updateCampaign
+      tags: [campaigns]
+      summary: Edit a draft
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CampaignInput" } } }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { $ref: "#/components/schemas/Campaign" } } } }
+        "409": { description: Not a draft }
+    delete:
+      operationId: deleteCampaign
+      tags: [campaigns]
+      summary: Delete a draft or a cancelled campaign that reached nobody (communication:update)
+      responses:
+        "204": { description: Deleted }
+        "409": { description: Sent campaigns are kept as a record }
+  /campaigns/{id}/send:
+    post:
+      operationId: sendCampaign
+      tags: [campaigns]
+      summary: Send now or schedule (communication:update). 409 when the provider, mailing address or unsubscribe signer is not configured, or the audience is empty.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scheduledAt: { type: [string, "null"], format: date-time }
+      responses:
+        "200": { description: Scheduled, content: { application/json: { schema: { $ref: "#/components/schemas/Campaign" } } } }
+        "409": { description: Not configured / empty audience / not a draft }
+  /campaigns/{id}/cancel:
+    post:
+      operationId: cancelCampaign
+      tags: [campaigns]
+      summary: Cancel a scheduled or sending campaign
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Cancelled, content: { application/json: { schema: { $ref: "#/components/schemas/Campaign" } } } }
+  /campaigns/v1/webhooks/resend:
+    post:
+      operationId: campaignResendWebhook
+      tags: [campaigns]
+      security: []
+      summary: Resend delivery/open/click/bounce/complaint events (svix signature, RESEND_WEBHOOK_SECRET)
+      responses:
+        "200": { description: Accepted (or duplicate) }
+        "401": { description: Bad signature }
+        "503": { description: RESEND_WEBHOOK_SECRET not configured }
+  /campaigns/v1/webhooks/twilio-status:
+    post:
+      operationId: campaignTwilioStatusCallback
+      tags: [campaigns]
+      security: []
+      summary: Twilio SMS delivery receipts (X-Twilio-Signature)
+      responses:
+        "204": { description: Accepted }
+        "403": { description: Bad signature }
+  # --- end stage2/campaigns ---
+
 
 components:
   securitySchemes:
@@ -4824,6 +5433,10 @@ components:
           type: string
         planTier:
           type: string
+          description: >
+            The plan the product actually enforces (from the subscription /
+            entitlements — the same tier /billing/subscription reports), not
+            the legacy organizations.plan_tier column.
         logoUrl:
           type: ["string", "null"]
         createdAt:
@@ -4880,11 +5493,25 @@ components:
           type: integer
         openLeadsCount:
           type: integer
+          description: >
+            CRM contacts whose status is Lead (not deleted) — the same number
+            the Clients & Leads page shows. Not the inbound queue's `leads` table.
         unreadNotificationsCount:
           type: integer
         ahipCompletionRateCurrent:
           type: number
-          description: Share of active agents with a passed/waived AHIP for ahipPlanYear.
+          description: >
+            Percent of agents who need AHIP (status active or onboarding) with
+            a passed or waived record for ahipPlanYear.
+        ahipCompleteCount:
+          type: integer
+        agentsRequiringAhip:
+          type: integer
+        licensesExpiredCount:
+          type: integer
+          description: >
+            Licenses past their expiry date (or stored as expired) for agents
+            still on the team (onboarding, active, suspended).
         ahipPlanYear:
           type: integer
           description: Plan year being sold today — the calendar year through Sept 30, the next year from Oct 1.
@@ -4947,6 +5574,9 @@ components:
           type: ["string", "null"]
         userFullName:
           type: ["string", "null"]
+        contactName:
+          type: ["string", "null"]
+          description: The client the activity is about; null unless the caller has contact:read.
         resourceType:
           type: ["string", "null"]
         resourceId:
@@ -5284,6 +5914,15 @@ components:
         status:
           type: string
           enum: [active, pending, expired, suspended, not_appointed]
+        effectiveStatus:
+          type: string
+          enum: [active, pending, expired, suspended, not_appointed]
+          description: >
+            The status to show and count. Same as `status`, except a license
+            whose expiry date has passed is always "expired". Active means
+            status active AND no expiry or expiry in the future — the shared
+            definition Licensing, the agent profile, Ready to Sell, the back
+            office and the dashboard all use.
         renewalSubmittedAt:
           type: ["string", "null"]
           format: date-time
@@ -5655,8 +6294,13 @@ components:
           type: integer
         totalActiveAgents:
           type: integer
+          description: Deprecated alias of agentsRequiringAhip.
+        agentsRequiringAhip:
+          type: integer
+          description: Agents whose status is active or onboarding.
         passedCount:
           type: integer
+          description: Of those, how many have a passed or waived AHIP record for the year.
         completionRate:
           type: number
         records:
@@ -7213,7 +7857,7 @@ components:
       properties:
         type:
           type: string
-          enum: [create_task, send_notification, send_email, send_sms, change_contact_status, enroll_sequence, change_deal_stage]
+          enum: [create_task, send_notification, send_email, send_sms, change_contact_status, enroll_sequence, change_deal_stage, create_appointment]
         config:
           type: object
           additionalProperties: true
@@ -8314,3 +8958,72 @@ components:
         - preclearedAt
         - preclearanceId
         - expiresAt
+
+    # --- stage2/new-pages-core ---
+    KbArticleStage2:
+      type: object
+      properties:
+        id: { type: string }
+        orgId: { type: string }
+        category: { type: string }
+        title: { type: string }
+        content: { type: string }
+        keywords: { type: array, items: { type: string } }
+        isActive: { type: boolean }
+        createdBy: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, orgId, category, title, content, keywords, isActive, createdAt, updatedAt]
+    KbArticleInputStage2:
+      type: object
+      properties:
+        category: { type: string, maxLength: 80 }
+        title: { type: string, maxLength: 200 }
+        content: { type: string, maxLength: 20000 }
+        keywords: { type: array, maxItems: 50, items: { type: string, maxLength: 60 } }
+        isActive: { type: boolean }
+    # --- stage2/campaigns ---
+    CampaignAudience:
+      type: object
+      description: Audience filter over contacts. Health conditions and race are never filterable.
+      additionalProperties: false
+      properties:
+        statuses: { type: array, items: { type: string, enum: [lead, prospect, enrolled, retained, lost] } }
+        planTypes: { type: array, items: { type: string, enum: [MA, PDP, MAPD, supp, other] } }
+        carrierIds: { type: array, items: { type: string } }
+        states: { type: array, items: { type: string } }
+        sources: { type: array, items: { type: string } }
+        tags: { type: array, items: { type: string } }
+        birthdayMonth: { type: integer, minimum: 1, maximum: 12 }
+    CampaignInput:
+      type: object
+      properties:
+        channel: { type: string, enum: [email, sms] }
+        name: { type: string }
+        templateId: { type: [string, "null"] }
+        subject: { type: [string, "null"] }
+        body: { type: [string, "null"] }
+        audience: { $ref: "#/components/schemas/CampaignAudience" }
+    Campaign:
+      type: object
+      properties:
+        id: { type: string }
+        channel: { type: string, enum: [email, sms] }
+        name: { type: string }
+        status: { type: string, enum: [draft, scheduled, sending, sent, cancelled] }
+        subject: { type: [string, "null"] }
+        body: { type: [string, "null"] }
+        audience: { $ref: "#/components/schemas/CampaignAudience" }
+        templateName: { type: [string, "null"] }
+        scheduledAt: { type: [string, "null"], format: date-time }
+        sentAt: { type: [string, "null"], format: date-time }
+        recipientCount: { type: integer }
+        sentCount: { type: integer }
+        deliveredCount: { type: integer }
+        openedCount: { type: integer }
+        clickedCount: { type: integer }
+        bouncedCount: { type: integer }
+        failedCount: { type: integer }
+        skippedCount: { type: integer }
+        unsubscribedCount: { type: integer }
+    # --- end stage2/campaigns ---

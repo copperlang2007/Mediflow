@@ -20,6 +20,7 @@ import { randomUUID } from "crypto";
 import { db, messageThreadsTable, messagesTable } from "@workspace/db";
 import { logger } from "../logger";
 import { sendEmail } from "../email";
+import { fromHeaderFor } from "../emailFrom";
 import { sendSMS } from "../sms";
 import {
   evaluateConsumerEmail,
@@ -129,6 +130,7 @@ export async function deliverScheduledEmail(job: ScheduledEmailJob): Promise<Del
       text: job.text,
       replyTo: job.replyTo,
       tags: job.tags,
+      from: fromHeaderFor(job.fromName),
     });
     return result.success ? "sent" : "failed";
   }
@@ -156,6 +158,7 @@ export async function deliverScheduledEmail(job: ScheduledEmailJob): Promise<Del
     text,
     replyTo: job.replyTo,
     tags: job.tags,
+    from: fromHeaderFor(job.fromName),
     headers: url ? unsubscribeHeaders(url) : undefined,
   });
   if (ctx.automated) {

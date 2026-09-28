@@ -11,335 +11,136 @@ import {
   getGetContactQueryKey,
 } from "@workspace/api-client-react";
 import type { AiContext } from "@/components/ai-assistant";
+import { AiAssistantPanel, openAiAssistant } from "@/components/ai-assistant";
 import { PresenceToggle } from "@/components/layout/PresenceToggle";
-import { ViewAsAgencyControl } from "@/components/layout/ViewAsAgencyControl";
+import { ViewAsAgencyControl, ViewAsAgencyDialog } from "@/components/layout/ViewAsAgencyControl";
+import { GlobalSearch } from "@/components/layout/GlobalSearch";
+import {
+  DEV_NAV_GROUP,
+  NAV_GROUPS,
+  ROLE_LABELS,
+  activeNavHref,
+  visibleNavGroups,
+  type NavGroup,
+  type NavItemDef,
+  type Role,
+} from "@/components/layout/nav-config";
+import { BrandLockup } from "@/components/brand/BrandMark";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { IS_DEMO_BUILD } from "@/lib/demo/isDemo";
 import { cn } from "@/lib/utils";
-
-type Role =
-  | "super_admin"
-  | "agency_admin"
-  | "compliance_manager"
-  | "agent_support"
-  | "viewer"
-  | "agent"
-  | "developer";
-
-const ALL_ROLES: Role[] = [
-  "super_admin", "agency_admin", "compliance_manager",
-  "agent_support", "viewer", "agent", "developer",
-];
-
-const ROLE_LABELS: Record<Role, string> = {
-  super_admin: "Super Admin",
-  agency_admin: "Agency Admin",
-  compliance_manager: "Compliance Mgr",
-  agent_support: "Agent Support",
-  viewer: "Viewer",
-  agent: "Agent",
-  developer: "Developer",
-};
-
-const ROLE_COLORS: Record<Role, string> = {
-  super_admin: "bg-purple-100 text-purple-800",
-  agency_admin: "bg-blue-100 text-blue-800",
-  compliance_manager: "bg-teal-100 text-teal-800",
-  agent_support: "bg-sky-100 text-sky-800",
-  viewer: "bg-slate-100 text-slate-700",
-  agent: "bg-green-100 text-green-800",
-  developer: "bg-orange-100 text-orange-800",
-};
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  LayoutDashboard,
-  Users,
-  FileText,
-  Award,
-  PhoneCall,
-  CheckSquare,
-  FolderOpen,
-  ShieldCheck,
-  ShieldAlert,
-  CalendarClock,
-  Megaphone,
-  TrendingDown,
-  RotateCcw,
-  Settings,
-  CreditCard,
-  Menu,
-  X,
   Bell,
-  ChevronRight,
-  LogOut,
-  User,
   Building2,
+  ChevronDown,
   ChevronLeft,
-  RefreshCcw,
-  Zap,
-  BarChart2,
-  Lock,
-  Database,
-  DollarSign,
-  Wallet,
-  Wrench,
-  KeyRound,
-  Handshake,
-  ClipboardCheck,
-  Activity,
-  Radio,
-  Target,
-  Trophy,
-  MonitorPlay,
+  CreditCard,
+  Eye,
+  FlaskConical,
+  HelpCircle,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Search,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  User,
   UserPlus,
+  X,
 } from "lucide-react";
 import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
 import NotificationPanel from "@/components/notifications/NotificationPanel";
 import { useSSENotifications } from "@/hooks/useSSENotifications";
-import { AiAssistantPanel } from "@/components/ai-assistant";
 
-type NavItemDef = {
-  href: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  roles: Role[];
-};
-
-type NavGroup = { group: string; items: NavItemDef[] };
-
-const navItems: NavGroup[] = [
-  {
-    group: "Core",
-    items: [
-      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ALL_ROLES },
-      {
-        href: "/agents", label: "Agents", icon: Users,
-        roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
-      },
-      {
-        href: "/onboarding", label: "My onboarding", icon: ClipboardCheck,
-        roles: ["agent"],
-      },
-      {
-        href: "/admin-onboarding", label: "Contracting", icon: Handshake,
-        roles: ["super_admin", "agency_admin", "compliance_manager"],
-      },
-    ],
-  },
-  {
-    group: "Compliance",
-    items: [
-      { href: "/licensing", label: "Licensing", icon: FileText, roles: ALL_ROLES },
-      { href: "/certifications", label: "Certifications", icon: Award, roles: ALL_ROLES },
-      {
-        href: "/renewals", label: "Renewals", icon: RefreshCcw,
-        roles: ["super_admin", "agency_admin", "compliance_manager"],
-      },
-      {
-        href: "/aep", label: "AEP Center", icon: CalendarClock,
-        roles: ["super_admin", "agency_admin", "compliance_manager"],
-      },
-      {
-        href: "/churn", label: "Churn Risk", icon: TrendingDown,
-        roles: ["super_admin", "agency_admin", "compliance_manager"],
-      },
-    ],
-  },
-  {
-    group: "Sales",
-    items: [
-      {
-        href: "/crm", label: "CRM", icon: PhoneCall,
-        roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
-      },
-      {
-        href: "/admin/queue", label: "Live Queue", icon: Radio,
-        roles: ["super_admin", "agency_admin"],
-      },
-      {
-        href: "/admin/queue/wall", label: "Wallboard", icon: MonitorPlay,
-        roles: ["super_admin", "agency_admin"],
-      },
-      {
-        href: "/readiness", label: "Ready to Sell", icon: Target,
-        roles: ["super_admin", "agency_admin", "compliance_manager"],
-      },
-      { href: "/tasks", label: "Tasks", icon: CheckSquare, roles: ALL_ROLES },
-      {
-        href: "/commissions", label: "Commissions", icon: DollarSign,
-        roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
-      },
-      {
-        href: "/clawbacks", label: "Clawbacks", icon: RotateCcw,
-        roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
-      },
-      {
-        href: "/my-commissions", label: "My Commissions", icon: Wallet,
-        roles: ["agent"],
-      },
-    ],
-  },
-  {
-    group: "Resources",
-    items: [
-      { href: "/documents", label: "Documents", icon: FolderOpen, roles: ALL_ROLES },
-      {
-        href: "/compliance", label: "Audit & Compliance", icon: ShieldCheck,
-        roles: ["super_admin", "agency_admin", "compliance_manager"],
-      },
-      {
-        href: "/complaints", label: "Complaints", icon: ShieldAlert,
-        roles: ["super_admin", "agency_admin", "compliance_manager"],
-      },
-      {
-        href: "/marketing", label: "Marketing Approval", icon: Megaphone,
-        roles: ["super_admin", "agency_admin", "compliance_manager"],
-      },
-    ],
-  },
-  {
-    group: "Analytics",
-    items: [
-      {
-        href: "/reports", label: "Reports", icon: BarChart2,
-        roles: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
-      },
-      {
-        href: "/leaderboard", label: "Leaderboard", icon: Trophy,
-        roles: ["super_admin", "agency_admin", "compliance_manager"],
-      },
-    ],
-  },
-  {
-    group: "Settings",
-    items: [
-      {
-        href: "/automations", label: "Automations", icon: Zap,
-        roles: ["super_admin", "agency_admin"],
-      },
-      {
-        href: "/admin-carriers", label: "Carriers", icon: Building2,
-        roles: ["super_admin", "agency_admin"],
-      },
-      {
-        // Narrower than the rest of this group on purpose: billing is the
-        // agency's money, and the RBAC matrix restricts it to the same two
-        // roles server-side (see permissions.ts `billing`).
-        href: "/settings/billing", label: "Billing", icon: CreditCard,
-        roles: ["super_admin", "agency_admin"],
-      },
-      {
-        href: "/admin-compliance", label: "HIPAA / SOC 2", icon: Lock,
-        roles: ["super_admin", "agency_admin", "compliance_manager"],
-      },
-      {
-        href: "/data-migration", label: "Data Migration", icon: Database,
-        roles: ["super_admin", "agency_admin"],
-      },
-      {
-        href: "/admin/health", label: "System Health", icon: Activity,
-        roles: ["super_admin", "agency_admin"],
-      },
-    ],
-  },
+// Roles that can read contacts server-side (permissions.ts `contact.read`).
+// The global search box calls /api/contacts, so it is only shown to them.
+const CONTACT_READERS: Role[] = [
+  "super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer",
 ];
 
-function NavItem({
-  href,
-  label,
-  icon: Icon,
+const COLLAPSE_KEY = "mediflow:sidebar-collapsed";
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function NavLinkItem({
+  item,
+  active,
   collapsed,
   badgeCount,
-  badgeLabel,
+  onNavigate,
 }: {
-  href: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
+  item: NavItemDef;
+  active: boolean;
   collapsed: boolean;
   badgeCount?: number;
-  badgeLabel?: string;
+  onNavigate?: () => void;
 }) {
-  const [location] = useLocation();
-  const isActive = location === href || (href !== "/dashboard" && location.startsWith(href));
+  const Icon = item.icon;
   const showBadge = typeof badgeCount === "number" && badgeCount > 0;
   const badgeText = showBadge && badgeCount > 99 ? "99+" : showBadge ? String(badgeCount) : "";
+  const badgeLabel = showBadge ? `${badgeCount} overdue ${item.label.toLowerCase()}` : undefined;
 
-  if (collapsed) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Link href={href}>
-            <div
-              className={cn(
-                "relative flex items-center justify-center h-10 w-10 rounded-lg mx-auto transition-colors cursor-pointer",
-                isActive
-                  ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <Icon className="h-5 w-5" />
-              {showBadge && (
-                <span
-                  aria-label={badgeLabel ?? `${badgeCount} ${label}`}
-                  className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-semibold leading-none flex items-center justify-center"
-                >
-                  {badgeText}
-                </span>
-              )}
-            </div>
-          </Link>
-        </TooltipTrigger>
-        <TooltipContent side="right" className="font-medium">
-          {label}
-          {showBadge && ` · ${badgeCount} overdue`}
-        </TooltipContent>
-      </Tooltip>
-    );
-  }
-
-  return (
-    <Link href={href}>
-      <div
-        className={cn(
-          "flex items-center gap-3 px-3 h-10 rounded-lg transition-colors cursor-pointer",
-          isActive
-            ? "bg-sidebar-primary text-sidebar-primary-foreground font-medium"
-            : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-        )}
-      >
-        <Icon className="h-5 w-5 shrink-0" />
-        <span className="text-sm truncate">{label}</span>
-        {showBadge && (
-          <span
-            aria-label={badgeLabel ?? `${badgeCount} ${label}`}
-            className={cn(
-              "ml-auto min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-semibold leading-none flex items-center justify-center",
-              isActive
-                ? "bg-sidebar-primary-foreground/20 text-sidebar-primary-foreground"
-                : "bg-destructive text-destructive-foreground",
-            )}
-          >
-            {badgeText}
-          </span>
-        )}
-        {!showBadge && isActive && (
-          <ChevronRight className="h-3.5 w-3.5 ml-auto shrink-0 opacity-60" />
-        )}
-      </div>
+  const link = (
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+        active
+          ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+          : "text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        collapsed && "justify-center px-0 h-10 w-10 mx-auto",
+      )}
+    >
+      <Icon className="h-[18px] w-[18px] shrink-0" />
+      {!collapsed && <span className="truncate">{item.label}</span>}
+      {showBadge && (
+        <span
+          aria-label={badgeLabel}
+          className={cn(
+            "min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-semibold leading-none flex items-center justify-center",
+            collapsed ? "absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 text-[10px]" : "ml-auto",
+            active
+              ? "bg-white/25 text-white"
+              : "bg-destructive text-destructive-foreground",
+          )}
+        >
+          {badgeText}
+        </span>
+      )}
     </Link>
+  );
+
+  if (!collapsed) return link;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{link}</TooltipTrigger>
+      <TooltipContent side="right" className="font-medium">
+        {item.label}
+        {showBadge && ` · ${badgeCount} overdue`}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -368,15 +169,11 @@ function useAiContext(): AiContext {
   });
 
   if (agentId) {
-    const label = agent
-      ? `Agent: ${agent.firstName} ${agent.lastName}`
-      : "Agent";
+    const label = agent ? `Agent: ${agent.firstName} ${agent.lastName}` : "Agent";
     return { pageType: "agent", agentId, label };
   }
   if (contactId) {
-    const label = contact
-      ? `Contact: ${contact.firstName} ${contact.lastName}`
-      : "Contact";
+    const label = contact ? `Contact: ${contact.firstName} ${contact.lastName}` : "Contact";
     return { pageType: "contact", contactId, label };
   }
   if (location === "/dashboard" || location.startsWith("/dashboard")) {
@@ -385,10 +182,29 @@ function useAiContext(): AiContext {
   return { pageType: "other" };
 }
 
+/** Slim banner shown on every page of a demo build. */
+function DemoBanner() {
+  return (
+    <div
+      role="status"
+      className="flex items-center gap-3 px-4 sm:px-6 py-2 bg-sky-500/10 border-b border-sky-500/30 text-sky-900 dark:text-sky-200 text-sm shrink-0"
+    >
+      <FlaskConical className="h-4 w-4 shrink-0" />
+      <span className="font-semibold">Demo</span>
+      <span className="min-w-0 text-sky-800/80 dark:text-sky-300/80">
+        Sample agency, invented data.<span className="hidden sm:inline"> Nothing here is a real person.</span>
+      </span>
+    </div>
+  );
+}
+
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState<boolean>(readCollapsed);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [viewAsOpen, setViewAsOpen] = useState(false);
+  const [location] = useLocation();
   const { user } = useUser();
   const { signOut } = useClerk();
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -406,6 +222,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [userRole]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0");
+    } catch {
+      // storage unavailable — collapse still works for this page view
+    }
+  }, [collapsed]);
+
+  // Close the mobile drawer whenever the route changes.
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location]);
+
   // Overdue tasks badge for the Tasks nav item. Refresh once a minute so the
   // count rolls over as items pass their due date without a hard refresh.
   const { data: dashboardStats } = useGetDashboardStats({
@@ -422,202 +251,97 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   });
   const overdueTaskCount = dashboardStats?.overdueTasks ?? 0;
 
-  // Dev nav group — only added at runtime when the build-time flag is
-  // set AND the user has a developer/super_admin role. The build-time
-  // flag means production bundles never even contain the dev pages, but
-  // we still gate the group by role so a stray developer-flag staging
-  // build doesn't show the nav to ordinary users.
+  // Dev nav group — only added when the build-time flag is set AND the user
+  // has a developer/super_admin role.
   const showDevNav =
-    DEV_CONSOLE_ENABLED &&
-    (userRole === "developer" || userRole === "super_admin");
+    DEV_CONSOLE_ENABLED && (userRole === "developer" || userRole === "super_admin");
+  const allGroups: NavGroup[] = showDevNav ? [...NAV_GROUPS, DEV_NAV_GROUP] : NAV_GROUPS;
+  const groups = visibleNavGroups(userRole, allGroups);
+  const activeHref = activeNavHref(location, groups);
 
-  const navItemsWithDev: NavGroup[] = showDevNav
-    ? [
-        ...navItems,
-        {
-          group: "Dev",
-          items: [
-            {
-              href: "/dev",
-              label: "Dev Console",
-              icon: Wrench,
-              roles: ["developer", "super_admin"],
-            },
-            {
-              href: "/dev/db",
-              label: "Schema",
-              icon: Database,
-              roles: ["developer", "super_admin"],
-            },
-            {
-              href: "/dev/env",
-              label: "Environment",
-              icon: KeyRound,
-              roles: ["developer", "super_admin"],
-            },
-          ],
-        },
-      ]
-    : navItems;
+  const canSearch = !userRole || CONTACT_READERS.includes(userRole);
+  const isOwner = userRole === "super_admin" || userRole === "agency_admin";
+  const isSuperAdmin = userRole === "super_admin";
+  const roleLabel = userRole ? (ROLE_LABELS[userRole] ?? userRole) : null;
+  const initials =
+    `${user?.firstName?.[0] ?? ""}${user?.lastName?.[0] ?? ""}`.toUpperCase() || "U";
 
-  // Filter nav groups to items allowed for this user's role.
-  // While role is loading, show all to avoid flicker.
-  const filteredNavItems = navItemsWithDev
-    .map((group) => ({
-      ...group,
-      items: group.items.filter(
-        (item) => !userRole || item.roles.includes(userRole),
-      ),
-    }))
-    .filter((group) => group.items.length > 0);
+  const doSignOut = () => {
+    localStorage.removeItem("mediflow:view-as-org");
+    void signOut({ redirectUrl: basePath || "/" });
+  };
 
-  const sidebarContent = (
-    <div className={cn("flex flex-col h-full", collapsed ? "items-center" : "")}>
+  const renderSidebar = (isCollapsed: boolean, onNavigate?: () => void) => (
+    <div className="flex h-full flex-col">
       {/* Logo */}
       <div
         className={cn(
-          "flex items-center gap-3 px-4 h-16 border-b border-sidebar-border shrink-0",
-          collapsed && "justify-center px-0"
+          "flex h-16 items-center gap-3 border-b border-sidebar-border shrink-0",
+          isCollapsed ? "justify-center px-2" : "px-4",
         )}
       >
-        <img
-          src={`${basePath}/logo.svg`}
-          alt="agencyBRIDGE"
-          className="h-8 w-8 shrink-0"
-        />
-        {!collapsed && (
-          <div className="min-w-0">
-            <p className="font-bold text-sidebar-foreground text-sm truncate">
-              agencyBRIDGE
-            </p>
-            <p className="text-xs text-sidebar-foreground/50 truncate">Agency Platform</p>
-          </div>
-        )}
+        <Link href="/dashboard" onClick={onNavigate} className="min-w-0" aria-label="agencyBRIDGE — go to dashboard">
+          <BrandLockup
+            size={36}
+            tone="light"
+            compact={isCollapsed}
+            subtitle="Agency Platform"
+            wordmarkClassName="text-white text-sm"
+            subtitleClassName="text-sidebar-foreground"
+          />
+        </Link>
       </div>
 
       {/* Nav */}
-      <ScrollArea className="flex-1 py-3">
-        <div className={cn("space-y-5", collapsed ? "px-2" : "px-3")}>
-          {filteredNavItems.map((group) => (
-            <div key={group.group}>
-              {!collapsed && (
-                <p className="text-[10px] uppercase tracking-widest font-semibold text-sidebar-foreground/40 px-3 mb-1">
+      <ScrollArea className="flex-1">
+        <nav aria-label="Main navigation" className={cn("py-4 space-y-6", isCollapsed ? "px-2" : "px-3")}>
+          {groups.map((group) => (
+            <div key={group.group} className="space-y-1">
+              {isCollapsed ? (
+                <div className="mx-auto mb-2 h-px w-6 bg-sidebar-border" aria-hidden="true" />
+              ) : (
+                <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
                   {group.group}
                 </p>
               )}
-              <div className="space-y-0.5">
-                {group.items.map((item) => (
-                  <NavItem
-                    key={item.href}
-                    href={item.href}
-                    label={item.label}
-                    icon={item.icon}
-                    collapsed={collapsed}
-                    badgeCount={item.href === "/tasks" ? overdueTaskCount : undefined}
-                    badgeLabel={
-                      item.href === "/tasks"
-                        ? `${overdueTaskCount} overdue tasks`
-                        : undefined
-                    }
-                  />
-                ))}
-              </div>
+              {group.items.map((item) => (
+                <NavLinkItem
+                  key={item.href}
+                  item={item}
+                  active={item.href === activeHref}
+                  collapsed={isCollapsed}
+                  onNavigate={onNavigate}
+                  badgeCount={item.badge === "overdueTasks" ? overdueTaskCount : undefined}
+                />
+              ))}
             </div>
           ))}
-        </div>
+        </nav>
       </ScrollArea>
 
-      {/* Settings + User */}
-      <div
-        className={cn(
-          "border-t border-sidebar-border py-3 shrink-0",
-          collapsed ? "px-2" : "px-3"
-        )}
-      >
-        {/* Seat management is an owner concern — same audience as billing. */}
-        {(userRole === "super_admin" || userRole === "agency_admin") && (
-          <NavItem
-            href="/settings/team"
-            label="Team"
-            icon={UserPlus}
-            collapsed={collapsed}
-          />
-        )}
-
-        <NavItem
-          href="/settings"
-          label="Settings"
-          icon={Settings}
-          collapsed={collapsed}
-        />
-
+      {/* Footer: presence (agents) + collapse */}
+      <div className={cn("border-t border-sidebar-border p-3 shrink-0 space-y-1", isCollapsed && "px-2")}>
         {/* Agents mark themselves Available/Away for inbound lead routing. */}
         {userRole === "agent" && (
-          <div className={cn("mt-1", collapsed ? "flex justify-center" : "")}>
-            <PresenceToggle collapsed={collapsed} />
+          <div className={isCollapsed ? "flex justify-center" : ""}>
+            <PresenceToggle collapsed={isCollapsed} />
           </div>
         )}
-
-        <div className={cn("mt-2", collapsed ? "flex justify-center" : "")}>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className={cn(
-                  "flex items-center gap-2 w-full rounded-lg transition-colors",
-                  collapsed
-                    ? "h-10 w-10 justify-center hover:bg-sidebar-accent"
-                    : "px-3 h-12 hover:bg-sidebar-accent"
-                )}
-              >
-                <Avatar className="h-7 w-7 shrink-0">
-                  <AvatarImage src={user?.imageUrl} />
-                  <AvatarFallback className="text-xs bg-sidebar-primary text-sidebar-primary-foreground">
-                    {user?.firstName?.[0]}
-                    {user?.lastName?.[0]}
-                  </AvatarFallback>
-                </Avatar>
-                {!collapsed && (
-                  <div className="min-w-0 text-left flex-1">
-                    <p className="text-xs font-medium text-sidebar-foreground truncate">
-                      {user?.fullName ?? "User"}
-                    </p>
-                    <p className="text-[11px] text-sidebar-foreground/50 truncate">
-                      {user?.primaryEmailAddress?.emailAddress}
-                    </p>
-                  </div>
-                )}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" side="right" className="w-52">
-              <DropdownMenuItem asChild>
-                <Link href="/settings">
-                  <User className="h-4 w-4 mr-2" />
-                  Profile
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/settings">
-                  <Building2 className="h-4 w-4 mr-2" />
-                  Organization
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/settings/security">
-                  <ShieldCheck className="h-4 w-4 mr-2" />
-                  Account security
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-destructive focus:text-destructive"
-                onClick={() => { localStorage.removeItem("mediflow:view-as-org"); void signOut({ redirectUrl: basePath || "/" }); }}
-              >
-                <LogOut className="h-4 w-4 mr-2" />
-                Sign Out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+        {!onNavigate && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setCollapsed(!collapsed)}
+            aria-label={isCollapsed ? "Expand menu" : "Collapse menu"}
+            className={cn(
+              "w-full text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent",
+              isCollapsed && "justify-center px-0",
+            )}
+          >
+            <ChevronLeft className={cn("h-4 w-4 transition-transform", isCollapsed && "rotate-180")} />
+            {!isCollapsed && <span className="ml-2">Collapse</span>}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -627,97 +351,257 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Desktop sidebar */}
       <aside
         className={cn(
-          "hidden lg:flex flex-col bg-sidebar border-r border-sidebar-border transition-all duration-200 shrink-0 relative",
-          collapsed ? "w-16" : "w-60"
+          "hidden lg:flex flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border shrink-0 transition-[width] duration-300 ease-in-out",
+          collapsed ? "w-[76px]" : "w-64",
         )}
       >
-        {sidebarContent}
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="absolute -right-3 top-16 h-6 w-6 rounded-full bg-sidebar-accent border border-sidebar-border flex items-center justify-center text-sidebar-foreground/60 hover:text-sidebar-foreground transition-colors z-10"
-        >
-          {collapsed ? (
-            <ChevronRight className="h-3.5 w-3.5" />
-          ) : (
-            <ChevronLeft className="h-3.5 w-3.5" />
-          )}
-        </button>
+        {renderSidebar(collapsed)}
       </aside>
 
-      {/* Mobile sidebar overlay */}
+      {/* Mobile sidebar */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden"
           onClick={() => setMobileOpen(false)}
         />
       )}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-60 bg-sidebar border-r border-sidebar-border lg:hidden transition-transform duration-200",
-          mobileOpen ? "translate-x-0" : "-translate-x-full"
+          "fixed inset-y-0 left-0 z-50 w-64 bg-sidebar text-sidebar-foreground border-r border-sidebar-border lg:hidden transition-transform duration-300",
+          mobileOpen ? "translate-x-0" : "-translate-x-full",
         )}
+        aria-hidden={!mobileOpen}
       >
-        {sidebarContent}
+        {renderSidebar(false, () => setMobileOpen(false))}
+        <button
+          onClick={() => setMobileOpen(false)}
+          className="absolute top-4 right-3 z-10 p-1.5 rounded-md bg-sidebar-accent text-sidebar-accent-foreground hover:opacity-80"
+          aria-label="Close menu"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </aside>
 
-      {/* Main */}
+      {/* Main column */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        {IS_DEMO_BUILD && <DemoBanner />}
+
         {/* Top bar */}
-        <header className="h-14 border-b border-border bg-background/95 backdrop-blur flex items-center px-4 gap-3 shrink-0">
+        <header className="h-16 border-b border-border bg-card/80 backdrop-blur-sm flex items-center gap-3 px-4 sm:px-6 shrink-0">
           <Button
             variant="ghost"
             size="icon"
-            className="lg:hidden"
+            className="lg:hidden shrink-0"
             onClick={() => setMobileOpen(true)}
+            aria-label="Open menu"
           >
             <Menu className="h-5 w-5" />
           </Button>
 
-          <div className="flex-1" />
-
-          <ViewAsAgencyControl enabled={userRole === "super_admin"} />
-
-          {/* Role badge */}
-          {userRole && (
-            <Badge
-              variant="secondary"
-              className={cn(
-                "text-xs font-medium hidden sm:inline-flex",
-                ROLE_COLORS[userRole] ?? "bg-slate-100 text-slate-700",
-              )}
-            >
-              {ROLE_LABELS[userRole] ?? userRole}
-            </Badge>
+          {/* Search: inline from md up; an icon that opens a search sheet below. */}
+          {canSearch ? (
+            <>
+              <GlobalSearch className="hidden md:block" />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="md:hidden shrink-0"
+                onClick={() => setSearchOpen(true)}
+                aria-label="Search clients"
+                title="Search clients"
+              >
+                <Search className="h-5 w-5" />
+              </Button>
+              <div className="flex-1 md:hidden" />
+            </>
+          ) : (
+            <div className="flex-1" />
           )}
 
-          {/* Notification bell */}
-          {!viewingAgency && <div className="relative">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setNotifOpen(!notifOpen)}
-              className="relative"
-            >
-              <Bell className="h-5 w-5" />
-              {unreadCount > 0 && (
-                <Badge className="absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px] font-bold bg-destructive text-destructive-foreground border-0">
-                  {unreadCount > 99 ? "99+" : unreadCount}
-                </Badge>
-              )}
-            </Button>
-            {notifOpen && (
-              <NotificationPanel onClose={() => setNotifOpen(false)} />
+          {/* Role chip only where there's room; otherwise it's in the account menu. */}
+          {roleLabel && (
+            <div className="hidden xl:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-muted/60 border border-border shrink-0">
+              <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">{roleLabel}</span>
+            </div>
+          )}
+
+          <div className="flex min-w-0 items-center gap-0.5 sm:gap-2 ml-auto shrink-0">
+            <ViewAsAgencyControl enabled={isSuperAdmin} />
+
+            {/* Notifications */}
+            {!viewingAgency && (
+              <div className="relative">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setNotifOpen(!notifOpen)}
+                  className="relative"
+                  aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+                  title="Notifications"
+                >
+                  <Bell className="h-5 w-5" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 h-4 min-w-4 px-1 rounded-full text-[10px] font-bold leading-4 text-center bg-destructive text-destructive-foreground ring-2 ring-card">
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  )}
+                </Button>
+                {notifOpen && <NotificationPanel onClose={() => setNotifOpen(false)} />}
+              </div>
             )}
-          </div>}
+
+            <ThemeToggle />
+
+            {/* Help */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label="Help" title="Help">
+                  <HelpCircle className="h-5 w-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-60">
+                <DropdownMenuLabel>Need a hand?</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {!viewingAgency && (
+                  <DropdownMenuItem onClick={() => openAiAssistant()} className="cursor-pointer">
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Ask the AI assistant
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem asChild>
+                  <Link href="/dashboard">
+                    <LayoutDashboard className="h-4 w-4 mr-2" />
+                    Back to my dashboard
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/settings">
+                    <Settings className="h-4 w-4 mr-2" />
+                    Account settings
+                  </Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* User menu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="flex shrink-0 items-center gap-2.5 rounded-full pl-1 pr-1 xl:pr-3 py-1 hover:bg-muted/60 transition-colors"
+                  aria-label="Account menu"
+                >
+                  <Avatar className="h-9 w-9 border-2 border-accent/20">
+                    <AvatarImage src={user?.imageUrl} />
+                    <AvatarFallback className="bg-navy-gradient text-white text-sm font-semibold">
+                      {initials}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="hidden xl:flex flex-col items-start leading-tight min-w-0">
+                    <span className="text-sm font-semibold truncate max-w-40">{user?.fullName ?? "User"}</span>
+                    {roleLabel && <span className="text-[11px] text-muted-foreground">{roleLabel}</span>}
+                  </span>
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground hidden xl:block" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64 max-w-[calc(100vw-1rem)]">
+                <DropdownMenuLabel className="font-normal">
+                  <p className="text-sm font-semibold truncate">{user?.fullName ?? "User"}</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {user?.primaryEmailAddress?.emailAddress}
+                  </p>
+                  {roleLabel && (
+                    <p className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground xl:hidden">
+                      <ShieldCheck className="h-3 w-3" />
+                      {roleLabel}
+                    </p>
+                  )}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {isSuperAdmin && !viewingAgency && (
+                  <DropdownMenuItem
+                    className="cursor-pointer xl:hidden"
+                    onClick={() => setViewAsOpen(true)}
+                  >
+                    <Eye className="h-4 w-4 mr-2" />
+                    View an agency…
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem asChild>
+                  <Link href="/settings">
+                    <User className="h-4 w-4 mr-2" />
+                    Profile
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/settings">
+                    <Building2 className="h-4 w-4 mr-2" />
+                    Agency settings
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/settings/security">
+                    <ShieldCheck className="h-4 w-4 mr-2" />
+                    Account security
+                  </Link>
+                </DropdownMenuItem>
+                {isOwner && (
+                  <>
+                    <DropdownMenuItem asChild>
+                      <Link href="/settings/team">
+                        <UserPlus className="h-4 w-4 mr-2" />
+                        Team
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/settings/billing">
+                        <CreditCard className="h-4 w-4 mr-2" />
+                        Billing
+                      </Link>
+                    </DropdownMenuItem>
+                  </>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive cursor-pointer"
+                  onClick={doSignOut}
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 overflow-y-auto">
+        {/* Page content. Bottom padding keeps the last card clear of the
+            floating AI button (56px at bottom-6) and any device safe area. */}
+        <main
+          className={cn(
+            "flex-1 overflow-y-auto overflow-x-hidden",
+            !viewingAgency && "pb-[calc(5.5rem+env(safe-area-inset-bottom))]",
+          )}
+        >
           {children}
         </main>
       </div>
 
-      {/* Floating AI Assistant */}
+      {/* Small-screen search sheet (the inline box shows from md up). */}
+      {canSearch && (
+        <Sheet open={searchOpen} onOpenChange={setSearchOpen}>
+          <SheetContent side="top" className="p-4 pt-12">
+            <SheetTitle className="sr-only">Search clients</SheetTitle>
+            <SheetDescription className="sr-only">Find a client by name, phone or email.</SheetDescription>
+            {searchOpen && (
+              <GlobalSearch autoFocus className="max-w-none" onNavigate={() => setSearchOpen(false)} />
+            )}
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {isSuperAdmin && <ViewAsAgencyDialog open={viewAsOpen} onOpenChange={setViewAsOpen} />}
+
+      {/* Floating AI Assistant (existing /api/ai/chat feature) */}
       {!viewingAgency && <AiAssistantPanel context={aiContext} />}
     </div>
   );

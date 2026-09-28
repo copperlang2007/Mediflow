@@ -8,8 +8,9 @@ test("create an automation rule with lead_created -> change_contact_status", asy
 }) => {
   await signIn(page);
 
+  // /automations redirects to the Workflow Automation page.
   await page.goto("/automations");
-  await expect(page).toHaveURL(/\/automations/);
+  await expect(page).toHaveURL(/\/workflows/);
 
   // Open the "New Rule" dialog.
   await page.getByRole("button", { name: /new rule/i }).click();
@@ -22,12 +23,12 @@ test("create an automation rule with lead_created -> change_contact_status", asy
   // TODO: replace these label-based queries with stable data-testid hooks
   //       once the automation form is instrumented.
   await page.getByLabel(/trigger/i).first().click();
-  await page.getByRole("option", { name: /lead.?created/i }).click();
+  await page.getByRole("option", { name: /new lead/i }).click();
 
   // Action: change_contact_status -> prospect.
   await page.getByLabel(/action/i).first().click();
   await page
-    .getByRole("option", { name: /change.?contact.?status/i })
+    .getByRole("option", { name: /update status/i })
     .click();
 
   // Status target = "prospect".

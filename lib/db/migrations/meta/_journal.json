@@ -372,6 +372,48 @@
       "when": 1791200000000,
       "tag": "0052_schema_drift_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1791300000000,
+      "tag": "0053_kb_articles",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1791400000000,
+      "tag": "0054_appointments",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1791500000000,
+      "tag": "0055_org_branding",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1791600000000,
+      "tag": "0056_campaigns",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1791700000000,
+      "tag": "0057_campaign_settings_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1791800000000,
+      "tag": "0058_commission_statement_reconciled_at",
+      "breakpoints": true
     }
   ]
 }

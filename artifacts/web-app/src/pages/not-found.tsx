@@ -1,28 +1,34 @@
 import { Link } from "wouter";
-import { Card, CardContent } from "@/components/ui/card";
+import { ArrowLeft, Compass } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { AlertCircle } from "lucide-react";
+import { BrandLockup } from "@/components/brand/BrandMark";
 
 export default function NotFound() {
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-background">
-      <Card className="w-full max-w-md mx-4">
-        <CardContent className="pt-6">
-          <div className="flex mb-4 gap-2 items-center">
-            <AlertCircle className="h-8 w-8 text-red-500" />
-            <h1 className="text-2xl font-bold text-foreground">Page not found</h1>
+    <div className="flex min-h-[100dvh] w-full flex-col bg-background">
+      <header className="flex h-16 items-center border-b border-border bg-card px-4 sm:px-6">
+        <Link href="/" aria-label="agencyBRIDGE home">
+          <BrandLockup size={32} wordmarkClassName="text-base text-foreground" />
+        </Link>
+      </header>
+      <main className="flex flex-1 items-center justify-center px-4 py-16">
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
+          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-accent">
+            <Compass className="h-7 w-7" />
           </div>
-
-          <p className="mt-4 text-sm text-muted-foreground">
-            We couldn't find the page you were looking for. It may have been
-            moved, or the link may be out of date.
+          <h1 className="font-display text-2xl font-bold tracking-tight">We couldn't find that page</h1>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            The link may be old, or the page may have moved. Nothing is wrong with your account —
+            head back to your dashboard and pick up from there.
           </p>
-
           <Button asChild className="mt-6">
-            <Link href="/">Back to home</Link>
+            <Link href="/dashboard">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to my dashboard
+            </Link>
           </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </main>
     </div>
   );
 }

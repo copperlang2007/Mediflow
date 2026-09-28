@@ -28,6 +28,7 @@ import {
 import { Monitor, Plus, FileDown } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/shared";
 
 export default function TechStackTab({ agentId }: { agentId: string }) {
   const qc = useQueryClient();
@@ -94,10 +95,7 @@ export default function TechStackTab({ agentId }: { agentId: string }) {
       </div>
 
       {(accounts ?? []).length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <Monitor className="h-10 w-10 mx-auto mb-2 opacity-20" />
-          <p className="text-sm">No tech stack accounts</p>
-        </div>
+        <EmptyState compact icon={Monitor} title="No tool accounts yet" description="Track the logins this agent has been given — dialer, quoting, email — so nothing is missed when they join or leave." />
       ) : (
         <div className="space-y-2">
           {(accounts ?? []).map((acct) => (

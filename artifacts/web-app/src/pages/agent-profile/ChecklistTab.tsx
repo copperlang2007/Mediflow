@@ -13,6 +13,7 @@ import { Progress } from "@/components/ui/progress";
 import { CheckSquare, Check, SkipForward } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/shared";
 
 export default function ChecklistTab({ agentId }: { agentId: string }) {
   const qc = useQueryClient();
@@ -36,10 +37,8 @@ export default function ChecklistTab({ agentId }: { agentId: string }) {
 
   if ((runs ?? []).length === 0) {
     return (
-      <div className="p-6 text-center py-12 text-muted-foreground">
-        <CheckSquare className="h-10 w-10 mx-auto mb-2 opacity-20" />
-        <p className="text-sm">No checklists found</p>
-        <p className="text-xs mt-1">An onboarding checklist is created automatically when an agent is added</p>
+      <div className="p-6">
+        <EmptyState compact icon={CheckSquare} title="No checklists yet" description="An onboarding checklist is created automatically when an agent is added." />
       </div>
     );
   }

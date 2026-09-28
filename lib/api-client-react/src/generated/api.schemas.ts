@@ -68,6 +68,7 @@ export interface Organization {
   id: string;
   name: string;
   slug: string;
+  /** The plan the product actually enforces (from the subscription / entitlements — the same tier /billing/subscription reports), not the legacy organizations.plan_tier column. */
   planTier: string;
   /** @nullable */
   logoUrl?: string | null;
@@ -104,10 +105,15 @@ export interface DashboardStats {
   licensesExpiringIn90Days: number;
   openTasksCount: number;
   overdueTasks: number;
+  /** CRM contacts whose status is Lead (not deleted) — the same number the Clients & Leads page shows. Not the inbound queue's `leads` table. */
   openLeadsCount: number;
   unreadNotificationsCount: number;
-  /** Share of active agents with a passed/waived AHIP for ahipPlanYear. */
+  /** Percent of agents who need AHIP (status active or onboarding) with a passed or waived record for ahipPlanYear. */
   ahipCompletionRateCurrent: number;
+  ahipCompleteCount?: number;
+  agentsRequiringAhip?: number;
+  /** Licenses past their expiry date (or stored as expired) for agents still on the team (onboarding, active, suspended). */
+  licensesExpiredCount?: number;
   /** Plan year being sold today — the calendar year through Sept 30, the next year from Oct 1. */
   ahipPlanYear?: number;
   totalContacts: number;
@@ -124,6 +130,11 @@ export interface ActivityItem {
   userId?: string | null;
   /** @nullable */
   userFullName?: string | null;
+  /**
+   * The client the activity is about; null unless the caller has contact:read.
+   * @nullable
+   */
+  contactName?: string | null;
   /** @nullable */
   resourceType?: string | null;
   /** @nullable */
@@ -357,6 +368,20 @@ export const StateLicenseStatus = {
   not_appointed: "not_appointed",
 } as const;
 
+/**
+ * The status to show and count. Same as `status`, except a license whose expiry date has passed is always "expired". Active means status active AND no expiry or expiry in the future — the shared definition Licensing, the agent profile, Ready to Sell, the back office and the dashboard all use.
+ */
+export type StateLicenseEffectiveStatus =
+  (typeof StateLicenseEffectiveStatus)[keyof typeof StateLicenseEffectiveStatus];
+
+export const StateLicenseEffectiveStatus = {
+  active: "active",
+  pending: "pending",
+  expired: "expired",
+  suspended: "suspended",
+  not_appointed: "not_appointed",
+} as const;
+
 export interface StateLicense {
   id: string;
   agentId: string;
@@ -369,6 +394,8 @@ export interface StateLicense {
   /** @nullable */
   expiryDate?: string | null;
   status: StateLicenseStatus;
+  /** The status to show and count. Same as `status`, except a license whose expiry date has passed is always "expired". Active means status active AND no expiry or expiry in the future — the shared definition Licensing, the agent profile, Ready to Sell, the back office and the dashboard all use. */
+  effectiveStatus?: StateLicenseEffectiveStatus;
   /** @nullable */
   renewalSubmittedAt?: string | null;
   /** @nullable */
@@ -661,7 +688,11 @@ export type AhipDashboardRecordsItem = {
 
 export interface AhipDashboard {
   year: number;
+  /** Deprecated alias of agentsRequiringAhip. */
   totalActiveAgents: number;
+  /** Agents whose status is active or onboarding. */
+  agentsRequiringAhip?: number;
+  /** Of those, how many have a passed or waived AHIP record for the year. */
   passedCount: number;
   completionRate: number;
   records: AhipDashboardRecordsItem[];
@@ -1908,6 +1939,7 @@ export const AutomationActionType = {
   change_contact_status: "change_contact_status",
   enroll_sequence: "enroll_sequence",
   change_deal_stage: "change_deal_stage",
+  create_appointment: "create_appointment",
 } as const;
 
 export type AutomationActionConfig = { [key: string]: unknown };
@@ -2919,6 +2951,139 @@ export interface DialTicket {
   callbackUrl: string;
 }
 
+export interface KbArticleStage2 {
+  id: string;
+  orgId: string;
+  category: string;
+  title: string;
+  content: string;
+  keywords: string[];
+  isActive: boolean;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KbArticleInputStage2 {
+  /** @maxLength 80 */
+  category?: string;
+  /** @maxLength 200 */
+  title?: string;
+  /** @maxLength 20000 */
+  content?: string;
+  /**
+   * @maxItems 50
+   * @items.maxLength 60
+   */
+  keywords?: string[];
+  isActive?: boolean;
+}
+
+export type CampaignAudienceStatusesItem =
+  (typeof CampaignAudienceStatusesItem)[keyof typeof CampaignAudienceStatusesItem];
+
+export const CampaignAudienceStatusesItem = {
+  lead: "lead",
+  prospect: "prospect",
+  enrolled: "enrolled",
+  retained: "retained",
+  lost: "lost",
+} as const;
+
+export type CampaignAudiencePlanTypesItem =
+  (typeof CampaignAudiencePlanTypesItem)[keyof typeof CampaignAudiencePlanTypesItem];
+
+export const CampaignAudiencePlanTypesItem = {
+  MA: "MA",
+  PDP: "PDP",
+  MAPD: "MAPD",
+  supp: "supp",
+  other: "other",
+} as const;
+
+/**
+ * Audience filter over contacts. Health conditions and race are never filterable.
+ */
+export interface CampaignAudience {
+  statuses?: CampaignAudienceStatusesItem[];
+  planTypes?: CampaignAudiencePlanTypesItem[];
+  carrierIds?: string[];
+  states?: string[];
+  sources?: string[];
+  tags?: string[];
+  /**
+   * @minimum 1
+   * @maximum 12
+   */
+  birthdayMonth?: number;
+}
+
+export type CampaignInputChannel =
+  (typeof CampaignInputChannel)[keyof typeof CampaignInputChannel];
+
+export const CampaignInputChannel = {
+  email: "email",
+  sms: "sms",
+} as const;
+
+export interface CampaignInput {
+  channel?: CampaignInputChannel;
+  name?: string;
+  /** @nullable */
+  templateId?: string | null;
+  /** @nullable */
+  subject?: string | null;
+  /** @nullable */
+  body?: string | null;
+  audience?: CampaignAudience;
+}
+
+export type CampaignChannel =
+  (typeof CampaignChannel)[keyof typeof CampaignChannel];
+
+export const CampaignChannel = {
+  email: "email",
+  sms: "sms",
+} as const;
+
+export type CampaignStatus =
+  (typeof CampaignStatus)[keyof typeof CampaignStatus];
+
+export const CampaignStatus = {
+  draft: "draft",
+  scheduled: "scheduled",
+  sending: "sending",
+  sent: "sent",
+  cancelled: "cancelled",
+} as const;
+
+export interface Campaign {
+  id?: string;
+  channel?: CampaignChannel;
+  name?: string;
+  status?: CampaignStatus;
+  /** @nullable */
+  subject?: string | null;
+  /** @nullable */
+  body?: string | null;
+  audience?: CampaignAudience;
+  /** @nullable */
+  templateName?: string | null;
+  /** @nullable */
+  scheduledAt?: string | null;
+  /** @nullable */
+  sentAt?: string | null;
+  recipientCount?: number;
+  sentCount?: number;
+  deliveredCount?: number;
+  openedCount?: number;
+  clickedCount?: number;
+  bouncedCount?: number;
+  failedCount?: number;
+  skippedCount?: number;
+  unsubscribedCount?: number;
+}
+
 export type GetUsersParams = {
   role?: string;
   isActive?: boolean;
@@ -3382,4 +3547,401 @@ export type ListOnboardingsParams = {
   status?: string;
   limit?: number;
   offset?: number;
+};
+
+export type GetEnrollmentsSummaryParams = {
+  carrierId?: string;
+  agentId?: string;
+  planType?: GetEnrollmentsSummaryPlanType;
+  status?: string;
+  effectuated?: GetEnrollmentsSummaryEffectuated;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  /**
+   * Client name or policy number
+   */
+  search?: string;
+};
+
+export type GetEnrollmentsSummaryPlanType =
+  (typeof GetEnrollmentsSummaryPlanType)[keyof typeof GetEnrollmentsSummaryPlanType];
+
+export const GetEnrollmentsSummaryPlanType = {
+  MA: "MA",
+  PDP: "PDP",
+  MAPD: "MAPD",
+  supp: "supp",
+  other: "other",
+} as const;
+
+export type GetEnrollmentsSummaryEffectuated =
+  (typeof GetEnrollmentsSummaryEffectuated)[keyof typeof GetEnrollmentsSummaryEffectuated];
+
+export const GetEnrollmentsSummaryEffectuated = {
+  true: "true",
+  false: "false",
+} as const;
+
+export type GetEnrollmentsSummary200 = {
+  total?: number;
+  active?: number;
+  pending?: number;
+  ended?: number;
+  effectuated?: number;
+  notEffectuated?: number;
+  /** Effective date within the next 60 days */
+  startingSoon?: number;
+};
+
+export type GetReconciliationOverview200StatementsItem = {
+  [key: string]: unknown;
+};
+
+export type GetReconciliationOverview200Totals = { [key: string]: unknown };
+
+export type GetReconciliationOverview200UnmatchedItemsItem = {
+  [key: string]: unknown;
+};
+
+export type GetReconciliationOverview200MissedPaymentsItem = {
+  [key: string]: unknown;
+};
+
+export type GetReconciliationOverview200 = {
+  statements?: GetReconciliationOverview200StatementsItem[];
+  totals?: GetReconciliationOverview200Totals;
+  unmatchedItems?: GetReconciliationOverview200UnmatchedItemsItem[];
+  missedPayments?: GetReconciliationOverview200MissedPaymentsItem[];
+  asOf?: string;
+};
+
+export type GetMyAgentBackoffice200 = { [key: string]: unknown };
+
+export type GetAgentBackoffice200 = { [key: string]: unknown };
+
+export type ListKbArticlesParams = {
+  search?: string;
+  category?: string;
+  includeInactive?: ListKbArticlesIncludeInactive;
+};
+
+export type ListKbArticlesIncludeInactive =
+  (typeof ListKbArticlesIncludeInactive)[keyof typeof ListKbArticlesIncludeInactive];
+
+export const ListKbArticlesIncludeInactive = {
+  true: "true",
+  false: "false",
+} as const;
+
+export type ListKbArticles200Stats = {
+  total?: number;
+  active?: number;
+  categories?: number;
+  keywords?: number;
+};
+
+export type ListKbArticles200 = {
+  articles?: KbArticleStage2[];
+  stats?: ListKbArticles200Stats;
+};
+
+export type ListAppointmentsParams = {
+  from: string;
+  to: string;
+  agentId?: string;
+  contactId?: string;
+  status?: ListAppointmentsStatus;
+};
+
+export type ListAppointmentsStatus =
+  (typeof ListAppointmentsStatus)[keyof typeof ListAppointmentsStatus];
+
+export const ListAppointmentsStatus = {
+  confirmed: "confirmed",
+  pending: "pending",
+  completed: "completed",
+  cancelled: "cancelled",
+  no_show: "no_show",
+} as const;
+
+export type ListAppointments200DataItem = { [key: string]: unknown };
+
+export type ListAppointments200Summary = {
+  total?: number;
+  confirmed?: number;
+  pending?: number;
+  completed?: number;
+  cancelled?: number;
+  no_show?: number;
+};
+
+export type ListAppointments200Scope =
+  (typeof ListAppointments200Scope)[keyof typeof ListAppointments200Scope];
+
+export const ListAppointments200Scope = {
+  own: "own",
+  org: "org",
+} as const;
+
+export type ListAppointments200 = {
+  data?: ListAppointments200DataItem[];
+  summary?: ListAppointments200Summary;
+  scope?: ListAppointments200Scope;
+};
+
+export type CreateAppointmentBodyType =
+  (typeof CreateAppointmentBodyType)[keyof typeof CreateAppointmentBodyType];
+
+export const CreateAppointmentBodyType = {
+  enrollment: "enrollment",
+  review: "review",
+  renewal: "renewal",
+  consultation: "consultation",
+  other: "other",
+} as const;
+
+export type CreateAppointmentBodyStatus =
+  (typeof CreateAppointmentBodyStatus)[keyof typeof CreateAppointmentBodyStatus];
+
+export const CreateAppointmentBodyStatus = {
+  confirmed: "confirmed",
+  pending: "pending",
+  completed: "completed",
+  cancelled: "cancelled",
+  no_show: "no_show",
+} as const;
+
+export type CreateAppointmentBodyLocationType =
+  (typeof CreateAppointmentBodyLocationType)[keyof typeof CreateAppointmentBodyLocationType];
+
+export const CreateAppointmentBodyLocationType = {
+  office: "office",
+  phone: "phone",
+  video: "video",
+  home: "home",
+} as const;
+
+export type CreateAppointmentBody = {
+  /** @maxLength 200 */
+  title: string;
+  type?: CreateAppointmentBodyType;
+  status?: CreateAppointmentBodyStatus;
+  startsAt: string;
+  endsAt: string;
+  /** @nullable */
+  contactId?: string | null;
+  /** @nullable */
+  agentId?: string | null;
+  /**
+   * @maxLength 4000
+   * @nullable
+   */
+  notes?: string | null;
+  locationType?: CreateAppointmentBodyLocationType;
+  /**
+   * @maxLength 300
+   * @nullable
+   */
+  locationDetail?: string | null;
+  /**
+   * https:// only
+   * @nullable
+   */
+  meetingUrl?: string | null;
+};
+
+export type CreateAppointment201 = { [key: string]: unknown };
+
+export type ListAppointmentContactOptionsParams = {
+  search?: string;
+};
+
+export type ListAppointmentContactOptions200DataItem = {
+  id?: string;
+  firstName?: string;
+  lastName?: string;
+  /** @nullable */
+  assignedAgentId?: string | null;
+};
+
+export type ListAppointmentContactOptions200 = {
+  data?: ListAppointmentContactOptions200DataItem[];
+};
+
+export type ListAppointmentAgentOptions200DataItem = {
+  id?: string;
+  firstName?: string;
+  lastName?: string;
+  isMe?: boolean;
+};
+
+export type ListAppointmentAgentOptions200 = {
+  data?: ListAppointmentAgentOptions200DataItem[];
+};
+
+export type GetAppointment200 = { [key: string]: unknown };
+
+export type UpdateAppointmentBody = { [key: string]: unknown };
+
+export type UpdateAppointment200 = { [key: string]: unknown };
+
+export type GetOrgBranding200 = { [key: string]: unknown };
+
+export type UpdateOrgBrandingBody = {
+  /**
+   * @maxLength 40
+   * @nullable
+   */
+  productName?: string | null;
+  /**
+   * @maxLength 80
+   * @nullable
+   */
+  tagline?: string | null;
+  /**
+   * @nullable
+   * @pattern ^#[0-9a-fA-F]{6}$
+   */
+  primaryColor?: string | null;
+  /**
+   * @nullable
+   * @pattern ^#[0-9a-fA-F]{6}$
+   */
+  accentColor?: string | null;
+  /** @nullable */
+  displayFont?: string | null;
+  /** @nullable */
+  bodyFont?: string | null;
+  /** @nullable */
+  logoUrl?: string | null;
+  /** @nullable */
+  markUrl?: string | null;
+  /** @nullable */
+  faviconUrl?: string | null;
+  /**
+   * @maxLength 60
+   * @nullable
+   */
+  emailFromName?: string | null;
+};
+
+export type UpdateOrgBranding200 = { [key: string]: unknown };
+
+export type ResetOrgBranding200 = { [key: string]: unknown };
+
+export type ListAgenciesOverview200 = { [key: string]: unknown };
+
+export type CreateAgencyBody = {
+  /**
+   * @minLength 2
+   * @maxLength 120
+   */
+  name: string;
+  /** @pattern ^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$ */
+  slug: string;
+  adminEmail: string;
+};
+
+export type CreateAgency201 = { [key: string]: unknown };
+
+export type ListCampaignsParams = {
+  channel?: ListCampaignsChannel;
+};
+
+export type ListCampaignsChannel =
+  (typeof ListCampaignsChannel)[keyof typeof ListCampaignsChannel];
+
+export const ListCampaignsChannel = {
+  email: "email",
+  sms: "sms",
+} as const;
+
+export type GetCampaignOverviewParams = {
+  channel?: GetCampaignOverviewChannel;
+};
+
+export type GetCampaignOverviewChannel =
+  (typeof GetCampaignOverviewChannel)[keyof typeof GetCampaignOverviewChannel];
+
+export const GetCampaignOverviewChannel = {
+  email: "email",
+  sms: "sms",
+} as const;
+
+export type GetCampaignOverview200 = { [key: string]: unknown };
+
+export type GetCampaignConfig200 = { [key: string]: unknown };
+
+export type UpdateCampaignSettingsBody = {
+  /** @nullable */
+  senderName?: string | null;
+  /** @nullable */
+  physicalAddress?: string | null;
+  /** @nullable */
+  replyToEmail?: string | null;
+  defaultTimeZone?: string;
+};
+
+export type UpdateCampaignSettings200 = { [key: string]: unknown };
+
+export type GetCampaignActivityParams = {
+  channel?: GetCampaignActivityChannel;
+};
+
+export type GetCampaignActivityChannel =
+  (typeof GetCampaignActivityChannel)[keyof typeof GetCampaignActivityChannel];
+
+export const GetCampaignActivityChannel = {
+  email: "email",
+  sms: "sms",
+} as const;
+
+export type GetCampaignActivity200Item = { [key: string]: unknown };
+
+export type PreviewCampaignAudienceBodyChannel =
+  (typeof PreviewCampaignAudienceBodyChannel)[keyof typeof PreviewCampaignAudienceBodyChannel];
+
+export const PreviewCampaignAudienceBodyChannel = {
+  email: "email",
+  sms: "sms",
+} as const;
+
+export type PreviewCampaignAudienceBody = {
+  channel: PreviewCampaignAudienceBodyChannel;
+  audience?: CampaignAudience;
+};
+
+export type PreviewCampaignAudience200 = {
+  matched?: number;
+  eligible?: number;
+  optedOut?: number;
+  missingAddress?: number;
+};
+
+export type GetCampaignAudienceOptions200 = { [key: string]: unknown };
+
+export type ListCampaignOptOutsParams = {
+  channel?: ListCampaignOptOutsChannel;
+};
+
+export type ListCampaignOptOutsChannel =
+  (typeof ListCampaignOptOutsChannel)[keyof typeof ListCampaignOptOutsChannel];
+
+export const ListCampaignOptOutsChannel = {
+  email: "email",
+  sms: "sms",
+} as const;
+
+export type ListCampaignOptOuts200 = { [key: string]: unknown };
+
+export type ResubscribeCampaignContactBody = {
+  contactId: string;
+  confirm: true;
+  /** @minLength 5 */
+  reason: string;
+};
+
+export type SendCampaignBody = {
+  /** @nullable */
+  scheduledAt?: string | null;
 };

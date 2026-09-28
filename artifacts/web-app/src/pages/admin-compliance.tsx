@@ -47,6 +47,21 @@ import {
   CheckCircle2, AlertTriangle, Clock, ChevronRight, Users,
   RefreshCcw, FileText, MonitorSmartphone, LogOut,
 } from "lucide-react";
+import { PageHeader, KpiCard, MiniStat, SectionCard, StatusPill, EmptyState, TechnicalDetails, type StatusTone } from "@/components/shared";
+import { PageShell, KpiGrid, TableFrame, NoticeBanner } from "@/components/ops";
+import { Info, ShieldAlert, XCircle, ListChecks } from "lucide-react";
+import { useProductName } from "@/lib/branding/BrandingProvider";
+
+function humanize(s: string): string {
+  const t = s.replace(/[_-]+/g, " ").trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+const ACTION_TONE: Record<string, StatusTone> = {
+  create: "success", update: "info", delete: "danger", export: "warning",
+  login: "navy", logout: "neutral", force_logout: "danger", revoke_session: "danger",
+  invite_user: "info", import: "info",
+};
 
 // ─── Audit Log Tab ────────────────────────────────────────────────────────────
 function AuditDiffDialog({ entry, onClose }: { entry: AuditEntry; onClose: () => void }) {
@@ -163,16 +178,19 @@ function AuditLogTab() {
   const ACTION_TYPES = ["create", "update", "delete", "export", "login", "logout", "force_logout", "revoke_session", "invite_user", "import"];
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Complete immutable audit trail. Click any row to view before/after diff.</p>
+    <SectionCard
+      title="Audit log"
+      description="Every view and change, kept permanently. Click a row to see what changed."
+      icon={FileDown}
+      actions={
         <Button variant="outline" size="sm" onClick={handleExport}>
           <Download className="h-4 w-4 mr-1.5" /> Export CSV
         </Button>
-      </div>
-
+      }
+      contentClassName="space-y-4"
+    >
       {/* Filter row */}
-      <div className="flex flex-wrap gap-2 items-end">
+      <div className="flex flex-wrap gap-2 items-end rounded-lg bg-muted/40 p-3">
         <div className="flex flex-col gap-1">
           <label className="text-xs text-muted-foreground">Action</label>
           <Select value={filterAction} onValueChange={(v) => { setFilterAction(v); setPage(0); }}>
@@ -234,7 +252,7 @@ function AuditLogTab() {
       {isLoading ? (
         <div className="space-y-2">{[...Array(8)].map((_, i) => <Skeleton key={i} className="h-12 rounded" />)}</div>
       ) : (
-        <Card>
+        <TableFrame>
           <Table>
             <TableHeader>
               <TableRow>
@@ -254,13 +272,13 @@ function AuditLogTab() {
                     {new Date(entry.createdAt).toLocaleString()}
                   </TableCell>
                   <TableCell className="text-sm">{entry.userFullName ?? entry.userId ?? "—"}</TableCell>
-                  <TableCell><Badge variant="secondary" className="text-xs">{entry.userRole ?? "—"}</Badge></TableCell>
-                  <TableCell><Badge variant={entry.action === "delete" || entry.action === "force_logout" ? "destructive" : "outline"} className="text-xs">{entry.action}</Badge></TableCell>
+                  <TableCell>{entry.userRole ? <StatusPill tone="navy">{humanize(entry.userRole)}</StatusPill> : "—"}</TableCell>
+                  <TableCell><StatusPill tone={ACTION_TONE[entry.action] ?? "neutral"}>{humanize(entry.action)}</StatusPill></TableCell>
                   <TableCell className="text-sm text-muted-foreground">{entry.resourceType}{entry.resourceId ? ` · ${entry.resourceId.slice(0, 8)}…` : ""}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{entry.ipAddress ?? "—"}</TableCell>
                   <TableCell>
                     {entry.changes
-                      ? <Badge variant="secondary" className="text-xs cursor-pointer">View</Badge>
+                      ? <span className="text-xs font-medium text-accent">View</span>
                       : <span className="text-xs text-muted-foreground">—</span>
                     }
                   </TableCell>
@@ -271,7 +289,7 @@ function AuditLogTab() {
               )}
             </TableBody>
           </Table>
-        </Card>
+        </TableFrame>
       )}
 
       {data && data.total > limit && (
@@ -283,7 +301,7 @@ function AuditLogTab() {
           </div>
         </div>
       )}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -328,18 +346,20 @@ function AccessReviewTab() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Review all user accounts, roles, and access status.</p>
+    <SectionCard
+      title="Access review"
+      description="Everyone with a login, their role, and when they last signed in. Deactivate anyone who no longer needs access."
+      icon={Users}
+      actions={
         <Button variant="outline" size="sm" onClick={handleExport}>
           <Download className="h-4 w-4 mr-1.5" /> Export CSV
         </Button>
-      </div>
-
+      }
+    >
       {isLoading ? (
         <div className="space-y-2">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-12 rounded" />)}</div>
       ) : (
-        <Card>
+        <TableFrame>
           <Table>
             <TableHeader>
               <TableRow>
@@ -356,11 +376,11 @@ function AccessReviewTab() {
                 <TableRow key={user.id}>
                   <TableCell className="font-medium">{user.fullName}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{user.email}</TableCell>
-                  <TableCell><Badge variant="secondary" className="text-xs">{user.role}</Badge></TableCell>
+                  <TableCell><StatusPill tone="navy">{humanize(user.role)}</StatusPill></TableCell>
                   <TableCell>
-                    <Badge variant={user.isActive ? "default" : "secondary"} className={user.isActive ? "bg-green-100 text-green-800 text-xs" : "text-xs"}>
+                    <StatusPill tone={user.isActive ? "success" : "neutral"}>
                       {user.isActive ? "Active" : "Inactive"}
-                    </Badge>
+                    </StatusPill>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleDateString() : "Never"}
@@ -398,9 +418,9 @@ function AccessReviewTab() {
               ))}
             </TableBody>
           </Table>
-        </Card>
+        </TableFrame>
       )}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -436,25 +456,33 @@ function LoginHistoryTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Authentication event log with IP, device, and success/failure tracking.</p>
-        <Button variant="outline" size="sm" onClick={handleExport}>
-          <Download className="h-4 w-4 mr-1.5" /> Export CSV
-        </Button>
-      </div>
-
       {successRate !== null && (
-        <div className="grid grid-cols-3 gap-4">
-          <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Total Events</p><p className="text-2xl font-bold">{data?.total.toLocaleString()}</p></CardContent></Card>
-          <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Success Rate</p><p className="text-2xl font-bold text-green-600">{successRate}%</p></CardContent></Card>
-          <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Failed Attempts</p><p className="text-2xl font-bold text-red-500">{data?.events.filter((e: LoginEvent) => !e.success).length ?? 0}</p></CardContent></Card>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <MiniStat label="Sign-in events (all time)" value={data?.total.toLocaleString() ?? "0"} icon={LogIn} />
+          <MiniStat label="Success rate (this page)" value={`${successRate}%`} icon={CheckCircle2} tone="success" />
+          <MiniStat
+            label="Failed attempts (this page)"
+            value={data?.events.filter((e: LoginEvent) => !e.success).length ?? 0}
+            icon={XCircle}
+            tone={(data?.events.filter((e: LoginEvent) => !e.success).length ?? 0) > 0 ? "danger" : "default"}
+          />
         </div>
       )}
 
+      <SectionCard
+        title="Login history"
+        description="Every sign-in attempt with its IP address and, if it failed, why"
+        icon={LogIn}
+        actions={
+          <Button variant="outline" size="sm" onClick={handleExport}>
+            <Download className="h-4 w-4 mr-1.5" /> Export CSV
+          </Button>
+        }
+      >
       {isLoading ? (
         <div className="space-y-2">{[...Array(8)].map((_, i) => <Skeleton key={i} className="h-12 rounded" />)}</div>
       ) : (
-        <Card>
+        <TableFrame>
           <Table>
             <TableHeader>
               <TableRow>
@@ -472,8 +500,8 @@ function LoginHistoryTab() {
                   <TableCell className="text-sm">{event.email ?? event.userId ?? "—"}</TableCell>
                   <TableCell>
                     {event.success
-                      ? <Badge className="bg-green-100 text-green-800 text-xs"><CheckCircle2 className="h-3 w-3 mr-1" />Success</Badge>
-                      : <Badge variant="destructive" className="text-xs"><AlertTriangle className="h-3 w-3 mr-1" />Failed</Badge>
+                      ? <StatusPill tone="success" className="gap-1"><CheckCircle2 className="h-3 w-3" />Success</StatusPill>
+                      : <StatusPill tone="danger" className="gap-1"><AlertTriangle className="h-3 w-3" />Failed</StatusPill>
                     }
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">{event.ipAddress ?? "—"}</TableCell>
@@ -485,8 +513,9 @@ function LoginHistoryTab() {
               )}
             </TableBody>
           </Table>
-        </Card>
+        </TableFrame>
       )}
+      </SectionCard>
     </div>
   );
 }
@@ -530,13 +559,12 @@ function SecurityConfigTab() {
   return (
     <div className="space-y-6">
       {/* Session Config */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Clock className="h-5 w-5 text-blue-500" /> Session Timeout</CardTitle>
-          <CardDescription>Configure inactivity timeout for all users. HIPAA recommends ≤ 30 minutes.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-4">
+      <SectionCard
+        title="Session timeout"
+        description="Sign people out automatically after they've been idle. HIPAA guidance is 30 minutes or less."
+        icon={Clock}
+      >
+          <div className="flex flex-wrap items-center gap-4">
             <Label>Timeout after inactivity:</Label>
             <Select
               value={String(sessionConfig?.sessionTimeoutMinutes ?? 30)}
@@ -552,31 +580,26 @@ function SecurityConfigTab() {
               </SelectContent>
             </Select>
             {sessionConfig?.sessionTimeoutMinutes && sessionConfig.sessionTimeoutMinutes <= 30 && (
-              <Badge className="bg-green-100 text-green-800 text-xs"><CheckCircle2 className="h-3 w-3 mr-1" />HIPAA Compliant</Badge>
+              <StatusPill tone="success" className="gap-1"><CheckCircle2 className="h-3 w-3" />Within HIPAA guidance</StatusPill>
             )}
           </div>
-        </CardContent>
-      </Card>
+      </SectionCard>
 
       {/* Data Retention */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Database className="h-5 w-5 text-purple-500" /> Data Retention Policies</CardTitle>
-          <CardDescription>
-            Configure how long each record type is retained. CMS requires Medicare Advantage and Part D records to be kept
-            for 10 years ({CMS_RETENTION_DAYS} days), so no policy can delete sooner.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
+      <SectionCard
+        title="Data retention"
+        description={`How long each kind of record is kept. CMS requires Medicare Advantage and Part D records to be kept for 10 years (${CMS_RETENTION_DAYS.toLocaleString()} days), so no policy can delete sooner.`}
+        icon={Database}
+      >
+          <div className="divide-y divide-border rounded-lg border border-border px-4">
             {retentionPolicies?.map((policy) => (
-              <div key={policy.recordType} className="flex items-center justify-between py-3 border-b last:border-0">
+              <div key={policy.recordType} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div>
                   <p className="font-medium text-sm">{RETENTION_LABELS[policy.recordType] ?? policy.recordType}</p>
                   <p className="text-xs text-muted-foreground">
                     {policy.retentionDays} days ({Math.round(policy.retentionDays / 365 * 10) / 10} years)
                     {policy.retentionDays < CMS_RETENTION_DAYS && (
-                      <span className="text-yellow-600 ml-1">⚠ Saved below the CMS 10-year minimum — enforced as 10 years</span>
+                      <StatusPill tone="warning" className="ml-2">Below the CMS 10-year minimum — enforced as 10 years</StatusPill>
                     )}
                   </p>
                 </div>
@@ -604,14 +627,72 @@ function SecurityConfigTab() {
                 </div>
               </div>
             ))}
+            {retentionPolicies && retentionPolicies.length === 0 && (
+              <EmptyState compact icon={Database} title="No retention policies yet" description="Default retention applies until you set one." />
+            )}
           </div>
-        </CardContent>
-      </Card>
+      </SectionCard>
     </div>
   );
 }
 
-// ─── BAA & SOC 2 Tab ──────────────────────────────────────────────────────────
+// ─── Readiness checks tab ─────────────────────────────────────────────────────
+
+/**
+ * Plain-language titles for the checks GET /api/admin/baa-checklist runs.
+ * The server's own label and note (which name tables, files and constants)
+ * stay available to admins under "Technical details".
+ */
+const CONTROL_TITLES: Record<string, string> = {
+  audit_logging_enabled: "Activity log is recording",
+  phi_masking_active: "Health details are hidden from roles that don't need them",
+  object_storage_acl_enforced: "Stored files have an access policy for your agency",
+  data_retention_policy_set: "Record-keeping periods are set",
+  breach_notification_workflow: "Breach reporting process is in place",
+  export_anomaly_alerting: "Alerts for unusual data downloads",
+};
+
+const plural = (n: string, one: string, many: string) => `${n} ${n === "1" ? one : many}`;
+
+/** Rewrites the server's check note in everyday words. Unknown notes pass through. */
+export function plainControlNote(id: string, note: string | null | undefined): string | null {
+  if (id === "phi_masking_active") {
+    return "Protected health information is masked for anyone whose role isn't allowed to see it.";
+  }
+  if (!note) return null;
+  if (/query failed/i.test(note)) return "We couldn't run this check just now. Reload the page to try again.";
+  let m: RegExpMatchArray | null;
+  if (/table not provisioned/i.test(note) || /No ACL policy row/i.test(note)) {
+    return "No agency-specific file access policy on file yet. Files are still protected by the storage provider's own access rules.";
+  }
+  if ((m = note.match(/^(\d+) ACL policy row\(s\) on file/))) {
+    return `${plural(m[1], "file access policy", "file access policies")} on file.`;
+  }
+  if ((m = note.match(/^(\d+) retention policy row\(s\) configured/))) {
+    return `${plural(m[1], "record-keeping rule", "record-keeping rules")} set.`;
+  }
+  if (/^No retention rows/.test(note)) {
+    return "No custom rules yet, so the standard record-keeping periods (5–7 years) apply.";
+  }
+  if ((m = note.match(/^(\d+) exports in last 30d but no anomaly alerts/))) {
+    return `${plural(m[1], "download", "downloads")} in the last 30 days but no unusual-activity alerts yet. Ask whoever runs your install to confirm the automatic check is running.`;
+  }
+  if ((m = note.match(/^(\d+) anomaly alert\(s\) recorded in last 30d/))) {
+    return `${plural(m[1], "unusual-download alert", "unusual-download alerts")} in the last 30 days — the automatic check is working.`;
+  }
+  if (/^No export traffic in last 30d/.test(note)) return "No data downloads in the last 30 days, so nothing to alert on.";
+  if ((m = note.match(/^(\d+) audit entries in last 24h/))) {
+    return `${plural(m[1], "activity recorded", "activities recorded")} in the last 24 hours.`;
+  }
+  if (/^No audit entries in last 24h/.test(note)) return "Nothing recorded in the last 24 hours.";
+  if ((m = note.match(/^(\d+) resolved breach record\(s\); (\d+) reported in last 90d/))) {
+    return `${plural(m[1], "resolved breach record", "resolved breach records")}; ${m[2]} reported in the last 90 days.`;
+  }
+  if ((m = note.match(/^(\d+) unresolved breaches reported in last 90d/))) {
+    return `${plural(m[1], "unresolved breach", "unresolved breaches")} reported in the last 90 days.`;
+  }
+  return note;
+}
 const BAA_STATUS_LABEL: Record<BaaStatus, string> = {
   pass: "Pass",
   warn: "Needs review",
@@ -619,11 +700,11 @@ const BAA_STATUS_LABEL: Record<BaaStatus, string> = {
   fail: "Fail",
 };
 
-const BAA_STATUS_BADGE: Record<BaaStatus, string> = {
-  pass: "bg-green-100 text-green-800",
-  warn: "bg-yellow-100 text-yellow-800",
-  partial: "bg-yellow-100 text-yellow-800",
-  fail: "bg-red-100 text-red-800",
+const BAA_STATUS_TONE: Record<BaaStatus, StatusTone> = {
+  pass: "success",
+  warn: "warning",
+  partial: "warning",
+  fail: "danger",
 };
 
 export function BaaSoc2Tab() {
@@ -651,80 +732,96 @@ export function BaaSoc2Tab() {
       const blob = await res.blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `soc2-evidence-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.download = `security-evidence-${new Date().toISOString().slice(0, 10)}.pdf`;
       a.click();
-      toast({ title: "SOC 2 evidence pack generated and downloaded" });
+      toast({ title: "Evidence pack downloaded" });
     } catch {
-      toast({ title: "Failed to generate SOC 2 pack", variant: "destructive" });
+      toast({ title: "Couldn't create the evidence pack. Try again.", variant: "destructive" });
     } finally {
       setGenerating(false);
     }
   };
 
   const statusIcon = (status: BaaStatus) => {
-    if (status === "pass") return <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />;
-    if (status === "fail") return <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />;
-    return <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0" />;
+    const tile = "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg";
+    if (status === "pass") return <div className={`${tile} bg-success/15 text-success`}><CheckCircle2 className="h-5 w-5" /></div>;
+    if (status === "fail") return <div className={`${tile} bg-destructive/10 text-destructive`}><XCircle className="h-5 w-5" /></div>;
+    return <div className={`${tile} bg-warning/15 text-warning`}><AlertTriangle className="h-5 w-5" /></div>;
   };
+  const pct = total > 0 ? Math.round((passing / total) * 100) : 0;
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">Passing</p>
-            <p className="text-2xl font-bold text-green-600" data-testid="baa-passing">{passing}/{total}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">Needs attention</p>
-            <p className="text-2xl font-bold text-yellow-600" data-testid="baa-attention">{attention}/{total}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Evidence Pack</p>
-                <p className="text-xs text-muted-foreground mt-0.5">For SOC 2 auditors</p>
-              </div>
-              <Button size="sm" onClick={generatePdf} disabled={generating}>
-                {generating ? <RefreshCcw className="h-4 w-4 mr-1.5 animate-spin" /> : <FileText className="h-4 w-4 mr-1.5" />}
-                {generating ? "Generating…" : "Generate PDF"}
-              </Button>
+      <KpiGrid cols={3}>
+        <KpiCard
+          label="Controls passing"
+          value={<span data-testid="baa-passing">{passing}/{total}</span>}
+          icon={CheckCircle2}
+          color="green"
+          loading={isLoading}
+          hint={total > 0 ? `${pct}% of the checks we run` : "Checks run when this page loads"}
+        />
+        <KpiCard
+          label="Needs attention"
+          value={<span data-testid="baa-attention">{attention}/{total}</span>}
+          icon={AlertTriangle}
+          color="orange"
+          loading={isLoading}
+          hint={attention === 0 && total > 0 ? "Nothing to fix — nice" : "See the notes below"}
+        />
+        <div className="rounded-xl border border-border bg-card p-5 shadow-sm flex flex-col justify-between gap-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">Evidence pack</p>
+              <p className="text-sm text-muted-foreground mt-1">A PDF of these checks and your audit history to hand to an auditor</p>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-navy-100 text-navy-800 dark:bg-secondary dark:text-secondary-foreground">
+              <FileText className="h-5 w-5" />
+            </div>
+          </div>
+          <Button size="sm" onClick={generatePdf} disabled={generating} className="self-start">
+            {generating ? <RefreshCcw className="h-4 w-4 mr-1.5 animate-spin" /> : <FileText className="h-4 w-4 mr-1.5" />}
+            {generating ? "Generating…" : "Generate PDF"}
+          </Button>
+        </div>
+      </KpiGrid>
 
       {isLoading ? (
         <div className="space-y-2">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-14 rounded" />)}</div>
       ) : isError ? (
-        <p className="text-sm text-muted-foreground">Couldn't load the BAA checklist. Try again in a moment.</p>
+        <SectionCard>
+          <EmptyState icon={ShieldAlert} title="Couldn't load the BAA checklist. Try again in a moment." />
+        </SectionCard>
       ) : (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">HIPAA BAA readiness</CardTitle>
-            {data?.generatedAt && (
-              <CardDescription>Checked {new Date(data.generatedAt).toLocaleString()}</CardDescription>
+        <SectionCard
+          title="HIPAA readiness checks"
+          description={data?.generatedAt ? `Checked live from your settings · ${new Date(data.generatedAt).toLocaleString()}` : "Checked live from your settings"}
+          icon={ListChecks}
+          contentClassName="space-y-2"
+        >
+            {controls.length === 0 && (
+              <EmptyState compact icon={ListChecks} title="No controls to show" description="The checklist didn't return any checks for this agency." />
             )}
-          </CardHeader>
-          <CardContent className="space-y-2">
             {controls.map((control) => (
-              <div key={control.id} className="flex items-start gap-3 p-3 rounded-lg border bg-muted/20" data-testid={`baa-control-${control.id}`}>
+              <div key={control.id} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card" data-testid={`baa-control-${control.id}`}>
                 {statusIcon(control.status)}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{control.label}</p>
-                  {control.note && <p className="text-xs text-muted-foreground mt-0.5">{control.note}</p>}
+                  <p className="text-sm font-medium">{CONTROL_TITLES[control.id] ?? control.label}</p>
+                  {plainControlNote(control.id, control.note) && (
+                    <p className="text-xs text-muted-foreground mt-0.5">{plainControlNote(control.id, control.note)}</p>
+                  )}
+                  <TechnicalDetails className="mt-1">
+                    <div>check: {control.id}</div>
+                    <div>{control.label}</div>
+                    {control.note && <div>{control.note}</div>}
+                  </TechnicalDetails>
                 </div>
-                <Badge variant="secondary" className={`text-xs shrink-0 ${BAA_STATUS_BADGE[control.status] ?? ""}`}>
+                <StatusPill tone={BAA_STATUS_TONE[control.status] ?? "neutral"} className="shrink-0">
                   {BAA_STATUS_LABEL[control.status] ?? control.status}
-                </Badge>
+                </StatusPill>
               </div>
             ))}
-          </CardContent>
-        </Card>
+        </SectionCard>
       )}
     </div>
   );
@@ -774,26 +871,26 @@ function SessionsTab() {
   });
 
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        View and manage active user sessions. Force logout terminates all active sessions for a user immediately.
-      </p>
-
+    <SectionCard
+      title="Active sessions"
+      description="See where people are signed in. Force logout ends every session for that person straight away."
+      icon={MonitorSmartphone}
+    >
       {isLoading ? (
         <div className="space-y-2">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-14 rounded" />)}</div>
       ) : (
         <div className="space-y-2">
           {users?.filter((u) => u.isActive).map((user) => (
-            <Card key={user.id} className={expandedUserId === user.id ? "border-blue-200" : ""}>
+            <Card key={user.id} className={expandedUserId === user.id ? "border-accent/40 shadow-none" : "shadow-none"}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
-                      {user.fullName.charAt(0).toUpperCase()}
+                    <div className="h-9 w-9 rounded-full bg-navy-100 text-navy-800 dark:bg-secondary dark:text-secondary-foreground flex items-center justify-center text-xs font-semibold">
+                      {user.fullName.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()}
                     </div>
                     <div>
                       <p className="text-sm font-medium">{user.fullName}</p>
-                      <p className="text-xs text-muted-foreground">{user.email} · <Badge variant="secondary" className="text-xs">{user.role}</Badge></p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">{user.email} <StatusPill tone="navy">{humanize(user.role)}</StatusPill></p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -878,24 +975,28 @@ function SessionsTab() {
           ))}
         </div>
       )}
-    </div>
+    </SectionCard>
   );
 }
 
 // ─── Export Log Tab ───────────────────────────────────────────────────────────
 function ExportLogTab() {
+  const productName = useProductName();
   const { data, isLoading } = useQuery({
     queryKey: ["admin", "export-log"],
     queryFn: () => apiFetch<ExportLogResponse>("/api/admin/export-log?limit=100"),
   });
 
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">All data exports performed by users in your organization are logged here for HIPAA compliance.</p>
+    <SectionCard
+      title="Export log"
+      description={`Every time someone downloads data from ${productName}, it's recorded here`}
+      icon={Download}
+    >
       {isLoading ? (
         <div className="space-y-2">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-12 rounded" />)}</div>
       ) : (
-        <Card>
+        <TableFrame>
           <Table>
             <TableHeader>
               <TableRow>
@@ -910,7 +1011,7 @@ function ExportLogTab() {
                 <TableRow key={entry.id}>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{new Date(entry.createdAt).toLocaleString()}</TableCell>
                   <TableCell className="text-sm">{entry.userFullName ?? entry.userId ?? "—"}</TableCell>
-                  <TableCell><Badge variant="secondary" className="text-xs">{entry.exportType.replace(/_/g, " ")}</Badge></TableCell>
+                  <TableCell><StatusPill tone="info">{humanize(entry.exportType)}</StatusPill></TableCell>
                   <TableCell className="text-sm">{entry.recordCount?.toLocaleString() ?? "—"}</TableCell>
                 </TableRow>
               ))}
@@ -919,9 +1020,9 @@ function ExportLogTab() {
               )}
             </TableBody>
           </Table>
-        </Card>
+        </TableFrame>
       )}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -945,25 +1046,39 @@ type ClerkSession = { sessionId: string; createdAt: string; lastActiveAt: string
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function AdminCompliancePage() {
   const { isAdmin, isLoading: meLoading } = useIsAdmin(ADMIN_OR_COMPLIANCE_ROLES);
+  const productName = useProductName();
 
   if (!meLoading && !isAdmin) {
-    return <div className="p-8 text-center text-muted-foreground">You don't have access to this page.</div>;
+    return (
+      <PageShell>
+        <SectionCard>
+          <EmptyState
+            icon={Lock}
+            title="You don't have access to this page."
+            description="Security and HIPAA controls are available to agency admins and compliance managers."
+          />
+        </SectionCard>
+      </PageShell>
+    );
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <ShieldCheck className="h-6 w-6 text-blue-600" />
-          HIPAA / SOC 2 Compliance
-        </h1>
-        <p className="text-muted-foreground mt-1">Security controls, access review, audit trails, and evidence management.</p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Security & HIPAA readiness checks"
+        subtitle="Live security checks, who can get in, and a record of every sign-in, change and export"
+      />
+
+      <NoticeBanner icon={Info} title="These are live checks, not a certification">
+        Each check below is worked out from your agency's real settings every time this page loads. Passing
+        them doesn't make {productName} or your agency certified under any security or compliance standard;
+        the evidence pack gives your own auditor the facts they'll ask for.
+      </NoticeBanner>
 
       <Tabs defaultValue="baa-soc2">
         <TabsList className="flex-wrap h-auto gap-1">
           <TabsTrigger value="baa-soc2" className="flex items-center gap-1.5">
-            <ShieldCheck className="h-3.5 w-3.5" /> BAA / SOC 2
+            <ShieldCheck className="h-3.5 w-3.5" /> Readiness checks
           </TabsTrigger>
           <TabsTrigger value="audit-log" className="flex items-center gap-1.5">
             <FileDown className="h-3.5 w-3.5" /> Audit Log
@@ -995,6 +1110,6 @@ export default function AdminCompliancePage() {
           <TabsContent value="security-config"><SecurityConfigTab /></TabsContent>
         </div>
       </Tabs>
-    </div>
+    </PageShell>
   );
 }
