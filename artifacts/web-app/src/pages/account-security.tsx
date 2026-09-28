@@ -3,6 +3,17 @@ import { ShieldCheck, ShieldAlert } from "lucide-react";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
+// The app-wide Clerk appearance (App.tsx) pins cardBox to 440px for the
+// sign-in card. UserProfile has a sidebar plus a content pane, so at that
+// width it collapses and truncates. Let it fill the page column instead.
+// Classes from both appearances are applied, hence the `!` overrides.
+const userProfileAppearance = {
+  elements: {
+    rootBox: "!w-full !block",
+    cardBox: "!w-full !max-w-none min-h-[40rem] !rounded-xl !shadow-sm",
+  },
+};
+
 /**
  * Account security: where a user enrolls MFA.
  *
@@ -49,7 +60,11 @@ export default function AccountSecurityPage() {
         </div>
       )}
 
-      <UserProfile routing="path" path={`${basePath}/settings/security`} />
+      <UserProfile
+        routing="path"
+        path={`${basePath}/settings/security`}
+        appearance={userProfileAppearance}
+      />
     </div>
   );
 }
