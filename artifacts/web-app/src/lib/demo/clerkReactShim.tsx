@@ -117,3 +117,8 @@ export function SignUp() {
     </div>
   );
 }
+
+/** Demo builds have no real account to manage. */
+export function UserProfile(_props: { routing?: string; path?: string }) {
+  return <p className="text-sm text-muted-foreground">Account settings are not available in the demo.</p>;
+}

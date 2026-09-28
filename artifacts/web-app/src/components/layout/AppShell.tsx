@@ -539,6 +539,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     Agency settings
                   </Link>
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/settings/security">
+                    <ShieldCheck className="h-4 w-4 mr-2" />
+                    Account security
+                  </Link>
+                </DropdownMenuItem>
                 {isOwner && (
                   <>
                     <DropdownMenuItem asChild>

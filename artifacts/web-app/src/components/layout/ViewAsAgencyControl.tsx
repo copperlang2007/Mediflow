@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Eye, X } from "lucide-react";
+import { Link } from "wouter";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,17 +23,18 @@ function readActiveOrgId(): string | null {
 function useViewAsAgencies(enabled: boolean) {
   const [agencies, setAgencies] = useState<Agency[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [activeOrgId] = useState<string | null>(readActiveOrgId);
 
   useEffect(() => {
     if (!enabled) return;
     void apiFetch<{ agencies: Agency[] }>("/api/admin/agencies")
-      .then((result) => { setAgencies(result.agencies); setError(null); })
+      .then((result) => { setAgencies(result.agencies); setError(null); setMfaRequired(false); })
       .catch((cause: { status?: number; data?: { error?: string } }) => {
         setAgencies([]);
-        setError(cause.status === 403 && cause.data?.error === "mfa_required"
-          ? "Enable MFA in account security to view agencies."
-          : "Could not load agencies. Refresh to try again.");
+        const needsMfa = cause.status === 403 && cause.data?.error === "mfa_required";
+        setMfaRequired(needsMfa);
+        setError(needsMfa ? null : "Could not load agencies. Refresh to try again.");
       });
   }, [enabled]);
 
@@ -46,7 +48,16 @@ function useViewAsAgencies(enabled: boolean) {
     window.location.reload();
   };
 
-  return { agencies, error, activeOrgId, setView, exitView };
+  return { agencies, error, mfaRequired, activeOrgId, setView, exitView };
+}
+
+/** Viewing agencies needs Clerk MFA; this points at the page that enrolls it. */
+function MfaLink({ className, onNavigate }: { className?: string; onNavigate?: () => void }) {
+  return (
+    <Link href="/settings/security" className={cn("underline underline-offset-2", className)} onClick={onNavigate}>
+      Set up two-step verification to view agencies
+    </Link>
+  );
 }
 
 function AgencySelect({
@@ -80,7 +91,7 @@ function AgencySelect({
  * shortened on small screens.
  */
 export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
-  const { agencies, error, activeOrgId, setView, exitView } = useViewAsAgencies(enabled);
+  const { agencies, error, mfaRequired, activeOrgId, setView, exitView } = useViewAsAgencies(enabled);
   if (!enabled) return null;
 
   const activeAgency = agencies.find((agency) => agency.id === activeOrgId);
@@ -96,6 +107,7 @@ export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
         <span className="hidden font-medium sm:inline truncate max-w-48">Viewing {name} - read-only</span>
         <span className="sr-only sm:hidden">Viewing {name}, read-only</span>
         {error && <span role="alert" className="hidden md:inline">{error}</span>}
+        {mfaRequired && <MfaLink className="hidden md:inline text-amber-700 dark:text-amber-300" />}
         <Button variant="ghost" size="sm" className="h-6 px-1.5 text-amber-900 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-500/20" onClick={exitView} aria-label="Exit agency view">
           <X className="h-3.5 w-3.5" />
         </Button>
@@ -109,6 +121,7 @@ export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
       <span className="hidden 2xl:inline">View agency</span>
       <AgencySelect agencies={agencies} onPick={setView} className="max-w-44" />
       {error && <span role="alert" className="max-w-52 text-amber-700">{error}</span>}
+      {mfaRequired && <MfaLink className="max-w-52 text-amber-700" />}
     </label>
   );
 }
@@ -121,7 +134,7 @@ export function ViewAsAgencyDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { agencies, error, setView } = useViewAsAgencies(open);
+  const { agencies, error, mfaRequired, setView } = useViewAsAgencies(open);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
@@ -133,6 +146,9 @@ export function ViewAsAgencyDialog({
         </DialogHeader>
         <AgencySelect agencies={agencies} onPick={setView} className="h-10 w-full text-sm" />
         {error && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">{error}</p>}
+        {mfaRequired && (
+          <MfaLink className="text-sm text-amber-700 dark:text-amber-300" onNavigate={() => onOpenChange(false)} />
+        )}
       </DialogContent>
     </Dialog>
   );
