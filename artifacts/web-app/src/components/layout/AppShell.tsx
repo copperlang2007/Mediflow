@@ -601,6 +601,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   Organization
                 </Link>
               </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/settings/security">
+                  <ShieldCheck className="h-4 w-4 mr-2" />
+                  Account security
+                </Link>
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"

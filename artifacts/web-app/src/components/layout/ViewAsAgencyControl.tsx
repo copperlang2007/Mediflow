@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Eye, X } from "lucide-react";
+import { Link } from "wouter";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 
@@ -9,6 +10,7 @@ const VIEW_AS_KEY = "mediflow:view-as-org";
 export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
   const [agencies, setAgencies] = useState<Agency[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [activeOrgId] = useState<string | null>(() => {
     try { return globalThis.localStorage?.getItem(VIEW_AS_KEY) ?? null; } catch { return null; }
   });
@@ -16,12 +18,12 @@ export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
   useEffect(() => {
     if (!enabled) return;
     void apiFetch<{ agencies: Agency[] }>("/api/admin/agencies")
-      .then((result) => { setAgencies(result.agencies); setError(null); })
+      .then((result) => { setAgencies(result.agencies); setError(null); setMfaRequired(false); })
       .catch((cause: { status?: number; data?: { error?: string } }) => {
         setAgencies([]);
-        setError(cause.status === 403 && cause.data?.error === "mfa_required"
-          ? "Enable MFA in account security to view agencies."
-          : "Could not load agencies. Refresh to try again.");
+        const needsMfa = cause.status === 403 && cause.data?.error === "mfa_required";
+        setMfaRequired(needsMfa);
+        setError(needsMfa ? null : "Could not load agencies. Refresh to try again.");
       });
   }, [enabled]);
 
@@ -44,6 +46,11 @@ export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
         <Eye className="h-3.5 w-3.5" />
         <span className="font-medium">Viewing {activeAgency?.name ?? "agency"} - read-only</span>
         {error && <span role="alert">{error}</span>}
+        {mfaRequired && (
+        <Link href="/settings/security" className="max-w-52 text-amber-700 underline underline-offset-2">
+          Set up two-step verification to view agencies
+        </Link>
+      )}
         <Button variant="ghost" size="sm" className="h-6 px-1.5 text-amber-900 hover:bg-amber-100" onClick={exitView} aria-label="Exit agency view">
           <X className="h-3.5 w-3.5" />
         </Button>
@@ -60,6 +67,11 @@ export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
         {agencies.map((agency) => <option key={agency.id} value={agency.id}>{agency.name}</option>)}
       </select>
       {error && <span role="alert" className="max-w-52 text-amber-700">{error}</span>}
+      {mfaRequired && (
+        <Link href="/settings/security" className="max-w-52 text-amber-700 underline underline-offset-2">
+          Set up two-step verification to view agencies
+        </Link>
+      )}
     </label>
   );
 }
