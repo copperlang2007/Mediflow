@@ -108,6 +108,8 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ALL_ROLES },
       { href: "/crm", label: "Clients & Leads", icon: Users, roles: BACK_OFFICE },
+      // An agent's own clients, with the PHI they need to service them.
+      { href: "/my-clients", label: "My Clients", icon: Users, roles: ["agent"] },
       // Book of business (enrollments). Server gate: contact:read.
       { href: "/policies", label: "Policies", icon: FileStack, roles: BACK_OFFICE },
       { href: "/tasks", label: "Tasks", icon: CheckSquare, roles: ALL_ROLES, badge: "overdueTasks" },

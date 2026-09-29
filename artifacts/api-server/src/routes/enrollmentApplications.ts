@@ -4,11 +4,12 @@
  *   GET /contacts/:id/applications      — summary list (no PHI beyond plan info)
  *   GET /applications/:id/full          — the decrypted application
  *
- * The full view is limited to PHI_PRIVILEGED_ROLES and writes an audit_log
- * entry on EVERY view, before any data is returned: if the audit write fails,
- * nothing is shown. Health answers and race/ethnicity are only ever returned
- * here, to a privileged person looking at them, never to routing, scoring or
- * AI features.
+ * The full view is limited to PHI_PRIVILEGED_ROLES and to the agent who
+ * services the client (the contact's assigned agent, or the application's
+ * writing agent; see lib/phiAccess.ts). It writes an audit_log entry on EVERY
+ * view, before any data is returned: if the audit write fails, nothing is
+ * shown. Health answers and race/ethnicity are only ever returned here, to a
+ * person allowed to look at them, never to routing, scoring or AI features.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "crypto";
@@ -17,6 +18,7 @@ import {
   db,
   auditLogTable,
   contactsTable,
+  enrollmentsTable,
   enrollmentApplicationsTable,
   enrollmentApplicationVersionsTable,
   decryptPii,
@@ -24,9 +26,30 @@ import {
 import { requireMfa } from "../middlewares/requireMfa";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { PHI_PRIVILEGED_ROLES } from "../lib/permissions";
+import { mayViewFullApplication, phiViewerAgentId } from "../lib/phiAccess";
 import { isPolicyEvent, parsePolicyEvent } from "../lib/integrations/enrollhere/policyEvent";
 
 const router: IRouter = Router();
+
+/**
+ * Medicare / Medicaid numbers from a Sunfire application read from GHL custom
+ * fields (lib/integrations/ghl/sunfire.ts stores them as "Label (merge_key)").
+ */
+function sunfireFieldIds(payload: Record<string, unknown>): { medicareNumber: string | null; medicaidNumber: string | null } | null {
+  if (payload.source !== "gohighlevel" || typeof payload.fields !== "object" || payload.fields === null) return null;
+  const fields = payload.fields as Record<string, unknown>;
+  const pick = (...keys: string[]): string | null => {
+    for (const key of keys) {
+      const hit = Object.entries(fields).find(([label, v]) => label.endsWith(`(${key})`) && typeof v === "string" && v.trim());
+      if (hit) return (hit[1] as string).trim();
+    }
+    return null;
+  };
+  return { medicareNumber: pick("medicare_number", "applicanthicn"), medicaidNumber: pick("medicaid_number") };
+}
+
+const FULL_VIEW_REFUSED = "Only admins, compliance and the client's own agent can view full applications.";
+
 
 const param = (v: string | string[] | undefined): string => (Array.isArray(v) ? v[0] ?? "" : v ?? "");
 
@@ -56,13 +79,19 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const contactId = param(req.params.id);
-    const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable)
+    const [contact] = await db.select({ id: contactsTable.id, assignedAgentId: contactsTable.assignedAgentId }).from(contactsTable)
       .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
-    const rows = await db.select(summaryColumns).from(enrollmentApplicationsTable)
+    const rows = await db.select({ ...summaryColumns, writingAgentId: enrollmentsTable.agentId }).from(enrollmentApplicationsTable)
+      .leftJoin(enrollmentsTable, eq(enrollmentsTable.id, enrollmentApplicationsTable.enrollmentId))
       .where(and(eq(enrollmentApplicationsTable.orgId, authReq.orgId), eq(enrollmentApplicationsTable.contactId, contactId)))
       .orderBy(desc(enrollmentApplicationsTable.updatedAt));
-    res.json({ applications: rows, canViewFull: PHI_PRIVILEGED_ROLES.has(authReq.userRole) });
+    const viewerAgentId = await phiViewerAgentId(authReq);
+    const applications = rows.map(({ writingAgentId, ...row }) => ({
+      ...row,
+      canViewFull: mayViewFullApplication(authReq.userRole, viewerAgentId, contact.assignedAgentId, writingAgentId),
+    }));
+    res.json({ applications, canViewFull: applications.some((a) => a.canViewFull) });
   },
 );
 
@@ -73,22 +102,32 @@ router.get(
   requireMfa,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    if (!PHI_PRIVILEGED_ROLES.has(authReq.userRole)) {
-      res.status(403).json({ error: "Only admins and compliance can view full applications." });
+    const viewerAgentId = await phiViewerAgentId(authReq);
+    if (!PHI_PRIVILEGED_ROLES.has(authReq.userRole) && !viewerAgentId) {
+      res.status(403).json({ error: FULL_VIEW_REFUSED });
       return;
     }
     const id = param(req.params.id);
     // Only for a live contact in this org: a deleted contact's application is
     // not viewable (hard deletes cascade the application away entirely).
-    const [found] = await db.select({ app: enrollmentApplicationsTable }).from(enrollmentApplicationsTable)
+    const [found] = await db.select({
+      app: enrollmentApplicationsTable,
+      assignedAgentId: contactsTable.assignedAgentId,
+      writingAgentId: enrollmentsTable.agentId,
+    }).from(enrollmentApplicationsTable)
       .innerJoin(contactsTable, and(
         eq(contactsTable.id, enrollmentApplicationsTable.contactId),
         eq(contactsTable.orgId, authReq.orgId),
         isNull(contactsTable.deletedAt),
       ))
+      .leftJoin(enrollmentsTable, eq(enrollmentsTable.id, enrollmentApplicationsTable.enrollmentId))
       .where(and(eq(enrollmentApplicationsTable.id, id), eq(enrollmentApplicationsTable.orgId, authReq.orgId))).limit(1);
     const app = found?.app;
     if (!app) { res.status(404).json({ error: "Application not found" }); return; }
+    if (!mayViewFullApplication(authReq.userRole, viewerAgentId, found.assignedAgentId, found.writingAgentId)) {
+      res.status(403).json({ error: FULL_VIEW_REFUSED });
+      return;
+    }
 
     const requested = Number(req.query.version);
     const version = Number.isInteger(requested) && requested > 0 ? requested : app.currentVersion;
@@ -124,7 +163,7 @@ router.get(
 
     // Identifiers come from the selected version's own payload, so an older
     // version shows the numbers it was received with, not today's.
-    const ids = isPolicyEvent(payload) ? parsePolicyEvent(payload) : null;
+    const ids = isPolicyEvent(payload) ? parsePolicyEvent(payload) : sunfireFieldIds(payload);
 
     res.set("Cache-Control", "no-store");
     res.json({

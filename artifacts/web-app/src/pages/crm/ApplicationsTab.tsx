@@ -29,6 +29,8 @@ interface ApplicationSummary {
   signatureDate: string | null;
   agentEmail: string | null;
   updatedAt: string;
+  /** Admins and compliance, or the agent who services this client. */
+  canViewFull?: boolean;
 }
 
 interface FullApplication {
@@ -79,7 +81,7 @@ function Tree({ value, depth = 0 }: { value: unknown; depth?: number }) {
   return <span>{String(value)}</span>;
 }
 
-function FullApplicationDialog({ applicationId, onClose }: { applicationId: string; onClose: () => void }) {
+export function FullApplicationDialog({ applicationId, onClose }: { applicationId: string; onClose: () => void }) {
   const [version, setVersion] = useState<number | null>(null);
   const { data, isLoading, error } = useQuery({
     queryKey: ["application-full", applicationId, version],
@@ -175,7 +177,7 @@ export default function ApplicationsTab({ contactId }: { contactId: string }) {
                 {a.agentEmail && <p className="text-xs text-muted-foreground break-all">Agent: {a.agentEmail}</p>}
               </div>
             </div>
-            {data?.canViewFull && (
+            {(a.canViewFull ?? data?.canViewFull) && (
               <Button size="sm" variant="outline" onClick={() => setOpenId(a.id)}>
                 <ShieldAlert className="h-3.5 w-3.5 mr-1.5" />Full application
               </Button>
