@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { Download, Link2, ListTree } from "lucide-react";
+import { Download, Link2, ListTree, RefreshCw } from "lucide-react";
 import { customFetch } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -9,6 +10,7 @@ import { downloadCsvText } from "@/lib/exports";
 
 type GhlStatus = {
   configured: boolean;
+  running?: boolean;
   locationId: string | null;
   lastRunAt: string | null;
   lastStatus: string | null;
@@ -27,9 +29,10 @@ function errorText(err: unknown): string {
 
 /**
  * GoHighLevel connection for agency admins: whether the contact feed is
- * connected, how its last run went, and the sub-account's custom field
- * definitions (names and types only) so fields like Sunfire plan data can be
- * mapped. No contact data is shown here.
+ * connected, how its last run went, a manual sync (or a full re-read, which
+ * also imports Sunfire applications for contacts synced earlier), and the
+ * sub-account's custom field definitions (names and types only). No contact
+ * data is shown here.
  */
 export function GhlConnectionCard() {
   const status = useQuery({
@@ -42,6 +45,30 @@ export function GhlConnectionCard() {
     queryFn: () => customFetch<{ locationId: string; fields: GhlCustomField[] }>("/api/integrations/ghl/custom-fields"),
     enabled: configured,
     retry: false,
+  });
+
+  const queryClient = useQueryClient();
+  const [syncNote, setSyncNote] = useState<string | null>(null);
+  const [confirmFull, setConfirmFull] = useState(false);
+  const sync = useMutation({
+    mutationFn: (full: boolean) =>
+      customFetch<{ queued: boolean; full: boolean; alreadyRunning: boolean }>("/api/integrations/ghl/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ full }),
+      }),
+    onSuccess: (r) => {
+      setConfirmFull(false);
+      setSyncNote(
+        r.alreadyRunning
+          ? "A sync is already running; this request runs right after it."
+          : r.full
+            ? "Full re-read queued. Every contact and Sunfire application is read again; large accounts take a few runs."
+            : "Sync queued. New and changed contacts arrive in a minute or two.",
+      );
+      void queryClient.invalidateQueries({ queryKey: ["/api/integrations/ghl/status"] });
+    },
+    onError: (err) => setSyncNote(errorText(err)),
   });
 
   const download = () => {
@@ -86,6 +113,24 @@ export function GhlConnectionCard() {
             )}
           </div>
           {status.data?.lastError && <p className="text-xs text-destructive">{status.data.lastError}</p>}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" disabled={sync.isPending} onClick={() => sync.mutate(false)}>
+              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${sync.isPending ? "animate-spin" : ""}`} /> Sync now
+            </Button>
+            {confirmFull ? (
+              <>
+                <span className="text-xs text-muted-foreground">Re-read every contact from GoHighLevel?</span>
+                <Button size="sm" disabled={sync.isPending} onClick={() => sync.mutate(true)}>Yes, re-read all</Button>
+                <Button size="sm" variant="ghost" onClick={() => setConfirmFull(false)}>Cancel</Button>
+              </>
+            ) : (
+              <Button size="sm" variant="ghost" disabled={sync.isPending} onClick={() => setConfirmFull(true)}>
+                Re-read all contacts
+              </Button>
+            )}
+          </div>
+          {syncNote && <p role="status" className="text-xs text-muted-foreground">{syncNote}</p>}
 
           <div className="rounded-lg border border-border bg-muted/30 p-3">
             <div className="mb-2 flex flex-wrap items-center gap-2">

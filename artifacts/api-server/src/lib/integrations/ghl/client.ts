@@ -39,7 +39,15 @@ export interface GhlContact {
   dnd?: boolean | null;
   dateAdded?: string | null;
   dateUpdated?: string | null;
+  /** Custom field values, keyed by field id (see listContactCustomFields for names). */
+  customFields?: GhlCustomFieldValue[] | null;
   searchAfter?: (string | number)[] | null;
+}
+
+/** A custom field value on a contact; the value is text, a number, a list or an object. */
+export interface GhlCustomFieldValue {
+  id: string;
+  value?: unknown;
 }
 
 export interface SearchPage {
