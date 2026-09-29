@@ -54,6 +54,7 @@ let appNotMine: string;
 let ended: { id: string };
 let appEnded: string;
 let appAmbiguous: string;
+let appFallback: string;
 let supportUser: { id: string };
 
 async function seedApplication(contactId: string, enrollmentId: string | null, fields: Record<string, string>): Promise<string> {
@@ -95,7 +96,7 @@ beforeAll(async () => {
     orgId: org.id, firstName: "Rosa", lastName: "Alvarez", medicareId: "1EG4TE5MK73",
     dob: new Date("1951-03-07T00:00:00Z"), healthConditions: ["COPD", "Diabetes"],
   });
-  wroteForOther = await seedContact(tdb, { orgId: org.id, firstName: "Carmen", lastName: "Ortiz", medicareId: "4CD5EF6GH78", healthConditions: ["CHF"] });
+  wroteForOther = await seedContact(tdb, { orgId: org.id, firstName: "Carmen", lastName: "Ortiz", medicareId: "4CD5EF6GH78", healthConditions: ["CHF"], dob: new Date("1955-08-15T00:00:00Z") });
   ended = await seedContact(tdb, { orgId: org.id, firstName: "Ellen", lastName: "Price", medicareId: "5DE6FG7HJ89" });
   notMine = await seedContact(tdb, { orgId: org.id, firstName: "Dana", lastName: "Stone", medicareId: "2AB3CD4EF56" });
   await tdb.update(contactsTable).set({ assignedAgentId: agentA.id }).where(eq(contactsTable.id, mine.id));
@@ -113,6 +114,11 @@ beforeAll(async () => {
   appAmbiguous = await seedApplication(mine.id, null, {
     "Spouse Medicare Number (medicare_number)": "9SP1OU2SE34",
     "Medicare Number (medicare_number)": "1EG4TE5MK73",
+  });
+  appFallback = await seedApplication(mine.id, null, {
+    "Spouse Medicare Number (medicare_number)": "9SP1OU2SE34",
+    "Medicare Number (medicare_number)": "1EG4TE5MK73",
+    "Applicant HICN (applicanthicn)": "7HJ2CK3AB45",
   });
   // A back-office user who happens to have a linked agent row gains nothing from it.
   supportUser = await seedUser(tdb, { orgId: org.id, role: "agent_support" });
@@ -188,6 +194,7 @@ describe("My clients", () => {
     // Written, not assigned, still pending: the writing agent sees the PHI.
     const live = await request(app).get(`/api/agents/me/clients/${wroteForOther.id}`).set(withAuth(userA.id));
     expect(live.body.contact).toMatchObject({ medicareId: "4CD5EF6GH78", healthConditions: ["CHF"] });
+    expect(live.body.contact.dob).toMatch(/^1955-08-15/);
     // Cancelled: gone from their book, the detail and the full application.
     const list = await request(app).get("/api/agents/me/clients?limit=200").set(withAuth(userA.id));
     expect(list.body.data.map((c: { id: string }) => c.id)).not.toContain(ended.id);
@@ -211,5 +218,8 @@ describe("My clients", () => {
     const res = await request(app).get(`/api/applications/${appAmbiguous}/full`).set(withAuth(userA.id));
     expect(res.status).toBe(200);
     expect(res.body.medicareId).toBeNull();
+    // An unambiguous fallback field is still used.
+    const fallback = await request(app).get(`/api/applications/${appFallback}/full`).set(withAuth(userA.id));
+    expect(fallback.body.medicareId).toBe("7HJ2CK3AB45");
   });
 });
