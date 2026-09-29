@@ -76,6 +76,8 @@ tags:
   # --- stage2/campaigns ---
   - name: campaigns
     description: Omnichannel email/SMS marketing campaigns
+  - name: calling
+    description: Native browser calling on Twilio Voice (call sessions, access token, TwiML webhooks)
 
 paths:
   /healthz:
@@ -5341,6 +5343,153 @@ paths:
         "403": { description: Bad signature }
   # --- end stage2/campaigns ---
 
+  # --- native calling (Twilio Voice) ---
+  # routes/softphone.ts + routes/voiceWebhooks.ts. The browser NEVER supplies a
+  # phone number: a call is started from a contact id, the number is derived and
+  # stored server side, and the Voice webhook dials only the stored number.
+  /softphone/calls:
+    post:
+      operationId: startSoftphoneCall
+      tags: [calling]
+      summary: Preclear a call to a contact and create a single-use call session
+      description: |
+        Runs preclearance (consent, do-not-contact across orgs, calling hours in
+        the contact's timezone, agent eligibility) plus attempt-limit and redial
+        cooldown backstops. A refused call returns 409 with the specific reasons
+        and stores a `blocked` call session as an audit trail. The `agent` role
+        may call only contacts assigned to their own agent profile.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartCallBody"
+      responses:
+        "201":
+          description: Call session created; pass callSessionId (and `to`) as Device.connect params
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartCallResponse"
+        "400": { description: Invalid body (a phone number field is rejected), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { description: Contact not found or not callable by this user, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409":
+          description: Refused by preclearance or a dial backstop
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallBlockedResponse"
+        "503":
+          description: Twilio Voice not configured (needs_setup) or demo mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallingUnavailable"
+    get:
+      operationId: listSoftphoneCalls
+      tags: [calling]
+      summary: Recent call sessions (agents see only their own)
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 15 } }
+        - { name: contactId, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Call sessions, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallSessionList"
+  /softphone/calls/{id}:
+    patch:
+      operationId: updateSoftphoneCall
+      tags: [calling]
+      summary: Save disposition and notes on a call (owner or admin only)
+      description: |
+        A DO_NOT_CALL disposition also records an opt-out for the number, which
+        blocks further calls and texts to it.
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCallBody"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateCallResponse"
+        "400": { description: Invalid body, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { description: Call not found (or not yours), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: A blocked call cannot be dispositioned, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /softphone/voice-token:
+    get:
+      operationId: getSoftphoneVoiceToken
+      tags: [calling]
+      summary: Mint a short-lived Twilio Voice access token for the signed-in user
+      description: |
+        HS256 JWT with a VoiceGrant (outgoing through our TwiML App only),
+        identity = the user id, TTL at most 10 minutes. Returns 503 with
+        `status: needs_setup` and the names of the missing env vars until Twilio
+        is configured.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceToken"
+        "503":
+          description: Needs setup (missing env var names) or demo mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallingUnavailable"
+  /webhooks/twilio/voice:
+    post:
+      operationId: twilioVoiceWebhook
+      tags: [calling]
+      security: []
+      summary: TwiML App Voice URL (X-Twilio-Signature). Dials only the number stored on the call session.
+      description: |
+        Rejects (TwiML `<Reject>`) unless the session is `initiated`, under 2
+        minutes old, bound to the calling user, the echoed `To` matches the
+        stored number and the number still clears the opt-out check. Recording
+        stays off unless the session has `recording_enabled`.
+      responses:
+        "200": { description: TwiML (Dial or Reject), content: { text/xml: { schema: { type: string } } } }
+        "403": { description: Bad signature }
+  /webhooks/twilio/voice-status:
+    post:
+      operationId: twilioVoiceStatusCallback
+      tags: [calling]
+      security: []
+      summary: Call status and Dial results (X-Twilio-Signature). Idempotent; logs the call once.
+      responses:
+        "200": { description: Accepted (or duplicate), content: { text/xml: { schema: { type: string } } } }
+        "403": { description: Bad signature }
+  /webhooks/twilio/voice-notice:
+    post:
+      operationId: twilioVoiceRecordingNotice
+      tags: [calling]
+      security: []
+      summary: Recording notice played to the callee before bridging (X-Twilio-Signature)
+      responses:
+        "200": { description: TwiML notice, content: { text/xml: { schema: { type: string } } } }
+        "403": { description: Bad signature }
+  # --- end native calling ---
+
 
 components:
   securitySchemes:
@@ -9064,3 +9213,110 @@ components:
         skippedCount: { type: integer }
         unsubscribedCount: { type: integer }
     # --- end stage2/campaigns ---
+    # --- native calling (Twilio Voice) ---
+    StartCallBody:
+      type: object
+      additionalProperties: false
+      required: [contactId]
+      properties:
+        contactId: { type: string }
+        productLine: { type: string, enum: [MA, PDP, MAPD, supp, other] }
+    StartCallResponse:
+      type: object
+      required: [callSessionId, to]
+      properties:
+        callSessionId: { type: string }
+        to: { type: string, description: E.164 number derived server side from the contact }
+    CallBlockReason:
+      type: object
+      required: [code, detail]
+      properties:
+        code:
+          type: string
+          enum:
+            - AGENT_NOT_LICENSED
+            - AGENT_LICENSE_EXPIRED
+            - AGENT_NO_AHIP
+            - AGENT_NOT_CERTIFIED
+            - NO_CONSENT
+            - DNC
+            - OUTSIDE_CALLING_HOURS
+            - TIMEZONE_UNRESOLVED
+            - MISSING_INPUT
+            - INVALID_NUMBER
+            - AGENT_NOT_ELIGIBLE
+            - MAX_ATTEMPTS_EXCEEDED
+            - REDIAL_COOLDOWN
+        detail: { type: string }
+    CallBlockedResponse:
+      type: object
+      required: [error, reasons, callSessionId]
+      properties:
+        error: { type: string }
+        code: { type: string }
+        reasons:
+          type: array
+          items: { $ref: "#/components/schemas/CallBlockReason" }
+        callSessionId: { type: string }
+    CallingUnavailable:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [needs_setup, demo_mode] }
+        missing:
+          type: array
+          description: Names (never values) of the Twilio env vars that are not set
+          items: { type: string }
+        error: { type: string }
+    VoiceToken:
+      type: object
+      required: [token, identity, expiresAt, ttlSeconds]
+      properties:
+        token: { type: string }
+        identity: { type: string }
+        expiresAt: { type: string, format: date-time }
+        ttlSeconds: { type: integer }
+    CallSession:
+      type: object
+      properties:
+        id: { type: string }
+        contactId: { type: [string, "null"] }
+        userId: { type: [string, "null"] }
+        direction: { type: string }
+        status:
+          type: string
+          enum: [initiated, ringing, in_progress, completed, busy, no_answer, failed, canceled, blocked]
+        toNumber: { type: string }
+        startedAt: { type: [string, "null"], format: date-time }
+        answeredAt: { type: [string, "null"], format: date-time }
+        endedAt: { type: [string, "null"], format: date-time }
+        durationSeconds: { type: [integer, "null"] }
+        dispositionCode: { type: [string, "null"] }
+        notes: { type: [string, "null"] }
+        blockedReason: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        firstName: { type: [string, "null"] }
+        lastName: { type: [string, "null"] }
+    CallSessionList:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/CallSession" }
+        total: { type: integer }
+    UpdateCallBody:
+      type: object
+      additionalProperties: false
+      properties:
+        dispositionCode:
+          type: string
+          enum: [POSITIVE, NEUTRAL, NEGATIVE, COMPLIANCE, FOLLOW_UP, UNKNOWN, DO_NOT_CALL]
+        notes: { type: [string, "null"], maxLength: 2000 }
+    UpdateCallResponse:
+      type: object
+      properties:
+        id: { type: string }
+        status: { type: string }
+        dispositionCode: { type: [string, "null"] }
+        notes: { type: [string, "null"] }
+    # --- end native calling ---

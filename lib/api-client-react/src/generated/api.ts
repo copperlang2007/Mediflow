@@ -43,6 +43,9 @@ import type {
   BulkImportResult,
   BulkUpdateAgentTechStack200,
   BulkUpdateTechStackBody,
+  CallBlockedResponse,
+  CallSessionList,
+  CallingUnavailable,
   Campaign,
   CampaignInput,
   CancelOnboardingResponse,
@@ -185,6 +188,7 @@ import type {
   ListKbArticles200,
   ListKbArticlesParams,
   ListOnboardingsParams,
+  ListSoftphoneCallsParams,
   LogActivityBody,
   MarkMessageRead200,
   Message,
@@ -250,6 +254,8 @@ import type {
   SignOnboardingCarrierResponse,
   SmsTemplate,
   SnoozeRenewalBody,
+  StartCallBody,
+  StartCallResponse,
   StartOnboardingBody,
   StartOnboardingResponse,
   StateLicense,
@@ -265,6 +271,8 @@ import type {
   UpdateAppointment200,
   UpdateAppointmentBody,
   UpdateAutomationRuleBody,
+  UpdateCallBody,
+  UpdateCallResponse,
   UpdateCampaignSettings200,
   UpdateCampaignSettingsBody,
   UpdateCarrierBody,
@@ -301,6 +309,7 @@ import type {
   UserListResponse,
   ValidateGhlImportBody,
   ValidateMondayImportBody,
+  VoiceToken,
   VoidEnvelopeBody,
   VoidEnvelopeResponse,
 } from "./api.schemas";
@@ -23592,4 +23601,654 @@ export const useCampaignTwilioStatusCallback = <
   TContext
 > => {
   return useMutation(getCampaignTwilioStatusCallbackMutationOptions(options));
+};
+
+export const getStartSoftphoneCallUrl = () => {
+  return `/api/softphone/calls`;
+};
+
+/**
+ * Runs preclearance (consent, do-not-contact across orgs, calling hours in
+ * the contact's timezone, agent eligibility) plus attempt-limit and redial
+ * cooldown backstops. A refused call returns 409 with the specific reasons
+ * and stores a `blocked` call session as an audit trail. The `agent` role
+ * may call only contacts assigned to their own agent profile.
+ * @summary Preclear a call to a contact and create a single-use call session
+ */
+export const startSoftphoneCall = async (
+  startCallBody: StartCallBody,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<StartCallResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+  return customFetch<StartCallResponse>(getStartSoftphoneCallUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(startCallBody),
+  });
+};
+
+export const getStartSoftphoneCallMutationKey = () =>
+  ["startSoftphoneCall"] as const;
+
+export const getStartSoftphoneCallMutationOptions = <
+  TError = ErrorType<Error | CallBlockedResponse | CallingUnavailable>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startSoftphoneCall>>,
+    TError,
+    StartSoftphoneCallMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof startSoftphoneCall>>,
+  TError,
+  StartSoftphoneCallMutationVariables,
+  TContext
+> => {
+  const mutationKey = getStartSoftphoneCallMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof startSoftphoneCall>>,
+    StartSoftphoneCallMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return startSoftphoneCall(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type StartSoftphoneCallMutationResult = NonNullable<
+  Awaited<ReturnType<typeof startSoftphoneCall>>
+>;
+export type StartSoftphoneCallMutationBody = BodyType<StartCallBody>;
+export type StartSoftphoneCallMutationError = ErrorType<
+  Error | CallBlockedResponse | CallingUnavailable
+>;
+export type StartSoftphoneCallMutationVariables = {
+  data: BodyType<StartCallBody>;
+};
+
+/**
+ * @summary Preclear a call to a contact and create a single-use call session
+ */
+export const useStartSoftphoneCall = <
+  TError = ErrorType<Error | CallBlockedResponse | CallingUnavailable>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startSoftphoneCall>>,
+    TError,
+    StartSoftphoneCallMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof startSoftphoneCall>>,
+  TError,
+  StartSoftphoneCallMutationVariables,
+  TContext
+> => {
+  return useMutation(getStartSoftphoneCallMutationOptions(options));
+};
+
+export const getListSoftphoneCallsUrl = (params?: ListSoftphoneCallsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/softphone/calls?${stringifiedParams}`
+    : `/api/softphone/calls`;
+};
+
+/**
+ * @summary Recent call sessions (agents see only their own)
+ */
+export const listSoftphoneCalls = async (
+  params?: ListSoftphoneCallsParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CallSessionList> => {
+  return customFetch<CallSessionList>(getListSoftphoneCallsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListSoftphoneCallsQueryKey = (
+  params?: ListSoftphoneCallsParams,
+) => {
+  return [`/api/softphone/calls`, ...(params ? [params] : [])] as const;
+};
+
+export const getListSoftphoneCallsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listSoftphoneCalls>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListSoftphoneCallsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSoftphoneCalls>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListSoftphoneCallsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listSoftphoneCalls>>
+  > = ({ signal }) => listSoftphoneCalls(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listSoftphoneCalls>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListSoftphoneCallsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listSoftphoneCalls>>
+>;
+export type ListSoftphoneCallsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Recent call sessions (agents see only their own)
+ */
+
+export function useListSoftphoneCalls<
+  TData = Awaited<ReturnType<typeof listSoftphoneCalls>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListSoftphoneCallsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSoftphoneCalls>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListSoftphoneCallsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getUpdateSoftphoneCallUrl = (id: string) => {
+  return `/api/softphone/calls/${id}`;
+};
+
+/**
+ * A DO_NOT_CALL disposition also records an opt-out for the number, which
+ * blocks further calls and texts to it.
+ * @summary Save disposition and notes on a call (owner or admin only)
+ */
+export const updateSoftphoneCall = async (
+  id: string,
+  updateCallBody: UpdateCallBody,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<UpdateCallResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+  return customFetch<UpdateCallResponse>(getUpdateSoftphoneCallUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(updateCallBody),
+  });
+};
+
+export const getUpdateSoftphoneCallMutationKey = () =>
+  ["updateSoftphoneCall"] as const;
+
+export const getUpdateSoftphoneCallMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateSoftphoneCall>>,
+    TError,
+    UpdateSoftphoneCallMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateSoftphoneCall>>,
+  TError,
+  UpdateSoftphoneCallMutationVariables,
+  TContext
+> => {
+  const mutationKey = getUpdateSoftphoneCallMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateSoftphoneCall>>,
+    UpdateSoftphoneCallMutationVariables
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateSoftphoneCall(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateSoftphoneCallMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateSoftphoneCall>>
+>;
+export type UpdateSoftphoneCallMutationBody = BodyType<UpdateCallBody>;
+export type UpdateSoftphoneCallMutationError = ErrorType<Error>;
+export type UpdateSoftphoneCallMutationVariables = {
+  id: string;
+  data: BodyType<UpdateCallBody>;
+};
+
+/**
+ * @summary Save disposition and notes on a call (owner or admin only)
+ */
+export const useUpdateSoftphoneCall = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateSoftphoneCall>>,
+    TError,
+    UpdateSoftphoneCallMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateSoftphoneCall>>,
+  TError,
+  UpdateSoftphoneCallMutationVariables,
+  TContext
+> => {
+  return useMutation(getUpdateSoftphoneCallMutationOptions(options));
+};
+
+export const getGetSoftphoneVoiceTokenUrl = () => {
+  return `/api/softphone/voice-token`;
+};
+
+/**
+ * HS256 JWT with a VoiceGrant (outgoing through our TwiML App only),
+ * identity = the user id, TTL at most 10 minutes. Returns 503 with
+ * `status: needs_setup` and the names of the missing env vars until Twilio
+ * is configured.
+ * @summary Mint a short-lived Twilio Voice access token for the signed-in user
+ */
+export const getSoftphoneVoiceToken = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<VoiceToken> => {
+  return customFetch<VoiceToken>(getGetSoftphoneVoiceTokenUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSoftphoneVoiceTokenQueryKey = () => {
+  return [`/api/softphone/voice-token`] as const;
+};
+
+export const getGetSoftphoneVoiceTokenQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSoftphoneVoiceToken>>,
+  TError = ErrorType<CallingUnavailable>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSoftphoneVoiceToken>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetSoftphoneVoiceTokenQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSoftphoneVoiceToken>>
+  > = ({ signal }) => getSoftphoneVoiceToken({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSoftphoneVoiceToken>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSoftphoneVoiceTokenQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSoftphoneVoiceToken>>
+>;
+export type GetSoftphoneVoiceTokenQueryError = ErrorType<CallingUnavailable>;
+
+/**
+ * @summary Mint a short-lived Twilio Voice access token for the signed-in user
+ */
+
+export function useGetSoftphoneVoiceToken<
+  TData = Awaited<ReturnType<typeof getSoftphoneVoiceToken>>,
+  TError = ErrorType<CallingUnavailable>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSoftphoneVoiceToken>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSoftphoneVoiceTokenQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getTwilioVoiceWebhookUrl = () => {
+  return `/api/webhooks/twilio/voice`;
+};
+
+/**
+ * Rejects (TwiML `<Reject>`) unless the session is `initiated`, under 2
+ * minutes old, bound to the calling user, the echoed `To` matches the
+ * stored number and the number still clears the opt-out check. Recording
+ * stays off unless the session has `recording_enabled`.
+ * @summary TwiML App Voice URL (X-Twilio-Signature). Dials only the number stored on the call session.
+ */
+export const twilioVoiceWebhook = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<string> => {
+  return customFetch<string>(getTwilioVoiceWebhookUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getTwilioVoiceWebhookMutationKey = () =>
+  ["twilioVoiceWebhook"] as const;
+
+export const getTwilioVoiceWebhookMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof twilioVoiceWebhook>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof twilioVoiceWebhook>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = getTwilioVoiceWebhookMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof twilioVoiceWebhook>>,
+    void
+  > = () => {
+    return twilioVoiceWebhook(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type TwilioVoiceWebhookMutationResult = NonNullable<
+  Awaited<ReturnType<typeof twilioVoiceWebhook>>
+>;
+
+export type TwilioVoiceWebhookMutationError = ErrorType<void>;
+
+/**
+ * @summary TwiML App Voice URL (X-Twilio-Signature). Dials only the number stored on the call session.
+ */
+export const useTwilioVoiceWebhook = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof twilioVoiceWebhook>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof twilioVoiceWebhook>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getTwilioVoiceWebhookMutationOptions(options));
+};
+
+export const getTwilioVoiceStatusCallbackUrl = () => {
+  return `/api/webhooks/twilio/voice-status`;
+};
+
+/**
+ * @summary Call status and Dial results (X-Twilio-Signature). Idempotent; logs the call once.
+ */
+export const twilioVoiceStatusCallback = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<string> => {
+  return customFetch<string>(getTwilioVoiceStatusCallbackUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getTwilioVoiceStatusCallbackMutationKey = () =>
+  ["twilioVoiceStatusCallback"] as const;
+
+export const getTwilioVoiceStatusCallbackMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof twilioVoiceStatusCallback>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof twilioVoiceStatusCallback>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = getTwilioVoiceStatusCallbackMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof twilioVoiceStatusCallback>>,
+    void
+  > = () => {
+    return twilioVoiceStatusCallback(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type TwilioVoiceStatusCallbackMutationResult = NonNullable<
+  Awaited<ReturnType<typeof twilioVoiceStatusCallback>>
+>;
+
+export type TwilioVoiceStatusCallbackMutationError = ErrorType<void>;
+
+/**
+ * @summary Call status and Dial results (X-Twilio-Signature). Idempotent; logs the call once.
+ */
+export const useTwilioVoiceStatusCallback = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof twilioVoiceStatusCallback>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof twilioVoiceStatusCallback>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getTwilioVoiceStatusCallbackMutationOptions(options));
+};
+
+export const getTwilioVoiceRecordingNoticeUrl = () => {
+  return `/api/webhooks/twilio/voice-notice`;
+};
+
+/**
+ * @summary Recording notice played to the callee before bridging (X-Twilio-Signature)
+ */
+export const twilioVoiceRecordingNotice = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<string> => {
+  return customFetch<string>(getTwilioVoiceRecordingNoticeUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getTwilioVoiceRecordingNoticeMutationKey = () =>
+  ["twilioVoiceRecordingNotice"] as const;
+
+export const getTwilioVoiceRecordingNoticeMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof twilioVoiceRecordingNotice>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof twilioVoiceRecordingNotice>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = getTwilioVoiceRecordingNoticeMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof twilioVoiceRecordingNotice>>,
+    void
+  > = () => {
+    return twilioVoiceRecordingNotice(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type TwilioVoiceRecordingNoticeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof twilioVoiceRecordingNotice>>
+>;
+
+export type TwilioVoiceRecordingNoticeMutationError = ErrorType<void>;
+
+/**
+ * @summary Recording notice played to the callee before bridging (X-Twilio-Signature)
+ */
+export const useTwilioVoiceRecordingNotice = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof twilioVoiceRecordingNotice>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof twilioVoiceRecordingNotice>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getTwilioVoiceRecordingNoticeMutationOptions(options));
 };
