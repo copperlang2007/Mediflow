@@ -1,0 +1,244 @@
+// @vitest-environment jsdom
+/**
+ * Softphone browser-calling states: needs setup, ready, refused (exact reason),
+ * and a full call through a fake Twilio Device (params, mute, hang up, timer,
+ * post-call notes). `fetch` is mocked per URL and the Twilio SDK is faked — no
+ * real call, token or network is involved.
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Router } from "wouter";
+import { memoryLocation } from "wouter/memory-location";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { getGetMeQueryKey } from "@workspace/api-client-react";
+
+const fake = vi.hoisted(() => {
+  type Handler = (...args: unknown[]) => void;
+  const state = {
+    connectParams: [] as Record<string, string>[],
+    calls: [] as FakeCall[],
+    tokens: [] as string[],
+    destroyed: 0,
+  };
+  class FakeCall {
+    handlers: Record<string, Handler[]> = {};
+    muted = false;
+    disconnected = false;
+    on(evt: string, fn: Handler) { (this.handlers[evt] ??= []).push(fn); return this; }
+    emit(evt: string, ...args: unknown[]) { (this.handlers[evt] ?? []).forEach((h) => h(...args)); }
+    mute(m = true) { this.muted = m; this.emit("mute", m); }
+    disconnect() { this.disconnected = true; this.emit("disconnect"); }
+  }
+  class FakeDevice {
+    constructor(token: string) { state.tokens.push(token); }
+    on() { return this; }
+    updateToken() {}
+    destroy() { state.destroyed += 1; }
+    async connect(opts: { params: Record<string, string> }) {
+      state.connectParams.push(opts.params);
+      const c = new FakeCall();
+      state.calls.push(c);
+      return c;
+    }
+  }
+  return { state, FakeDevice, FakeCall };
+});
+
+vi.mock("@twilio/voice-sdk", () => ({
+  Device: fake.FakeDevice,
+  Call: { Codec: { Opus: "opus", PCMU: "pcmu" } },
+}));
+
+import DialerPage from "@/pages/DialerPage";
+
+const ADMIN = { id: "u-admin", orgId: "o-1", email: "a@example.com", fullName: "Admin", role: "agency_admin", isActive: true };
+const SUPPORT = { ...ADMIN, id: "u-support", role: "agent_support" };
+const VIEWER = { ...ADMIN, id: "u-viewer", role: "viewer" };
+
+const CONTACT = {
+  id: "c-1", firstName: "Joan", lastName: "Park", email: "joan@example.com", phone: "+15035551234",
+  status: "enrolled", stateCode: "OR", zipCode: "97201", currentPlanType: "supp", assignedAgentId: null,
+};
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function renderAt(path: string, user = ADMIN) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  qc.setQueryData(getGetMeQueryKey(), user);
+  const [pathname, search = ""] = path.split("?");
+  const { hook, searchHook } = memoryLocation({ path: pathname, searchPath: search, static: true } as never) as unknown as {
+    hook: never; searchHook: never;
+  };
+  return render(
+    <QueryClientProvider client={qc}>
+      <Router hook={hook} searchHook={searchHook}>
+        <TooltipProvider><DialerPage /></TooltipProvider>
+      </Router>
+    </QueryClientProvider>,
+  );
+}
+
+type RouteFn = (url: string, init?: RequestInit) => Response;
+let routes: Record<string, RouteFn>;
+let fetchMock: ReturnType<typeof vi.fn>;
+
+const TOKEN = { token: "header.payload.signature", identity: "u_admin", expiresAt: new Date(Date.now() + 600_000).toISOString(), ttlSeconds: 600 };
+
+beforeEach(() => {
+  fake.state.connectParams.length = 0;
+  fake.state.calls.length = 0;
+  fake.state.tokens.length = 0;
+  fake.state.destroyed = 0;
+  routes = {
+    "/api/softphone/recent-calls": () => json({ data: [], total: 0 }),
+    "/api/softphone/dispositions": () => json({ data: [{ code: "FOLLOW_UP", label: "Call back / follow up" }, { code: "DO_NOT_CALL", label: "Do not call again" }] }),
+    "/api/contacts/c-1": () => json(CONTACT),
+    "/api/softphone/precheck": () => json({
+      okToCall: true, checks: { consent: true, dncClear: true, withinCallingHours: true, agentEligible: true },
+      failures: [], agent: null, productLine: "supp", planYear: 2026,
+      callingHours: { startHour: 8, endHour: 21, timezone: "America/Los_Angeles", localTime: "12:00 PM" }, checkedAt: new Date().toISOString(),
+    }),
+  };
+  fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const hit = Object.keys(routes).sort((a, b) => b.length - a.length).find((k) => url.includes(k));
+    return hit ? routes[hit](url, init) : json({ error: "not found" }, 404);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+function calledUrls(): string[] {
+  return fetchMock.mock.calls.map((c) => String(c[0]));
+}
+
+describe("Softphone browser calling states", () => {
+  it("shows an honest 'Needs setup' (with the missing names for admins) and disables Call", async () => {
+    routes["/api/softphone/voice-token"] = () => json({ status: "needs_setup", missing: ["TWILIO_API_KEY_SECRET", "TWILIO_TWIML_APP_SID"] }, 503);
+    renderAt("/dialer?contact=c-1");
+    expect(await screen.findByText(/Browser calling: needs setup/)).toBeInTheDocument();
+    expect(screen.getByText("Needs setup")).toBeInTheDocument();
+    expect(screen.getByText(/TWILIO_API_KEY_SECRET, TWILIO_TWIML_APP_SID/)).toBeInTheDocument();
+    await screen.findAllByText("Joan Park");
+    for (const b of screen.getAllByRole("button", { name: /^Call$/ })) expect(b).toBeDisabled();
+    expect(screen.getByTestId("call-hint")).toHaveTextContent("Browser calling needs setup.");
+    expect(calledUrls().some((u) => u.includes("/api/softphone/calls"))).toBe(false);
+  });
+
+  it("hides the missing names from non-admin roles", async () => {
+    routes["/api/softphone/voice-token"] = () => json({ status: "needs_setup", missing: ["TWILIO_API_KEY_SECRET"] }, 503);
+    renderAt("/dialer", SUPPORT);
+    expect(await screen.findByText("Needs setup")).toBeInTheDocument();
+    expect(screen.queryByText(/TWILIO_API_KEY_SECRET/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Ask your agency administrator/)).toBeInTheDocument();
+  });
+
+  it("roles that cannot place calls see no calling UI and mint no token", async () => {
+    routes["/api/softphone/voice-token"] = () => json(TOKEN);
+    renderAt("/dialer", VIEWER);
+    expect(await screen.findByTestId("call-hint")).toHaveTextContent("Your role can't place calls.");
+    expect(calledUrls().some((u) => u.includes("voice-token"))).toBe(false);
+  });
+
+  it("you can only call a contact on file: typing a number is not enough", async () => {
+    routes["/api/softphone/voice-token"] = () => json(TOKEN);
+    routes["/api/softphone/lookup"] = () => json({ data: [], total: 0 });
+    renderAt("/dialer");
+    expect(await screen.findByText(/Browser calling: ready/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Phone number"), { target: { value: "5035559999" } });
+    await waitFor(() => expect(calledUrls().some((u) => u.includes("/api/softphone/lookup"))).toBe(true));
+    expect(screen.getByRole("button", { name: /^Call$/ })).toBeDisabled();
+    expect(screen.getByTestId("call-hint")).toHaveTextContent(/contact on file|Pick a contact/);
+  });
+
+  it("shows the server's exact refusal reasons and never opens a device", async () => {
+    routes["/api/softphone/voice-token"] = () => json(TOKEN);
+    routes["/api/softphone/calls"] = () => json({
+      error: "outside permitted calling hours for America/Los_Angeles",
+      code: "OUTSIDE_CALLING_HOURS",
+      reasons: [
+        { code: "OUTSIDE_CALLING_HOURS", detail: "outside permitted calling hours for America/Los_Angeles" },
+        { code: "REDIAL_COOLDOWN", detail: "redial cooldown: wait 12 more minute(s) (minimum gap 30 minutes)" },
+      ],
+      callSessionId: "blocked-1",
+    }, 409);
+    renderAt("/dialer?contact=c-1");
+    await screen.findByText(/Browser calling: ready/);
+    await screen.findAllByText("Joan Park");
+    fireEvent.click(screen.getAllByRole("button", { name: /^Call$/ })[0]);
+    expect(await screen.findByText("Call blocked")).toBeInTheDocument();
+    expect(screen.getByText("outside permitted calling hours for America/Los_Angeles")).toBeInTheDocument();
+    expect(screen.getByText("redial cooldown: wait 12 more minute(s) (minimum gap 30 minutes)")).toBeInTheDocument();
+    expect(fake.state.connectParams).toHaveLength(0);
+    expect(fake.state.tokens).toHaveLength(0);
+    // The request named only the contact — never a phone number.
+    const post = fetchMock.mock.calls.find((c) => String(c[0]).includes("/api/softphone/calls"))!;
+    expect(JSON.parse(String((post[1] as RequestInit).body))).toEqual({ contactId: "c-1" });
+  });
+
+  it("runs a call end to end: connect params, live timer, mute, hang up, post-call notes", async () => {
+    routes["/api/softphone/voice-token"] = () => json(TOKEN);
+    routes["/api/softphone/calls/"] = (_u, init) => {
+      expect(init?.method).toBe("PATCH");
+      return json({ id: "sess-1", status: "completed", dispositionCode: null, notes: "left voicemail" });
+    };
+    routes["/api/softphone/calls"] = (_u, init) =>
+      init?.method === "POST" ? json({ callSessionId: "sess-1", to: "+15035551234" }, 201) : json({ data: [] });
+
+    renderAt("/dialer?contact=c-1");
+    await screen.findByText(/Browser calling: ready/);
+    await screen.findAllByText("Joan Park");
+    fireEvent.click(screen.getAllByRole("button", { name: /^Call$/ })[0]);
+
+    await waitFor(() => expect(fake.state.connectParams).toHaveLength(1));
+    // Only the server-issued session id and the number it returned go to Twilio.
+    expect(fake.state.connectParams[0]).toEqual({ callSessionId: "sess-1", To: "+15035551234" });
+    expect(fake.state.tokens).toEqual([TOKEN.token]);
+    expect(await screen.findByText("Ringing…")).toBeInTheDocument();
+
+    const call = fake.state.calls[0];
+    act(() => call.emit("accept"));
+    expect(await screen.findByText("In call")).toBeInTheDocument();
+    expect(screen.getByLabelText("Call timer")).toHaveTextContent(/^00:0\d$/);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Mute$/ }));
+    expect(call.muted).toBe(true);
+    expect(await screen.findByRole("button", { name: /^Unmute$/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Hang up/ }));
+    expect(call.disconnected).toBe(true);
+    expect(await screen.findByText("Call ended")).toBeInTheDocument();
+
+    fireEvent.change(document.getElementById("postcall-notes")!, { target: { value: "left voicemail" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Save call$/ }));
+    await waitFor(() => {
+      const patch = fetchMock.mock.calls.find((c) => (c[1] as RequestInit | undefined)?.method === "PATCH");
+      expect(patch).toBeTruthy();
+      expect(String(patch![0])).toContain("/api/softphone/calls/sess-1");
+      expect(JSON.parse(String((patch![1] as RequestInit).body))).toEqual({ notes: "left voicemail" });
+    });
+    // Form closes once saved.
+    await waitFor(() => expect(screen.queryByText("Call ended")).not.toBeInTheDocument());
+  });
+
+  it("a mic-permission failure is explained, not swallowed", async () => {
+    routes["/api/softphone/voice-token"] = () => json(TOKEN);
+    routes["/api/softphone/calls"] = () => json({ callSessionId: "sess-2", to: "+15035551234" }, 201);
+    renderAt("/dialer?contact=c-1");
+    await screen.findByText(/Browser calling: ready/);
+    await screen.findAllByText("Joan Park");
+    fireEvent.click(screen.getAllByRole("button", { name: /^Call$/ })[0]);
+    await waitFor(() => expect(fake.state.calls).toHaveLength(1));
+    act(() => {
+      const err = Object.assign(new Error("denied"), { name: "NotAllowedError" });
+      fake.state.calls[0].emit("error", err);
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Microphone access is blocked/);
+  });
+});

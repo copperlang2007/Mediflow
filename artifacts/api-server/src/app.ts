@@ -119,7 +119,11 @@ app.use(helmet({
       "connect-src": [
         "'self'", ...(clerkDomain ? [clerkDomain] : []),
         "https://*.protect.clerk.com:*",
+        // Twilio Voice SDK signalling (browser calling): HTTPS + secure WebSocket.
+        "https://*.twilio.com", "wss://*.twilio.com",
       ],
+      // The Voice SDK plays its ring / disconnect tones from Twilio's CDN.
+      "media-src": ["'self'", "https://sdk.twilio.com", "data:", "blob:"],
       "frame-src": [
         "'self'", ...(clerkDomain ? [clerkDomain] : []),
         "https://challenges.cloudflare.com", "https://*.protect.clerk.com",

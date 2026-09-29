@@ -1,16 +1,19 @@
 /**
- * Softphone — dial pad + lead screen-pop.
+ * Softphone — dial pad + lead screen-pop + browser calling.
  *
- * Mediflow cannot place calls from the browser yet, so this page never
- * simulates one (no fake timers, no fake transcripts). What it does, with
- * real data:
+ * Nothing on this page is simulated (no fake timers, transcripts or call
+ * history). With real data it:
  *   - looks a typed number up against your contacts;
  *   - shows the contact, their past call summaries and call history;
  *   - says whether it is OK to call them right now, using the same
  *     preclearance rules the dialer integration uses (consent, DNC / opt-out,
  *     calling hours in their time zone, agent licensing / AHIP / certs);
- *   - lets you log a call you made on your own phone (existing call_log
- *     activity), with a disposition.
+ *   - places the call from the browser over Twilio Voice. You can only call a
+ *     contact on file: the server derives the number, so typing a number is
+ *     only ever a way to FIND a contact. It shows "Needs setup" until Twilio is
+ *     configured, and never places a call in a demo build;
+ *   - after hang-up, saves a disposition + notes on the call;
+ *   - still lets you log a call you made on your own phone.
  */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearch } from "wouter";
@@ -28,9 +31,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PageHeader, SectionCard, StatusPill, EmptyState } from "@/components/shared";
-import { ComingSoonNote, ContactPicker, NoAccess, SoonBadge } from "@/components/portal-dialer";
+import { ContactPicker, NoAccess, SoonBadge } from "@/components/portal-dialer";
+import { CallPanel, CallingSetupNote, CallingStatusBadge } from "@/components/portal-dialer/CallPanel";
+import { CALL_CREATE_ROLES, useSoftphoneCall, useVoiceReadiness } from "@/lib/portalDialer/calling";
 import { useIsAdmin } from "@/lib/auth/useIsAdmin";
 import { apiRequest } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -40,6 +44,7 @@ import {
   CONTACT_READ_ROLES,
   CONTACT_UPDATE_ROLES,
   RECENT_CALLS_KEY,
+  SUPERVISOR_ROLES,
   contactActivitiesKey,
   formatPhone,
   initialsOf,
@@ -267,7 +272,7 @@ function LogCallCard({ contact, canLog, notesId }: { contact: ContactLite | null
 
   const disabled = !contact || !canLog;
   return (
-    <SectionCard title="Log a call" icon={ClipboardList} description="Record a call you made or took on your own phone" contentClassName="space-y-3">
+    <SectionCard title="Log a call" icon={ClipboardList} description="Record a call you made or took outside Mediflow, on your own phone" contentClassName="space-y-3">
       {!contact ? (
         <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">Look up or pick a contact first.</p>
       ) : !canLog ? (
@@ -325,6 +330,8 @@ export default function DialerPage() {
   const { role, isLoading: roleLoading } = useIsAdmin(CONTACT_READ_ROLES);
   const allowed = !!role && (CONTACT_READ_ROLES as readonly string[]).includes(role);
   const canLog = !!role && (CONTACT_UPDATE_ROLES as readonly string[]).includes(role);
+  const canCall = !!role && (CALL_CREATE_ROLES as readonly string[]).includes(role);
+  const isSetupAdmin = !!role && (SUPERVISOR_ROLES as readonly string[]).includes(role);
 
   const search = useSearch();
   const initialContactId = useMemo(() => new URLSearchParams(search).get("contact"), [search]);
@@ -333,8 +340,11 @@ export default function DialerPage() {
   const [debouncedNumber, setDebouncedNumber] = useState("");
   const [picked, setPicked] = useState<ContactLite | null>(null);
   const [pickedId, setPickedId] = useState<string | null>(initialContactId);
-  const [comingSoonOpen, setComingSoonOpen] = useState(false);
   const notesId = "softphone-call-notes";
+  const readiness = useVoiceReadiness(allowed && canCall);
+  const softphone = useSoftphoneCall();
+  const callState = softphone.state;
+  const callActive = callState.phase !== "idle" && callState.phase !== "ended";
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedNumber(number), 300);
@@ -368,13 +378,30 @@ export default function DialerPage() {
   const digits = number.replace(/\D/g, "");
   const lookupRows = lookup.data?.data ?? [];
 
+  // Calling needs a contact on file (the server derives the number) and a
+  // ready, non-demo setup. Say why when it can't.
+  const callBlockedHint =
+    !canCall ? "Your role can't place calls."
+    : readiness.state === "demo" ? "Calls are turned off in the demo."
+    : readiness.state === "needs_setup" ? "Browser calling needs setup."
+    : readiness.state === "error" ? "Browser calling is unavailable right now."
+    : readiness.state === "checking" ? "Checking browser calling…"
+    : !contact ? "Pick a contact on file — you can only call contacts."
+    : !contact.phone ? "This contact has no phone number."
+    : callActive ? "A call is in progress."
+    : null;
+  const canPlaceCall = callBlockedHint === null;
+  const placeCall = () => {
+    if (contact && canPlaceCall) void softphone.start(contact.id);
+  };
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
-      <PageHeader title="Softphone Dialer" subtitle="Look up who you're calling, check it's OK to call, and log the call">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
-          <span className="h-2 w-2 rounded-full bg-muted-foreground/50" /> Browser calling: coming soon
-        </span>
+      <PageHeader title="Softphone Dialer" subtitle="Look up who you're calling, check it's OK to call, call from your browser, and log the call">
+        <CallingStatusBadge readiness={readiness} />
       </PageHeader>
+
+      {canCall && <CallingSetupNote readiness={readiness} showNames={isSetupAdmin} />}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_minmax(0,1fr)]">
         {/* Column 1 — dial pad + recent calls */}
@@ -405,8 +432,8 @@ export default function DialerPage() {
             <div className="mt-3 grid grid-cols-2 gap-2">
               <Button
                 className="bg-success text-white hover:bg-success/90"
-                disabled={digits.length < 7}
-                onClick={() => setComingSoonOpen(true)}
+                disabled={!canPlaceCall}
+                onClick={placeCall}
               >
                 <PhoneCall className="mr-1.5 h-4 w-4" /> Call
               </Button>
@@ -414,6 +441,9 @@ export default function DialerPage() {
                 <Delete className="mr-1.5 h-4 w-4" /> Clear
               </Button>
             </div>
+            {callBlockedHint && (
+              <p className="mt-2 text-center text-xs text-muted-foreground" data-testid="call-hint">{callBlockedHint}</p>
+            )}
           </SectionCard>
 
           <SectionCard title="Recent Calls" icon={Clock} contentClassName="pt-0">
@@ -457,8 +487,15 @@ export default function DialerPage() {
           </SectionCard>
         </div>
 
-        {/* Column 2 — screen-pop */}
+        {/* Column 2 — live call + screen-pop */}
         <div className="space-y-6">
+          <CallPanel
+            state={callState}
+            contactName={contact ? `${contact.firstName} ${contact.lastName}` : "this contact"}
+            onHangUp={softphone.hangUp}
+            onToggleMute={softphone.toggleMute}
+            onDone={softphone.reset}
+          />
           <SectionCard title="Caller" icon={UserRound} className={cn(contact && "ring-1 ring-success/40")}>
             {!contact ? (
               <div className="space-y-4">
@@ -517,7 +554,7 @@ export default function DialerPage() {
                   <Button variant="outline" size="sm" asChild>
                     <Link href={`/crm/contacts/${contact.id}`}>Open contact <ExternalLink className="ml-1 h-3.5 w-3.5" /></Link>
                   </Button>
-                  <Button size="sm" className="bg-success text-white hover:bg-success/90" onClick={() => setComingSoonOpen(true)} disabled={!contact.phone}>
+                  <Button size="sm" className="bg-success text-white hover:bg-success/90" onClick={placeCall} disabled={!canPlaceCall}>
                     <PhoneCall className="mr-1.5 h-3.5 w-3.5" /> Call
                   </Button>
                 </div>
@@ -532,10 +569,9 @@ export default function DialerPage() {
         {/* Column 3 — log a call + roadmap */}
         <div className="space-y-6">
           <LogCallCard contact={contact} canLog={canLog} notesId={notesId} />
-          <SectionCard title="Coming with browser calling" icon={Sparkles} contentClassName="pt-0">
+          <SectionCard title="Coming next" icon={Sparkles} contentClassName="pt-0">
             <ul className="space-y-2.5 text-sm">
               {[
-                { icon: PhoneCall, t: "Click-to-call from this page", d: "Pre-cleared automatically before it dials." },
                 { icon: Mic, t: "Live transcription", d: "Fills in record fields while you talk." },
                 { icon: FileAudio, t: "Call recording", d: "Stored with the contact, with consent." },
                 { icon: Radio, t: "Hold, mute and transfer", d: "Warm transfers to another agent." },
@@ -552,32 +588,6 @@ export default function DialerPage() {
         </div>
       </div>
 
-      <Dialog open={comingSoonOpen} onOpenChange={setComingSoonOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Calling from the browser is coming soon</DialogTitle>
-            <DialogDescription>
-              For now, place the call from your own phone, then log it here so it lands on the contact's timeline.
-              Check the "OK to call?" panel first.
-            </DialogDescription>
-          </DialogHeader>
-          <ComingSoonNote title="What's coming" icon={PhoneCall}>
-            One-click dialing that runs the same consent, do-not-call, calling-hours and licensing checks before it connects.
-          </ComingSoonNote>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setComingSoonOpen(false)}>Close</Button>
-            <Button
-              onClick={() => {
-                setComingSoonOpen(false);
-                setTimeout(() => document.getElementById(notesId)?.focus(), 50);
-              }}
-              disabled={!contact || !canLog}
-            >
-              <ClipboardList className="mr-1.5 h-4 w-4" /> Log a call
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
