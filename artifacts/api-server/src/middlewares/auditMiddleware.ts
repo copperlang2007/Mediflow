@@ -116,7 +116,7 @@ function prepareAuditEntry(
   const httpMethod = req.method.toUpperCase();
   const isRead = httpMethod === "GET" || httpMethod === "HEAD";
 
-  if ((isRead && !includeReads) || (viewOnlyReads && (!isRead || !req.get("X-MediFlow-View-Org")))) {
+  if ((isRead && !includeReads) || (viewOnlyReads && (!req.get("X-MediFlow-View-Org") || (!isRead && req.get("X-MediFlow-Support-Edit") !== "true")))) {
     return null;
   }
 
@@ -124,7 +124,7 @@ function prepareAuditEntry(
 
   return () => {
     const authReq = req as AuthenticatedRequest;
-    if (viewOnlyReads && !authReq.viewOnly) return;
+    if (viewOnlyReads && !authReq.viewOnly && !authReq.supportEdit) return;
     const userId = authReq.userId ?? null;
     const orgId = authReq.orgId ?? null;
 
@@ -143,6 +143,7 @@ function prepareAuditEntry(
       durationMs,
       statusCode: res.statusCode,
       ...(authReq.viewOnly ? { viewOnly: true, realOrgId: authReq.realOrgId, viewingOrgId: authReq.viewingOrgId } : {}),
+      ...(authReq.supportEdit ? { supportEdit: true, supportReason: authReq.supportReason, realOrgId: authReq.realOrgId, viewingOrgId: authReq.viewingOrgId } : {}),
     };
 
     db.insert(auditLogTable)
