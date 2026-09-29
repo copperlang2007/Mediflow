@@ -189,7 +189,7 @@ async function applyViewAsContext(
         userRole: authReq.userRole,
         action: "update",
         resourceType: resource === "contacts" ? "contact" : "agent",
-        resourceId: path.split("/").at(-1) ?? null,
+        resourceId: path.split("/").pop() ?? null,
         ipAddress: req.ip ?? null,
         userAgent: req.headers["user-agent"] ?? null,
         changes: { supportEdit: true, phase: "attempt", reason, realOrgId, viewingOrgId: organization.id, path },
