@@ -49,7 +49,7 @@ import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { randomUUID } from "node:crypto";
 import { auditLogTable, callSessionsTable } from "@workspace/db";
 import { isDemoMode } from "../lib/demoMode";
-import { placeCall } from "../lib/voice/callSessions";
+import { cancelUnclaimedSession, placeCall } from "../lib/voice/callSessions";
 import { mintVoiceToken, missingVoiceEnv } from "../lib/voice/voiceToken";
 import { recordPhoneOptOut } from "../lib/compliance/optOut";
 import { logger } from "../lib/logger";
@@ -527,6 +527,39 @@ const PatchCallBody = z
     message: "Provide a dispositionCode and/or notes",
   });
 
+/**
+ * POST /softphone/calls/:id/cancel — the browser abandoned the attempt before
+ * Twilio claimed the session (mic denied, hung up while connecting). Frees the
+ * attempt-limit / cooldown slot so an ordinary retry works. Owner or admin only;
+ * a session Twilio already claimed cannot be canceled (409).
+ */
+router.post(
+  "/softphone/calls/:id/cancel",
+  requireAuth,
+  requirePermission("call", "update"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const c = callSessionsTable;
+    const [row] = await db
+      .select({ id: c.id, userId: c.userId })
+      .from(c)
+      .where(and(eq(c.id, id), eq(c.orgId, authReq.orgId)))
+      .limit(1);
+    const isAdmin = authReq.userRole === "agency_admin" || authReq.userRole === "super_admin";
+    if (!row || (row.userId !== authReq.userId && !isAdmin)) {
+      res.status(404).json({ error: "Call not found" });
+      return;
+    }
+    const outcome = await cancelUnclaimedSession(row.id, authReq.orgId);
+    if (outcome === "already_used") {
+      res.status(409).json({ error: "This call already reached Twilio and cannot be canceled" });
+      return;
+    }
+    res.json({ id: row.id, status: "canceled" });
+  },
+);
+
 /** PATCH /softphone/calls/:id — save disposition + notes (owner or admin only). */
 router.patch(
   "/softphone/calls/:id",
@@ -554,6 +587,16 @@ router.patch(
     }
     if (row.status === "blocked") {
       res.status(409).json({ error: "A blocked call cannot be dispositioned" });
+      return;
+    }
+    // A do-not-call opt-out is consulted for this number across EVERY org, so it
+    // is only accepted for a call that provably reached and was answered by the
+    // person — never for a session Twilio never claimed or nobody picked up.
+    if (
+      parsed.data.dispositionCode === "DO_NOT_CALL" &&
+      !((row.status === "in_progress" || row.status === "completed") && row.answeredAt != null)
+    ) {
+      res.status(409).json({ error: "Do not call can only be recorded for a call that was answered." });
       return;
     }
 
@@ -584,11 +627,16 @@ router.patch(
           changes: { contactId: row.contactId, via: "call_disposition" },
         });
       }
-      if (row.activityId && patch.dispositionCode) {
+      // Keep the contact-timeline entry in step with what was saved. (If the
+      // activity does not exist yet, the status callback copies these from the row.)
+      const activityMeta: Record<string, unknown> = {};
+      if (patch.dispositionCode) activityMeta.disposition = patch.dispositionCode;
+      if (typeof patch.notes === "string") activityMeta.notes = patch.notes;
+      if (row.activityId && Object.keys(activityMeta).length > 0) {
         await tx
           .update(activitiesTable)
           .set({
-            metadata: sql`coalesce(${activitiesTable.metadata}, '{}'::jsonb) || ${JSON.stringify({ disposition: patch.dispositionCode })}::jsonb`,
+            metadata: sql`coalesce(${activitiesTable.metadata}, '{}'::jsonb) || ${JSON.stringify(activityMeta)}::jsonb`,
           })
           .where(and(eq(activitiesTable.id, row.activityId), eq(activitiesTable.orgId, authReq.orgId)));
       }

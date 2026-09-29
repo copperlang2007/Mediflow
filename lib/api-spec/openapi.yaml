@@ -5410,7 +5410,8 @@ paths:
       summary: Save disposition and notes on a call (owner or admin only)
       description: |
         A DO_NOT_CALL disposition also records an opt-out for the number, which
-        blocks further calls and texts to it.
+        blocks further calls and texts to it. It is accepted only for a call that
+        was answered (409 otherwise).
       security:
         - cookieAuth: []
       parameters:
@@ -5431,6 +5432,24 @@ paths:
         "400": { description: Invalid body, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "404": { description: Call not found (or not yours), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "409": { description: A blocked call cannot be dispositioned, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /softphone/calls/{id}/cancel:
+    post:
+      operationId: cancelSoftphoneCall
+      tags: [calling]
+      summary: Abandon a call attempt Twilio never claimed (frees the retry limit slot)
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Canceled (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateCallResponse"
+        "404": { description: Call not found (or not yours), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: The call already reached Twilio, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   /softphone/voice-token:
     get:
       operationId: getSoftphoneVoiceToken

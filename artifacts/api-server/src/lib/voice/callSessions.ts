@@ -12,7 +12,7 @@
  * read, stored or logged, and phone numbers never go to logs or the audit log.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, gte, ne, or, sql } from "drizzle-orm";
+import { and, eq, gte, isNotNull, ne, or, sql } from "drizzle-orm";
 import {
   db,
   activitiesTable,
@@ -69,6 +69,21 @@ export interface PlaceCallInput {
   productLine?: ProductLine;
   now?: Date;
   limits?: DialLimits;
+}
+
+const PRODUCT_LINES: readonly ProductLine[] = ["MA", "PDP", "MAPD", "supp", "other"];
+const STRICT_LINES: readonly ProductLine[] = ["MA", "PDP", "MAPD"];
+
+/** Contact's stored plan type wins; a request may only supply a strict line when none is stored. */
+export function resolveProductLine(
+  stored: string | null | undefined,
+  requested: ProductLine | undefined,
+): ProductLine {
+  if (stored) {
+    // An unrecognised stored value fails closed to the strictest line.
+    return PRODUCT_LINES.includes(stored as ProductLine) ? (stored as ProductLine) : "MAPD";
+  }
+  return requested && STRICT_LINES.includes(requested) ? requested : "MAPD";
 }
 
 async function callerAgentProfile(orgId: string, userId: string) {
@@ -133,8 +148,12 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
     agentId = assigned?.id ?? null;
   }
 
-  const productLine: ProductLine =
-    input.productLine ?? (contact.currentPlanType as ProductLine | null) ?? "MAPD";
+  // The product line decides how strict the agent checks are (AHIP + carrier
+  // certification for MA/PDP/MAPD), so the CALLER never gets to lower it. It is
+  // the contact's stored plan type when there is one; a request value is only
+  // considered when the contact has none, and only if it is a carrier-appointed
+  // line (never `supp` / `other`, which skip AHIP and certification).
+  const productLine: ProductLine = resolveProductLine(contact.currentPlanType, input.productLine);
   const reasons: BlockReason[] = [];
 
   // 1) The number must be a valid, dialable NANP number.
@@ -161,7 +180,8 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
     },
     callbackUrl: "about:blank",
     productLine,
-    planYear: now.getUTCFullYear(),
+    // planYear deliberately omitted: preclearance resolves the SELLING plan year
+    // (sellingPlanYear) — from October the next year's AHIP/certs are required.
   });
   const preFailures = decision.failures ?? [];
   const agentFailed = !agentId || preFailures.some((f) => AGENT_CODES.has(f.code));
@@ -226,7 +246,16 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
           eq(callSessionsTable.orgId, input.orgId),
           sameTarget,
           ne(callSessionsTable.status, "blocked"),
+          ne(callSessionsTable.status, "canceled"),
           gte(callSessionsTable.createdAt, windowStart),
+          // Only attempts that reached Twilio count. A session that was never
+          // claimed (mic denied, hung up while connecting, page closed) dialed
+          // nobody; it counts only while it could still be claimed, so two
+          // parallel clicks are still caught but an ordinary retry works.
+          or(
+            isNotNull(callSessionsTable.twilioCallSid),
+            gte(callSessionsTable.createdAt, new Date(now.getTime() - CALL_SESSION_TTL_MS)),
+          ),
         ),
       );
     if (recent.length >= limits.maxAttempts) {
@@ -344,6 +373,38 @@ export async function claimSessionForDial(
   }
 }
 
+/**
+ * The browser abandoned an attempt before Twilio ever claimed the session
+ * (mic denied, hung up while connecting). Marks it `canceled` so it never
+ * counts toward the attempt limit or the redial cooldown, and can never be
+ * dialed. A claimed session is left alone.
+ */
+export async function cancelUnclaimedSession(
+  sessionId: string,
+  orgId: string,
+): Promise<"canceled" | "already_used" | "not_found"> {
+  const rows = await db
+    .update(callSessionsTable)
+    .set({ status: "canceled" })
+    .where(
+      and(
+        eq(callSessionsTable.id, sessionId),
+        eq(callSessionsTable.orgId, orgId),
+        eq(callSessionsTable.status, "initiated"),
+        sql`${callSessionsTable.twilioCallSid} IS NULL`,
+      ),
+    )
+    .returning({ id: callSessionsTable.id });
+  if (rows.length > 0) return "canceled";
+  const [exists] = await db
+    .select({ status: callSessionsTable.status })
+    .from(callSessionsTable)
+    .where(and(eq(callSessionsTable.id, sessionId), eq(callSessionsTable.orgId, orgId)))
+    .limit(1);
+  if (!exists) return "not_found";
+  return exists.status === "canceled" ? "canceled" : "already_used";
+}
+
 /** Mark an unused (`initiated`) session blocked. Never touches a used session. */
 export async function blockUnusedSession(sessionId: string, reason: string): Promise<boolean> {
   const rows = await db
@@ -446,6 +507,8 @@ export async function applyStatusUpdate(input: {
   callSid: string;
   twilioStatus: string | undefined;
   durationRaw?: string;
+  /** True for a <Dial action> result: status/duration describe the CALLEE leg. */
+  calleeLeg?: boolean;
   now?: Date;
 }): Promise<StatusUpdateOutcome> {
   const next = mapTwilioStatus(input.twilioStatus);
@@ -473,6 +536,12 @@ export async function applyStatusUpdate(input: {
     if (TERMINAL.has(next)) {
       patch.endedAt = now;
       const reported = clampDuration(input.durationRaw);
+      // A callee leg that completed with talk time proves the call was answered
+      // even when no in-progress event was ever delivered. (DO_NOT_CALL relies on
+      // `answeredAt`, so it is only ever inferred from callee-leg evidence.)
+      if (input.calleeLeg && next === "completed" && !row.answeredAt && reported && reported > 0) {
+        patch.answeredAt = new Date(now.getTime() - reported * 1000);
+      }
       const computed =
         row.answeredAt != null
           ? Math.max(0, Math.round((now.getTime() - row.answeredAt.getTime()) / 1000))
@@ -498,6 +567,9 @@ export async function applyStatusUpdate(input: {
             direction: row.direction,
             outcome: next,
             durationSeconds: duration,
+            // Already saved from the browser before this callback arrived.
+            ...(row.dispositionCode ? { disposition: row.dispositionCode } : {}),
+            ...(row.notes ? { notes: row.notes } : {}),
           },
           createdBy: row.userId,
         });

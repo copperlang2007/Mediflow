@@ -23816,7 +23816,8 @@ export const getUpdateSoftphoneCallUrl = (id: string) => {
 
 /**
  * A DO_NOT_CALL disposition also records an opt-out for the number, which
- * blocks further calls and texts to it.
+ * blocks further calls and texts to it. It is accepted only for a call that
+ * was answered (409 otherwise).
  * @summary Save disposition and notes on a call (owner or admin only)
  */
 export const updateSoftphoneCall = async (
@@ -23915,6 +23916,94 @@ export const useUpdateSoftphoneCall = <
   TContext
 > => {
   return useMutation(getUpdateSoftphoneCallMutationOptions(options));
+};
+
+export const getCancelSoftphoneCallUrl = (id: string) => {
+  return `/api/softphone/calls/${id}/cancel`;
+};
+
+/**
+ * @summary Abandon a call attempt Twilio never claimed (frees the retry limit slot)
+ */
+export const cancelSoftphoneCall = async (
+  id: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<UpdateCallResponse> => {
+  return customFetch<UpdateCallResponse>(getCancelSoftphoneCallUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getCancelSoftphoneCallMutationKey = () =>
+  ["cancelSoftphoneCall"] as const;
+
+export const getCancelSoftphoneCallMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof cancelSoftphoneCall>>,
+    TError,
+    CancelSoftphoneCallMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof cancelSoftphoneCall>>,
+  TError,
+  CancelSoftphoneCallMutationVariables,
+  TContext
+> => {
+  const mutationKey = getCancelSoftphoneCallMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof cancelSoftphoneCall>>,
+    CancelSoftphoneCallMutationVariables
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return cancelSoftphoneCall(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CancelSoftphoneCallMutationResult = NonNullable<
+  Awaited<ReturnType<typeof cancelSoftphoneCall>>
+>;
+
+export type CancelSoftphoneCallMutationError = ErrorType<Error>;
+export type CancelSoftphoneCallMutationVariables = { id: string };
+
+/**
+ * @summary Abandon a call attempt Twilio never claimed (frees the retry limit slot)
+ */
+export const useCancelSoftphoneCall = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof cancelSoftphoneCall>>,
+    TError,
+    CancelSoftphoneCallMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof cancelSoftphoneCall>>,
+  TError,
+  CancelSoftphoneCallMutationVariables,
+  TContext
+> => {
+  return useMutation(getCancelSoftphoneCallMutationOptions(options));
 };
 
 export const getGetSoftphoneVoiceTokenUrl = () => {

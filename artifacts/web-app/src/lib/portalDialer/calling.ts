@@ -83,7 +83,11 @@ export interface CallState {
   phase: CallPhase;
   callSessionId: string | null;
   contactId: string | null;
+  /** Display name of the contact this call was placed to, captured at Call time. */
+  contactName: string | null;
   muted: boolean;
+  /** True once the far end picked up (drives what the post-call form may offer). */
+  answered: boolean;
   /** ms epoch when the far end answered; drives the live timer. */
   answeredAt: number | null;
   /** Set when the call ended, for the post-call form. */
@@ -100,7 +104,9 @@ const IDLE: CallState = {
   phase: "idle",
   callSessionId: null,
   contactId: null,
+  contactName: null,
   muted: false,
+  answered: false,
   answeredAt: null,
   endedAt: null,
   blocked: null,
@@ -141,12 +147,30 @@ function micMessage(err: unknown): string | null {
   return null;
 }
 
+/**
+ * Tell the server an attempt never reached Twilio, so it stops counting toward
+ * the attempt limit / redial cooldown. Best effort: failures are ignored (the
+ * server also stops counting unclaimed sessions once they expire).
+ */
+export function cancelCallSession(callSessionId: string): Promise<unknown> {
+  return apiFetch(`/api/softphone/calls/${encodeURIComponent(callSessionId)}/cancel`, { method: "POST" });
+}
+function abandonSession(callSessionId: string): void {
+  void cancelCallSession(callSessionId).catch(() => undefined);
+}
+
 export function useSoftphoneCall(opts: { deviceFactory?: DeviceFactory } = {}) {
   const factory = opts.deviceFactory ?? defaultDeviceFactory;
   const [state, setState] = useState<CallState>(IDLE);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const deviceRef = useRef<VoiceDeviceLike | null>(null);
   const callRef = useRef<VoiceCallLike | null>(null);
   const tokenExpiryRef = useRef(0);
+  // Attempt generation. Every await in `start` re-checks it; hang-up during
+  // connecting, reset and unmount bump it, so a late Device / call from an
+  // abandoned attempt is torn down instead of going live.
+  const genRef = useRef(0);
 
   const patch = useCallback((p: Partial<CallState>) => setState((s) => ({ ...s, ...p })), []);
 
@@ -158,7 +182,13 @@ export function useSoftphoneCall(opts: { deviceFactory?: DeviceFactory } = {}) {
   }, []);
 
   // Never leave a call or a registered Device behind when the page unmounts.
-  useEffect(() => teardown, [teardown]);
+  useEffect(
+    () => () => {
+      genRef.current += 1;
+      teardown();
+    },
+    [teardown],
+  );
 
   const fetchToken = useCallback(async (): Promise<VoiceToken> => {
     const t = await apiFetch<VoiceToken>("/api/softphone/voice-token");
@@ -167,12 +197,14 @@ export function useSoftphoneCall(opts: { deviceFactory?: DeviceFactory } = {}) {
   }, []);
 
   const start = useCallback(
-    async (contactId: string) => {
+    async (contactId: string, contactName: string) => {
       if (IS_DEMO_BUILD) {
         setState({ ...IDLE, unavailable: "demo" });
         return;
       }
-      setState({ ...IDLE, phase: "checking", contactId });
+      const gen = ++genRef.current;
+      const stale = (): boolean => genRef.current !== gen;
+      setState({ ...IDLE, phase: "checking", contactId, contactName });
 
       // 1) Server-side preclearance. It picks the number; we only name a contact.
       let session: StartCallResponse;
@@ -183,19 +215,26 @@ export function useSoftphoneCall(opts: { deviceFactory?: DeviceFactory } = {}) {
           body: JSON.stringify({ contactId }),
         });
       } catch (err) {
+        if (stale()) return;
         const e = err as HttpError;
         const body = (e.data ?? {}) as Partial<CallBlockedResponse> & { status?: string };
+        const base = { ...IDLE, contactId, contactName };
         if (e.status === 409 && Array.isArray(body.reasons)) {
-          setState({ ...IDLE, contactId, blocked: body.reasons });
+          setState({ ...base, blocked: body.reasons });
         } else if (e.status === 503 && body.status === "needs_setup") {
-          setState({ ...IDLE, contactId, unavailable: "needs_setup" });
+          setState({ ...base, unavailable: "needs_setup" });
         } else if (e.status === 503 && body.status === "demo_mode") {
-          setState({ ...IDLE, contactId, unavailable: "demo" });
+          setState({ ...base, unavailable: "demo" });
         } else if (e.status === 404) {
-          setState({ ...IDLE, contactId, error: "This contact can't be called from your account." });
+          setState({ ...base, error: "This contact can't be called from your account." });
         } else {
-          setState({ ...IDLE, contactId, error: e.message || "Couldn't start the call." });
+          setState({ ...base, error: e.message || "Couldn't start the call." });
         }
+        return;
+      }
+      // Reset while the request was in flight: the session is simply never dialed.
+      if (stale()) {
+        abandonSession(session.callSessionId);
         return;
       }
 
@@ -205,10 +244,20 @@ export function useSoftphoneCall(opts: { deviceFactory?: DeviceFactory } = {}) {
       try {
         if (!deviceRef.current || tokenExpiryRef.current - Date.now() < 60_000) {
           const token = await fetchToken();
+          if (stale()) {
+            abandonSession(session.callSessionId);
+            return;
+          }
           if (deviceRef.current) {
             deviceRef.current.updateToken(token.token);
           } else {
             const device = await factory(token.token);
+            if (stale()) {
+              // Abandoned while the Device was being created: never let it live.
+              try { device.destroy(); } catch { /* already gone */ }
+              abandonSession(session.callSessionId);
+              return;
+            }
             device.on("tokenWillExpire", () => {
               void fetchToken().then((t) => deviceRef.current?.updateToken(t.token)).catch(() => undefined);
             });
@@ -218,9 +267,16 @@ export function useSoftphoneCall(opts: { deviceFactory?: DeviceFactory } = {}) {
         const call = await deviceRef.current!.connect({
           params: { callSessionId: session.callSessionId, To: session.to },
         });
+        if (stale()) {
+          // Abandoned while connecting: hang the late call up and drop the Device.
+          try { call.disconnect(); } catch { /* already gone */ }
+          teardown();
+          abandonSession(session.callSessionId);
+          return;
+        }
         callRef.current = call;
         call.on("ringing", () => patch({ phase: "ringing" }));
-        call.on("accept", () => patch({ phase: "in_call", answeredAt: Date.now() }));
+        call.on("accept", () => patch({ phase: "in_call", answered: true, answeredAt: Date.now() }));
         call.on("mute", (isMuted: unknown) => patch({ muted: Boolean(isMuted) }));
         const finish = (message?: string) => {
           callRef.current = null;
@@ -236,10 +292,13 @@ export function useSoftphoneCall(opts: { deviceFactory?: DeviceFactory } = {}) {
         );
         patch({ phase: "ringing" });
       } catch (err) {
+        // Never reached Twilio: free the retry slot so an ordinary retry works.
+        abandonSession(session.callSessionId);
+        if (stale()) return;
         const e = err as HttpError;
         const body = (e.data ?? {}) as { status?: string };
         if (e.status === 503 && body.status === "needs_setup") {
-          setState({ ...IDLE, contactId, callSessionId: session.callSessionId, unavailable: "needs_setup" });
+          setState({ ...IDLE, contactId, contactName, callSessionId: session.callSessionId, unavailable: "needs_setup" });
         } else {
           // The session exists but never dialed; the disposition form still lets the agent record why.
           setState((s) => ({
@@ -251,12 +310,27 @@ export function useSoftphoneCall(opts: { deviceFactory?: DeviceFactory } = {}) {
         }
       }
     },
-    [factory, fetchToken, patch],
+    [factory, fetchToken, patch, teardown],
   );
 
   const hangUp = useCallback(() => {
-    try { callRef.current?.disconnect(); } catch { /* ignore */ }
-  }, []);
+    if (callRef.current) {
+      try { callRef.current.disconnect(); } catch { /* ignore */ }
+      return;
+    }
+    // No live call yet (still connecting): abandon the attempt. Bumping the
+    // generation makes `start` destroy any Device / call that arrives late.
+    genRef.current += 1;
+    teardown();
+    if (stateRef.current.phase === "connecting" && stateRef.current.callSessionId) {
+      abandonSession(stateRef.current.callSessionId);
+    }
+    setState((s) =>
+      s.phase === "connecting"
+        ? { ...s, phase: "ended", endedAt: Date.now(), muted: false, error: "You hung up before the call connected." }
+        : s,
+    );
+  }, [teardown]);
 
   const toggleMute = useCallback(() => {
     const call = callRef.current;
@@ -270,6 +344,7 @@ export function useSoftphoneCall(opts: { deviceFactory?: DeviceFactory } = {}) {
 
   /** Back to idle (after the post-call form is saved or skipped). */
   const reset = useCallback(() => {
+    genRef.current += 1;
     teardown();
     setState(IDLE);
   }, [teardown]);

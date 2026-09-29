@@ -192,6 +192,7 @@ router.post(
         callSid,
         twilioStatus: dialStatus || params.CallStatus,
         durationRaw: dialStatus ? params.DialCallDuration : params.CallDuration,
+        calleeLeg: Boolean(dialStatus),
       });
       if (outcome.applied) {
         const [row] = await db

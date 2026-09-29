@@ -20,6 +20,8 @@ const fake = vi.hoisted(() => {
     calls: [] as FakeCall[],
     tokens: [] as string[],
     destroyed: 0,
+    /** When set, Device.connect() waits for it — lets a test abandon a call mid-connect. */
+    gate: null as Promise<void> | null,
   };
   class FakeCall {
     handlers: Record<string, Handler[]> = {};
@@ -37,6 +39,7 @@ const fake = vi.hoisted(() => {
     destroy() { state.destroyed += 1; }
     async connect(opts: { params: Record<string, string> }) {
       state.connectParams.push(opts.params);
+      if (state.gate) await state.gate;
       const c = new FakeCall();
       state.calls.push(c);
       return c;
@@ -92,6 +95,7 @@ beforeEach(() => {
   fake.state.calls.length = 0;
   fake.state.tokens.length = 0;
   fake.state.destroyed = 0;
+  fake.state.gate = null;
   routes = {
     "/api/softphone/recent-calls": () => json({ data: [], total: 0 }),
     "/api/softphone/dispositions": () => json({ data: [{ code: "FOLLOW_UP", label: "Call back / follow up" }, { code: "DO_NOT_CALL", label: "Do not call again" }] }),
@@ -225,6 +229,95 @@ describe("Softphone browser calling states", () => {
     });
     // Form closes once saved.
     await waitFor(() => expect(screen.queryByText("Call ended")).not.toBeInTheDocument());
+  });
+
+  it("hanging up while 'Connecting…' abandons the attempt: a late call is disconnected and the Device destroyed", async () => {
+    let release!: () => void;
+    fake.state.gate = new Promise<void>((r) => { release = r; });
+    routes["/api/softphone/voice-token"] = () => json(TOKEN);
+    routes["/api/softphone/calls"] = () => json({ callSessionId: "sess-3", to: "+15035551234" }, 201);
+    renderAt("/dialer?contact=c-1");
+    await screen.findByText(/Browser calling: ready/);
+    await screen.findAllByText("Joan Park");
+    fireEvent.click(screen.getAllByRole("button", { name: /^Call$/ })[0]);
+    await waitFor(() => expect(fake.state.connectParams).toHaveLength(1));
+    expect(screen.getByText("Connecting…")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Hang up/ }));
+    expect(await screen.findByText("Call ended")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/hung up before the call connected/);
+    // The never-dialed session is released server side so a retry isn't blocked.
+    await waitFor(() =>
+      expect(calledUrls().some((u) => u.includes("/api/softphone/calls/sess-3/cancel"))).toBe(true),
+    );
+
+    // Twilio finally hands back the call: it must not go live.
+    await act(async () => { release(); await Promise.resolve(); });
+    await waitFor(() => expect(fake.state.calls[0].disconnected).toBe(true));
+    expect(fake.state.destroyed).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("Ringing…")).not.toBeInTheDocument();
+    expect(screen.queryByText("In call")).not.toBeInTheDocument();
+  });
+
+  it("leaving the page before the Device exists creates no Device and no call", async () => {
+    let releaseToken!: () => void;
+    const tokenGate = new Promise<void>((r) => { releaseToken = r; });
+    let tokenCalls = 0;
+    routes["/api/softphone/voice-token"] = () => {
+      tokenCalls += 1;
+      return tokenCalls === 1 ? json(TOKEN) : (tokenGate.then(() => json(TOKEN)) as unknown as Response);
+    };
+    routes["/api/softphone/calls"] = () => json({ callSessionId: "sess-4", to: "+15035551234" }, 201);
+    const view = renderAt("/dialer?contact=c-1");
+    await screen.findByText(/Browser calling: ready/);
+    await screen.findAllByText("Joan Park");
+    fireEvent.click(screen.getAllByRole("button", { name: /^Call$/ })[0]);
+    await waitFor(() => expect(tokenCalls).toBe(2));
+
+    view.unmount();
+    await act(async () => { releaseToken(); await new Promise((r) => setTimeout(r, 20)); });
+    expect(fake.state.tokens).toHaveLength(0);
+    expect(fake.state.connectParams).toHaveLength(0);
+    expect(fake.state.calls).toHaveLength(0);
+  });
+
+  it("the live panel keeps the name of the person called even if the picker moves on", async () => {
+    routes["/api/softphone/voice-token"] = () => json(TOKEN);
+    routes["/api/softphone/calls"] = () => json({ callSessionId: "sess-5", to: "+15035551234" }, 201);
+    renderAt("/dialer?contact=c-1");
+    await screen.findByText(/Browser calling: ready/);
+    await screen.findAllByText("Joan Park");
+    fireEvent.click(screen.getAllByRole("button", { name: /^Call$/ })[0]);
+    await waitFor(() => expect(fake.state.calls).toHaveLength(1));
+    expect(await screen.findByText("Ringing…")).toBeInTheDocument();
+
+    // Deselect the contact mid-call (the card's Clear button).
+    const clear = screen.getAllByRole("button", { name: /^Clear$/ }).find((b) => !(b as HTMLButtonElement).disabled)!;
+    fireEvent.click(clear);
+    await waitFor(() => expect(screen.queryByText("Caller")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("Joan Park")).toHaveLength(1));
+    expect(screen.getByText("Live call")).toBeInTheDocument();
+    expect(screen.queryByText("this contact")).not.toBeInTheDocument();
+  });
+
+  it("an ended call keeps Call disabled until the notes are saved or skipped", async () => {
+    routes["/api/softphone/voice-token"] = () => json(TOKEN);
+    routes["/api/softphone/calls"] = () => json({ callSessionId: "sess-6", to: "+15035551234" }, 201);
+    renderAt("/dialer?contact=c-1");
+    await screen.findByText(/Browser calling: ready/);
+    await screen.findAllByText("Joan Park");
+    fireEvent.click(screen.getAllByRole("button", { name: /^Call$/ })[0]);
+    await waitFor(() => expect(fake.state.calls).toHaveLength(1));
+    act(() => fake.state.calls[0].emit("accept"));
+    fireEvent.click(await screen.findByRole("button", { name: /Hang up/ }));
+    expect(await screen.findByText("Call ended")).toBeInTheDocument();
+
+    for (const b of screen.getAllByRole("button", { name: /^Call$/ })) expect(b).toBeDisabled();
+    expect(screen.getByTestId("call-hint")).toHaveTextContent(/Save or skip/);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Skip$/ }));
+    await waitFor(() => expect(screen.queryByText("Call ended")).not.toBeInTheDocument());
+    for (const b of screen.getAllByRole("button", { name: /^Call$/ })) expect(b).toBeEnabled();
   });
 
   it("a mic-permission failure is explained, not swallowed", async () => {

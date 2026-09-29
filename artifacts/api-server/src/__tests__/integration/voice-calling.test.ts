@@ -91,6 +91,8 @@ async function newContact(opts: {
   consent?: boolean;
   phone?: string | null;
   state?: string | null;
+  /** Stored plan type; defaults to `supp` (no AHIP / carrier-cert requirement). */
+  plan?: string | null;
 } = {}): Promise<{ id: string; e164: string }> {
   const p = nextPhone();
   const c = await seedContact(db, { orgId: opts.orgId ?? org.id, firstName: "Call", lastName: `Target${seq}` });
@@ -100,7 +102,7 @@ async function newContact(opts: {
       phone: opts.phone === undefined ? p.formatted : opts.phone,
       stateCode: opts.state === undefined ? "OR" : opts.state,
       assignedAgentId: opts.assignedAgentId ?? null,
-      currentPlanType: "supp", // no AHIP / carrier-cert requirement
+      currentPlanType: (opts.plan === undefined ? "supp" : opts.plan) as never,
       ...(opts.consent === false ? {} : { tcpaConsentAt: new Date("2026-01-01"), tcpaConsentSource: "web form" }),
     })
     .where(eq(schema.contactsTable.id, c.id));
@@ -386,7 +388,7 @@ describe("preclearance blocks each store a blocked row and return 409 with the r
     for (let i = 0; i < 3; i++) {
       await db.insert(schema.callSessionsTable).values({
         id: randomUUID(), orgId: org.id, contactId: c.id, userId: admin.id, toNumber: c.e164,
-        status: "completed", createdAt: new Date(NOON_PT.getTime() - (2 + i) * 3_600_000),
+        status: "completed", twilioCallSid: newSid(), createdAt: new Date(NOON_PT.getTime() - (2 + i) * 3_600_000),
       });
     }
     await expectBlocked(await place(admin.id, c.id), "MAX_ATTEMPTS_EXCEEDED");
@@ -397,7 +399,7 @@ describe("preclearance blocks each store a blocked row and return 409 with the r
     for (let i = 0; i < 3; i++) {
       await db.insert(schema.callSessionsTable).values({
         id: randomUUID(), orgId: org.id, contactId: c.id, userId: admin.id, toNumber: c.e164,
-        status: "completed", createdAt: new Date(NOON_PT.getTime() - (30 + i) * 3_600_000),
+        status: "completed", twilioCallSid: newSid(), createdAt: new Date(NOON_PT.getTime() - (30 + i) * 3_600_000),
       });
     }
     expect((await place(admin.id, c.id)).status).toBe(201);
@@ -407,9 +409,54 @@ describe("preclearance blocks each store a blocked row and return 409 with the r
     const c = await newContact();
     await db.insert(schema.callSessionsTable).values({
       id: randomUUID(), orgId: org.id, contactId: c.id, userId: admin.id, toNumber: c.e164,
-      status: "no_answer", createdAt: new Date(NOON_PT.getTime() - 5 * 60_000),
+      status: "no_answer", twilioCallSid: newSid(), createdAt: new Date(NOON_PT.getTime() - 5 * 60_000),
     });
     await expectBlocked(await place(admin.id, c.id), "REDIAL_COOLDOWN");
+  });
+
+  it("sessions that never reached Twilio do not burn the attempt limit or cooldown", async () => {
+    const c = await newContact();
+    // Four abandoned attempts (mic denied, closed the tab): still `initiated`,
+    // never claimed, past the 2 minute claim window.
+    for (let i = 0; i < 4; i++) {
+      await db.insert(schema.callSessionsTable).values({
+        id: randomUUID(), orgId: org.id, contactId: c.id, userId: admin.id, toNumber: c.e164,
+        status: "initiated", createdAt: new Date(NOON_PT.getTime() - (5 + i) * 60_000),
+      });
+    }
+    expect((await place(admin.id, c.id)).status).toBe(201);
+  });
+
+  it("an abandoned attempt can be canceled so an immediate retry works", async () => {
+    const c = await newContact();
+    const first = await place(admin.id, c.id);
+    expect(first.status).toBe(201);
+    // Without the cancel, a retry inside the claim window is a cooldown hit.
+    const cancel = await request(app).post(`/api/softphone/calls/${first.body.callSessionId}/cancel`).set(A(admin.id));
+    expect(cancel.status).toBe(200);
+    expect((await sessionRow(first.body.callSessionId)).status).toBe("canceled");
+    // Idempotent.
+    expect((await request(app).post(`/api/softphone/calls/${first.body.callSessionId}/cancel`).set(A(admin.id))).status).toBe(200);
+    // And the canceled session can never be dialed.
+    const dial = await postTwilio(VOICE, voiceParams(first.body.callSessionId, c.e164, admin.id));
+    expect(dial.text).toContain("<Reject");
+    const retry = await place(admin.id, c.id);
+    expect(retry.status).toBe(201);
+  });
+
+  it("cancel: owner or admin only, org scoped, and not once Twilio claimed the session", async () => {
+    const c = await newContact({ assignedAgentId: agent1.id });
+    const placed = await place(agentUser1.id, c.id);
+    const id = placed.body.callSessionId as string;
+    const cancel = (u: { id: string }) => request(app).post(`/api/softphone/calls/${id}/cancel`).set(A(u.id));
+    expect((await cancel(agentUser2)).status).toBe(404);
+    expect((await cancel(otherAdmin)).status).toBe(404);
+    expect((await cancel(viewer)).status).toBe(403);
+    expect((await sessionRow(id)).status).toBe("initiated");
+
+    await postTwilio(VOICE, voiceParams(id, c.e164, agentUser1.id));
+    expect((await cancel(agentUser1)).status).toBe(409);
+    expect((await sessionRow(id)).status).toBe("ringing");
   });
 
   it("blocked attempts do not themselves count toward limits, but a second live call right away is a cooldown hit", async () => {
@@ -773,7 +820,8 @@ describe("PATCH /softphone/calls/:id (disposition + notes)", () => {
     const started = await startedCall(userId);
     const sid = newSid();
     await postTwilio(VOICE, voiceParams(started.sessionId, started.to, userId, sid));
-    await postTwilio(STATUS, { CallSid: sid, CallStatus: "completed", CallDuration: "60" });
+    // The callee leg's <Dial action> result: answered, 60s of talk time.
+    await postTwilio(STATUS, { CallSid: sid, DialCallStatus: "completed", DialCallDuration: "60", CallStatus: "in-progress" });
     return started;
   }
   const patch = (userId: string, id: string, body: Record<string, unknown>) =>
@@ -842,6 +890,145 @@ describe("PATCH /softphone/calls/:id (disposition + notes)", () => {
 
     const audit = await db.select().from(schema.auditLogTable).where(eq(schema.auditLogTable.action, "call_dnc_opt_out"));
     expect(audit.some((a) => a.resourceId === sessionId)).toBe(true);
+  });
+});
+
+describe("product line and plan year are derived server side", () => {
+  /** A licensed OR agent with NO AHIP / carrier certification, plus their user. */
+  async function licensedNoCerts() {
+    const u = await seedUser(db, { orgId: org.id, role: "agency_admin" });
+    const a = await seedAgent(db, { orgId: org.id, firstName: "Cert" });
+    await db.update(schema.agentsTable).set({ userId: u.id }).where(eq(schema.agentsTable.id, a.id));
+    await license(a.id);
+    return { user: u, agent: a };
+  }
+
+  it("a request cannot lower the product line to skip AHIP + carrier certification", async () => {
+    const { user } = await licensedNoCerts();
+    const mapd = await newContact({ plan: "MAPD" });
+    for (const productLine of ["other", "supp", "MA"]) {
+      const res = await place(user.id, mapd.id, { productLine });
+      expect(res.status).toBe(409);
+      expect(res.body.reasons.map((r: { code: string }) => r.code)).toEqual(
+        expect.arrayContaining(["AGENT_NO_AHIP", "AGENT_NOT_CERTIFIED"]),
+      );
+      // Not a fresh contact each loop: clear the cooldown row so the block reason stays about eligibility.
+      await db.delete(schema.callSessionsTable).where(eq(schema.callSessionsTable.contactId, mapd.id));
+    }
+  });
+
+  it("with no stored plan, a request may not choose a lower-check line either", async () => {
+    const { user } = await licensedNoCerts();
+    const none = await newContact({ plan: null });
+    const res = await place(user.id, none.id, { productLine: "other" });
+    expect(res.status).toBe(409);
+    expect(res.body.reasons.map((r: { code: string }) => r.code)).toContain("AGENT_NO_AHIP");
+  });
+
+  it("a contact whose stored plan is supplemental still skips AHIP (the stored plan decides)", async () => {
+    const { user } = await licensedNoCerts();
+    const supp = await newContact({ plan: "supp" });
+    expect((await place(user.id, supp.id)).status).toBe(201);
+  });
+
+  it("from October the SELLING plan year (next year) is required, not the calendar year", async () => {
+    const { user, agent: a } = await licensedNoCerts();
+    const [carrier] = await db
+      .insert(schema.carriersTable)
+      .values({ id: randomUUID(), orgId: org.id, name: "PY Carrier" })
+      .returning();
+    const passed = async (year: number) => {
+      await db.insert(schema.ahipRecordsTable).values({ id: randomUUID(), agentId: a.id, certificationYear: year, status: "passed" });
+      await db.insert(schema.carrierCertificationsTable).values({
+        id: randomUUID(), agentId: a.id, carrierId: carrier!.id, certificationYear: year, status: "passed",
+      });
+    };
+    const c = await newContact({ plan: "MAPD" });
+
+    // Oct 15, 2026 noon Pacific: certified for 2026 only -> blocked (needs 2027).
+    vi.setSystemTime(new Date("2026-10-15T19:00:00Z"));
+    await passed(2026);
+    const blocked = await place(user.id, c.id);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.reasons.find((r: { code: string }) => r.code === "AGENT_NO_AHIP").detail).toContain("2027");
+
+    // Certified for 2027 -> allowed (Dec 1 is still the selling year 2027).
+    await passed(2027);
+    vi.setSystemTime(new Date("2026-12-01T20:00:00Z"));
+    sessionSalt = randomUUID();
+    await db.delete(schema.callSessionsTable).where(eq(schema.callSessionsTable.contactId, c.id));
+    expect((await place(user.id, c.id)).status).toBe(201);
+  });
+});
+
+describe("DO_NOT_CALL only for an answered call", () => {
+  const patch = (userId: string, id: string, body: Record<string, unknown>) =>
+    request(app).patch(`/api/softphone/calls/${id}`).set(A(userId)).send(body);
+
+  async function optOutCount(e164: string) {
+    const rows = await db.select().from(schema.optOutsTable);
+    return rows.filter((o) => o.phone === e164).length;
+  }
+
+  it("rejects it on a session Twilio never claimed and creates no opt-out", async () => {
+    const { contact, sessionId } = await startedCall();
+    const res = await patch(admin.id, sessionId, { dispositionCode: "DO_NOT_CALL" });
+    expect(res.status).toBe(409);
+    expect(await optOutCount(contact.e164)).toBe(0);
+    const [c] = await db.select().from(schema.contactsTable).where(eq(schema.contactsTable.id, contact.id));
+    expect(c!.optOutSms).toBe(false);
+    // Other dispositions on the same session are still fine.
+    expect((await patch(admin.id, sessionId, { dispositionCode: "UNKNOWN" })).status).toBe(200);
+  });
+
+  it("rejects it while ringing / when the callee never answered", async () => {
+    const ringing = await startedCall();
+    await postTwilio(VOICE, voiceParams(ringing.sessionId, ringing.to, admin.id));
+    expect((await patch(admin.id, ringing.sessionId, { dispositionCode: "DO_NOT_CALL" })).status).toBe(409);
+
+    const noAnswer = await startedCall();
+    const sid = newSid();
+    await postTwilio(VOICE, voiceParams(noAnswer.sessionId, noAnswer.to, admin.id, sid));
+    await postTwilio(STATUS, { CallSid: sid, DialCallStatus: "no-answer", DialCallDuration: "0" });
+    expect((await patch(admin.id, noAnswer.sessionId, { dispositionCode: "DO_NOT_CALL" })).status).toBe(409);
+    expect(await optOutCount(noAnswer.contact.e164)).toBe(0);
+    expect(await optOutCount(ringing.contact.e164)).toBe(0);
+  });
+
+  it("accepts it once the callee leg completed with talk time (no in-progress event needed)", async () => {
+    const { contact, sessionId, to } = await startedCall();
+    const sid = newSid();
+    await postTwilio(VOICE, voiceParams(sessionId, to, admin.id, sid));
+    await postTwilio(STATUS, { CallSid: sid, DialCallStatus: "completed", DialCallDuration: "45" });
+    expect((await sessionRow(sessionId)).answeredAt).not.toBeNull();
+    expect((await patch(admin.id, sessionId, { dispositionCode: "DO_NOT_CALL" })).status).toBe(200);
+    expect(await optOutCount(contact.e164)).toBe(1);
+  });
+});
+
+describe("disposition saved before the status callback", () => {
+  it("the call_log created later carries the already-saved disposition and notes", async () => {
+    const { contact, sessionId, to } = await startedCall();
+    const sid = newSid();
+    await postTwilio(VOICE, voiceParams(sessionId, to, admin.id, sid));
+
+    // The agent saves from the browser BEFORE Twilio's completed callback.
+    const saved = await request(app)
+      .patch(`/api/softphone/calls/${sessionId}`)
+      .set(A(admin.id))
+      .send({ dispositionCode: "FOLLOW_UP", notes: "call back Friday" });
+    expect(saved.status).toBe(200);
+
+    await postTwilio(STATUS, { CallSid: sid, DialCallStatus: "completed", DialCallDuration: "20" });
+    const row = await sessionRow(sessionId);
+    const [act] = await db.select().from(schema.activitiesTable).where(eq(schema.activitiesTable.id, row.activityId!));
+    expect(act!.contactId).toBe(contact.id);
+    expect(act!.metadata).toMatchObject({ disposition: "FOLLOW_UP", notes: "call back Friday" });
+
+    // Saving again after the callback keeps the timeline entry in step.
+    await request(app).patch(`/api/softphone/calls/${sessionId}`).set(A(admin.id)).send({ notes: "updated note" });
+    const [after] = await db.select().from(schema.activitiesTable).where(eq(schema.activitiesTable.id, row.activityId!));
+    expect(after!.metadata).toMatchObject({ disposition: "FOLLOW_UP", notes: "updated note" });
   });
 });
 

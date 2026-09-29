@@ -7098,7 +7098,8 @@ export const ListSoftphoneCallsResponse = zod.object({
 
 /**
  * A DO_NOT_CALL disposition also records an opt-out for the number, which
- * blocks further calls and texts to it.
+ * blocks further calls and texts to it. It is accepted only for a call that
+ * was answered (409 otherwise).
  * @summary Save disposition and notes on a call (owner or admin only)
  */
 export const UpdateSoftphoneCallParams = zod.object({
@@ -7123,6 +7124,20 @@ export const UpdateSoftphoneCallBody = zod.object({
 });
 
 export const UpdateSoftphoneCallResponse = zod.object({
+  id: zod.string().optional(),
+  status: zod.string().optional(),
+  dispositionCode: zod.string().nullish(),
+  notes: zod.string().nullish(),
+});
+
+/**
+ * @summary Abandon a call attempt Twilio never claimed (frees the retry limit slot)
+ */
+export const CancelSoftphoneCallParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const CancelSoftphoneCallResponse = zod.object({
   id: zod.string().optional(),
   status: zod.string().optional(),
   dispositionCode: zod.string().nullish(),

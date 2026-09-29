@@ -344,7 +344,10 @@ export default function DialerPage() {
   const readiness = useVoiceReadiness(allowed && canCall);
   const softphone = useSoftphoneCall();
   const callState = softphone.state;
-  const callActive = callState.phase !== "idle" && callState.phase !== "ended";
+  // An ended call stays "active" until the agent saves or skips the post-call
+  // form, so a new call can't silently discard an unsaved disposition.
+  const callActive = callState.phase !== "idle";
+  const callEnded = callState.phase === "ended";
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedNumber(number), 300);
@@ -388,11 +391,12 @@ export default function DialerPage() {
     : readiness.state === "checking" ? "Checking browser calling…"
     : !contact ? "Pick a contact on file — you can only call contacts."
     : !contact.phone ? "This contact has no phone number."
+    : callEnded ? "Save or skip the last call's notes first."
     : callActive ? "A call is in progress."
     : null;
   const canPlaceCall = callBlockedHint === null;
   const placeCall = () => {
-    if (contact && canPlaceCall) void softphone.start(contact.id);
+    if (contact && canPlaceCall) void softphone.start(contact.id, `${contact.firstName} ${contact.lastName}`);
   };
 
   return (
@@ -491,7 +495,6 @@ export default function DialerPage() {
         <div className="space-y-6">
           <CallPanel
             state={callState}
-            contactName={contact ? `${contact.firstName} ${contact.lastName}` : "this contact"}
             onHangUp={softphone.hangUp}
             onToggleMute={softphone.toggleMute}
             onDone={softphone.reset}

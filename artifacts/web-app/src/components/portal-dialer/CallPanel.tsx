@@ -86,10 +86,13 @@ function Timer({ since }: { since: number | null }) {
 function PostCallForm({
   callSessionId,
   contactId,
+  answered,
   onDone,
 }: {
   callSessionId: string;
   contactId: string | null;
+  /** DO_NOT_CALL is only offered for a call the other party actually answered. */
+  answered: boolean;
   onDone: () => void;
 }) {
   const qc = useQueryClient();
@@ -124,7 +127,7 @@ function PostCallForm({
         <Select value={disposition} onValueChange={setDisposition}>
           <SelectTrigger id="postcall-disposition"><SelectValue placeholder="Choose an outcome" /></SelectTrigger>
           <SelectContent>
-            {(dispositions?.data ?? []).map((d) => (
+            {(dispositions?.data ?? []).filter((d) => answered || d.code !== "DO_NOT_CALL").map((d) => (
               <SelectItem key={d.code} value={d.code}>{d.label}</SelectItem>
             ))}
           </SelectContent>
@@ -159,17 +162,17 @@ function PostCallForm({
 
 export function CallPanel({
   state,
-  contactName,
   onHangUp,
   onToggleMute,
   onDone,
 }: {
   state: CallState;
-  contactName: string;
   onHangUp: () => void;
   onToggleMute: () => void;
   onDone: () => void;
 }) {
+  // The name captured when Call was pressed — the picker may move on mid-call.
+  const contactName = state.contactName ?? "this contact";
   const live = state.phase === "checking" || state.phase === "connecting" || state.phase === "ringing" || state.phase === "in_call";
   const label =
     state.phase === "checking" ? "Checking it's OK to call…"
@@ -256,7 +259,12 @@ export function CallPanel({
 
       {state.phase === "ended" && state.callSessionId && (
         <div className="mt-4">
-          <PostCallForm callSessionId={state.callSessionId} contactId={state.contactId} onDone={onDone} />
+          <PostCallForm
+            callSessionId={state.callSessionId}
+            contactId={state.contactId}
+            answered={state.answered}
+            onDone={onDone}
+          />
         </div>
       )}
     </SectionCard>
