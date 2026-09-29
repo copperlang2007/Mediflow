@@ -14,6 +14,7 @@ import {
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import webhooksRouter from "./routes/webhooks";
+import voiceWebhooksRouter from "./routes/voiceWebhooks";
 import stripeWebhookRouter from "./routes/stripeWebhook";
 import dialerEventsRouter from "./routes/dialerEvents";
 import queuePublicRouter from "./routes/queuePublic";
@@ -311,6 +312,10 @@ app.use("/api", userLimiter);
 // Twilio inbound webhooks — mounted at root so Twilio can reach them without
 // API auth middleware. Signature validation is enforced inside the handler.
 app.use(webhooksRouter);
+
+// Twilio Voice (native browser calling): TwiML webhook + status callbacks.
+// Same posture as the SMS receiver above — signature-verified, no Clerk.
+app.use(voiceWebhooksRouter);
 
 // Stripe billing webhooks — mounted at root alongside the Twilio receiver and
 // for the same reason: Stripe has no Clerk session. Trust comes from the
