@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 
 type Agency = { id: string; name: string; slug: string };
 const VIEW_AS_KEY = "mediflow:view-as-org";
+const SUPPORT_REASON_KEY = "mediflow:support-edit-reason";
 
 function readActiveOrgId(): string | null {
   try { return globalThis.localStorage?.getItem(VIEW_AS_KEY) ?? null; } catch { return null; }
@@ -25,6 +26,9 @@ function useViewAsAgencies(enabled: boolean) {
   const [error, setError] = useState<string | null>(null);
   const [mfaRequired, setMfaRequired] = useState(false);
   const [activeOrgId] = useState<string | null>(readActiveOrgId);
+  const [supportReason, setSupportReason] = useState<string | null>(() => {
+    try { return globalThis.localStorage?.getItem(SUPPORT_REASON_KEY) ?? null; } catch { return null; }
+  });
 
   useEffect(() => {
     if (!enabled) return;
@@ -40,15 +44,32 @@ function useViewAsAgencies(enabled: boolean) {
 
   const setView = (orgId: string) => {
     if (!orgId) return;
+    localStorage.removeItem(SUPPORT_REASON_KEY);
     localStorage.setItem(VIEW_AS_KEY, orgId);
     window.location.reload();
   };
   const exitView = () => {
     localStorage.removeItem(VIEW_AS_KEY);
+    localStorage.removeItem(SUPPORT_REASON_KEY);
     window.location.reload();
   };
 
-  return { agencies, error, mfaRequired, activeOrgId, setView, exitView };
+  const enableSupportEdit = () => {
+    const reason = window.prompt("Why are you helping this agency? This reason is recorded with each profile edit.")?.trim();
+    if (!reason) return;
+    if (reason.length < 10 || reason.length > 240) {
+      window.alert("Enter a reason between 10 and 240 characters.");
+      return;
+    }
+    localStorage.setItem(SUPPORT_REASON_KEY, reason);
+    setSupportReason(reason);
+  };
+  const disableSupportEdit = () => {
+    localStorage.removeItem(SUPPORT_REASON_KEY);
+    setSupportReason(null);
+  };
+
+  return { agencies, error, mfaRequired, activeOrgId, supportReason, setView, exitView, enableSupportEdit, disableSupportEdit };
 }
 
 /** Viewing agencies needs Clerk MFA; this points at the page that enrolls it. */
@@ -91,7 +112,7 @@ function AgencySelect({
  * shortened on small screens.
  */
 export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
-  const { agencies, error, mfaRequired, activeOrgId, setView, exitView } = useViewAsAgencies(enabled);
+  const { agencies, error, mfaRequired, activeOrgId, supportReason, setView, exitView, enableSupportEdit, disableSupportEdit } = useViewAsAgencies(enabled);
   if (!enabled) return null;
 
   const activeAgency = agencies.find((agency) => agency.id === activeOrgId);
@@ -101,13 +122,16 @@ export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
     return (
       <div
         className="flex min-w-0 items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
-        title={`Viewing ${name} — read-only`}
+        title={supportReason ? `Helping ${name} — contact and agent profile edits enabled` : `Viewing ${name} — read-only`}
       >
         <Eye className="h-3.5 w-3.5 shrink-0" />
-        <span className="hidden font-medium sm:inline truncate max-w-48">Viewing {name} - read-only</span>
-        <span className="sr-only sm:hidden">Viewing {name}, read-only</span>
+        <span className="hidden font-medium sm:inline truncate max-w-48">{supportReason ? `Helping ${name} - profile edits` : `Viewing ${name} - read-only`}</span>
+        <span className="sr-only sm:hidden">{supportReason ? `Helping ${name}, profile edits enabled` : `Viewing ${name}, read-only`}</span>
         {error && <span role="alert" className="hidden md:inline">{error}</span>}
         {mfaRequired && <MfaLink className="hidden md:inline text-amber-700 dark:text-amber-300" />}
+        <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={supportReason ? disableSupportEdit : enableSupportEdit}>
+          {supportReason ? "Stop editing" : "Enable profile edits"}
+        </Button>
         <Button variant="ghost" size="sm" className="h-6 px-1.5 text-amber-900 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-500/20" onClick={exitView} aria-label="Exit agency view">
           <X className="h-3.5 w-3.5" />
         </Button>
