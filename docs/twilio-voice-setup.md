@@ -102,6 +102,58 @@ the settings that are missing (never their values).
   side of contacting less. A separate voice channel is a possible later follow-up.
 - Keeps recording **off**. Nothing in the product can turn it on yet.
 
+## Calling clients you moved over from GoHighLevel (owner switch)
+
+Normally a call needs a **documented consent date and source** on the contact.
+Clients moved over from GoHighLevel do not have those fields. You have told us
+their consent was approved and is recorded on the call recordings, and that
+do-not-contact requests live in GoHighLevel as the DND flag.
+
+There is one switch for this: **Settings, Calling compliance, "Allow calls to
+imported clients with no do-not-contact flag"**. It is **off** until an agency
+admin turns it on (there is a confirmation with an acknowledgement box, and the
+change is written to the audit log). Nobody else can change it.
+
+**What it does when it is on.** A contact can be called without a documented
+consent date if **all** of these are true:
+
+- the contact is linked to a GoHighLevel contact (it came in through the sync);
+- the contact is not marked do-not-contact and has no opt-out of any kind (text
+  or email opt-out, or an opt-out on the number in any agency);
+- GoHighLevel has not flagged that record as DND, even in the rare case where the
+  sync could not copy the flag onto the contact.
+
+Everything else is as strict as before: calling hours, licensing, redial limits,
+and the check again at the moment the call connects. Each call is stored with
+the reason it was allowed (`documented` or `imported_ghl_recorded_call`), and the
+softphone shows a small note when a call went ahead on the imported basis.
+
+**What it does not do. Please read this.**
+
+- **No DND flag is not the same as consent.** Mediflow cannot see the recordings;
+  it is trusting what you told us.
+- **The national and state do-not-call registries are not checked**, by this
+  switch or by the calling feature.
+- **Rules for existing customers have time limits.**
+- Have your attorney or compliance counsel confirm this before you rely on it.
+  Nothing here is a statement that the calls are compliant.
+
+**Clean up after the move.** Add a real consent date and source to each client
+(the switch is a bridge, not a permanent answer), then turn the switch off.
+
+### Before you turn it on
+
+1. Run a GoHighLevel sync. Contacts only count as imported once they are linked,
+   and a DND flag only reaches Mediflow when the sync runs. A record last changed
+   in GoHighLevel before the sync feature was updated is not re-read on its own,
+   so make a small change to (or re-save) known do-not-contact records in
+   GoHighLevel, or ask us to re-run the sync from the start.
+2. Spot-check a few clients you know are do-not-contact in GoHighLevel. Open each
+   in Mediflow and try to call: they must show as **blocked**.
+3. Check every agent who will call has an **active** agent profile.
+4. Check all six Twilio settings above are filled in (the softphone says "ready").
+5. Talk to counsel about the points above.
+
 ## What still needs a lawyer's review before real use
 
 Mediflow's checks are technical safeguards, not legal advice, and no part of
