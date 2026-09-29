@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, ne, and, sql, desc, inArray, type SQL } from "drizzle-orm";
+import { eq, ne, and, or, sql, desc, inArray, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { db, agentsTable, taskInstancesTable, taskTemplatesTable } from "@workspace/db";
@@ -10,6 +10,11 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { generateAepRenewalTasks } from "../lib/aepRenewal/generate";
+import {
+  requireAgentPermissionOrSelf,
+  isSelfScopedAgent,
+  callerAgentId,
+} from "../middlewares/agentSelfScope";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { safeLimit, safeOffset } from "../lib/listGuards";
@@ -40,6 +45,28 @@ const UpdateTaskSchema = z.object({
   priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
 });
 
+/**
+ * SQL condition limiting task rows to those an `agent` may see and act on:
+ * tasks for their own agent profile or assigned to their own user. Always
+ * combined (AND) with the org filter. With no linked agent profile only
+ * tasks assigned to the user themselves match.
+ */
+async function agentTaskScope(req: Request): Promise<SQL> {
+  const a = req as AuthenticatedRequest;
+  const own = await callerAgentId(req);
+  const assigned = eq(taskInstancesTable.assignedToUserId, a.userId);
+  return (own ? or(eq(taskInstancesTable.agentId, own), assigned) : assigned) as SQL;
+}
+
+/** Task templates are org-wide admin configuration — never for agents. */
+function denyAgentRole(req: Request, res: Response): boolean {
+  if (isSelfScopedAgent(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return true;
+  }
+  return false;
+}
+
 router.use(
   routerAuditMiddleware(router, "task_instance", undefined, {
     includeReads: false,
@@ -68,6 +95,7 @@ router.get(
     const offsetNum = safeOffset(offset);
 
     const conditions: SQL[] = [eq(taskInstancesTable.orgId, authReq.orgId)];
+    if (isSelfScopedAgent(req)) conditions.push(await agentTaskScope(req));
     if (status && ["open", "in_progress", "completed", "cancelled"].includes(status)) {
       conditions.push(eq(taskInstancesTable.status, status as "open" | "in_progress" | "completed" | "cancelled"));
     }
@@ -95,7 +123,7 @@ router.get(
 router.get(
   "/agents/:id/tasks",
   requireAuth,
-  requirePermission("agent", "read"),
+  requireAgentPermissionOrSelf("read", "id"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -227,6 +255,19 @@ router.patch(
     }
 
     const data = parsed.data;
+
+    // Agents act on their own tasks only, and only on progress (status) —
+    // never re-assigning, re-titling or re-prioritising.
+    let scope: SQL | undefined;
+    if (isSelfScopedAgent(req)) {
+      const touched = Object.entries(data).filter(([, v]) => v !== undefined).map(([k]) => k);
+      if (touched.some((k) => k !== "status")) {
+        res.status(403).json({ error: "Agents may only update the status of their own tasks" });
+        return;
+      }
+      scope = await agentTaskScope(req);
+    }
+
     const updates: Record<string, unknown> = {};
     if (data.title !== undefined) updates.title = data.title;
     if (data.description !== undefined) updates.description = data.description;
@@ -256,7 +297,7 @@ router.patch(
           .where(
             and(
               eq(taskInstancesTable.id, taskId),
-              eq(taskInstancesTable.orgId, authReq.orgId),
+              eq(taskInstancesTable.orgId, authReq.orgId), scope,
               ne(taskInstancesTable.status, "completed"),
             ),
           )
@@ -272,7 +313,7 @@ router.patch(
           const [existing] = await tx
             .select()
             .from(taskInstancesTable)
-            .where(and(eq(taskInstancesTable.id, taskId), eq(taskInstancesTable.orgId, authReq.orgId)))
+            .where(and(eq(taskInstancesTable.id, taskId), eq(taskInstancesTable.orgId, authReq.orgId), scope))
             .limit(1);
           if (!existing) {
             return { kind: "not-found" as const };
@@ -282,7 +323,7 @@ router.patch(
             const [updated2] = await tx
               .update(taskInstancesTable)
               .set(updates)
-              .where(and(eq(taskInstancesTable.id, taskId), eq(taskInstancesTable.orgId, authReq.orgId)))
+              .where(and(eq(taskInstancesTable.id, taskId), eq(taskInstancesTable.orgId, authReq.orgId), scope))
               .returning();
             row = updated2;
           } else {
@@ -293,7 +334,7 @@ router.patch(
         const [updated] = await tx
           .update(taskInstancesTable)
           .set(updates)
-          .where(and(eq(taskInstancesTable.id, taskId), eq(taskInstancesTable.orgId, authReq.orgId)))
+          .where(and(eq(taskInstancesTable.id, taskId), eq(taskInstancesTable.orgId, authReq.orgId), scope))
           .returning();
         if (!updated) {
           return { kind: "not-found" as const };
@@ -529,6 +570,7 @@ router.get(
   requireAuth,
   requirePermission("task_instance", "read"),
   async (req: Request, res: Response): Promise<void> => {
+    if (denyAgentRole(req, res)) return;
     const authReq = req as AuthenticatedRequest;
 
     const templates = await db
@@ -580,6 +622,7 @@ router.patch(
   requireAuth,
   requirePermission("task_instance", "update"),
   async (req: Request, res: Response): Promise<void> => {
+    if (denyAgentRole(req, res)) return;
     const authReq = req as AuthenticatedRequest;
     const templateId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 

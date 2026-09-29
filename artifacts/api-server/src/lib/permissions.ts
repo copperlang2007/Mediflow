@@ -116,10 +116,13 @@ const MATRIX: PermissionMatrix = {
     update: ["super_admin", "agency_admin", "compliance_manager"],
     delete: ["super_admin", "agency_admin"],
   },
+  // `agent` gets read + update ONLY; routes/tasks.ts narrows it to rows for
+  // the caller's own agent profile / assigned to the caller (status changes
+  // only). Never create/delete; task templates stay admin-only.
   task_instance: {
-    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer"],
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "agent", "developer"],
     create: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
-    update: ["super_admin", "agency_admin", "compliance_manager", "agent_support"],
+    update: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "agent"],
     delete: ["super_admin", "agency_admin"],
   },
   document: {
