@@ -64,6 +64,11 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { auditMiddleware, routerAuditMiddleware } from "../middlewares/auditMiddleware";
+import {
+  requireAgentPermissionOrSelf,
+  isSelfScopedAgent,
+  callerAgentId,
+} from "../middlewares/agentSelfScope";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import { logger } from "../lib/logger";
 import { PHI_PRIVILEGED_ROLES, type Role } from "../lib/permissions";
@@ -503,7 +508,7 @@ router.post(
 router.get(
   "/onboarding/:agentId",
   requireAuth,
-  requirePermission("agent", "read"),
+  requireAgentPermissionOrSelf("read", "agentId"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const agentId = String(req.params.agentId);
@@ -559,7 +564,7 @@ router.get(
 router.patch(
   "/onboarding/:agentId/profile",
   requireAuth,
-  requirePermission("agent", "update"),
+  requireAgentPermissionOrSelf("update", "agentId"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const agentId = String(req.params.agentId);
@@ -687,7 +692,7 @@ router.patch(
 router.post(
   "/onboarding/:agentId/carriers/select",
   requireAuth,
-  requirePermission("agent", "update"),
+  requireAgentPermissionOrSelf("update", "agentId"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const agentId = String(req.params.agentId);
@@ -880,7 +885,8 @@ router.post(
 router.get(
   "/onboarding",
   requireAuth,
-  requireRole("super_admin", "agency_admin"),
+  // `agent` is admitted self-scoped: their own runs only (see below).
+  requireRole("super_admin", "agency_admin", "agent"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
 
@@ -897,6 +903,16 @@ router.get(
     const offsetNum = safeOffset(offset);
 
     const conditions: SQL[] = [eq(agentOnboardingRunsTable.orgId, authReq.orgId)];
+    if (isSelfScopedAgent(req)) {
+      // Agents see only their own onboarding runs. No linked agent profile
+      // means nothing to show — never fall back to an unfiltered list.
+      const own = await callerAgentId(req);
+      if (!own) {
+        res.json({ data: [], total: 0, limit: limitNum, offset: offsetNum });
+        return;
+      }
+      conditions.push(eq(agentOnboardingRunsTable.agentId, own));
+    }
     if (status && isOnboardingStatus(status)) {
       conditions.push(eq(agentOnboardingRunsTable.status, status));
     }

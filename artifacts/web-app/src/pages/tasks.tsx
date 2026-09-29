@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import {
+  useGetMe,
   useGetTasks,
   useCreateTask,
   useUpdateTask,
@@ -379,7 +380,14 @@ function TasksView() {
   const [form, setForm] = useState({ title: "", description: "", dueDate: "", priority: "medium" as string });
 
   const { data, isLoading, error: tasksError } = useGetTasks({ status: statusFilter === "all" ? undefined : statusFilter, limit: 100 });
-  const { data: templates } = useGetTaskTemplates();
+  // Agents are read/update-own only: GET /task-templates and POST /tasks are
+  // 403 for them, so don't fetch templates or offer creation until the role is
+  // known to be a back-office one.
+  const { data: me } = useGetMe();
+  const canManage = Boolean(me?.role) && me?.role !== "agent";
+  const { data: templates } = useGetTaskTemplates({
+    query: { enabled: canManage, queryKey: getGetTaskTemplatesQueryKey() },
+  });
   const { mutateAsync: createTask, isPending } = useCreateTask();
   const { mutateAsync: updateTask } = useUpdateTask();
 
@@ -434,16 +442,18 @@ function TasksView() {
               </SelectContent>
             </Select>
             <div className="flex gap-2 md:ml-auto">
-              {(templates ?? []).length > 0 && (
+              {canManage && (templates ?? []).length > 0 && (
                 <Button variant="outline" onClick={() => setFromTemplateOpen(true)}>
                   <LayoutTemplate className="h-4 w-4 mr-1.5" />
                   From Template
                 </Button>
               )}
-              <Button onClick={() => setAddOpen(true)}>
-                <Plus className="h-4 w-4 mr-1.5" />
-                New Task
-              </Button>
+              {canManage && (
+                <Button onClick={() => setAddOpen(true)}>
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  New Task
+                </Button>
+              )}
             </div>
           </>
         }
@@ -745,7 +755,11 @@ function TemplatesView() {
 }
 
 export default function TasksPage() {
-  const [view, setView] = useState<View>("tasks");
+  const [viewState, setView] = useState<View>("tasks");
+  const { data: me } = useGetMe();
+  // Templates are org-wide admin configuration; the API refuses them to agents.
+  const showTemplates = Boolean(me?.role) && me?.role !== "agent";
+  const view: View = showTemplates ? viewState : "tasks";
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
@@ -763,6 +777,7 @@ export default function TasksPage() {
             <ListChecks className="h-4 w-4" />
             Tasks
           </button>
+          {showTemplates && (
           <button
             role="tab"
             aria-selected={view === "templates"}
@@ -775,6 +790,7 @@ export default function TasksPage() {
             <LayoutTemplate className="h-4 w-4" />
             Templates
           </button>
+          )}
         </div>
       </PageHeader>
 

@@ -963,7 +963,7 @@ router.post(
         requireExportConfirm(req, res, () => { confirmed = true; });
         if (!confirmed) return;
 
-        const headers = ["id","firstName","lastName","email","phone","status","medicareId","currentPlanType","stateCode","zipCode","leadSource","createdAt"];
+        const headers = ["id","firstName","lastName","email","phone","status","currentPlanType","stateCode","zipCode","leadSource","createdAt"];
         const maskedContacts = contacts.map((c) => serializeContact(c, authReq.userRole));
         const rows = maskedContacts.map((c) => headers.map((h) => {
           const v = (c as Record<string, unknown>)[h];

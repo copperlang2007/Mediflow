@@ -329,7 +329,7 @@ describe("CSV exports", () => {
     expect(roster.status).toBe(403);
   });
 
-  it("exports contacts with the MBI decrypted only for PHI-privileged roles, and logs it", async () => {
+  it("exports contacts with NO Medicare ID value or header for any role, and logs it", async () => {
     const before = await exportLogCount("contacts_csv");
     const priv = await request(app)
       .get("/api/reports/contacts/export")
@@ -338,7 +338,9 @@ describe("CSV exports", () => {
     expect(priv.status).toBe(200);
     expect(priv.headers["content-type"]).toContain("text/csv");
     expect(priv.text).toContain("Mary");
-    expect(priv.text).toContain(MBI);
+    expect(priv.text).not.toContain(MBI);
+    expect(priv.text.toLowerCase()).not.toContain("medicare");
+    expect(priv.text).not.toContain("***-**-****");
     expect(priv.text).not.toContain("Other");
 
     const masked = await request(app)
@@ -347,7 +349,8 @@ describe("CSV exports", () => {
       .set("X-Confirm-Export", "true");
     expect(masked.status).toBe(200);
     expect(masked.text).not.toContain(MBI);
-    expect(masked.text).toContain("***-**-****");
+    expect(masked.text.toLowerCase()).not.toContain("medicare");
+    expect(masked.text).not.toContain("***-**-****");
 
     expect(await exportLogCount("contacts_csv")).toBe(before + 2);
   });

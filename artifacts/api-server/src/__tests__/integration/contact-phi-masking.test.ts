@@ -106,7 +106,7 @@ describe("Contact PHI masking", () => {
     expect(res.body.healthConditions).toEqual([]);
   });
 
-  it("POST /contacts/bulk export_csv as agent_support emits MASKED medicareId in the CSV body", async () => {
+  it("POST /contacts/bulk export_csv as agent_support emits NO medicareId in the CSV", async () => {
     // export_csv requires step-up confirmation (H1) — send the confirm header.
     const res = await request(app)
       .post("/api/contacts/bulk")
@@ -115,11 +115,12 @@ describe("Contact PHI masking", () => {
       .send({ ids: [contactWithPhi.id], action: "export_csv" });
     expect(res.status).toBe(200);
     const body = String(res.text ?? res.body ?? "");
-    expect(body).toContain("***-**-****");
+    expect(body.split("\n")[0].toLowerCase()).not.toContain("medicare");
+    expect(body).not.toContain("***-**-****");
     expect(body).not.toContain(REAL_MEDICARE_ID);
   });
 
-  it("POST /contacts/bulk export_csv as super_admin emits the REAL medicareId", async () => {
+  it("POST /contacts/bulk export_csv as super_admin emits NO medicareId in the CSV", async () => {
     // export_csv requires step-up confirmation (H1) — send the confirm header.
     const res = await request(app)
       .post("/api/contacts/bulk")
@@ -128,6 +129,7 @@ describe("Contact PHI masking", () => {
       .send({ ids: [contactWithPhi.id], action: "export_csv" });
     expect(res.status).toBe(200);
     const body = String(res.text ?? res.body ?? "");
-    expect(body).toContain(REAL_MEDICARE_ID);
+    expect(body.split("\n")[0].toLowerCase()).not.toContain("medicare");
+    expect(body).not.toContain(REAL_MEDICARE_ID);
   });
 });

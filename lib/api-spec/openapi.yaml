@@ -312,6 +312,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/Agent"
 
+  /agents/me:
+    get:
+      operationId: getMyAgent
+      tags: [agents]
+      summary: The caller's own agent profile (agent role only)
+      description: |
+        Self lookup for the `agent` role, which has no `agent:read`. Resolved
+        by the authenticated user within their own org. 404 when the user has
+        no linked agent profile; 403 for any other role.
+      responses:
+        "200":
+          description: The caller's agent profile (minimal fields)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyAgent"
+        "404":
+          description: No agent profile is linked to this user
+
   /agents/{id}:
     get:
       operationId: getAgent
@@ -5589,6 +5608,24 @@ components:
         - type
         - title
         - createdAt
+
+    MyAgent:
+      type: object
+      properties:
+        id:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        status:
+          type: string
+          enum: [onboarding, active, suspended, offboarding, offboarded]
+      required:
+        - id
+        - firstName
+        - lastName
+        - status
 
     Agent:
       type: object

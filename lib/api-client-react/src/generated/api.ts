@@ -188,6 +188,7 @@ import type {
   LogActivityBody,
   MarkMessageRead200,
   Message,
+  MyAgent,
   Notification,
   NotificationCount,
   OffboardResponse,
@@ -1315,6 +1316,84 @@ export const useCreateAgent = <
 > => {
   return useMutation(getCreateAgentMutationOptions(options));
 };
+
+export const getGetMyAgentUrl = () => {
+  return `/api/agents/me`;
+};
+
+/**
+ * Self lookup for the `agent` role, which has no `agent:read`. Resolved
+ * by the authenticated user within their own org. 404 when the user has
+ * no linked agent profile; 403 for any other role.
+ * @summary The caller's own agent profile (agent role only)
+ */
+export const getMyAgent = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<MyAgent> => {
+  return customFetch<MyAgent>(getGetMyAgentUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetMyAgentQueryKey = () => {
+  return [`/api/agents/me`] as const;
+};
+
+export const getGetMyAgentQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMyAgent>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getMyAgent>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetMyAgentQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getMyAgent>>> = ({
+    signal,
+  }) => getMyAgent({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMyAgent>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetMyAgentQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMyAgent>>
+>;
+export type GetMyAgentQueryError = ErrorType<void>;
+
+/**
+ * @summary The caller's own agent profile (agent role only)
+ */
+
+export function useGetMyAgent<
+  TData = Awaited<ReturnType<typeof getMyAgent>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getMyAgent>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetMyAgentQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
 
 export const getGetAgentUrl = (id: string) => {
   return `/api/agents/${id}`;
