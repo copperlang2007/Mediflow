@@ -1157,8 +1157,9 @@ describe("everything is re-checked at dial time", () => {
     expect(row.blockedReason).toContain(reason);
     expect(row.twilioCallSid).toBeNull();
   }
-  const upd = (id: string, set: Record<string, unknown>) =>
-    db.update(schema.contactsTable).set(set as never).where(eq(schema.contactsTable.id, id));
+  const upd = async (id: string, set: Record<string, unknown>): Promise<void> => {
+    await db.update(schema.contactsTable).set(set as never).where(eq(schema.contactsTable.id, id));
+  };
 
   it("consent removed after preclearance", async () => {
     await rejectedAfter((id) => upd(id, { tcpaConsentAt: null }), "no_consent");
