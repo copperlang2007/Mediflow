@@ -29,3 +29,4 @@ export * from "./appointments";
 export * from "./branding";
 export * from "./campaigns";
 export * from "./voice";
+export * from "./callScoring";
