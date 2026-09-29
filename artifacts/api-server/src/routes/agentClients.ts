@@ -75,7 +75,7 @@ router.get(
         currentPlanType: contactsTable.currentPlanType,
         dob: contactsTable.dob,
       }).from(contactsTable).where(and(...conditions))
-        .orderBy(asc(contactsTable.lastName), asc(contactsTable.firstName))
+        .orderBy(asc(contactsTable.lastName), asc(contactsTable.firstName), asc(contactsTable.id))
         .limit(limit).offset(offset),
       db.select({ total: sql<number>`count(*)` }).from(contactsTable).where(and(...conditions)),
     ]);
