@@ -45,7 +45,8 @@ export type Resource =
   | "seat"
   | "dev_console"
   | "kb_article"
-  | "appointment";
+  | "appointment"
+  | "call";
 
 export type Action = "read" | "create" | "update" | "delete" | "admin";
 
@@ -263,6 +264,16 @@ const MATRIX: PermissionMatrix = {
     create: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "agent"],
     update: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "agent"],
     delete: ["super_admin", "agency_admin", "agent"],
+  },
+  // Native browser calling (Twilio Voice). `create` = place a call. The `agent`
+  // role may place calls only to contacts assigned to their own agent profile
+  // and read/update only their own call sessions; routes/softphone.ts applies
+  // that narrowing — this matrix only admits the role. Viewers and developers
+  // never place calls. Compliance managers may read the org's call history.
+  call: {
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "agent"],
+    create: ["super_admin", "agency_admin", "agent_support", "agent"],
+    update: ["super_admin", "agency_admin", "agent_support", "agent"],
   },
 };
 

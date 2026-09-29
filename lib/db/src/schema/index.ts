@@ -28,3 +28,4 @@ export * from "./knowledgeBase";
 export * from "./appointments";
 export * from "./branding";
 export * from "./campaigns";
+export * from "./voice";
