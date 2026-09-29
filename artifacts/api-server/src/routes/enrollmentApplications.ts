@@ -38,14 +38,14 @@ const router: IRouter = Router();
 function sunfireFieldIds(payload: Record<string, unknown>): { medicareNumber: string | null; medicaidNumber: string | null } | null {
   if (payload.source !== "gohighlevel" || typeof payload.fields !== "object" || payload.fields === null) return null;
   const fields = payload.fields as Record<string, unknown>;
-  // GHL merge keys are unique per sub-account, so one match is expected; if a
-  // payload ever carries two (a renamed or duplicated field), show neither
-  // rather than risk putting another person's number at the top.
+  // GHL merge keys are unique per sub-account, so one match is expected; a key
+  // that matches two fields (a renamed or duplicated field) is skipped rather
+  // than risk putting another person's number at the top, and the next
+  // fallback key is tried.
   const pick = (...keys: string[]): string | null => {
     for (const key of keys) {
       const hits = Object.entries(fields).filter(([label, v]) => label.endsWith(`(${key})`) && typeof v === "string" && v.trim());
       if (hits.length === 1) return (hits[0]![1] as string).trim();
-      if (hits.length > 1) return null;
     }
     return null;
   };
