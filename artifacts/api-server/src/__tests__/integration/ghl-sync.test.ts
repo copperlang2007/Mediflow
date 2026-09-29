@@ -164,14 +164,45 @@ describe("GHL feed", () => {
     expect((await orgContacts()).find((c) => c.firstName === "First1")).toMatchObject({ optOutSms: true, optOutEmail: true });
   });
 
-  it("records GHL's latest DND flag on the link (and mirrors it on later syncs)", async () => {
-    const [link] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, "ghl-1"));
-    expect(link!.externalDnd).toBe(true);
-    await sync.runGhlSync(cfg(), { fetchImpl: fakeGhl([{ ...ghlContact(1), email: "one@example.com", dnd: false, dateUpdated: "2026-03-02T00:00:00.000Z" }]).impl });
-    const [after] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, "ghl-1"));
-    expect(after!.externalDnd).toBe(false);
-    // The contact's own opt-out flags are never turned back off.
-    expect((await orgContacts()).find((c) => c.firstName === "First1")).toMatchObject({ optOutSms: true, optOutEmail: true });
+  it("external_dnd on the link: unknown stays unknown, omitted/null never clear it, true is sticky", async () => {
+    const org16 = await seedOrg(tdb, { id: "ghl-org-dnd-link" });
+    const cfg16 = ({ orgId: org16.id, token: TOKEN, locationId: `loc-${org16.id}` });
+    const dndOf = async (extId: string) =>
+      (await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, extId)))[0]!.externalDnd;
+    let t = 0;
+    const pass = async (n: number, extra: Record<string, unknown>) => {
+      t += 1;
+      const c = { ...ghlContact(n), dateUpdated: new Date(Date.UTC(2026, 8, 1, 0, 0, t)).toISOString(), ...extra } as GhlContact;
+      // "omitted" means the key is absent from the payload
+      if ("dnd" in extra && extra.dnd === "__omit__") delete (c as unknown as Record<string, unknown>).dnd;
+      await sync.runGhlSync(cfg16, { fetchImpl: fakeGhl([c]).impl });
+    };
+
+    // Omitted on first sight: unknown (null), NOT false. Still null after another omitted/null pass.
+    await pass(14000, { dnd: "__omit__" });
+    expect(await dndOf("ghl-14000")).toBeNull();
+    await pass(14000, { dnd: null });
+    expect(await dndOf("ghl-14000")).toBeNull();
+    // Explicit false replaces unknown; a later omitted/null leaves it false.
+    await pass(14000, { dnd: false });
+    expect(await dndOf("ghl-14000")).toBe(false);
+    await pass(14000, { dnd: "__omit__" });
+    await pass(14000, { dnd: null });
+    expect(await dndOf("ghl-14000")).toBe(false);
+    // false then true -> true.
+    await pass(14000, { dnd: true });
+    expect(await dndOf("ghl-14000")).toBe(true);
+    // true is never turned back off: not by omitted, null, or an explicit false.
+    await pass(14000, { dnd: "__omit__" });
+    await pass(14000, { dnd: null });
+    await pass(14000, { dnd: false });
+    expect(await dndOf("ghl-14000")).toBe(true);
+
+    // First sight with true / false are recorded as sent.
+    await pass(14001, { dnd: true });
+    expect(await dndOf("ghl-14001")).toBe(true);
+    await pass(14002, { dnd: false });
+    expect(await dndOf("ghl-14002")).toBe(false);
   });
 
   it("stops at the page cap, reports more_pending, and resumes from the cursor", async () => {

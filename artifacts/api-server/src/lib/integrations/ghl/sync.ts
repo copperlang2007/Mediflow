@@ -405,10 +405,18 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
     sureOfIdentity = true;
     await fillBlanks(tx, orgId, contactId, contact, null);
     // An undated response must not erase the timestamp we already have.
-    // externalDnd always mirrors GHL's latest flag (it only ever blocks calls).
-    await tx.update(externalContactLinksTable)
-      .set({ ...(externalUpdatedAt ? { externalUpdatedAt } : {}), externalDnd: !!gc.dnd })
-      .where(eq(externalContactLinksTable.id, link.id));
+    // external_dnd is only written when GHL actually sent a boolean (an omitted
+    // or null value leaves what we know untouched), and a stored true is never
+    // turned back off here, like the contact opt-outs. An explicit false only
+    // replaces unknown (null).
+    const dndPatch = typeof gc.dnd === "boolean"
+      ? { externalDnd: gc.dnd ? true : sql`coalesce(${externalContactLinksTable.externalDnd}, false)` }
+      : {};
+    if (externalUpdatedAt || Object.keys(dndPatch).length > 0) {
+      await tx.update(externalContactLinksTable)
+        .set({ ...(externalUpdatedAt ? { externalUpdatedAt } : {}), ...dndPatch })
+        .where(eq(externalContactLinksTable.id, link.id));
+    }
   } else {
     // Not linked yet. If the only person this matches is one the agency has
     // soft-deleted, record a tombstone link and stop: syncing must not bring a
@@ -479,7 +487,7 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
     await tx.insert(externalContactLinksTable).values({
       id: randomUUID(), orgId, source: GHL_SOURCE, externalId: gc.id, contactId, externalUpdatedAt,
       // Recorded even when DND could not be applied below (weak identity match).
-      externalDnd: !!gc.dnd,
+      externalDnd: typeof gc.dnd === "boolean" ? gc.dnd : null,
     }).onConflictDoNothing();
   }
 

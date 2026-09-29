@@ -73,9 +73,11 @@ export async function resolveConsentBasis(
         eq(externalContactLinksTable.contactId, contact.id),
       ),
     );
-  // Linked to GHL, and GHL never reported do-not-disturb for any linked record
-  // (covers a DND the sync could not apply to a weakly matched contact).
-  if (links.length === 0 || links.some((l) => l.externalDnd)) return null;
+  // Linked to GHL, and every linked record has been checked and GHL said
+  // do-not-disturb is OFF. Only an explicit false passes: null (unknown, never
+  // refreshed - e.g. a legacy link) and true both block. This also covers a DND
+  // the sync could not apply to a weakly matched contact.
+  if (links.length === 0 || links.some((l) => l.externalDnd !== false)) return null;
 
   if (!dialedPhone || (await isNumberOptedOutAnyOrg(dialedPhone, handle))) return null;
 

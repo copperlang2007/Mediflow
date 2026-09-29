@@ -73,6 +73,14 @@ router.put(
     // Turning consent enforcement off is a compliance-significant decision:
     // the setting and its audit row (with the prior value) commit together.
     const settings = await db.transaction(async (tx) => {
+      // Serialize concurrent updates: make sure the row exists (defaults match
+      // the column defaults; a concurrent insert is a no-op), then lock it, so
+      // the prior values below - and the audit rows derived from them - are
+      // exactly what this update replaces.
+      await tx
+        .insert(orgSettingsTable)
+        .values({ id: randomUUID(), orgId: authReq.orgId })
+        .onConflictDoNothing({ target: orgSettingsTable.orgId });
       const [existing] = await tx
         .select({
           id: orgSettingsTable.id,
@@ -81,41 +89,23 @@ router.put(
         })
         .from(orgSettingsTable)
         .where(eq(orgSettingsTable.orgId, authReq.orgId))
-        .limit(1);
+        .limit(1)
+        .for("update");
 
-      let saved;
-      if (!existing) {
-        [saved] = await tx
-          .insert(orgSettingsTable)
-          .values({
-            id: randomUUID(),
-            orgId: authReq.orgId,
-            ahipSeasonOpenMonth: data.ahipSeasonOpenMonth ?? 7,
-            ahipSeasonOpenDay: data.ahipSeasonOpenDay ?? 1,
-            ahipDeadlineMonth: data.ahipDeadlineMonth ?? 12,
-            ahipDeadlineDay: data.ahipDeadlineDay ?? 7,
-            ahipReminderEnabled: data.ahipReminderEnabled ?? true,
-            ahipReminderIntervalWeeks: data.ahipReminderIntervalWeeks ?? 2,
-            requireSmsConsent: data.requireSmsConsent ?? true,
-            allowImportedContactConsent: data.allowImportedContactConsent ?? false,
-          })
-          .returning();
-      } else {
-        const updates: Record<string, unknown> = {};
-        if (data.ahipSeasonOpenMonth !== undefined) updates.ahipSeasonOpenMonth = data.ahipSeasonOpenMonth;
-        if (data.ahipSeasonOpenDay !== undefined) updates.ahipSeasonOpenDay = data.ahipSeasonOpenDay;
-        if (data.ahipDeadlineMonth !== undefined) updates.ahipDeadlineMonth = data.ahipDeadlineMonth;
-        if (data.ahipDeadlineDay !== undefined) updates.ahipDeadlineDay = data.ahipDeadlineDay;
-        if (data.ahipReminderEnabled !== undefined) updates.ahipReminderEnabled = data.ahipReminderEnabled;
-        if (data.ahipReminderIntervalWeeks !== undefined) updates.ahipReminderIntervalWeeks = data.ahipReminderIntervalWeeks;
-        if (data.requireSmsConsent !== undefined) updates.requireSmsConsent = data.requireSmsConsent;
-        if (data.allowImportedContactConsent !== undefined) updates.allowImportedContactConsent = data.allowImportedContactConsent;
-        [saved] = Object.keys(updates).length
-          ? await tx.update(orgSettingsTable).set(updates).where(eq(orgSettingsTable.orgId, authReq.orgId)).returning()
-          : await tx.select().from(orgSettingsTable).where(eq(orgSettingsTable.orgId, authReq.orgId)).limit(1);
-      }
+      const updates: Record<string, unknown> = {};
+      if (data.ahipSeasonOpenMonth !== undefined) updates.ahipSeasonOpenMonth = data.ahipSeasonOpenMonth;
+      if (data.ahipSeasonOpenDay !== undefined) updates.ahipSeasonOpenDay = data.ahipSeasonOpenDay;
+      if (data.ahipDeadlineMonth !== undefined) updates.ahipDeadlineMonth = data.ahipDeadlineMonth;
+      if (data.ahipDeadlineDay !== undefined) updates.ahipDeadlineDay = data.ahipDeadlineDay;
+      if (data.ahipReminderEnabled !== undefined) updates.ahipReminderEnabled = data.ahipReminderEnabled;
+      if (data.ahipReminderIntervalWeeks !== undefined) updates.ahipReminderIntervalWeeks = data.ahipReminderIntervalWeeks;
+      if (data.requireSmsConsent !== undefined) updates.requireSmsConsent = data.requireSmsConsent;
+      if (data.allowImportedContactConsent !== undefined) updates.allowImportedContactConsent = data.allowImportedContactConsent;
+      const [saved] = Object.keys(updates).length
+        ? await tx.update(orgSettingsTable).set(updates).where(eq(orgSettingsTable.orgId, authReq.orgId)).returning()
+        : await tx.select().from(orgSettingsTable).where(eq(orgSettingsTable.orgId, authReq.orgId)).limit(1);
 
-      const before = existing?.requireSmsConsent ?? true;
+      const before = existing!.requireSmsConsent;
       if (data.requireSmsConsent !== undefined && data.requireSmsConsent !== before) {
         await tx.insert(auditLogTable).values({
           id: randomUUID(),
@@ -131,7 +121,7 @@ router.put(
       // Voice consent for imported clients is compliance-significant too: the
       // change and its audit row (prior value) commit together. Not a
       // compliance finding - see lib/voice/consentBasis.ts.
-      const importedBefore = existing?.allowImportedContactConsent ?? false;
+      const importedBefore = existing!.allowImportedContactConsent;
       if (
         data.allowImportedContactConsent !== undefined &&
         data.allowImportedContactConsent !== importedBefore

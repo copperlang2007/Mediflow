@@ -6,7 +6,9 @@
 -- each call: 'documented' or 'imported_ghl_recorded_call'.
 -- external_contact_links.external_dnd: whether the external system last
 -- reported do-not-disturb for that record, even when the sync could not apply
--- it to the contact (weak identity match). It only ever blocks.
+-- it to the contact (weak identity match). NULL (no default, existing rows stay
+-- NULL) means unknown / never refreshed: imported-client calling needs an
+-- explicit false, so a legacy link is NOT callable until a sync refreshes it.
 ALTER TABLE "org_settings" ADD COLUMN IF NOT EXISTS "allow_imported_contact_consent" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "call_sessions" ADD COLUMN IF NOT EXISTS "consent_basis" text;--> statement-breakpoint
-ALTER TABLE "external_contact_links" ADD COLUMN IF NOT EXISTS "external_dnd" boolean DEFAULT false NOT NULL;
+ALTER TABLE "external_contact_links" ADD COLUMN IF NOT EXISTS "external_dnd" boolean;

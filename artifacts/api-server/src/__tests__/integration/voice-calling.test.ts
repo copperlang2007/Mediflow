@@ -1605,12 +1605,12 @@ describe("imported-client consent basis (org switch, GoHighLevel link, no flags)
       .onConflictDoUpdate({ target: schema.orgSettingsTable.orgId, set: { allowImportedContactConsent: on } });
   }
   /** A contact with NO documented consent, optionally linked to a GHL record. */
-  async function imported(opts: { linked?: boolean; linkDnd?: boolean; linkOrgId?: string } = {}) {
+  async function imported(opts: { linked?: boolean; linkDnd?: boolean | null; linkOrgId?: string } = {}) {
     const c = await newContact({ consent: false });
     if (opts.linked !== false) {
       await db.insert(schema.externalContactLinksTable).values({
         id: randomUUID(), orgId: opts.linkOrgId ?? org.id, source: "gohighlevel",
-        externalId: `ghl-${randomUUID()}`, contactId: c.id, externalDnd: opts.linkDnd ?? false,
+        externalId: `ghl-${randomUUID()}`, contactId: c.id, externalDnd: opts.linkDnd === undefined ? false : opts.linkDnd,
       });
     }
     return c;
@@ -1727,6 +1727,41 @@ describe("imported-client consent basis (org switch, GoHighLevel link, no flags)
     expect(res.body.code).toBe("NO_CONSENT");
   });
 
+  it("legacy link whose DND was never checked (external_dnd NULL) is NOT callable; explicit false is; true is not", async () => {
+    await setSwitch(org.id, true);
+    const legacy = await imported({ linkDnd: null });
+    const res = await place(admin.id, legacy.id);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("NO_CONSENT");
+    expect((await sessionRow(res.body.callSessionId)).consentBasis).toBeNull();
+    const checked = await imported({ linkDnd: false });
+    expect((await place(admin.id, checked.id)).status).toBe(201);
+    const dnd = await imported({ linkDnd: true });
+    expect((await place(admin.id, dnd.id)).status).toBe(409);
+  });
+
+  it("unknown link (NULL): blocked both when the contact is clean and when it also carries a local opt-out", async () => {
+    await setSwitch(org.id, true);
+    const clean = await imported({ linkDnd: null });
+    expect((await place(admin.id, clean.id)).status).toBe(409);
+    for (const set of [{ optOutSms: true }, { optOutEmail: true }, { status: "do_not_contact" }]) {
+      const c = await imported({ linkDnd: null });
+      await upd(c.id, set);
+      expect((await place(admin.id, c.id)).status).toBe(409);
+    }
+  });
+
+  it("a link that turns unknown (NULL) between place and webhook is rejected at dial time", async () => {
+    await setSwitch(org.id, true);
+    const c = await imported();
+    const res = await place(admin.id, c.id);
+    expect(res.status).toBe(201);
+    await db.update(schema.externalContactLinksTable).set({ externalDnd: null })
+      .where(eq(schema.externalContactLinksTable.contactId, c.id));
+    const hook = await postTwilio(VOICE, voiceParams(res.body.callSessionId, res.body.to, admin.id));
+    expect(hook.text).toContain("<Reject");
+  });
+
   describe("dial-time recheck enforces the same rule", () => {
     async function startImported() {
       await setSwitch(org.id, true);
@@ -1830,6 +1865,35 @@ describe("PUT /org-settings allowImportedContactConsent", () => {
     expect((await put(otherAdmin.id, { allowImportedContactConsent: true })).status).toBe(200);
     expect(await read(otherOrg.id)).toBe(true);
     expect(await read(org.id)).toBe(true);
+  });
+
+  it("concurrent true/false updates end with a consistent audit trail", async () => {
+    // Fresh org with NO settings row: exercises the create-then-lock path too.
+    const o = await seedOrg(db, { id: `vc-race-${randomUUID().slice(0, 8)}` });
+    const a = await seedUser(db, { orgId: o.id, role: "agency_admin" });
+    const b = await seedUser(db, { orgId: o.id, role: "agency_admin" });
+    for (let round = 0; round < 4; round++) {
+      await Promise.all([
+        put(a.id, { allowImportedContactConsent: true }),
+        put(b.id, { allowImportedContactConsent: false }),
+        put(a.id, { allowImportedContactConsent: true }),
+        put(b.id, { allowImportedContactConsent: false }),
+      ]);
+    }
+    const final = await read(o.id);
+    const rows = (await db.select().from(schema.auditLogTable).where(and(
+      eq(schema.auditLogTable.orgId, o.id),
+      eq(schema.auditLogTable.resourceType, "org_settings.allow_imported_contact_consent"),
+    ))).sort((x, y) => +new Date(x.createdAt) - +new Date(y.createdAt));
+    // Every audit row is a real transition, and the chain links up: each `from`
+    // is the previous row's `to`, starting from the default false, ending at the stored value.
+    type Ch = { allowImportedContactConsent: { from: boolean; to: boolean } };
+    const chain = rows.map((r) => (r.changes as Ch).allowImportedContactConsent);
+    expect(chain.length).toBeGreaterThan(0);
+    for (const c of chain) expect(c.from).not.toBe(c.to);
+    expect(chain[0]!.from).toBe(false);
+    for (let i = 1; i < chain.length; i++) expect(chain[i]!.from).toBe(chain[i - 1]!.to);
+    expect(chain[chain.length - 1]!.to).toBe(final);
   });
 
   it("rejects a non-boolean value", async () => {

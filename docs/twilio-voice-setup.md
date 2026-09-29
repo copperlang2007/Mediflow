@@ -120,8 +120,10 @@ consent date if **all** of these are true:
 - the contact is linked to a GoHighLevel contact (it came in through the sync);
 - the contact is not marked do-not-contact and has no opt-out of any kind (text
   or email opt-out, or an opt-out on the number in any agency);
-- GoHighLevel has not flagged that record as DND, even in the rare case where the
-  sync could not copy the flag onto the contact.
+- the sync has **checked** that record and GoHighLevel said DND is off. A link
+  that has never been refreshed by a sync is "unknown" and is **not callable**,
+  and so is any link GoHighLevel has ever flagged DND, even in the rare case where
+  the sync could not copy the flag onto the contact.
 
 Everything else is as strict as before: calling hours, licensing, redial limits,
 and the check again at the moment the call connects. Each call is stored with
@@ -138,16 +140,24 @@ softphone shows a small note when a call went ahead on the imported basis.
 - Have your attorney or compliance counsel confirm this before you rely on it.
   Nothing here is a statement that the calls are compliant.
 
+**A cleared DND does not re-enable calling.** Once GoHighLevel has reported DND on
+a contact, Mediflow keeps it blocked even if GoHighLevel later clears the flag
+(over-blocking is the safe direction, and a weakly matched contact never got a
+local opt-out written). An admin has to review such contacts and record documented
+consent on them. An explicit admin override is not built yet (follow-up).
+
 **Clean up after the move.** Add a real consent date and source to each client
 (the switch is a bridge, not a permanent answer), then turn the switch off.
 
 ### Before you turn it on
 
-1. Run a GoHighLevel sync. Contacts only count as imported once they are linked,
-   and a DND flag only reaches Mediflow when the sync runs. A record last changed
-   in GoHighLevel before the sync feature was updated is not re-read on its own,
-   so make a small change to (or re-save) known do-not-contact records in
-   GoHighLevel, or ask us to re-run the sync from the start.
+1. Run a **full** GoHighLevel sync (backfill from the beginning; ask us to reset
+   the sync cursor). Contacts linked before this feature existed are "unknown"
+   until the sync refreshes them, and the normal incremental sync does not revisit
+   unchanged contacts, so without a full re-sync those clients stay **blocked**
+   (that is deliberate: unknown is never treated as clear). Mediflow does not yet
+   show a count of still-unknown contacts; if a client you expect to be callable
+   is blocked, an un-refreshed link is the likely reason.
 2. Spot-check a few clients you know are do-not-contact in GoHighLevel. Open each
    in Mediflow and try to call: they must show as **blocked**.
 3. Check every agent who will call has an **active** agent profile.

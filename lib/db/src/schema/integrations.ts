@@ -66,9 +66,10 @@ export const externalContactLinksTable = pgTable(
     /**
      * The external system's latest do-not-disturb flag for this record, kept
      * even when the sync could not apply it to the contact (weak identity
-     * match). Imported-client voice consent requires this to be false.
+     * match). NULL = unknown / never refreshed (legacy rows); imported-client
+     * voice consent requires an explicit false, so null and true both block.
      */
-    externalDnd: boolean("external_dnd").notNull().default(false),
+    externalDnd: boolean("external_dnd"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
