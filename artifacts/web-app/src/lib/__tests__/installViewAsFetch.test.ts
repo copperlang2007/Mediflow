@@ -27,3 +27,19 @@ it("tags direct API mutations and reads with the selected agency, but leaves ide
   expect(transport.mock.calls[2][1]).toBeUndefined();
   expect(new Headers(transport.mock.calls[3][1].headers).get("X-MediFlow-View-Org")).toBe("org-b");
 });
+it("adds the stated reason only to permitted profile patches", async () => {
+  const transport = vi.fn().mockResolvedValue({ status: 204 });
+  globalThis.fetch = transport;
+  localStorage.setItem("mediflow:view-as-org", "org-b");
+  localStorage.setItem("mediflow:support-edit-reason", "Agency requested contact correction");
+  installViewAsFetch();
+
+  await fetch("/mediflow/api/contacts/contact-b", { method: "PATCH" });
+  await fetch("/api/contacts/contact-b", { method: "DELETE" });
+  await fetch("/api/contacts/contact-b/send-sms", { method: "POST" });
+
+  expect(new Headers(transport.mock.calls[0][1].headers).get("X-MediFlow-Support-Reason")).toBe("Agency requested contact correction");
+  expect(new Headers(transport.mock.calls[0][1].headers).get("X-MediFlow-Support-Edit")).toBe("true");
+  expect(new Headers(transport.mock.calls[1][1].headers).has("X-MediFlow-Support-Edit")).toBe(false);
+  expect(new Headers(transport.mock.calls[2][1].headers).has("X-MediFlow-Support-Edit")).toBe(false);
+});
