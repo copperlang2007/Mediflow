@@ -94,6 +94,8 @@ export interface CallState {
   endedAt: number | null;
   /** Server's exact refusal reasons (HTTP 409). */
   blocked: CallBlockReason[] | null;
+  /** Which consent rule allowed this call (server-reported); null when unknown. */
+  consentBasis: string | null;
   /** Non-refusal problem to show (mic denied, network, …). */
   error: string | null;
   /** Server said calling needs setup / is unavailable mid-flow. */
@@ -110,6 +112,7 @@ const IDLE: CallState = {
   answeredAt: null,
   endedAt: null,
   blocked: null,
+  consentBasis: null,
   error: null,
   unavailable: null,
 };
@@ -238,7 +241,7 @@ export function useSoftphoneCall(opts: { deviceFactory?: DeviceFactory } = {}) {
         return;
       }
 
-      patch({ phase: "connecting", callSessionId: session.callSessionId });
+      patch({ phase: "connecting", callSessionId: session.callSessionId, consentBasis: session.consentBasis ?? null });
 
       // 2) A Device from a fresh access token, 3) connect with the session id.
       try {

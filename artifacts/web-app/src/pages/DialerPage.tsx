@@ -89,7 +89,7 @@ export function describeFailure(f: PrecheckFailure, p: Pick<Precheck, "agent" | 
     case "AGENT_LICENSE_EXPIRED": return `${who}'s ${st} license has expired.`;
     case "AGENT_NO_AHIP": return `${who} hasn't completed AHIP for ${p.planYear}.`;
     case "AGENT_NOT_CERTIFIED": return `${who} has no valid carrier certification for ${p.planYear}.`;
-    case "NO_CONSENT": return "There's no consent on file for this contact.";
+    case "NO_CONSENT": return "There's no consent on file for this contact. If they are an imported client, an admin can enable imported-client consent in Settings.";
     case "DNC": return /do_not_contact/.test(f.detail) ? "This contact is marked Do not contact." : "This number is on your do-not-call / opt-out list.";
     case "OUTSIDE_CALLING_HOURS":
       return `It's ${p.callingHours.localTime ?? "outside hours"} for them — calls are allowed ${hourLabel(p.callingHours.startHour)}–${hourLabel(p.callingHours.endHour)} their time.`;
