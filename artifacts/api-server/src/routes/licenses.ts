@@ -8,6 +8,7 @@ import {
   requirePermission,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { requireAgentPermissionOrSelf } from "../middlewares/agentSelfScope";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import { withEffectiveStatus } from "../lib/licenses/licenseStatus";
@@ -64,7 +65,8 @@ async function getAgentOrFail(
 router.get(
   "/agents/:id/licenses",
   requireAuth,
-  requirePermission("agent", "read"),
+  // `agent` role: own licenses only (other ids answer 404, like a missing agent).
+  requireAgentPermissionOrSelf("read", "id"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const agentId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

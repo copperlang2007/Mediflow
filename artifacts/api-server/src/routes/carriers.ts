@@ -1,4 +1,4 @@
-import { Router, type IRouter, type Request, type Response } from "express";
+import { Router, type IRouter, type NextFunction, type Request, type Response } from "express";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
@@ -10,6 +10,8 @@ import {
 } from "../middlewares/requireAuth";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { seedDefaultCarriers } from "../lib/carrierSeed";
+import { can } from "../lib/permissions";
+import { isSelfScopedAgent } from "../middlewares/agentSelfScope";
 
 // TODO(day-6-followup): no dedicated frontend admin page exists for managing
 // carriers today. The Day-6 email-out worker reads `appointment_desk_email`
@@ -68,7 +70,18 @@ router.use(
 router.get(
   "/carriers",
   requireAuth,
-  requirePermission("agent", "read"),
+  // Back-office roles: `agent:read`. The `agent` role (which has no agent:*
+  // permission) may read the org's carrier catalogue only, through a narrow
+  // projection, because the self-service onboarding wizard needs it to pick
+  // carriers. Both paths stay scoped to the caller's own org.
+  (req: Request, res: Response, next: NextFunction): void => {
+    const role = (req as AuthenticatedRequest).userRole;
+    if (role && (can(role, "agent", "read") || (isSelfScopedAgent(req) && can(role, "agent_onboarding", "read")))) {
+      next();
+      return;
+    }
+    res.status(403).json({ error: "Forbidden" });
+  },
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const carriers = await db
@@ -76,6 +89,21 @@ router.get(
       .from(carriersTable)
       .where(eq(carriersTable.orgId, authReq.orgId))
       .orderBy(carriersTable.name);
+    if (isSelfScopedAgent(req)) {
+      // No appointment-desk addresses / metadata (internal ops config).
+      res.json(
+        carriers.map((c) => ({
+          id: c.id,
+          orgId: c.orgId,
+          name: c.name,
+          cmsContractNumber: c.cmsContractNumber,
+          logoUrl: c.logoUrl,
+          isActive: c.isActive,
+          createdAt: c.createdAt,
+        })),
+      );
+      return;
+    }
     res.json(carriers);
   },
 );

@@ -392,6 +392,25 @@ export const CreateAgentResponse = zod.object({
 });
 
 /**
+ * Self lookup for the `agent` role, which has no `agent:read`. Resolved
+ * by the authenticated user within their own org. 404 when the user has
+ * no linked agent profile; 403 for any other role.
+ * @summary The caller's own agent profile (agent role only)
+ */
+export const GetMyAgentResponse = zod.object({
+  id: zod.string(),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  status: zod.enum([
+    "onboarding",
+    "active",
+    "suspended",
+    "offboarding",
+    "offboarded",
+  ]),
+});
+
+/**
  * @summary Get agent by ID
  */
 export const GetAgentParams = zod.object({

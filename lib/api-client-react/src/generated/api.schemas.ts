@@ -142,6 +142,23 @@ export interface ActivityItem {
   createdAt: string;
 }
 
+export type MyAgentStatus = (typeof MyAgentStatus)[keyof typeof MyAgentStatus];
+
+export const MyAgentStatus = {
+  onboarding: "onboarding",
+  active: "active",
+  suspended: "suspended",
+  offboarding: "offboarding",
+  offboarded: "offboarded",
+} as const;
+
+export interface MyAgent {
+  id: string;
+  firstName: string;
+  lastName: string;
+  status: MyAgentStatus;
+}
+
 export type AgentStatus = (typeof AgentStatus)[keyof typeof AgentStatus];
 
 export const AgentStatus = {

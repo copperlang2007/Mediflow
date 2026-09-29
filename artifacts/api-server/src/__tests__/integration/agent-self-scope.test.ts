@@ -32,6 +32,8 @@ import {
   agentOnboardingRunsTable,
   agentContractingProfilesTable,
   taskInstancesTable,
+  carriersTable,
+  stateLicensesTable,
 } from "@workspace/db/schema";
 
 import { bootTestDb, shutdownTestDb, withAuth } from "../helpers/testApp";
@@ -83,6 +85,12 @@ async function task(id: string, orgId: string, extra: Record<string, unknown>): 
   } as typeof taskInstancesTable.$inferInsert);
 }
 
+const C_OWN = `carrier-own-${randomUUID()}`;
+const C_FOREIGN = `carrier-foreign-${randomUUID()}`;
+const L_OWN = `lic-own-${randomUUID()}`;
+const L_PEER = `lic-peer-${randomUUID()}`;
+let unlinkedUser: { id: string };
+
 let ownRun: string;
 let peerRun: string;
 let foreignRun: string;
@@ -111,6 +119,22 @@ beforeAll(async () => {
   await db.insert(agentContractingProfilesTable).values({ agentId: agent.id, orgId: org.id });
   peerRun = await run(peer.id, org.id);
   foreignRun = await run(foreign.id, otherOrg.id);
+
+  unlinkedUser = await seedUser(db, { orgId: org.id, role: "agent" }); // deliberately NOT linked
+  await db.insert(carriersTable).values([
+    {
+      id: C_OWN,
+      orgId: org.id,
+      name: "Own Org Carrier",
+      appointmentDeskEmail: "desk@carrier.example",
+      appointmentDeskMetadata: { subject: "internal" },
+    },
+    { id: C_FOREIGN, orgId: otherOrg.id, name: "Foreign Org Carrier" },
+  ]);
+  await db.insert(stateLicensesTable).values([
+    { id: L_OWN, agentId: agent.id, stateCode: "FL", licenseType: "Health", status: "active" },
+    { id: L_PEER, agentId: peer.id, stateCode: "GA", licenseType: "Health", status: "active" },
+  ]);
 
   await task(T_OWN, org.id, { agentId: agent.id });
   await task(T_ASSIGNED, org.id, { assignedToUserId: agentUser.id });
@@ -284,5 +308,135 @@ describe("tasks — agent self-scope", () => {
   it("rejects unauthenticated callers", async () => {
     expect((await request(app).get("/api/tasks")).status).toBe(401);
     expect((await request(app).patch(`/api/tasks/${T_OWN}`).send({ status: "completed" })).status).toBe(401);
+  });
+});
+
+describe("GET /agents/me — agent self lookup", () => {
+  it("returns only the caller's own minimal profile", async () => {
+    const res = await request(app).get("/api/agents/me").set(withAuth(agentUser.id));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      id: agent.id,
+      firstName: expect.any(String),
+      lastName: "Own",
+      status: expect.any(String),
+    });
+  });
+
+  it("each agent resolves to their own profile, never a peer's or another org's", async () => {
+    const peerRes = await request(app).get("/api/agents/me").set(withAuth(peerUser.id));
+    expect(peerRes.body.id).toBe(peer.id);
+    const foreignRes = await request(app).get("/api/agents/me").set(withAuth(foreignUser.id));
+    expect(foreignRes.body.id).toBe(foreign.id);
+  });
+
+  it("is agent-role only (admins use the roster) and requires auth", async () => {
+    expect((await request(app).get("/api/agents/me").set(withAuth(admin.id))).status).toBe(403);
+    expect((await request(app).get("/api/agents/me")).status).toBe(401);
+  });
+
+  it("agents still cannot browse the roster or read other agent records", async () => {
+    expect((await request(app).get("/api/agents").set(withAuth(agentUser.id))).status).toBe(403);
+    expect((await request(app).get(`/api/agents/${peer.id}`).set(withAuth(agentUser.id))).status).toBe(403);
+  });
+});
+
+describe("GET /carriers — agent read is org-scoped and narrowed", () => {
+  it("agent sees own org's carriers without appointment-desk config, none from other orgs", async () => {
+    const res = await request(app).get("/api/carriers").set(withAuth(agentUser.id));
+    expect(res.status).toBe(200);
+    const ids = res.body.map((c: { id: string }) => c.id);
+    expect(ids).toContain(C_OWN);
+    expect(ids).not.toContain(C_FOREIGN);
+    const own = res.body.find((c: { id: string }) => c.id === C_OWN);
+    expect(own.name).toBe("Own Org Carrier");
+    expect(own).not.toHaveProperty("appointmentDeskEmail");
+    expect(own).not.toHaveProperty("appointmentDeskMetadata");
+  });
+
+  it("admin still gets the full row (org-scoped)", async () => {
+    const res = await request(app).get("/api/carriers").set(withAuth(admin.id));
+    expect(res.status).toBe(200);
+    const ids = res.body.map((c: { id: string }) => c.id);
+    expect(ids).toContain(C_OWN);
+    expect(ids).not.toContain(C_FOREIGN);
+    expect(res.body.find((c: { id: string }) => c.id === C_OWN).appointmentDeskEmail).toBe("desk@carrier.example");
+  });
+
+  it("agents cannot write carriers; unauthenticated is rejected", async () => {
+    expect((await request(app).post("/api/carriers").set(withAuth(agentUser.id)).send({ name: "x" })).status).toBe(403);
+    expect((await request(app).patch(`/api/carriers/${C_OWN}`).set(withAuth(agentUser.id)).send({ name: "x" })).status).toBe(403);
+    expect((await request(app).get("/api/carriers")).status).toBe(401);
+  });
+});
+
+describe("GET /agents/:id/licenses — agent sees own only", () => {
+  it("agent reads their own licenses", async () => {
+    const res = await request(app).get(`/api/agents/${agent.id}/licenses`).set(withAuth(agentUser.id));
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((l: { id: string }) => l.id)).toEqual([L_OWN]);
+  });
+
+  it("agent cannot read another agent's (same org) or another org's licenses", async () => {
+    const peerRes = await request(app).get(`/api/agents/${peer.id}/licenses`).set(withAuth(agentUser.id));
+    expect(peerRes.status).toBe(404);
+    expect(JSON.stringify(peerRes.body)).not.toContain(L_PEER);
+    expect((await request(app).get(`/api/agents/${foreign.id}/licenses`).set(withAuth(agentUser.id))).status).toBe(404);
+  });
+
+  it("agent cannot write licenses; admin unchanged; unauthenticated rejected", async () => {
+    const create = await request(app)
+      .post(`/api/agents/${agent.id}/licenses`)
+      .set(withAuth(agentUser.id))
+      .send({ stateCode: "TX", licenseType: "Health" });
+    expect(create.status).toBe(403);
+    const admRes = await request(app).get(`/api/agents/${peer.id}/licenses`).set(withAuth(admin.id));
+    expect(admRes.status).toBe(200);
+    expect((await request(app).get(`/api/agents/${foreign.id}/licenses`).set(withAuth(admin.id))).status).toBe(404);
+    expect((await request(app).get(`/api/agents/${agent.id}/licenses`)).status).toBe(401);
+  });
+});
+
+describe("unlinked agent (no agents.user_id row) fails closed", () => {
+  it("GET /agents/me is a 404", async () => {
+    expect((await request(app).get("/api/agents/me").set(withAuth(unlinkedUser.id))).status).toBe(404);
+  });
+
+  it("every agent-scoped path answers 404 for any agent id, including a real peer's", async () => {
+    for (const id of [agent.id, peer.id, foreign.id]) {
+      expect((await request(app).get(`/api/onboarding/${id}`).set(withAuth(unlinkedUser.id))).status).toBe(404);
+      expect((await request(app).get(`/api/agents/${id}/tasks`).set(withAuth(unlinkedUser.id))).status).toBe(404);
+      expect((await request(app).get(`/api/agents/${id}/licenses`).set(withAuth(unlinkedUser.id))).status).toBe(404);
+    }
+    const patch = await request(app)
+      .patch(`/api/onboarding/${agent.id}/profile`)
+      .set(withAuth(unlinkedUser.id))
+      .send({ businessName: "Hijack" });
+    expect(patch.status).toBe(404);
+  });
+
+  it("onboarding list is empty, not the unfiltered org list", async () => {
+    const res = await request(app).get("/api/onboarding").set(withAuth(unlinkedUser.id));
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+    expect(res.body.total).toBe(0);
+  });
+
+  it("tasks are limited to those assigned to the caller (none here), never the org's", async () => {
+    const before = await request(app).get("/api/tasks").set(withAuth(unlinkedUser.id));
+    expect(before.status).toBe(200);
+    expect(before.body.tasks).toEqual([]);
+    expect(before.body.total).toBe(0);
+
+    const mine = `task-unlinked-${randomUUID()}`;
+    await task(mine, org.id, { assignedToUserId: unlinkedUser.id });
+    const after = await request(app).get("/api/tasks").set(withAuth(unlinkedUser.id));
+    expect(after.body.tasks.map((t: { id: string }) => t.id)).toEqual([mine]);
+
+    const foreignPatch = await request(app)
+      .patch(`/api/tasks/${T_PEER}`)
+      .set(withAuth(unlinkedUser.id))
+      .send({ status: "completed" });
+    expect(foreignPatch.status).toBe(404);
   });
 });

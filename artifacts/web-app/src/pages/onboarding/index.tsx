@@ -11,7 +11,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { useGetMe, useGetAgents, getGetAgentsQueryKey } from "@workspace/api-client-react";
+import { useGetMe, useGetMyAgent, getGetMyAgentQueryKey, ApiError } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Check, ClipboardCheck, Handshake, UserX } from "lucide-react";
@@ -87,15 +87,21 @@ export default function OnboardingPage() {
   // For non-agent roles, we expose a hint that they should use the admin
   // dashboard instead of this self-service wizard.
   const isAgent = me?.role === "agent";
-  const { data: agentsData, isLoading: agentsLoading, error: agentsError } = useGetAgents(
-    { limit: 200 },
-    { query: { enabled: Boolean(me), queryKey: getGetAgentsQueryKey({ limit: 200 }) } },
-  );
-
-  const myAgent = useMemo(() => {
-    if (!me || !agentsData) return null;
-    return agentsData.agents.find((a) => a.userId === me.id) ?? null;
-  }, [me, agentsData]);
+  // The `agent` role has no agent:read, so it resolves its own profile through
+  // the self-scoped GET /agents/me (never the roster). A 404 means the user
+  // has no linked agent profile yet.
+  const {
+    data: myAgent,
+    isLoading: agentsLoading,
+    error: agentsError,
+  } = useGetMyAgent({
+    query: {
+      enabled: isAgent,
+      queryKey: getGetMyAgentQueryKey(),
+      retry: (count, err) => !(err instanceof ApiError && err.status === 404) && count < 2,
+    },
+  });
+  const agentNotLinked = agentsError instanceof ApiError && agentsError.status === 404;
 
   const { data: onboarding, isLoading: obLoading } = useOnboarding(
     myAgent?.id,
@@ -111,7 +117,7 @@ export default function OnboardingPage() {
   const activeStep: WizardStep =
     stepOverride ?? naturalStep ?? "welcome";
 
-  if (meLoading || agentsLoading || obLoading) {
+  if (meLoading || (isAgent && agentsLoading) || obLoading) {
     // Skeleton mirrors the real layout (header + progress pills + step card)
     // so the page shape stops jumping when data lands.
     return (
@@ -148,16 +154,28 @@ export default function OnboardingPage() {
     );
   }
 
+  if (agentNotLinked) {
+    return (
+      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
+        <Card>
+          <EmptyState
+            icon={UserX}
+            title={<h1>No agent profile linked</h1>}
+            description="Your agent profile isn't linked to your account yet. Please contact your admin."
+          />
+        </Card>
+      </div>
+    );
+  }
+
   if (!myAgent) {
     return (
       <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto">
         <Card>
           <EmptyState
             icon={UserX}
-            title={<h1>{agentsError ? "We couldn't find your agent record" : "No agent profile found"}</h1>}
-            description={agentsError
-              ? "Your account isn't allowed to look up agent records, so the wizard can't open. Ask your administrator to complete your contracting for you from the Contracting page."
-              : "Your user account isn't linked to an agent record yet. Please ask your administrator to invite you as an agent."}
+            title={<h1>We couldn't load your agent record</h1>}
+            description="Something went wrong loading your agent profile. Please refresh, or contact your admin if it keeps happening."
           />
         </Card>
       </div>

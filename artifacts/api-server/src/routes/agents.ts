@@ -259,6 +259,37 @@ router.post(
   },
 );
 
+// GET /agents/me — the caller's OWN agent profile, minimal fields. Lets the
+// `agent` role (no agent:read) resolve its agent id without browsing the
+// roster. Registered before `/agents/:id` so "me" is not read as an id.
+// Resolved by (orgId, userId) only; 404 when the user has no linked profile.
+router.get(
+  "/agents/me",
+  requireAuth,
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    if (authReq.userRole !== "agent") {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    const [row] = await db
+      .select({
+        id: agentsTable.id,
+        firstName: agentsTable.firstName,
+        lastName: agentsTable.lastName,
+        status: agentsTable.status,
+      })
+      .from(agentsTable)
+      .where(and(eq(agentsTable.orgId, authReq.orgId), eq(agentsTable.userId, authReq.userId)))
+      .limit(1);
+    if (!row) {
+      res.status(404).json({ error: "Agent profile not linked" });
+      return;
+    }
+    res.json(row);
+  },
+);
+
 router.get(
   "/agents/:id",
   requireAuth,
