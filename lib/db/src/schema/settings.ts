@@ -15,6 +15,10 @@ export const orgSettingsTable = pgTable("org_settings", {
   ahipReminderIntervalWeeks: integer("ahip_reminder_interval_weeks").notNull().default(2),
   // Automated SMS only goes to contacts with a recorded TCPA consent (0050).
   requireSmsConsent: boolean("require_sms_consent").notNull().default(true),
+  // Voice only (0060): when true, a contact linked to GoHighLevel with no
+  // opt-out of any kind may be called on the "imported_ghl_recorded_call"
+  // basis instead of a documented tcpa_consent_at. OFF by default.
+  allowImportedContactConsent: boolean("allow_imported_contact_consent").notNull().default(false),
   sessionTimeoutMinutes: integer("session_timeout_minutes").notNull().default(30),
 });
 

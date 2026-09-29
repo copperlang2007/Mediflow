@@ -892,6 +892,8 @@ export interface OrgSettings {
   ahipReminderIntervalWeeks: number;
   /** When true, automated SMS is only sent to contacts with a recorded TCPA consent. */
   requireSmsConsent?: boolean;
+  /** Voice calls only. When true, a contact linked to GoHighLevel with no opt-out of any kind may be called without documented consent (basis imported_ghl_recorded_call). Off by default. Not a compliance determination: the national and state do-not-call registries are not checked. */
+  allowImportedContactConsent?: boolean;
 }
 
 export interface UpdateOrgSettingsBody {
@@ -922,6 +924,7 @@ export interface UpdateOrgSettingsBody {
    */
   ahipReminderIntervalWeeks?: number;
   requireSmsConsent?: boolean;
+  allowImportedContactConsent?: boolean;
 }
 
 export type BulkUpdateTechStackBodyStatus =
@@ -3117,10 +3120,28 @@ export interface StartCallBody {
   productLine?: StartCallBodyProductLine;
 }
 
+/**
+ * Which consent rule allowed the call. imported_ghl_recorded_call is an admin-enabled basis, not a compliance determination.
+ * @nullable
+ */
+export type StartCallResponseConsentBasis =
+  | (typeof StartCallResponseConsentBasis)[keyof typeof StartCallResponseConsentBasis]
+  | null;
+
+export const StartCallResponseConsentBasis = {
+  documented: "documented",
+  imported_ghl_recorded_call: "imported_ghl_recorded_call",
+} as const;
+
 export interface StartCallResponse {
   callSessionId: string;
   /** E.164 number derived server side from the contact */
   to: string;
+  /**
+   * Which consent rule allowed the call. imported_ghl_recorded_call is an admin-enabled basis, not a compliance determination.
+   * @nullable
+   */
+  consentBasis?: StartCallResponseConsentBasis;
 }
 
 export type CallBlockReasonCode =
@@ -3216,6 +3237,11 @@ export interface CallSession {
   notes?: string | null;
   /** @nullable */
   blockedReason?: string | null;
+  /**
+   * documented or imported_ghl_recorded_call
+   * @nullable
+   */
+  consentBasis?: string | null;
   createdAt?: string;
   /** @nullable */
   firstName?: string | null;

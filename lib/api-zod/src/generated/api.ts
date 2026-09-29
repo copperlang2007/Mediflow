@@ -2311,6 +2311,12 @@ export const GetOrgSettingsResponse = zod.object({
     .describe(
       "When true, automated SMS is only sent to contacts with a recorded TCPA consent.",
     ),
+  allowImportedContactConsent: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Voice calls only. When true, a contact linked to GoHighLevel with no opt-out of any kind may be called without documented consent (basis imported_ghl_recorded_call). Off by default. Not a compliance determination: the national and state do-not-call registries are not checked.",
+    ),
 });
 
 /**
@@ -2359,6 +2365,7 @@ export const UpdateOrgSettingsBody = zod.object({
     .max(updateOrgSettingsBodyAhipReminderIntervalWeeksMax)
     .optional(),
   requireSmsConsent: zod.boolean().optional(),
+  allowImportedContactConsent: zod.boolean().optional(),
 });
 
 export const updateOrgSettingsResponseAhipSeasonOpenMonthMax = 12;
@@ -2405,6 +2412,12 @@ export const UpdateOrgSettingsResponse = zod.object({
     .optional()
     .describe(
       "When true, automated SMS is only sent to contacts with a recorded TCPA consent.",
+    ),
+  allowImportedContactConsent: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Voice calls only. When true, a contact linked to GoHighLevel with no opt-out of any kind may be called without documented consent (basis imported_ghl_recorded_call). Off by default. Not a compliance determination: the national and state do-not-call registries are not checked.",
     ),
 });
 
@@ -7040,6 +7053,16 @@ export const StartSoftphoneCallResponse = zod.object({
   to: zod
     .string()
     .describe("E.164 number derived server side from the contact"),
+  consentBasis: zod
+    .union([
+      zod.literal("documented"),
+      zod.literal("imported_ghl_recorded_call"),
+      zod.literal(null),
+    ])
+    .nullish()
+    .describe(
+      "Which consent rule allowed the call. imported_ghl_recorded_call is an admin-enabled basis, not a compliance determination.",
+    ),
 });
 
 /**
@@ -7096,6 +7119,10 @@ export const ListSoftphoneCallsResponse = zod.object({
         dispositionCode: zod.string().nullish(),
         notes: zod.string().nullish(),
         blockedReason: zod.string().nullish(),
+        consentBasis: zod
+          .string()
+          .nullish()
+          .describe("documented or imported_ghl_recorded_call"),
         createdAt: zod.coerce.date().optional(),
         firstName: zod.string().nullish(),
         lastName: zod.string().nullish(),

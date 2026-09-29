@@ -231,6 +231,47 @@ describe("Softphone browser calling states", () => {
     await waitFor(() => expect(screen.queryByText("Call ended")).not.toBeInTheDocument());
   });
 
+  it("notes on the call panel when a call went ahead on the imported-client basis, and only then", async () => {
+    routes["/api/softphone/voice-token"] = () => json(TOKEN);
+    routes["/api/softphone/calls"] = () =>
+      json({ callSessionId: "sess-imp", to: "+15035551234", consentBasis: "imported_ghl_recorded_call" }, 201);
+    renderAt("/dialer?contact=c-1");
+    await screen.findByText(/Browser calling: ready/);
+    await screen.findAllByText("Joan Park");
+    fireEvent.click(screen.getAllByRole("button", { name: /^Call$/ })[0]);
+    const note = await screen.findByTestId("imported-consent-note");
+    expect(note).toHaveTextContent(/imported-client basis/);
+    expect(note).toHaveTextContent(/not documented/);
+    expect(note).toHaveTextContent(/do-not-call registries were not checked/);
+  });
+
+  it("shows no imported-basis note for a call with documented consent", async () => {
+    routes["/api/softphone/voice-token"] = () => json(TOKEN);
+    routes["/api/softphone/calls"] = () =>
+      json({ callSessionId: "sess-doc", to: "+15035551234", consentBasis: "documented" }, 201);
+    renderAt("/dialer?contact=c-1");
+    await screen.findByText(/Browser calling: ready/);
+    await screen.findAllByText("Joan Park");
+    fireEvent.click(screen.getAllByRole("button", { name: /^Call$/ })[0]);
+    await waitFor(() => expect(fake.state.connectParams).toHaveLength(1));
+    expect(await screen.findByText("Ringing…")).toBeInTheDocument();
+    expect(screen.queryByTestId("imported-consent-note")).not.toBeInTheDocument();
+  });
+
+  it("the NO_CONSENT refusal tells the agent an admin can enable imported-client consent", async () => {
+    routes["/api/softphone/voice-token"] = () => json(TOKEN);
+    const detail =
+      "no documented TCPA consent (date and source) on file for this contact. If this is an imported GoHighLevel client, an admin can enable imported-client consent in Settings (only for contacts with no do-not-contact flag; confirm with counsel first)";
+    routes["/api/softphone/calls"] = () =>
+      json({ error: detail, code: "NO_CONSENT", reasons: [{ code: "NO_CONSENT", detail }], callSessionId: "b-1" }, 409);
+    renderAt("/dialer?contact=c-1");
+    await screen.findByText(/Browser calling: ready/);
+    await screen.findAllByText("Joan Park");
+    fireEvent.click(screen.getAllByRole("button", { name: /^Call$/ })[0]);
+    expect(await screen.findByText("Call blocked")).toBeInTheDocument();
+    expect(screen.getByText(/an admin can enable imported-client consent in Settings/)).toBeInTheDocument();
+  });
+
   it("hanging up while 'Connecting…' abandons the attempt: a late call is disconnected and the Device destroyed", async () => {
     let release!: () => void;
     fake.state.gate = new Promise<void>((r) => { release = r; });

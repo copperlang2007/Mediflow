@@ -73,6 +73,8 @@ export const callSessionsTable = pgTable(
     /** Which preclearance checks passed / failed for this attempt. */
     preclearanceResult: jsonb("preclearance_result"),
     blockedReason: text("blocked_reason"),
+    /** Which consent rule applied: 'documented' | 'imported_ghl_recorded_call' (null when none did). */
+    consentBasis: text("consent_basis"),
     /** Recording stays OFF unless this is true. Nothing in the app sets it yet. */
     recordingEnabled: boolean("recording_enabled").notNull().default(false),
     /** The `call_log` activity written when the call completed (exactly once). */

@@ -421,6 +421,13 @@
       "when": 1791900000000,
       "tag": "0059_call_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1792000000000,
+      "tag": "0060_imported_client_consent_basis",
+      "breakpoints": true
     }
   ]
 }

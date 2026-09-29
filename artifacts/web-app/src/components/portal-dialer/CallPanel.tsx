@@ -238,6 +238,19 @@ export function CallPanel({
         )}
       </div>
 
+      {state.consentBasis === "imported_ghl_recorded_call" && (
+        <p
+          className="mt-3 flex items-start gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground"
+          data-testid="imported-consent-note"
+        >
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            Allowed on the imported-client basis: this contact came from GoHighLevel and has no do-not-contact flag.
+            Consent is not documented in agencyBRIDGE, and the national and state do-not-call registries were not checked.
+          </span>
+        </p>
+      )}
+
       {state.error && (
         <p className="mt-3 flex items-start gap-2 rounded-lg bg-warning/10 px-3 py-2 text-sm" role="alert">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />

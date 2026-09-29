@@ -453,8 +453,16 @@ export async function syncOneContact(
     sureOfIdentity = true;
     await fillBlanks(tx, orgId, contactId, contact, null);
     // An undated response must not erase the timestamp we already have.
-    if (externalUpdatedAt) {
-      await tx.update(externalContactLinksTable).set({ externalUpdatedAt })
+    // external_dnd is only written when GHL actually sent a boolean (an omitted
+    // or null value leaves what we know untouched), and a stored true is never
+    // turned back off here, like the contact opt-outs. An explicit false only
+    // replaces unknown (null).
+    const dndPatch = typeof gc.dnd === "boolean"
+      ? { externalDnd: gc.dnd ? true : sql`coalesce(${externalContactLinksTable.externalDnd}, false)` }
+      : {};
+    if (externalUpdatedAt || Object.keys(dndPatch).length > 0) {
+      await tx.update(externalContactLinksTable)
+        .set({ ...(externalUpdatedAt ? { externalUpdatedAt } : {}), ...dndPatch })
         .where(eq(externalContactLinksTable.id, link.id));
     }
   } else {
@@ -526,6 +534,8 @@ export async function syncOneContact(
     }
     await tx.insert(externalContactLinksTable).values({
       id: randomUUID(), orgId, source: GHL_SOURCE, externalId: gc.id, contactId, externalUpdatedAt,
+      // Recorded even when DND could not be applied below (weak identity match).
+      externalDnd: typeof gc.dnd === "boolean" ? gc.dnd : null,
     }).onConflictDoNothing();
   }
 

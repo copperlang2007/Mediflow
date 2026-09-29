@@ -165,6 +165,47 @@ describe("GHL feed", () => {
     expect((await orgContacts()).find((c) => c.firstName === "First1")).toMatchObject({ optOutSms: true, optOutEmail: true });
   });
 
+  it("external_dnd on the link: unknown stays unknown, omitted/null never clear it, true is sticky", async () => {
+    const org16 = await seedOrg(tdb, { id: "ghl-org-dnd-link" });
+    const cfg16 = ({ orgId: org16.id, token: TOKEN, locationId: `loc-${org16.id}` });
+    const dndOf = async (extId: string) =>
+      (await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, extId)))[0]!.externalDnd;
+    let t = 0;
+    const pass = async (n: number, extra: Record<string, unknown>) => {
+      t += 1;
+      const c = { ...ghlContact(n), dateUpdated: new Date(Date.UTC(2026, 8, 1, 0, 0, t)).toISOString(), ...extra } as GhlContact;
+      // "omitted" means the key is absent from the payload
+      if ("dnd" in extra && extra.dnd === "__omit__") delete (c as unknown as Record<string, unknown>).dnd;
+      await sync.runGhlSync(cfg16, { fetchImpl: fakeGhl([c]).impl });
+    };
+
+    // Omitted on first sight: unknown (null), NOT false. Still null after another omitted/null pass.
+    await pass(14000, { dnd: "__omit__" });
+    expect(await dndOf("ghl-14000")).toBeNull();
+    await pass(14000, { dnd: null });
+    expect(await dndOf("ghl-14000")).toBeNull();
+    // Explicit false replaces unknown; a later omitted/null leaves it false.
+    await pass(14000, { dnd: false });
+    expect(await dndOf("ghl-14000")).toBe(false);
+    await pass(14000, { dnd: "__omit__" });
+    await pass(14000, { dnd: null });
+    expect(await dndOf("ghl-14000")).toBe(false);
+    // false then true -> true.
+    await pass(14000, { dnd: true });
+    expect(await dndOf("ghl-14000")).toBe(true);
+    // true is never turned back off: not by omitted, null, or an explicit false.
+    await pass(14000, { dnd: "__omit__" });
+    await pass(14000, { dnd: null });
+    await pass(14000, { dnd: false });
+    expect(await dndOf("ghl-14000")).toBe(true);
+
+    // First sight with true / false are recorded as sent.
+    await pass(14001, { dnd: true });
+    expect(await dndOf("ghl-14001")).toBe(true);
+    await pass(14002, { dnd: false });
+    expect(await dndOf("ghl-14002")).toBe(false);
+  });
+
   it("stops at the page cap, reports more_pending, and resumes from the cursor", async () => {
     const org2 = await seedOrg(tdb, { id: "ghl-org-2" });
     process.env.GHL_SYNC_ORG_IDS = `${org.id},${org2.id}`;
@@ -527,6 +568,10 @@ describe("GHL feed", () => {
     await sync.runGhlSync(cfg13, { fetchImpl: fakeGhl([ghlContact(13200, { firstName: "Bob", lastName: "Anderson", phone: "+15125557777", dnd: true })]).impl });
     const [after] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, sr.id));
     expect(after).toMatchObject({ optOutSms: false, optOutEmail: false });
+    // The flag was not applied to the contact, but the link remembers GHL said DND,
+    // so imported-client voice consent can never treat this contact as unflagged.
+    const [link] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.orgId, org13.id));
+    expect(link).toMatchObject({ contactId: sr.id, externalDnd: true });
   });
 
   it("ignores an unparseable GHL dateUpdated instead of failing the contact", async () => {

@@ -10,7 +10,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Settings, User, Building2, Shield, CalendarClock, Copy, MessageSquareWarning } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Settings, User, Building2, Shield, CalendarClock, Copy, MessageSquareWarning, PhoneCall } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
@@ -235,6 +246,122 @@ function TextingConsentCard() {
   );
 }
 
+/**
+ * Voice-calling consent for clients imported from GoHighLevel. OFF by default.
+ * Only agency admins can change it (the API enforces this; the switch is also
+ * disabled for everyone else). This is NOT a compliance finding.
+ */
+export function ImportedClientConsentCard({ isAdmin }: { isAdmin: boolean }) {
+  const qc = useQueryClient();
+  const { data: settings, isLoading, isError } = useGetOrgSettings();
+  const { mutateAsync: save, isPending } = useUpdateOrgSettings();
+  const enabled = settings?.allowImportedContactConsent === true;
+  const [confirming, setConfirming] = useState(false);
+  const [understood, setUnderstood] = useState(false);
+
+  const persist = async (next: boolean) => {
+    try {
+      await save({ data: { allowImportedContactConsent: next } });
+      void qc.invalidateQueries({ queryKey: getGetOrgSettingsQueryKey() });
+      toast.success(next ? "Calls to imported clients are now allowed" : "Calls to imported clients are turned off");
+    } catch {
+      toast.error("Failed to save setting");
+    }
+  };
+
+  const onToggle = (next: boolean) => {
+    if (next) {
+      setUnderstood(false);
+      setConfirming(true);
+    } else {
+      void persist(false);
+    }
+  };
+
+  return (
+    <SectionCard title="Calling compliance" icon={PhoneCall}>
+      {isLoading ? (
+        <Skeleton className="h-10 w-full" />
+      ) : isError ? (
+        <p className="text-sm text-destructive">Couldn't load this setting. Refresh to try again.</p>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium">Allow calls to imported clients with no do-not-contact flag</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Off by default. Calls normally need a documented consent date and source on the contact.
+                When this is on, a client imported from GoHighLevel can also be called if nothing marks
+                them do-not-contact.
+              </p>
+            </div>
+            <Switch
+              checked={enabled}
+              disabled={isPending || !isAdmin}
+              onCheckedChange={onToggle}
+              aria-label="Allow calls to imported clients with no do-not-contact flag"
+            />
+          </div>
+          <div className="rounded-lg bg-warning/10 px-3 py-2 text-xs" role="note">
+            <p className="font-medium">Read before turning this on</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              <li>No do-not-contact flag is not the same as consent. Consent for these clients is not recorded in agencyBRIDGE; it is said to be on the call recordings.</li>
+              <li>The national and state do-not-call registries are not checked.</li>
+              <li>Rules for existing customers have time limits.</li>
+              <li>Confirm this with your attorney or compliance counsel first. This setting is not a compliance guarantee.</li>
+            </ul>
+            <p className="mt-1">Anyone marked do-not-contact, opted out, or not linked to GoHighLevel is still blocked. Each call is recorded with the basis it used.</p>
+          </div>
+          {!isAdmin && (
+            <p className="text-xs text-muted-foreground">Only agency admins can change this setting.</p>
+          )}
+        </div>
+      )}
+
+      <AlertDialog open={confirming} onOpenChange={(o) => { if (!isPending) setConfirming(o); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Allow calls to imported clients?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  Clients imported from GoHighLevel with no do-not-contact flag will become callable without a
+                  documented consent date and source.
+                </p>
+                <ul className="list-disc space-y-1 pl-5">
+                  <li>No flag is not the same as consent.</li>
+                  <li>The national and state do-not-call registries are not checked.</li>
+                  <li>Existing-customer rules have time limits.</li>
+                  <li>Confirm with counsel before relying on this.</li>
+                </ul>
+                <p>The change is recorded in the audit log.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <label className="flex items-start gap-2 text-sm">
+            <Checkbox
+              checked={understood}
+              onCheckedChange={(v) => setUnderstood(v === true)}
+              aria-label="I understand and have confirmed this with counsel"
+              className="mt-0.5"
+            />
+            <span>I understand this, and I have confirmed or will confirm it with counsel.</span>
+          </label>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!understood || isPending}
+              onClick={() => { void persist(true); }}
+            >
+              Turn on
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </SectionCard>
+  );
+}
+
 export default function SettingsPage() {
   const { user: clerkUser } = useUser();
   const { data: me, isLoading: meLoading } = useGetMe();
@@ -327,6 +454,8 @@ export default function SettingsPage() {
       </SectionCard>
 
       <TextingConsentCard />
+
+      <ImportedClientConsentCard isAdmin={isAdmin} />
 
       {/* Security */}
       <SectionCard title="Sign-in & security" icon={Shield}>

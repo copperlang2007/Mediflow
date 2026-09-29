@@ -6782,6 +6782,12 @@ components:
         requireSmsConsent:
           type: boolean
           description: When true, automated SMS is only sent to contacts with a recorded TCPA consent.
+        allowImportedContactConsent:
+          type: boolean
+          description: >-
+            Voice calls only. When true, a contact linked to GoHighLevel with no opt-out of any kind may be called
+            without documented consent (basis imported_ghl_recorded_call). Off by default. Not a compliance
+            determination: the national and state do-not-call registries are not checked.
       required:
         - orgId
         - ahipSeasonOpenMonth
@@ -6817,6 +6823,8 @@ components:
           minimum: 1
           maximum: 52
         requireSmsConsent:
+          type: boolean
+        allowImportedContactConsent:
           type: boolean
 
     BulkUpdateTechStackBody:
@@ -9247,6 +9255,10 @@ components:
       properties:
         callSessionId: { type: string }
         to: { type: string, description: E.164 number derived server side from the contact }
+        consentBasis:
+          type: [string, "null"]
+          enum: [documented, imported_ghl_recorded_call, null]
+          description: Which consent rule allowed the call. imported_ghl_recorded_call is an admin-enabled basis, not a compliance determination.
     CallBlockReason:
       type: object
       required: [code, detail]
@@ -9315,6 +9327,7 @@ components:
         dispositionCode: { type: [string, "null"] }
         notes: { type: [string, "null"] }
         blockedReason: { type: [string, "null"] }
+        consentBasis: { type: [string, "null"], description: "documented or imported_ghl_recorded_call" }
         createdAt: { type: string, format: date-time }
         firstName: { type: [string, "null"] }
         lastName: { type: [string, "null"] }
