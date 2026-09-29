@@ -26,7 +26,7 @@ import {
 import { requireMfa } from "../middlewares/requireMfa";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { PHI_PRIVILEGED_ROLES } from "../lib/permissions";
-import { mayViewFullApplication, phiViewerAgentId, servicedWritingAgentId } from "../lib/phiAccess";
+import { applicationAccessColumns, mayViewFullApplication, phiViewerAgent } from "../lib/phiAccess";
 import { isPolicyEvent, parsePolicyEvent } from "../lib/integrations/enrollhere/policyEvent";
 
 const router: IRouter = Router();
@@ -38,16 +38,17 @@ const router: IRouter = Router();
 function sunfireFieldIds(payload: Record<string, unknown>): { medicareNumber: string | null; medicaidNumber: string | null } | null {
   if (payload.source !== "gohighlevel" || typeof payload.fields !== "object" || payload.fields === null) return null;
   const fields = payload.fields as Record<string, unknown>;
-  // GHL merge keys are unique per sub-account, so one match is expected; a key
-  // that matches two fields (a renamed or duplicated field) is skipped rather
-  // than risk putting another person's number at the top, and the next
-  // fallback key is tried.
+  // A number is shown only when every field carrying it (the key and its
+  // aliases) agrees: a renamed, duplicated or spouse field that differs means
+  // showing none rather than risk another person's number at the top. The
+  // full field list below still shows each one with its label.
   const pick = (...keys: string[]): string | null => {
-    for (const key of keys) {
-      const hits = Object.entries(fields).filter(([label, v]) => label.endsWith(`(${key})`) && typeof v === "string" && v.trim());
-      if (hits.length === 1) return (hits[0]![1] as string).trim();
+    const values = new Set<string>();
+    for (const [label, v] of Object.entries(fields)) {
+      if (typeof v !== "string" || !v.trim()) continue;
+      if (keys.some((key) => label.endsWith(`(${key})`))) values.add(v.trim().toUpperCase().replace(/[\s-]/g, ""));
     }
-    return null;
+    return values.size === 1 ? [...values][0]! : null;
   };
   return { medicareNumber: pick("medicare_number", "applicanthicn"), medicaidNumber: pick("medicaid_number") };
 }
@@ -83,17 +84,18 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const contactId = param(req.params.id);
-    const [contact] = await db.select({ id: contactsTable.id, assignedAgentId: contactsTable.assignedAgentId }).from(contactsTable)
+    const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable)
       .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
-    const rows = await db.select({ ...summaryColumns, writingAgentId: servicedWritingAgentId }).from(enrollmentApplicationsTable)
+    const rows = await db.select({ row: summaryColumns, access: applicationAccessColumns }).from(enrollmentApplicationsTable)
+      .innerJoin(contactsTable, eq(contactsTable.id, enrollmentApplicationsTable.contactId))
       .leftJoin(enrollmentsTable, eq(enrollmentsTable.id, enrollmentApplicationsTable.enrollmentId))
       .where(and(eq(enrollmentApplicationsTable.orgId, authReq.orgId), eq(enrollmentApplicationsTable.contactId, contactId)))
       .orderBy(desc(enrollmentApplicationsTable.updatedAt));
-    const viewerAgentId = await phiViewerAgentId(authReq);
-    const applications = rows.map(({ writingAgentId, ...row }) => ({
+    const viewer = await phiViewerAgent(authReq);
+    const applications = rows.map(({ row, access }) => ({
       ...row,
-      canViewFull: mayViewFullApplication(authReq.userRole, viewerAgentId, contact.assignedAgentId, writingAgentId),
+      canViewFull: mayViewFullApplication(authReq.userRole, viewer, access),
     }));
     res.json({ applications, canViewFull: applications.some((a) => a.canViewFull) });
   },
@@ -106,8 +108,8 @@ router.get(
   requireMfa,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const viewerAgentId = await phiViewerAgentId(authReq);
-    if (!PHI_PRIVILEGED_ROLES.has(authReq.userRole) && !viewerAgentId) {
+    const viewer = await phiViewerAgent(authReq);
+    if (!PHI_PRIVILEGED_ROLES.has(authReq.userRole) && !viewer) {
       res.status(403).json({ error: FULL_VIEW_REFUSED });
       return;
     }
@@ -116,8 +118,7 @@ router.get(
     // not viewable (hard deletes cascade the application away entirely).
     const [found] = await db.select({
       app: enrollmentApplicationsTable,
-      assignedAgentId: contactsTable.assignedAgentId,
-      writingAgentId: servicedWritingAgentId,
+      access: applicationAccessColumns,
     }).from(enrollmentApplicationsTable)
       .innerJoin(contactsTable, and(
         eq(contactsTable.id, enrollmentApplicationsTable.contactId),
@@ -130,7 +131,7 @@ router.get(
     const privileged = PHI_PRIVILEGED_ROLES.has(authReq.userRole);
     // An agent gets the same 403 for "not yours" and "no such application",
     // so application ids can't be probed.
-    if (!app || !mayViewFullApplication(authReq.userRole, viewerAgentId, found.assignedAgentId, found.writingAgentId)) {
+    if (!app || !mayViewFullApplication(authReq.userRole, viewer, found.access)) {
       if (!privileged) { res.status(403).json({ error: FULL_VIEW_REFUSED }); return; }
       res.status(404).json({ error: "Application not found" });
       return;

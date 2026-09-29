@@ -97,6 +97,10 @@ function ClientSheet({ clientId, onClose }: { clientId: string; onClose: () => v
     queryKey: ["/api/agents/me/clients", clientId],
     queryFn: () => customFetch<ClientDetail>(`/api/agents/me/clients/${clientId}`),
     retry: false,
+    // PHI: never served from cache. Evicted as soon as the sheet closes, so a
+    // revoked assignment or ended policy takes effect on the next open.
+    staleTime: 0,
+    gcTime: 0,
   });
   const c = data?.contact;
 
@@ -217,6 +221,8 @@ export default function MyClientsPage() {
       `/api/agents/me/clients?${new URLSearchParams({ search: q, limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) })}`,
     ),
     retry: false,
+    // Carries dates of birth: kept only while the page is open.
+    gcTime: 0,
   });
   const total = data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
