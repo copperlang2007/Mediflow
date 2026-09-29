@@ -15,6 +15,12 @@ import { apiFetch } from "@/lib/api";
 export const CONTACT_READ_ROLES = [
   "super_admin", "agency_admin", "compliance_manager", "agent_support", "viewer", "developer",
 ] as const;
+/**
+ * Roles that may open the softphone: everyone with `contact:read` plus the plain
+ * `agent`, who is served the SELF-SCOPED softphone endpoints (own assigned
+ * contacts only, dialer fields only) instead of the general contacts routes.
+ */
+export const SOFTPHONE_ROLES = [...CONTACT_READ_ROLES, "agent"] as const;
 /** Roles the API grants `contact:update` (needed to log a call / reply). */
 export const CONTACT_UPDATE_ROLES = [
   "super_admin", "agency_admin", "compliance_manager", "agent_support",
@@ -49,6 +55,60 @@ export function useContactSearch(search: string, enabled = true) {
       ),
     enabled: enabled && q.length >= 2,
     staleTime: 30_000,
+  });
+}
+
+/**
+ * Dial-pad type-ahead over `GET /softphone/contacts` (dialer fields only; an
+ * `agent` only ever gets contacts assigned to their own active profile).
+ */
+export function useSoftphoneContactSearch(search: string, enabled = true) {
+  const q = search.trim();
+  return useQuery({
+    queryKey: ["/api/softphone/contacts", "picker", q],
+    queryFn: ({ signal }) =>
+      apiFetch<{ data: ContactLite[]; total: number }>(
+        `/api/softphone/contacts?limit=8&search=${encodeURIComponent(q)}`,
+        { signal },
+      ),
+    enabled: enabled && q.length >= 2,
+    staleTime: 30_000,
+  });
+}
+
+/** One dialer-safe contact by id (deep link / recent call). */
+export function useSoftphoneContact(contactId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ["/api/softphone/contacts", contactId ?? ""],
+    queryFn: ({ signal }) =>
+      apiFetch<ContactLite>(`/api/softphone/contacts/${encodeURIComponent(contactId!)}`, { signal }),
+    enabled: enabled && Boolean(contactId),
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+export interface OwnCallSession {
+  id: string;
+  status: string;
+  startedAt: string | null;
+  createdAt: string;
+  durationSeconds: number | null;
+  dispositionCode: string | null;
+  notes: string | null;
+}
+
+/** The signed-in user's own call sessions with one contact (`GET /softphone/calls`). */
+export function useOwnCallSessions(contactId: string | null) {
+  return useQuery({
+    queryKey: ["/api/softphone/calls", "contact", contactId ?? ""],
+    queryFn: ({ signal }) =>
+      apiFetch<{ data: OwnCallSession[]; total: number }>(
+        `/api/softphone/calls?limit=10&contactId=${encodeURIComponent(contactId!)}`,
+        { signal },
+      ),
+    enabled: Boolean(contactId),
+    staleTime: 15_000,
   });
 }
 

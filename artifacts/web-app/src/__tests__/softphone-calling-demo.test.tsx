@@ -33,7 +33,7 @@ beforeEach(() => {
     const url = String(input);
     if (url.includes("/api/softphone/recent-calls")) return json({ data: [], total: 0 });
     if (url.includes("/api/softphone/dispositions")) return json({ data: [] });
-    if (url.includes("/api/contacts/c-1")) {
+    if (url.includes("/api/softphone/contacts/c-1")) {
       return json({ id: "c-1", firstName: "Joan", lastName: "Park", email: null, phone: "+15035551234", status: "enrolled", stateCode: "OR", zipCode: null, currentPlanType: null });
     }
     return json({ error: "not found" }, 404);
