@@ -438,7 +438,11 @@ router.post(
         return;
       case "ok":
         (req as Request & { callSessionId?: string }).callSessionId = result.callSessionId;
-        res.status(201).json({ callSessionId: result.callSessionId, to: result.to });
+        res.status(201).json({
+          callSessionId: result.callSessionId,
+          to: result.to,
+          consentBasis: result.consentBasis,
+        });
         return;
     }
   },
@@ -519,6 +523,7 @@ router.get(
         dispositionCode: c.dispositionCode,
         notes: c.notes,
         blockedReason: c.blockedReason,
+        consentBasis: c.consentBasis,
         createdAt: c.createdAt,
         firstName: contactsTable.firstName,
         lastName: contactsTable.lastName,

@@ -19,6 +19,7 @@ const UpdateSettingsSchema = z.object({
   ahipReminderEnabled: z.boolean().optional(),
   ahipReminderIntervalWeeks: z.number().int().min(1).max(52).optional(),
   requireSmsConsent: z.boolean().optional(),
+  allowImportedContactConsent: z.boolean().optional(),
 });
 
 router.get(
@@ -45,6 +46,7 @@ router.get(
         ahipReminderEnabled: true,
         ahipReminderIntervalWeeks: 2,
         requireSmsConsent: true,
+        allowImportedContactConsent: false,
       });
       return;
     }
@@ -72,7 +74,11 @@ router.put(
     // the setting and its audit row (with the prior value) commit together.
     const settings = await db.transaction(async (tx) => {
       const [existing] = await tx
-        .select({ id: orgSettingsTable.id, requireSmsConsent: orgSettingsTable.requireSmsConsent })
+        .select({
+          id: orgSettingsTable.id,
+          requireSmsConsent: orgSettingsTable.requireSmsConsent,
+          allowImportedContactConsent: orgSettingsTable.allowImportedContactConsent,
+        })
         .from(orgSettingsTable)
         .where(eq(orgSettingsTable.orgId, authReq.orgId))
         .limit(1);
@@ -91,6 +97,7 @@ router.put(
             ahipReminderEnabled: data.ahipReminderEnabled ?? true,
             ahipReminderIntervalWeeks: data.ahipReminderIntervalWeeks ?? 2,
             requireSmsConsent: data.requireSmsConsent ?? true,
+            allowImportedContactConsent: data.allowImportedContactConsent ?? false,
           })
           .returning();
       } else {
@@ -102,6 +109,7 @@ router.put(
         if (data.ahipReminderEnabled !== undefined) updates.ahipReminderEnabled = data.ahipReminderEnabled;
         if (data.ahipReminderIntervalWeeks !== undefined) updates.ahipReminderIntervalWeeks = data.ahipReminderIntervalWeeks;
         if (data.requireSmsConsent !== undefined) updates.requireSmsConsent = data.requireSmsConsent;
+        if (data.allowImportedContactConsent !== undefined) updates.allowImportedContactConsent = data.allowImportedContactConsent;
         [saved] = Object.keys(updates).length
           ? await tx.update(orgSettingsTable).set(updates).where(eq(orgSettingsTable.orgId, authReq.orgId)).returning()
           : await tx.select().from(orgSettingsTable).where(eq(orgSettingsTable.orgId, authReq.orgId)).limit(1);
@@ -118,6 +126,27 @@ router.put(
           resourceType: "org_settings.require_sms_consent",
           resourceId: authReq.orgId,
           changes: { requireSmsConsent: { from: before, to: data.requireSmsConsent } },
+        });
+      }
+      // Voice consent for imported clients is compliance-significant too: the
+      // change and its audit row (prior value) commit together. Not a
+      // compliance finding - see lib/voice/consentBasis.ts.
+      const importedBefore = existing?.allowImportedContactConsent ?? false;
+      if (
+        data.allowImportedContactConsent !== undefined &&
+        data.allowImportedContactConsent !== importedBefore
+      ) {
+        await tx.insert(auditLogTable).values({
+          id: randomUUID(),
+          orgId: authReq.orgId,
+          userId: authReq.userId,
+          userRole: authReq.userRole ?? null,
+          action: "update",
+          resourceType: "org_settings.allow_imported_contact_consent",
+          resourceId: authReq.orgId,
+          changes: {
+            allowImportedContactConsent: { from: importedBefore, to: data.allowImportedContactConsent },
+          },
         });
       }
       return saved;

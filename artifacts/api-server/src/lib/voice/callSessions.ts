@@ -33,6 +33,7 @@ import {
 import { isNumberOptedOutAnyOrg } from "../compliance/optOut";
 import { toDialableE164 } from "./phone";
 import { voiceCallerId, missingVoiceEnv, type VoiceEnvName } from "./voiceToken";
+import { resolveConsentBasis, type ConsentBasis } from "./consentBasis";
 import { resolveDialLimits, type DialLimits } from "./dialLimits";
 
 /** A call session is claimable by the Voice webhook for this long after creation. */
@@ -101,7 +102,7 @@ export type PlaceCallResult =
   | { kind: "blocked"; callSessionId: string; reasons: BlockReason[] }
   // Over the abandoned-attempt ceiling: refused WITHOUT storing another row.
   | { kind: "throttled"; reasons: BlockReason[] }
-  | { kind: "ok"; callSessionId: string; to: string };
+  | { kind: "ok"; callSessionId: string; to: string; consentBasis: ConsentBasis | null };
 
 const AGENT_CODES = new Set<PreclearanceFailure["code"]>([
   "AGENT_NOT_LICENSED",
@@ -166,6 +167,8 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
       status: contactsTable.status,
       tcpaConsentAt: contactsTable.tcpaConsentAt,
       tcpaConsentSource: contactsTable.tcpaConsentSource,
+      optOutSms: contactsTable.optOutSms,
+      optOutEmail: contactsTable.optOutEmail,
     })
     .from(contactsTable)
     .where(
@@ -276,15 +279,21 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
     reasons.push({ code: "DNC", detail: "this number is on a do-not-contact list" });
   }
 
-  // 4) Documented consent (when + where). ALWAYS enforced on the voice path: the
-  //    org's `require_sms_consent` switch governs automated SMS only and must
-  //    never silently turn off voice consent. Missing/deleted contact is already
-  //    NO_CONSENT above.
-  const hasConsent = Boolean(contact.tcpaConsentAt && contact.tcpaConsentSource?.trim());
-  if (!hasConsent && !reasons.some((r) => r.code === "NO_CONSENT")) {
+  // 4) Consent. ALWAYS enforced on the voice path: the org's `require_sms_consent`
+  //    switch governs automated SMS only and must never silently turn off voice
+  //    consent. Either documented consent (when + where), or - only if an admin
+  //    switched it on - the imported-GHL basis (see consentBasis.ts; NOT a
+  //    compliance finding). Missing/deleted contact is already NO_CONSENT above.
+  const consentBasis: ConsentBasis | null = await resolveConsentBasis(
+    input.orgId,
+    contact,
+    toNumber ?? contact.phone ?? null,
+  );
+  if (!consentBasis && !reasons.some((r) => r.code === "NO_CONSENT")) {
     reasons.push({
       code: "NO_CONSENT",
-      detail: "no documented TCPA consent (date and source) on file for this contact",
+      detail:
+        "no documented TCPA consent (date and source) on file for this contact. If this is an imported GoHighLevel client, an admin can enable imported-client consent in Settings (only for contacts with no do-not-contact flag; confirm with counsel first)",
     });
   }
 
@@ -401,8 +410,10 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
       createdAt: now,
       updatedAt: now,
       blockedReason: blocked ? all.map((r) => r.code).join(",") : null,
+      consentBasis,
       preclearanceResult: {
         precleared: !blocked,
+        consentBasis,
         checks: {
           numberValid: !hasIn("INVALID_NUMBER"),
           consent: !hasIn("NO_CONSENT"),
@@ -426,7 +437,7 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
   if (result.blocked) {
     return { kind: "blocked", callSessionId: sessionId, reasons: result.reasons ?? [] };
   }
-  return { kind: "ok", callSessionId: sessionId, to: toNumber! };
+  return { kind: "ok", callSessionId: sessionId, to: toNumber!, consentBasis };
 }
 
 // ---- Voice webhook: single-use claim ----------------------------------------
@@ -535,9 +546,11 @@ export async function recheckContactAtDial(
   if (!session.contactId) return "contact_ineligible";
   const [c] = await db
     .select({
+      id: contactsTable.id,
       status: contactsTable.status,
       deletedAt: contactsTable.deletedAt,
       optOutSms: contactsTable.optOutSms,
+      optOutEmail: contactsTable.optOutEmail,
       tcpaConsentAt: contactsTable.tcpaConsentAt,
       tcpaConsentSource: contactsTable.tcpaConsentSource,
       phone: contactsTable.phone,
@@ -552,8 +565,11 @@ export async function recheckContactAtDial(
   if (toDialableE164(c.phone) !== session.toNumber) return "phone_changed";
   // The contact's own opt-out flag (set by a STOP or a do-not-call disposition).
   if (c.optOutSms) return "opted_out";
-  // Consent could have been withdrawn/removed since preclearance; voice consent is unconditional.
-  if (!c.tcpaConsentAt || !c.tcpaConsentSource?.trim()) return "no_consent";
+  // Consent could have been withdrawn/removed since preclearance; voice consent is
+  // unconditional. The same rule as placeCall: documented consent, or the
+  // imported-GHL basis while the org switch is on, the link exists and no flag
+  // (including a new one set since) is present.
+  if (!(await resolveConsentBasis(session.orgId, c, session.toNumber))) return "no_consent";
   // Calling hours in the contact's CURRENT timezone, at connect time: a session
   // created just before the cutoff must not connect after it, and a state change
   // can change the zone. An unresolvable zone fails closed, as in preclearance.
