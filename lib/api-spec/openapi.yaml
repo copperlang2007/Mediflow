@@ -5395,6 +5395,7 @@ paths:
         - cookieAuth: []
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 15 } }
+        - { name: offset, in: query, description: "Rows to skip, for paging the full audit trail", schema: { type: integer, minimum: 0, default: 0 } }
         - { name: contactId, in: query, schema: { type: string } }
       responses:
         "200":
@@ -9322,7 +9323,9 @@ components:
         data:
           type: array
           items: { $ref: "#/components/schemas/CallSession" }
-        total: { type: integer }
+        total: { type: integer, description: Full count for the same filters (not just this page) }
+        limit: { type: integer }
+        offset: { type: integer }
     UpdateCallBody:
       type: object
       additionalProperties: false

@@ -12,14 +12,14 @@
  * read, stored or logged, and phone numbers never go to logs or the audit log.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, gte, isNotNull, ne, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, lt, ne, or, sql } from "drizzle-orm";
+import type { PgDatabase } from "drizzle-orm/pg-core";
 import {
   db,
   activitiesTable,
   agentsTable,
   callSessionsTable,
   contactsTable,
-  orgSettingsTable,
   type CallSession,
   type CallSessionStatus,
 } from "@workspace/db";
@@ -35,6 +35,43 @@ import { resolveDialLimits, type DialLimits } from "./dialLimits";
 
 /** A call session is claimable by the Voice webhook for this long after creation. */
 export const CALL_SESSION_TTL_MS = 2 * 60 * 1000;
+
+/**
+ * A ringing / in-progress session with no terminal callback after this long is
+ * treated as dead (no phone call lasts this long; Twilio's own hard cap is
+ * 4 hours) and marked `failed`.
+ */
+export const MAX_LIVE_CALL_MS = 4 * 60 * 60 * 1000;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyPgDb = PgDatabase<any, any, any>;
+
+/**
+ * Lazy expiry: mark this org's non-terminal (ringing / in_progress) sessions
+ * older than MAX_LIVE_CALL_MS as `failed` with `ended_at` set. Run when listing
+ * calls and when checking attempt limits, so a lost callback cannot leave a
+ * session "live" forever. No call_log is written for an expired session (we
+ * never learned how the call ended). Returns how many rows were expired.
+ */
+export async function expireStaleLiveSessions(
+  handle: AnyPgDb,
+  orgId: string,
+  now: Date = new Date(),
+): Promise<number> {
+  const cutoff = new Date(now.getTime() - MAX_LIVE_CALL_MS);
+  const rows = await handle
+    .update(callSessionsTable)
+    .set({ status: "failed", endedAt: now })
+    .where(
+      and(
+        eq(callSessionsTable.orgId, orgId),
+        inArray(callSessionsTable.status, ["ringing", "in_progress"]),
+        lt(sql`coalesce(${callSessionsTable.startedAt}, ${callSessionsTable.createdAt})`, cutoff),
+      ),
+    )
+    .returning({ id: callSessionsTable.id });
+  return rows.length;
+}
 
 export type BlockCode =
   | PreclearanceFailure["code"]
@@ -209,16 +246,12 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
     reasons.push({ code: "DNC", detail: "this number is on a do-not-contact list" });
   }
 
-  // 4) Documented consent (when + where), unless the org has switched consent
-  //    enforcement off. Missing contact/deleted is already NO_CONSENT above.
-  const [settings] = await db
-    .select({ requireSmsConsent: orgSettingsTable.requireSmsConsent })
-    .from(orgSettingsTable)
-    .where(eq(orgSettingsTable.orgId, input.orgId))
-    .limit(1);
-  const consentRequired = settings?.requireSmsConsent ?? true;
+  // 4) Documented consent (when + where). ALWAYS enforced on the voice path: the
+  //    org's `require_sms_consent` switch governs automated SMS only and must
+  //    never silently turn off voice consent. Missing/deleted contact is already
+  //    NO_CONSENT above.
   const hasConsent = Boolean(contact.tcpaConsentAt && contact.tcpaConsentSource?.trim());
-  if (consentRequired && !hasConsent && !reasons.some((r) => r.code === "NO_CONSENT")) {
+  if (!hasConsent && !reasons.some((r) => r.code === "NO_CONSENT")) {
     reasons.push({
       code: "NO_CONSENT",
       detail: "no documented TCPA consent (date and source) on file for this contact",
@@ -232,6 +265,9 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
   const sessionId = randomUUID();
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${lockKey}))`);
+
+    // A call whose terminal callback never arrived must not count as live forever.
+    await expireStaleLiveSessions(tx, input.orgId, now);
 
     const limitReasons: BlockReason[] = [];
     const windowStart = new Date(now.getTime() - limits.windowHours * 3_600_000);
@@ -261,7 +297,7 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
     if (recent.length >= limits.maxAttempts) {
       limitReasons.push({
         code: "MAX_ATTEMPTS_EXCEEDED",
-        detail: `already called ${recent.length} time(s) in the last ${limits.windowHours} hours (limit ${limits.maxAttempts})`,
+        detail: `another call to this number happened recently: it was already called ${recent.length} time(s) in the last ${limits.windowHours} hours (limit ${limits.maxAttempts}; counted per phone number, so contacts sharing this number share the limit)`,
       });
     }
     const last = recent.reduce<Date | null>(
@@ -274,7 +310,7 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
         const mins = Math.ceil((readyAt - now.getTime()) / 60_000);
         limitReasons.push({
           code: "REDIAL_COOLDOWN",
-          detail: `redial cooldown: wait ${mins} more minute(s) (minimum gap ${limits.redialCooldownMinutes} minutes)`,
+          detail: `redial cooldown: another call to this number happened recently (counted per phone number, so contacts sharing it share the wait) — wait ${mins} more minute(s), minimum gap ${limits.redialCooldownMinutes} minutes`,
         });
       }
     }

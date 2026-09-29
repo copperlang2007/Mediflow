@@ -7048,6 +7048,9 @@ export const StartSoftphoneCallResponse = zod.object({
 export const listSoftphoneCallsQueryLimitDefault = 15;
 export const listSoftphoneCallsQueryLimitMax = 50;
 
+export const listSoftphoneCallsQueryOffsetDefault = 0;
+export const listSoftphoneCallsQueryOffsetMin = 0;
+
 export const ListSoftphoneCallsQueryParams = zod.object({
   limit: zod.coerce
     .number()
@@ -7055,6 +7058,12 @@ export const ListSoftphoneCallsQueryParams = zod.object({
     .min(1)
     .max(listSoftphoneCallsQueryLimitMax)
     .default(listSoftphoneCallsQueryLimitDefault),
+  offset: zod.coerce
+    .number()
+    .int()
+    .min(listSoftphoneCallsQueryOffsetMin)
+    .default(listSoftphoneCallsQueryOffsetDefault)
+    .describe("Rows to skip, for paging the full audit trail"),
   contactId: zod.coerce.string().optional(),
 });
 
@@ -7093,7 +7102,13 @@ export const ListSoftphoneCallsResponse = zod.object({
       }),
     )
     .optional(),
-  total: zod.number().int().optional(),
+  total: zod
+    .number()
+    .int()
+    .optional()
+    .describe("Full count for the same filters (not just this page)"),
+  limit: zod.number().int().optional(),
+  offset: zod.number().int().optional(),
 });
 
 /**

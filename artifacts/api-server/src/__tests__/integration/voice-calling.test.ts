@@ -1032,6 +1032,135 @@ describe("disposition saved before the status callback", () => {
   });
 });
 
+describe("consent is always enforced for voice", () => {
+  it("an org that switched off SMS consent enforcement still cannot call a contact with no documented consent", async () => {
+    await db
+      .insert(schema.orgSettingsTable)
+      .values({ id: randomUUID(), orgId: org.id, requireSmsConsent: false })
+      .onConflictDoUpdate({ target: schema.orgSettingsTable.orgId, set: { requireSmsConsent: false } });
+    const c = await newContact({ consent: false });
+    const res = await place(admin.id, c.id);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("NO_CONSENT");
+    expect((await sessionRow(res.body.callSessionId)).status).toBe("blocked");
+    // With documented consent the same org can call.
+    const ok = await newContact();
+    expect((await place(admin.id, ok.id)).status).toBe(201);
+  });
+});
+
+describe("limits are per phone number, and the message says so", () => {
+  it("a second contact sharing the number is held by the first call's cooldown", async () => {
+    const a = await newContact();
+    const b = await newContact();
+    await db.update(schema.contactsTable).set({ phone: a.e164 }).where(eq(schema.contactsTable.id, b.id));
+    expect((await place(admin.id, a.id)).status).toBe(201);
+    const res = await place(admin.id, b.id);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("REDIAL_COOLDOWN");
+    expect(res.body.error).toContain("another call to this number happened recently");
+  });
+});
+
+describe("GET /softphone/calls paging", () => {
+  async function seedSessions(orgId: string, userId: string, n: number) {
+    const ids: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const id = randomUUID();
+      ids.push(id);
+      await db.insert(schema.callSessionsTable).values({
+        id, orgId, userId, toNumber: `+1503555${2000 + i}`, status: "completed",
+        createdAt: new Date(NOON_PT.getTime() - i * 1000),
+      });
+    }
+    return ids;
+  }
+
+  it("pages the whole org audit trail with limit/offset, newest first, no repeats", async () => {
+    const ids = await seedSessions(otherOrg.id, otherAdmin.id, 7);
+    const get = (q: string) => request(app).get(`/api/softphone/calls?${q}`).set(A(otherAdmin.id));
+    const p1 = await get("limit=3&offset=0");
+    const p2 = await get("limit=3&offset=3");
+    const p3 = await get("limit=3&offset=6");
+    expect(p1.status).toBe(200);
+    expect([p1, p2, p3].map((r) => r.body.data.length)).toEqual([3, 3, 1]);
+    expect(p1.body.total).toBe(7);
+    expect(p3.body).toMatchObject({ total: 7, limit: 3, offset: 6 });
+    const seen = [...p1.body.data, ...p2.body.data, ...p3.body.data].map((r: { id: string }) => r.id);
+    expect(seen).toEqual(ids); // newest first, every row exactly once
+    expect((await get("limit=3&offset=99")).body.data).toHaveLength(0);
+    expect((await get("limit=51")).status).toBe(400);
+    expect((await get("offset=-1")).status).toBe(400);
+  });
+
+  it("paging never crosses orgs, and agents page only their own sessions", async () => {
+    const mine = await db.select().from(schema.callSessionsTable).where(eq(schema.callSessionsTable.userId, agentUser2.id));
+    await seedSessions(org.id, agentUser2.id, 4);
+    await seedSessions(org.id, agentUser1.id, 2);
+    const res = await request(app).get("/api/softphone/calls?limit=50&offset=0").set(A(agentUser2.id));
+    expect(res.body.total).toBe(mine.length + 4);
+    expect(res.body.data.every((r: { userId: string }) => r.userId === agentUser2.id)).toBe(true);
+    const admin1 = await request(app).get("/api/softphone/calls?limit=1&offset=0").set(A(admin.id));
+    const inOrg = await db.select().from(schema.callSessionsTable).where(eq(schema.callSessionsTable.orgId, org.id));
+    expect(admin1.body.total).toBe(inOrg.length);
+  });
+});
+
+describe("stuck live sessions expire lazily; parent-leg terminal statuses close a call", () => {
+  it("listing marks non-terminal sessions older than 4 hours failed with ended_at set", async () => {
+    const stale = randomUUID();
+    const stale2 = randomUUID();
+    const fresh = randomUUID();
+    const hoursAgo = (h: number) => new Date(NOON_PT.getTime() - h * 3_600_000);
+    await db.insert(schema.callSessionsTable).values([
+      { id: stale, orgId: org.id, userId: admin.id, toNumber: "+15035553001", status: "ringing", twilioCallSid: newSid(), startedAt: hoursAgo(5), createdAt: hoursAgo(5) },
+      { id: stale2, orgId: org.id, userId: admin.id, toNumber: "+15035553002", status: "in_progress", twilioCallSid: newSid(), startedAt: hoursAgo(6), answeredAt: hoursAgo(6), createdAt: hoursAgo(6) },
+      { id: fresh, orgId: org.id, userId: admin.id, toNumber: "+15035553003", status: "ringing", twilioCallSid: newSid(), startedAt: hoursAgo(0.2), createdAt: hoursAgo(0.2) },
+    ]);
+    const res = await request(app).get("/api/softphone/calls?limit=50").set(A(admin.id));
+    expect(res.status).toBe(200);
+    expect((await sessionRow(stale)).status).toBe("failed");
+    expect((await sessionRow(stale2)).status).toBe("failed");
+    expect((await sessionRow(fresh)).status).toBe("ringing");
+    const row = await sessionRow(stale);
+    expect(row.endedAt).not.toBeNull();
+    // A late terminal callback for an expired session changes nothing.
+    await postTwilio(STATUS, { CallSid: row.twilioCallSid!, CallStatus: "completed", CallDuration: "5" });
+    expect((await sessionRow(stale)).status).toBe("failed");
+  });
+
+  it("checking attempt limits also expires stuck sessions for the org", async () => {
+    const stuck = randomUUID();
+    await db.insert(schema.callSessionsTable).values({
+      id: stuck, orgId: org.id, userId: admin.id, toNumber: "+15035553010", status: "ringing",
+      twilioCallSid: newSid(), startedAt: new Date(NOON_PT.getTime() - 5 * 3_600_000), createdAt: new Date(NOON_PT.getTime() - 5 * 3_600_000),
+    });
+    const c = await newContact();
+    expect((await place(admin.id, c.id)).status).toBe(201);
+    expect((await sessionRow(stuck)).status).toBe("failed");
+  });
+
+  it("a status callback with only a completed-like CallStatus (no DialCallStatus) is terminal and logs once", async () => {
+    for (const [twilio, expected] of [["completed", "completed"], ["no-answer", "no_answer"], ["busy", "busy"], ["failed", "failed"]] as const) {
+      const started = await startedCall();
+      const sid = newSid();
+      await postTwilio(VOICE, voiceParams(started.sessionId, started.to, admin.id, sid));
+      // Empty DialCallStatus, as a malformed <Dial action> post might send.
+      const params = { CallSid: sid, CallStatus: twilio, DialCallStatus: "", CallDuration: "12" };
+      await postTwilio(STATUS, params);
+      await postTwilio(STATUS, params);
+      const row = await sessionRow(started.sessionId);
+      expect(row.status).toBe(expected);
+      expect(row.endedAt).not.toBeNull();
+      const logs = await db
+        .select()
+        .from(schema.activitiesTable)
+        .where(and(eq(schema.activitiesTable.contactId, started.contact.id), eq(schema.activitiesTable.type, "call_log")));
+      expect(logs).toHaveLength(1);
+    }
+  });
+});
+
 describe("GET /softphone/dispositions", () => {
   it("includes DO_NOT_CALL alongside the shared categories", async () => {
     const res = await request(app).get("/api/softphone/dispositions").set(A(admin.id));

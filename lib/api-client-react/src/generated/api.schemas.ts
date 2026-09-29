@@ -3223,7 +3223,10 @@ export interface CallSession {
 
 export interface CallSessionList {
   data?: CallSession[];
+  /** Full count for the same filters (not just this page) */
   total?: number;
+  limit?: number;
+  offset?: number;
 }
 
 export type UpdateCallBodyDispositionCode =
@@ -4125,5 +4128,10 @@ export type ListSoftphoneCallsParams = {
    * @maximum 50
    */
   limit?: number;
+  /**
+   * Rows to skip, for paging the full audit trail
+   * @minimum 0
+   */
+  offset?: number;
   contactId?: string;
 };

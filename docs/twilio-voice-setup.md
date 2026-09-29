@@ -52,6 +52,12 @@ This is the same one text messaging uses, so it may already be set:
 Mediflow refuses a call that would break these. The defaults are safe; you only
 need to set them to change them.
 
+These limits are counted **per phone number**, not per contact. If a household
+shares one number, every contact on it shares the same limit and the same wait.
+That is deliberate (it is the stricter reading). When it happens, the message
+says another call to this number happened recently. A call that never reached
+Twilio (for example the microphone was blocked) does not count.
+
 | Setting name | Default | Meaning |
 |---|---|---|
 | `DIAL_MAX_ATTEMPTS` | 3 | Most calls to one contact or number in the window below. |
@@ -74,13 +80,18 @@ the settings that are missing (never their values).
 
 - Blocks the call if the number is on **any** agency's do-not-contact list (matched
   on the last 10 digits, however the number was typed), if the contact has no
-  documented consent, if it is outside 8am to 9pm in the contact's time zone,
+  documented consent (always required for calls, whatever your text-message
+  consent setting is), if it is outside 8am to 9pm in the contact's time zone,
   or if the agent is not licensed and certified.
 - Caps repeat calls (see limits above) and records every refused attempt, with
   the reason, so there is an audit trail.
 - Lets an agent dial only contacts assigned to them. Admins can call any contact
   in their own agency.
-- Turns a "do not call again" outcome into a do-not-contact entry for that number.
+- Turns a "do not call again" outcome into a do-not-contact entry for that number,
+  but only for a call the person actually answered. The entry is stored on the
+  text-message channel (the opt-out list has no separate "voice" channel yet) and
+  also switches off texting for that contact. That is intentional: it errs on the
+  side of contacting less. A separate voice channel is a possible later follow-up.
 - Keeps recording **off**. Nothing in the product can turn it on yet.
 
 ## What still needs a lawyer's review before real use

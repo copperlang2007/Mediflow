@@ -22,7 +22,7 @@
  * is left untouched on purpose.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   db,
@@ -49,7 +49,7 @@ import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { randomUUID } from "node:crypto";
 import { auditLogTable, callSessionsTable } from "@workspace/db";
 import { isDemoMode } from "../lib/demoMode";
-import { cancelUnclaimedSession, placeCall } from "../lib/voice/callSessions";
+import { cancelUnclaimedSession, expireStaleLiveSessions, placeCall } from "../lib/voice/callSessions";
 import { mintVoiceToken, missingVoiceEnv } from "../lib/voice/voiceToken";
 import { recordPhoneOptOut } from "../lib/compliance/optOut";
 import { logger } from "../lib/logger";
@@ -467,6 +467,7 @@ router.get(
 
 const CallsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(50).optional(),
+  offset: z.coerce.number().int().min(0).max(1_000_000).optional(),
   contactId: z.string().min(1).max(100).optional(),
 });
 
@@ -483,6 +484,8 @@ router.get(
       return;
     }
     const c = callSessionsTable;
+    // Lazily close out sessions whose terminal callback never arrived.
+    await expireStaleLiveSessions(db, authReq.orgId);
     const conditions = [eq(c.orgId, authReq.orgId)];
     if (authReq.userRole === "agent") conditions.push(eq(c.userId, authReq.userId));
     if (parsed.data.contactId) conditions.push(eq(c.contactId, parsed.data.contactId));
@@ -511,9 +514,14 @@ router.get(
         and(eq(contactsTable.id, c.contactId), eq(contactsTable.orgId, authReq.orgId)),
       )
       .where(and(...conditions))
-      .orderBy(desc(c.createdAt))
-      .limit(parsed.data.limit ?? 15);
-    res.json({ data: rows, total: rows.length });
+      // id breaks ties so pages never repeat or skip rows created in the same instant.
+      .orderBy(desc(c.createdAt), desc(c.id))
+      .limit(parsed.data.limit ?? 15)
+      .offset(parsed.data.offset ?? 0);
+    // `total` is the full count for the same filters, so admins can page the
+    // whole audit trail (limit <= 50 per page, org scoped, agents self-scoped).
+    const [{ n = 0 } = {}] = await db.select({ n: count() }).from(c).where(and(...conditions));
+    res.json({ data: rows, total: Number(n), limit: parsed.data.limit ?? 15, offset: parsed.data.offset ?? 0 });
   },
 );
 
