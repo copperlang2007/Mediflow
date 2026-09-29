@@ -320,6 +320,28 @@ describe("Softphone browser calling states", () => {
     for (const b of screen.getAllByRole("button", { name: /^Call$/ })) expect(b).toBeEnabled();
   });
 
+  it("the manual 'Log a call' form never offers DO_NOT_CALL (it can't create an opt-out)", async () => {
+    routes["/api/softphone/voice-token"] = () => json(TOKEN);
+    // jsdom lacks these; Radix Select calls them when it opens.
+    Element.prototype.scrollIntoView = () => undefined;
+    renderAt("/dialer?contact=c-1");
+    await screen.findAllByText("Joan Park");
+    const trigger = await screen.findByRole("combobox", { name: /call disposition/i });
+    // Wait for the (shared) list to load, then open the select.
+    await waitFor(() => expect(calledUrls().some((u) => u.includes("/api/softphone/dispositions"))).toBe(true));
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    expect(await screen.findByRole("option", { name: "Call back / follow up" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Do not call again" })).not.toBeInTheDocument();
+  });
+
+  it("manualLogDispositions filters DO_NOT_CALL and nothing else", async () => {
+    const { manualLogDispositions } = await import("@/lib/portalDialer/api");
+    const list = [{ code: "POSITIVE", label: "a" }, { code: "DO_NOT_CALL", label: "b" }, { code: "UNKNOWN", label: "c" }];
+    expect(manualLogDispositions(list).map((d) => d.code)).toEqual(["POSITIVE", "UNKNOWN"]);
+    expect(manualLogDispositions(undefined)).toEqual([]);
+  });
+
   it("a mic-permission failure is explained, not swallowed", async () => {
     routes["/api/softphone/voice-token"] = () => json(TOKEN);
     routes["/api/softphone/calls"] = () => json({ callSessionId: "sess-2", to: "+15035551234" }, 201);

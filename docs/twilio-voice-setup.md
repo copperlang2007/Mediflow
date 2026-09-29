@@ -84,6 +84,11 @@ the settings that are missing (never their values).
   documented consent (always required for calls, whatever your text-message
   consent setting is), if it is outside 8am to 9pm in the contact's time zone,
   or if the agent is not licensed and certified.
+- Lets only agents whose profile is **active** place calls. Suspended, offboarding,
+  offboarded and still-onboarding profiles are refused, and cannot borrow another
+  agent's license.
+- Re-checks consent, opt-outs and the contact's status at the moment the call
+  connects, in case something changed after the "OK to call" check.
 - Caps repeat calls (see limits above) and records every refused attempt, with
   the reason, so there is an audit trail.
 - Lets an agent dial only contacts assigned to them. Admins can call any contact

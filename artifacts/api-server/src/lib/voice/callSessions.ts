@@ -135,12 +135,19 @@ export function resolveProductLine(
 
 async function callerAgentProfile(orgId: string, userId: string) {
   const [row] = await db
-    .select({ id: agentsTable.id })
+    .select({ id: agentsTable.id, status: agentsTable.status })
     .from(agentsTable)
     .where(and(eq(agentsTable.orgId, orgId), eq(agentsTable.userId, userId)))
     .limit(1);
   return row ?? null;
 }
+
+/**
+ * Agent profile statuses that may place calls: the same rule the lead queue's
+ * ready-to-sell check uses (`agents.status = 'active'`). Onboarding,
+ * suspended, offboarding and offboarded profiles never dial.
+ */
+export const CALLING_AGENT_STATUSES: readonly string[] = ["active"];
 
 export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult> {
   const now = input.now ?? new Date();
@@ -185,14 +192,23 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
 
   // Whose licensing is checked: the caller's own agent profile, else the
   // contact's assigned agent. With neither, fail closed.
-  let agentId: string | null = mine?.id ?? null;
-  if (!agentId && contact.assignedAgentId) {
+  // A profile that is not allowed to sell (suspended / offboarding / offboarded /
+  // still onboarding) fails closed: it neither dials nor lends its licensing.
+  let agentId: string | null = null;
+  let agentIneligibleDetail: string | null = null;
+  if (mine) {
+    if (CALLING_AGENT_STATUSES.includes(mine.status)) agentId = mine.id;
+    else agentIneligibleDetail = `your agent profile is ${mine.status}, so you cannot place calls`;
+  } else if (contact.assignedAgentId) {
     const [assigned] = await db
-      .select({ id: agentsTable.id })
+      .select({ id: agentsTable.id, status: agentsTable.status })
       .from(agentsTable)
       .where(and(eq(agentsTable.id, contact.assignedAgentId), eq(agentsTable.orgId, input.orgId)))
       .limit(1);
-    agentId = assigned?.id ?? null;
+    if (assigned) {
+      if (CALLING_AGENT_STATUSES.includes(assigned.status)) agentId = assigned.id;
+      else agentIneligibleDetail = `the contact's assigned agent is ${assigned.status}, so licensing cannot be relied on`;
+    }
   }
 
   // The product line decides how strict the agent checks are (AHIP + carrier
@@ -241,7 +257,9 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
   if (!agentId) {
     reasons.push({
       code: "AGENT_NOT_ELIGIBLE",
-      detail: "no agent profile is linked to you or to this contact, so licensing cannot be verified",
+      detail:
+        agentIneligibleDetail ??
+        "no agent profile is linked to you or to this contact, so licensing cannot be verified",
     });
   }
 
@@ -320,7 +338,9 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
           eq(callSessionsTable.orgId, input.orgId),
           sameTarget,
           ne(callSessionsTable.status, "blocked"),
-          ne(callSessionsTable.status, "canceled"),
+          // A canceled row with a Twilio SID WAS dialed (Twilio ended it as
+          // canceled), so it still counts; only never-claimed cancels are free.
+          or(ne(callSessionsTable.status, "canceled"), isNotNull(callSessionsTable.twilioCallSid)),
           gte(callSessionsTable.createdAt, windowStart),
           // Only attempts that reached Twilio count. A session that was never
           // claimed (mic denied, hung up while connecting, page closed) dialed
@@ -498,15 +518,25 @@ export async function blockUnusedSession(sessionId: string, reason: string): Pro
  */
 export async function recheckContactAtDial(
   session: CallSession,
-): Promise<"ok" | "opted_out" | "contact_ineligible"> {
+): Promise<"ok" | "opted_out" | "contact_ineligible" | "no_consent"> {
   if (await isNumberOptedOutAnyOrg(session.toNumber)) return "opted_out";
   if (!session.contactId) return "contact_ineligible";
   const [c] = await db
-    .select({ status: contactsTable.status, deletedAt: contactsTable.deletedAt })
+    .select({
+      status: contactsTable.status,
+      deletedAt: contactsTable.deletedAt,
+      optOutSms: contactsTable.optOutSms,
+      tcpaConsentAt: contactsTable.tcpaConsentAt,
+      tcpaConsentSource: contactsTable.tcpaConsentSource,
+    })
     .from(contactsTable)
     .where(and(eq(contactsTable.id, session.contactId), eq(contactsTable.orgId, session.orgId)))
     .limit(1);
   if (!c || c.deletedAt || c.status === "do_not_contact") return "contact_ineligible";
+  // The contact's own opt-out flag (set by a STOP or a do-not-call disposition).
+  if (c.optOutSms) return "opted_out";
+  // Consent could have been withdrawn/removed since preclearance; voice consent is unconditional.
+  if (!c.tcpaConsentAt || !c.tcpaConsentSource?.trim()) return "no_consent";
   return "ok";
 }
 

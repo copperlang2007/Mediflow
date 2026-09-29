@@ -283,6 +283,17 @@ export interface Disposition {
   label: string;
 }
 
+/**
+ * Dispositions the manual "Log a call" form (calls made outside Mediflow) may
+ * offer. DO_NOT_CALL is excluded on purpose: that form only writes a generic
+ * `call_log` activity and never creates an opt-out, so offering it would look
+ * like a do-not-call was recorded when nothing stopped future calls. It exists
+ * only in the native softphone flow, where the server enforces it.
+ */
+export function manualLogDispositions(list: Disposition[] | undefined): Disposition[] {
+  return (list ?? []).filter((d) => d.code !== "DO_NOT_CALL");
+}
+
 export function useDispositions() {
   return useQuery({
     queryKey: ["/api/softphone/dispositions"],

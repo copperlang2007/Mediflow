@@ -202,7 +202,11 @@ beforeAll(async () => {
   await db.update(schema.agentsTable).set({ userId: agentUser2.id }).where(eq(schema.agentsTable.id, agent2.id));
   await db.update(schema.agentsTable).set({ userId: admin.id }).where(eq(schema.agentsTable.id, adminAgent.id));
   await db.update(schema.agentsTable).set({ userId: support.id }).where(eq(schema.agentsTable.id, supportAgent.id));
-  for (const a of [agent1, agent2, adminAgent, supportAgent]) await license(a.id);
+  for (const a of [agent1, agent2, adminAgent, supportAgent]) {
+    // Only `active` profiles may sell (seedAgent defaults to `onboarding`).
+    await db.update(schema.agentsTable).set({ status: "active" }).where(eq(schema.agentsTable.id, a.id));
+    await license(a.id);
+  }
 });
 
 afterAll(async () => {
@@ -975,7 +979,7 @@ describe("product line and plan year are derived server side", () => {
   async function licensedNoCerts() {
     const u = await seedUser(db, { orgId: org.id, role: "agency_admin" });
     const a = await seedAgent(db, { orgId: org.id, firstName: "Cert" });
-    await db.update(schema.agentsTable).set({ userId: u.id }).where(eq(schema.agentsTable.id, a.id));
+    await db.update(schema.agentsTable).set({ userId: u.id, status: "active" }).where(eq(schema.agentsTable.id, a.id));
     await license(a.id);
     return { user: u, agent: a };
   }
@@ -1080,6 +1084,158 @@ describe("DO_NOT_CALL only for an answered call", () => {
     expect((await sessionRow(sessionId)).answeredAt).not.toBeNull();
     expect((await patch(admin.id, sessionId, { dispositionCode: "DO_NOT_CALL" })).status).toBe(200);
     expect(await optOutCount(contact.e164)).toBe(1);
+  });
+});
+
+describe("only agents allowed to sell can place calls", () => {
+  async function callerWithStatus(status: "onboarding" | "active" | "suspended" | "offboarding" | "offboarded") {
+    const u = await seedUser(db, { orgId: org.id, role: "agency_admin" });
+    const a = await seedAgent(db, { orgId: org.id, firstName: `S-${status}` });
+    await db.update(schema.agentsTable).set({ userId: u.id, status }).where(eq(schema.agentsTable.id, a.id));
+    await license(a.id);
+    return { user: u, agent: a };
+  }
+
+  it("suspended, offboarding, offboarded and onboarding callers fail closed with a clear reason", async () => {
+    for (const status of ["suspended", "offboarding", "offboarded", "onboarding"] as const) {
+      const { user } = await callerWithStatus(status);
+      const c = await newContact();
+      const res = await place(user.id, c.id);
+      expect(res.status, status).toBe(409);
+      expect(res.body.code).toBe("AGENT_NOT_ELIGIBLE");
+      expect(res.body.error).toContain(status);
+      expect((await sessionRow(res.body.callSessionId)).status).toBe("blocked");
+    }
+    // An active profile is fine.
+    const { user } = await callerWithStatus("active");
+    expect((await place(user.id, (await newContact()).id)).status).toBe(201);
+  });
+
+  it("an offboarded caller cannot borrow an active assigned agent's licensing", async () => {
+    const { user } = await callerWithStatus("offboarded");
+    const c = await newContact({ assignedAgentId: agent1.id }); // agent1 is active and licensed
+    const res = await place(user.id, c.id);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("AGENT_NOT_ELIGIBLE");
+  });
+
+  it("with no own profile, an assigned agent who is not active blocks the call", async () => {
+    const u = await seedUser(db, { orgId: org.id, role: "agency_admin" });
+    const inactive = await seedAgent(db, { orgId: org.id, firstName: "Gone" });
+    await db.update(schema.agentsTable).set({ status: "offboarded" }).where(eq(schema.agentsTable.id, inactive.id));
+    await license(inactive.id);
+    const c = await newContact({ assignedAgentId: inactive.id });
+    const res = await place(u.id, c.id);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain("offboarded");
+    // An active assigned agent still covers a caller with no profile.
+    const ok = await newContact({ assignedAgentId: agent1.id });
+    expect((await place(u.id, ok.id)).status).toBe(201);
+  });
+
+  it("an agent-role user whose profile was suspended is refused", async () => {
+    const u = await seedUser(db, { orgId: org.id, role: "agent" });
+    const a = await seedAgent(db, { orgId: org.id, firstName: "Sus" });
+    await db.update(schema.agentsTable).set({ userId: u.id, status: "suspended" }).where(eq(schema.agentsTable.id, a.id));
+    await license(a.id);
+    const c = await newContact({ assignedAgentId: a.id });
+    const res = await place(u.id, c.id);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("AGENT_NOT_ELIGIBLE");
+  });
+});
+
+describe("everything is re-checked at dial time", () => {
+  async function rejectedAfter(mutate: (contactId: string) => Promise<void>, reason: string) {
+    const { contact, sessionId, to } = await startedCall();
+    await mutate(contact.id);
+    const res = await postTwilio(VOICE, voiceParams(sessionId, to, admin.id));
+    expect(res.text).toContain("<Reject");
+    expect(res.text).not.toContain("<Dial");
+    const row = await sessionRow(sessionId);
+    expect(row.status).toBe("blocked");
+    expect(row.blockedReason).toContain(reason);
+    expect(row.twilioCallSid).toBeNull();
+  }
+  const upd = (id: string, set: Record<string, unknown>) =>
+    db.update(schema.contactsTable).set(set as never).where(eq(schema.contactsTable.id, id));
+
+  it("consent removed after preclearance", async () => {
+    await rejectedAfter((id) => upd(id, { tcpaConsentAt: null }), "no_consent");
+  });
+  it("consent source cleared", async () => {
+    await rejectedAfter((id) => upd(id, { tcpaConsentSource: "  " }), "no_consent");
+  });
+  it("contact opt-out flag set", async () => {
+    await rejectedAfter((id) => upd(id, { optOutSms: true }), "opted_out");
+  });
+  it("contact soft-deleted", async () => {
+    await rejectedAfter((id) => upd(id, { deletedAt: new Date() }), "contact_ineligible");
+  });
+  it("contact marked do_not_contact", async () => {
+    await rejectedAfter((id) => upd(id, { status: "do_not_contact" }), "contact_ineligible");
+  });
+  it("same-org opt-out row added by number", async () => {
+    await rejectedAfter(async (id) => {
+      const [c] = await db.select().from(schema.contactsTable).where(eq(schema.contactsTable.id, id));
+      await db.insert(schema.optOutsTable).values({ id: randomUUID(), orgId: org.id, phone: c!.phone!, channel: "sms" });
+    }, "opted_out");
+  });
+});
+
+describe("a canceled row that was dialed still counts", () => {
+  it("cooldown: canceled WITH a Twilio SID blocks an immediate redial", async () => {
+    const c = await newContact();
+    await db.insert(schema.callSessionsTable).values({
+      id: randomUUID(), orgId: org.id, contactId: c.id, userId: admin.id, toNumber: c.e164,
+      status: "canceled", twilioCallSid: newSid(), createdAt: new Date(NOON_PT.getTime() - 5 * 60_000),
+    });
+    const res = await place(admin.id, c.id);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("REDIAL_COOLDOWN");
+  });
+
+  it("attempt limit: three canceled-with-SID rows use up the window; canceled without SID do not", async () => {
+    const dialed = await newContact();
+    const free = await newContact();
+    for (let i = 0; i < 3; i++) {
+      for (const [c, sid] of [[dialed, newSid()], [free, null]] as const) {
+        await db.insert(schema.callSessionsTable).values({
+          id: randomUUID(), orgId: org.id, contactId: c.id, userId: admin.id, toNumber: c.e164,
+          status: "canceled", twilioCallSid: sid, createdAt: new Date(NOON_PT.getTime() - (2 + i) * 3_600_000),
+        });
+      }
+    }
+    const blocked = await place(admin.id, dialed.id);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.code).toBe("MAX_ATTEMPTS_EXCEEDED");
+    expect((await place(admin.id, free.id)).status).toBe(201);
+  });
+});
+
+describe("PATCH racing the terminal status callback", () => {
+  it("disposition and notes always land on the timeline, whichever finishes first", async () => {
+    for (let i = 0; i < 8; i++) {
+      const { contact, sessionId, to } = await startedCall();
+      const sid = newSid();
+      await postTwilio(VOICE, voiceParams(sessionId, to, admin.id, sid));
+      const patch = request(app)
+        .patch(`/api/softphone/calls/${sessionId}`)
+        .set(A(admin.id))
+        .send({ dispositionCode: "FOLLOW_UP", notes: `race ${i}` });
+      const status = postTwilio(STATUS, { CallSid: sid, DialCallStatus: "completed", DialCallDuration: "30" });
+      // Alternate which request is started first.
+      const [a, b] = i % 2 === 0 ? await Promise.all([patch, status]) : (await Promise.all([status, patch])).reverse();
+      expect([a.status, b.status]).toEqual([200, 200]);
+      const row = await sessionRow(sessionId);
+      const logs = await db
+        .select()
+        .from(schema.activitiesTable)
+        .where(and(eq(schema.activitiesTable.contactId, contact.id), eq(schema.activitiesTable.type, "call_log")));
+      expect(logs).toHaveLength(1);
+      expect(row.activityId).toBe(logs[0]!.id);
+      expect(logs[0]!.metadata, `iteration ${i}`).toMatchObject({ disposition: "FOLLOW_UP", notes: `race ${i}` });
+    }
   });
 });
 

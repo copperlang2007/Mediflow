@@ -48,6 +48,7 @@ import {
   contactActivitiesKey,
   formatPhone,
   initialsOf,
+  manualLogDispositions,
   useContactCallLogs,
   useDispositions,
   usePhoneLookup,
@@ -308,7 +309,7 @@ function LogCallCard({ contact, canLog, notesId }: { contact: ContactLite | null
         <Select value={disposition} onValueChange={setDisposition} disabled={disabled}>
           <SelectTrigger id="call-disposition"><SelectValue placeholder="Choose an outcome" /></SelectTrigger>
           <SelectContent>
-            {(dispositions?.data ?? []).map((d) => (
+            {manualLogDispositions(dispositions?.data).map((d) => (
               <SelectItem key={d.code} value={d.code}>{d.label}</SelectItem>
             ))}
           </SelectContent>

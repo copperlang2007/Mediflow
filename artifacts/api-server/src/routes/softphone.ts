@@ -659,13 +659,19 @@ router.patch(
       if (patch.dispositionCode) activityMeta.disposition = patch.dispositionCode;
       // Whenever notes were explicitly provided (including cleared to null).
       if (parsed.data.notes !== undefined) activityMeta.notes = patch.notes ?? null;
-      if (row.activityId && Object.keys(activityMeta).length > 0) {
+      // `u.activityId` comes from the UPDATE ... RETURNING above, i.e. the row's
+      // CURRENT value after waiting on any concurrent status-callback lock —
+      // not the stale pre-transaction read. If the callback already logged the
+      // call, the timeline is updated here; if it hasn't, it copies the values
+      // from the row we just saved.
+      const currentActivityId = u?.activityId ?? null;
+      if (currentActivityId && Object.keys(activityMeta).length > 0) {
         await tx
           .update(activitiesTable)
           .set({
             metadata: sql`coalesce(${activitiesTable.metadata}, '{}'::jsonb) || ${JSON.stringify(activityMeta)}::jsonb`,
           })
-          .where(and(eq(activitiesTable.id, row.activityId), eq(activitiesTable.orgId, authReq.orgId)));
+          .where(and(eq(activitiesTable.id, currentActivityId), eq(activitiesTable.orgId, authReq.orgId)));
       }
       return u;
     });
