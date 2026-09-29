@@ -780,6 +780,18 @@ describe("abandoned attempts have their own ceiling", () => {
     expect(await rowCount(c.id)).toBe(30);
   });
 
+  it("the ceiling never hides a compliance reason, and says the count is per number", async () => {
+    const c = await newContact({ consent: false });
+    await seedAbandoned(c, 30);
+    const res = await place(admin.id, c.id);
+    expect(res.status).toBe(409);
+    const codes = res.body.reasons.map((r: { code: string }) => r.code);
+    expect(codes).toEqual(expect.arrayContaining(["NO_CONSENT", "TOO_MANY_ABANDONED_ATTEMPTS"]));
+    expect(res.body.code).toBe("NO_CONSENT"); // compliance first
+    expect(res.body.reasons.find((r: { code: string }) => r.code === "TOO_MANY_ABANDONED_ATTEMPTS").detail).toContain("per phone number");
+    expect(await rowCount(c.id)).toBe(30);
+  });
+
   it("just under the ceiling an ordinary retry still works (TTL logic unchanged)", async () => {
     const c = await newContact();
     await seedAbandoned(c, 29);

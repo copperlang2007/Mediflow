@@ -321,10 +321,13 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
     if (Number(abandoned) >= limits.maxUnclaimedAttempts) {
       return {
         throttled: true,
+        // Compliance reasons (consent, DNC, hours, eligibility) come FIRST so they
+        // are never hidden behind the ceiling; no row is stored (bounded table).
         reasons: [
+          ...reasons,
           {
             code: "TOO_MANY_ABANDONED_ATTEMPTS",
-            detail: `too many call attempts to this number never connected (${Number(abandoned)} in the last ${limits.windowHours} hours, limit ${limits.maxUnclaimedAttempts}); try again later or contact your administrator`,
+            detail: `too many call attempts to this number never connected (${Number(abandoned)} in the last ${limits.windowHours} hours, limit ${limits.maxUnclaimedAttempts}; counted per phone number, so contacts sharing this number share the limit); try again later or contact your administrator`,
           },
         ] as BlockReason[],
       } as const;
