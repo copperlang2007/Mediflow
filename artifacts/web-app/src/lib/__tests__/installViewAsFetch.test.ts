@@ -7,6 +7,7 @@ const nativeFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = nativeFetch;
   localStorage.clear();
+  sessionStorage.clear();
   vi.restoreAllMocks();
 });
 
@@ -31,7 +32,7 @@ it("adds the stated reason only to permitted profile patches", async () => {
   const transport = vi.fn().mockResolvedValue({ status: 204 });
   globalThis.fetch = transport;
   localStorage.setItem("mediflow:view-as-org", "org-b");
-  localStorage.setItem("mediflow:support-edit-reason", "Agency requested contact correction");
+  sessionStorage.setItem("mediflow:support-edit-reason", "Agency requested contact correction");
   installViewAsFetch();
 
   await fetch("/mediflow/api/contacts/contact-b", { method: "PATCH" });
