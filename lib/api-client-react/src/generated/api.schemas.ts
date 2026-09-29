@@ -3101,6 +3101,167 @@ export interface Campaign {
   unsubscribedCount?: number;
 }
 
+export type StartCallBodyProductLine =
+  (typeof StartCallBodyProductLine)[keyof typeof StartCallBodyProductLine];
+
+export const StartCallBodyProductLine = {
+  MA: "MA",
+  PDP: "PDP",
+  MAPD: "MAPD",
+  supp: "supp",
+  other: "other",
+} as const;
+
+export interface StartCallBody {
+  contactId: string;
+  productLine?: StartCallBodyProductLine;
+}
+
+export interface StartCallResponse {
+  callSessionId: string;
+  /** E.164 number derived server side from the contact */
+  to: string;
+}
+
+export type CallBlockReasonCode =
+  (typeof CallBlockReasonCode)[keyof typeof CallBlockReasonCode];
+
+export const CallBlockReasonCode = {
+  AGENT_NOT_LICENSED: "AGENT_NOT_LICENSED",
+  AGENT_LICENSE_EXPIRED: "AGENT_LICENSE_EXPIRED",
+  AGENT_NO_AHIP: "AGENT_NO_AHIP",
+  AGENT_NOT_CERTIFIED: "AGENT_NOT_CERTIFIED",
+  NO_CONSENT: "NO_CONSENT",
+  DNC: "DNC",
+  OUTSIDE_CALLING_HOURS: "OUTSIDE_CALLING_HOURS",
+  TIMEZONE_UNRESOLVED: "TIMEZONE_UNRESOLVED",
+  MISSING_INPUT: "MISSING_INPUT",
+  INVALID_NUMBER: "INVALID_NUMBER",
+  AGENT_NOT_ELIGIBLE: "AGENT_NOT_ELIGIBLE",
+  MAX_ATTEMPTS_EXCEEDED: "MAX_ATTEMPTS_EXCEEDED",
+  REDIAL_COOLDOWN: "REDIAL_COOLDOWN",
+  TOO_MANY_ABANDONED_ATTEMPTS: "TOO_MANY_ABANDONED_ATTEMPTS",
+} as const;
+
+export interface CallBlockReason {
+  code: CallBlockReasonCode;
+  detail: string;
+}
+
+export interface CallBlockedResponse {
+  error: string;
+  code?: string;
+  reasons: CallBlockReason[];
+  /** Absent when refused without storing a row (TOO_MANY_ABANDONED_ATTEMPTS) */
+  callSessionId?: string;
+}
+
+export type CallingUnavailableStatus =
+  (typeof CallingUnavailableStatus)[keyof typeof CallingUnavailableStatus];
+
+export const CallingUnavailableStatus = {
+  needs_setup: "needs_setup",
+  demo_mode: "demo_mode",
+} as const;
+
+export interface CallingUnavailable {
+  status: CallingUnavailableStatus;
+  /** Names (never values) of the Twilio env vars that are not set */
+  missing?: string[];
+  error?: string;
+}
+
+export interface VoiceToken {
+  token: string;
+  identity: string;
+  expiresAt: string;
+  ttlSeconds: number;
+}
+
+export type CallSessionStatus =
+  (typeof CallSessionStatus)[keyof typeof CallSessionStatus];
+
+export const CallSessionStatus = {
+  initiated: "initiated",
+  ringing: "ringing",
+  in_progress: "in_progress",
+  completed: "completed",
+  busy: "busy",
+  no_answer: "no_answer",
+  failed: "failed",
+  canceled: "canceled",
+  blocked: "blocked",
+} as const;
+
+export interface CallSession {
+  id?: string;
+  /** @nullable */
+  contactId?: string | null;
+  /** @nullable */
+  userId?: string | null;
+  direction?: string;
+  status?: CallSessionStatus;
+  toNumber?: string;
+  /** @nullable */
+  startedAt?: string | null;
+  /** @nullable */
+  answeredAt?: string | null;
+  /** @nullable */
+  endedAt?: string | null;
+  /** @nullable */
+  durationSeconds?: number | null;
+  /** @nullable */
+  dispositionCode?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  /** @nullable */
+  blockedReason?: string | null;
+  createdAt?: string;
+  /** @nullable */
+  firstName?: string | null;
+  /** @nullable */
+  lastName?: string | null;
+}
+
+export interface CallSessionList {
+  data?: CallSession[];
+  /** Full count for the same filters (not just this page) */
+  total?: number;
+  limit?: number;
+  offset?: number;
+}
+
+export type UpdateCallBodyDispositionCode =
+  (typeof UpdateCallBodyDispositionCode)[keyof typeof UpdateCallBodyDispositionCode];
+
+export const UpdateCallBodyDispositionCode = {
+  POSITIVE: "POSITIVE",
+  NEUTRAL: "NEUTRAL",
+  NEGATIVE: "NEGATIVE",
+  COMPLIANCE: "COMPLIANCE",
+  FOLLOW_UP: "FOLLOW_UP",
+  UNKNOWN: "UNKNOWN",
+  DO_NOT_CALL: "DO_NOT_CALL",
+} as const;
+
+export interface UpdateCallBody {
+  dispositionCode?: UpdateCallBodyDispositionCode;
+  /**
+   * @maxLength 2000
+   * @nullable
+   */
+  notes?: string | null;
+}
+
+export interface UpdateCallResponse {
+  id?: string;
+  status?: string;
+  /** @nullable */
+  dispositionCode?: string | null;
+  /** @nullable */
+  notes?: string | null;
+}
+
 export type GetUsersParams = {
   role?: string;
   isActive?: boolean;
@@ -3961,4 +4122,18 @@ export type ResubscribeCampaignContactBody = {
 export type SendCampaignBody = {
   /** @nullable */
   scheduledAt?: string | null;
+};
+
+export type ListSoftphoneCallsParams = {
+  /**
+   * @minimum 1
+   * @maximum 50
+   */
+  limit?: number;
+  /**
+   * Rows to skip, for paging the full audit trail
+   * @minimum 0
+   */
+  offset?: number;
+  contactId?: string;
 };

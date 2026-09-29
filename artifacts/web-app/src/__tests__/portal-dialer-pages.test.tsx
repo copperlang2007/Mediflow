@@ -108,7 +108,8 @@ describe("Softphone page", () => {
     routes["/api/softphone/dispositions"] = () => json({ data: [{ code: "FOLLOW_UP", label: "Call back / follow up" }] });
     renderAt("/dialer", <DialerPage />);
     expect(screen.getByText("Dial Pad")).toBeInTheDocument();
-    expect(screen.getByText(/Browser calling: coming soon/)).toBeInTheDocument();
+    // No Twilio setup in this test: the page says so instead of pretending.
+    expect(await screen.findByText(/Browser calling: (needs setup|unavailable)/)).toBeInTheDocument();
     expect(await screen.findByText("No calls logged yet")).toBeInTheDocument();
     expect(screen.queryByText(/00:00/)).not.toBeInTheDocument();
   });

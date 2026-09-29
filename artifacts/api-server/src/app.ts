@@ -14,6 +14,7 @@ import {
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import webhooksRouter from "./routes/webhooks";
+import voiceWebhooksRouter from "./routes/voiceWebhooks";
 import stripeWebhookRouter from "./routes/stripeWebhook";
 import dialerEventsRouter from "./routes/dialerEvents";
 import queuePublicRouter from "./routes/queuePublic";
@@ -118,7 +119,11 @@ app.use(helmet({
       "connect-src": [
         "'self'", ...(clerkDomain ? [clerkDomain] : []),
         "https://*.protect.clerk.com:*",
+        // Twilio Voice SDK signalling (browser calling): HTTPS + secure WebSocket.
+        "https://*.twilio.com", "wss://*.twilio.com",
       ],
+      // The Voice SDK plays its ring / disconnect tones from Twilio's CDN.
+      "media-src": ["'self'", "https://sdk.twilio.com", "data:", "blob:"],
       "frame-src": [
         "'self'", ...(clerkDomain ? [clerkDomain] : []),
         "https://challenges.cloudflare.com", "https://*.protect.clerk.com",
@@ -162,7 +167,22 @@ app.use("/api", apiCors);
 app.use("/sse/notifications", apiCors);
 
 // Global rate limit: 500 requests / 15 minutes per IP
+// Twilio Voice webhooks come from Twilio's shared egress IPs, not from users, so
+// the per-IP budgets below would throttle real call events (a 429 makes Twilio
+// drop or retry the callback). They are exempt here; they keep their own
+// dedicated limiter (routes/voiceWebhooks.ts) and X-Twilio-Signature check.
+// originalUrl, not path: under `app.use("/api", …)` req.path has "/api" stripped.
+// EXACT paths only — an unknown subpath such as /voice-fake stays rate limited.
+const VOICE_WEBHOOK_PATHS: ReadonlySet<string> = new Set([
+  "/api/webhooks/twilio/voice",
+  "/api/webhooks/twilio/voice-status",
+  "/api/webhooks/twilio/voice-notice",
+]);
+const isVoiceWebhook = (req: Request): boolean =>
+  VOICE_WEBHOOK_PATHS.has(req.originalUrl.split("?")[0]!);
+
 const globalLimiter = rateLimit({
+  skip: isVoiceWebhook,
   windowMs: 15 * 60 * 1000,
   max: 500,
   standardHeaders: true,
@@ -273,6 +293,7 @@ if (!isDemoMode()) {
 // Applied AFTER clerkMiddleware so getAuth(req) is populated.
 // Falls back to IP for unauthenticated requests.
 const userLimiter = rateLimit({
+  skip: isVoiceWebhook,
   windowMs: 60 * 1000,
   // Demo mode keys by IP (no Clerk userId), so multiple walkthrough viewers
   // behind one office/VPN egress share a budget — raise it so they aren't
@@ -311,6 +332,10 @@ app.use("/api", userLimiter);
 // Twilio inbound webhooks — mounted at root so Twilio can reach them without
 // API auth middleware. Signature validation is enforced inside the handler.
 app.use(webhooksRouter);
+
+// Twilio Voice (native browser calling): TwiML webhook + status callbacks.
+// Same posture as the SMS receiver above — signature-verified, no Clerk.
+app.use(voiceWebhooksRouter);
 
 // Stripe billing webhooks — mounted at root alongside the Twilio receiver and
 // for the same reason: Stripe has no Clerk session. Trust comes from the

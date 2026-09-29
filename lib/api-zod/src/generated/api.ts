@@ -7021,3 +7021,173 @@ export const CampaignResendWebhookResponse = zod.unknown();
  * @summary Twilio SMS delivery receipts (X-Twilio-Signature)
  */
 export const CampaignTwilioStatusCallbackResponse = zod.void();
+
+/**
+ * Runs preclearance (consent, do-not-contact across orgs, calling hours in
+ * the contact's timezone, agent eligibility) plus attempt-limit and redial
+ * cooldown backstops. A refused call returns 409 with the specific reasons
+ * and stores a `blocked` call session as an audit trail. The `agent` role
+ * may call only contacts assigned to their own agent profile.
+ * @summary Preclear a call to a contact and create a single-use call session
+ */
+export const StartSoftphoneCallBody = zod.object({
+  contactId: zod.string(),
+  productLine: zod.enum(["MA", "PDP", "MAPD", "supp", "other"]).optional(),
+});
+
+export const StartSoftphoneCallResponse = zod.object({
+  callSessionId: zod.string(),
+  to: zod
+    .string()
+    .describe("E.164 number derived server side from the contact"),
+});
+
+/**
+ * @summary Recent call sessions (agents see only their own)
+ */
+export const listSoftphoneCallsQueryLimitDefault = 15;
+export const listSoftphoneCallsQueryLimitMax = 50;
+
+export const listSoftphoneCallsQueryOffsetDefault = 0;
+export const listSoftphoneCallsQueryOffsetMin = 0;
+
+export const ListSoftphoneCallsQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(listSoftphoneCallsQueryLimitMax)
+    .default(listSoftphoneCallsQueryLimitDefault),
+  offset: zod.coerce
+    .number()
+    .int()
+    .min(listSoftphoneCallsQueryOffsetMin)
+    .default(listSoftphoneCallsQueryOffsetDefault)
+    .describe("Rows to skip, for paging the full audit trail"),
+  contactId: zod.coerce.string().optional(),
+});
+
+export const ListSoftphoneCallsResponse = zod.object({
+  data: zod
+    .array(
+      zod.object({
+        id: zod.string().optional(),
+        contactId: zod.string().nullish(),
+        userId: zod.string().nullish(),
+        direction: zod.string().optional(),
+        status: zod
+          .enum([
+            "initiated",
+            "ringing",
+            "in_progress",
+            "completed",
+            "busy",
+            "no_answer",
+            "failed",
+            "canceled",
+            "blocked",
+          ])
+          .optional(),
+        toNumber: zod.string().optional(),
+        startedAt: zod.coerce.date().nullish(),
+        answeredAt: zod.coerce.date().nullish(),
+        endedAt: zod.coerce.date().nullish(),
+        durationSeconds: zod.number().int().nullish(),
+        dispositionCode: zod.string().nullish(),
+        notes: zod.string().nullish(),
+        blockedReason: zod.string().nullish(),
+        createdAt: zod.coerce.date().optional(),
+        firstName: zod.string().nullish(),
+        lastName: zod.string().nullish(),
+      }),
+    )
+    .optional(),
+  total: zod
+    .number()
+    .int()
+    .optional()
+    .describe("Full count for the same filters (not just this page)"),
+  limit: zod.number().int().optional(),
+  offset: zod.number().int().optional(),
+});
+
+/**
+ * A DO_NOT_CALL disposition also records an opt-out for the number, which
+ * blocks further calls and texts to it. It is accepted only for a call that
+ * was answered (409 otherwise).
+ * @summary Save disposition and notes on a call (owner or admin only)
+ */
+export const UpdateSoftphoneCallParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const updateSoftphoneCallBodyNotesMax = 2000;
+
+export const UpdateSoftphoneCallBody = zod.object({
+  dispositionCode: zod
+    .enum([
+      "POSITIVE",
+      "NEUTRAL",
+      "NEGATIVE",
+      "COMPLIANCE",
+      "FOLLOW_UP",
+      "UNKNOWN",
+      "DO_NOT_CALL",
+    ])
+    .optional(),
+  notes: zod.string().max(updateSoftphoneCallBodyNotesMax).nullish(),
+});
+
+export const UpdateSoftphoneCallResponse = zod.object({
+  id: zod.string().optional(),
+  status: zod.string().optional(),
+  dispositionCode: zod.string().nullish(),
+  notes: zod.string().nullish(),
+});
+
+/**
+ * @summary Abandon a call attempt Twilio never claimed (frees the retry limit slot)
+ */
+export const CancelSoftphoneCallParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const CancelSoftphoneCallResponse = zod.object({
+  id: zod.string().optional(),
+  status: zod.string().optional(),
+  dispositionCode: zod.string().nullish(),
+  notes: zod.string().nullish(),
+});
+
+/**
+ * HS256 JWT with a VoiceGrant (outgoing through our TwiML App only),
+ * identity = the user id, TTL at most 10 minutes. Returns 503 with
+ * `status: needs_setup` and the names of the missing env vars until Twilio
+ * is configured.
+ * @summary Mint a short-lived Twilio Voice access token for the signed-in user
+ */
+export const GetSoftphoneVoiceTokenResponse = zod.object({
+  token: zod.string(),
+  identity: zod.string(),
+  expiresAt: zod.coerce.date(),
+  ttlSeconds: zod.number().int(),
+});
+
+/**
+ * Rejects (TwiML `<Reject>`) unless the session is `initiated`, under 2
+ * minutes old, bound to the calling user, the echoed `To` matches the
+ * stored number and the number still clears the opt-out check. Recording
+ * stays off unless the session has `recording_enabled`.
+ * @summary TwiML App Voice URL (X-Twilio-Signature). Dials only the number stored on the call session.
+ */
+export const TwilioVoiceWebhookResponse = zod.unknown();
+
+/**
+ * @summary Call status and Dial results (X-Twilio-Signature). Idempotent; logs the call once.
+ */
+export const TwilioVoiceStatusCallbackResponse = zod.unknown();
+
+/**
+ * @summary Recording notice played to the callee before bridging (X-Twilio-Signature)
+ */
+export const TwilioVoiceRecordingNoticeResponse = zod.unknown();
