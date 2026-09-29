@@ -244,10 +244,14 @@ export async function storeApplication(
   let applicationKey = p.confirmationCode ?? (p.policyId ? `policy:${p.policyId}` : null) ?? opts.fallbackKey ?? null;
   if (!applicationKey) return null;
 
+  // The key this application had before it carried a Sunfire code: the
+  // EnrollHere policy id, or the caller's fallback (GHL: contact + plan).
+  const codelessKey = p.policyId ? `policy:${p.policyId}` : opts.fallbackKey ?? null;
+
   // Serialize writers for one policy so two deliveries can't both take
-  // version N+1. Locked on the policy id when there is one, so a delivery that
-  // first carries the confirmation code still serializes with earlier ones.
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`enrollment-app:${orgId}:${p.policyId ?? applicationKey}`}, 0))`);
+  // version N+1. Locked on the codeless key when there is one, so a delivery
+  // that first carries the confirmation code still serializes with earlier ones.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`enrollment-app:${orgId}:${codelessKey ?? applicationKey}`}, 0))`);
 
   // A delivery without the Sunfire code continues the record this policy
   // already has (whatever it is keyed on) rather than starting a second one.
@@ -264,8 +268,8 @@ export async function storeApplication(
   // The policy was first stored without a Sunfire code: re-key that record so
   // its history continues on one application instead of splitting in two. A
   // code already held by another policy's record is never taken over.
-  if (p.confirmationCode && p.policyId) {
-    const fallbackKey = `policy:${p.policyId}`;
+  if (p.confirmationCode && codelessKey) {
+    const fallbackKey = codelessKey;
     const rows = await tx.select({
       id: enrollmentApplicationsTable.id,
       key: enrollmentApplicationsTable.applicationKey,

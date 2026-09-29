@@ -400,7 +400,18 @@ export async function syncOneContact(
   gc: GhlContact,
   defs: FieldDefs = new Map(),
 ): Promise<"created" | "updated" | "skipped"> {
-  const application = defs.size > 0 ? readSunfireApplication(gc, defs) : null;
+  let application = defs.size > 0 ? readSunfireApplication(gc, defs) : null;
+  const [link] = await tx.select().from(externalContactLinksTable).where(and(
+    eq(externalContactLinksTable.orgId, orgId),
+    eq(externalContactLinksTable.source, GHL_SOURCE),
+    eq(externalContactLinksTable.externalId, gc.id),
+  )).limit(1);
+  // An application whose Medicare ID differs from the linked contact's is
+  // someone else's: none of it (identifiers, details, agent) touches them.
+  if (application && link?.contactId && await mbiConflicts(tx, orgId, link.contactId, application.parsed.medicareNumber)) {
+    logger.warn({ orgId, contactId: link.contactId }, "GHL sync: Sunfire application's Medicare ID differs from the contact's; not attached");
+    application = null;
+  }
   const flat: Record<string, string> = {
     first_name: gc.firstName ?? "",
     last_name: gc.lastName ?? "",
@@ -421,19 +432,11 @@ export async function syncOneContact(
   const contact = interpreted.contact;
   // GHL allows phone-only leads; a contact here needs a first and last name.
   if (!contact || !gc.id) return "skipped";
-  const agent = application ? await findWritingAgent(tx, orgId, application.parsed.agentNpn, application.parsed.agentEmail) : null;
-  const agentId = agent?.id ?? null;
   contact.tags = [...new Set([...contact.tags, ...(Array.isArray(gc.tags) ? gc.tags : []).filter((t): t is string => typeof t === "string").map((t) => t.trim()).filter(Boolean)])];
   contact.leadSource ??= "GoHighLevel";
   if (gc.dnd) contact.optOut = true;
   const parsedUpdated = gc.dateUpdated ? new Date(gc.dateUpdated) : null;
   const externalUpdatedAt = parsedUpdated && !Number.isNaN(parsedUpdated.getTime()) ? parsedUpdated : null;
-
-  const [link] = await tx.select().from(externalContactLinksTable).where(and(
-    eq(externalContactLinksTable.orgId, orgId),
-    eq(externalContactLinksTable.source, GHL_SOURCE),
-    eq(externalContactLinksTable.externalId, gc.id),
-  )).limit(1);
 
   let contactId: string;
   let created = false;
@@ -448,7 +451,7 @@ export async function syncOneContact(
     if (!target || target.deletedAt) return "skipped";
     contactId = link.contactId;
     sureOfIdentity = true;
-    await fillBlanks(tx, orgId, contactId, contact, agentId);
+    await fillBlanks(tx, orgId, contactId, contact, null);
     // An undated response must not erase the timestamp we already have.
     if (externalUpdatedAt) {
       await tx.update(externalContactLinksTable).set({ externalUpdatedAt })
@@ -494,7 +497,7 @@ export async function syncOneContact(
     // linked to a DIFFERENT GHL contact (duplicates inside GHL), undo the merge
     // and skip, rather than permanently fusing two GHL records into one person.
     const result = await tx.transaction(async (sp) => {
-      const r = await upsertContact(sp, orgId, contact, agentId);
+      const r = await upsertContact(sp, orgId, contact, null);
       if (!r.created) {
         const [other] = await sp.select({ externalId: externalContactLinksTable.externalId }).from(externalContactLinksTable)
           .where(and(
@@ -537,10 +540,18 @@ export async function syncOneContact(
         sql`(${contactsTable.optOutSms} = false OR ${contactsTable.optOutEmail} = false)`));
   }
   if (application) {
-    if (sureOfIdentity) await importSunfireApplication(tx, orgId, contactId, agent, application);
+    if (sureOfIdentity) await importSunfireApplication(tx, orgId, contactId, application);
     else logger.info({ orgId, ghlContactId: gc.id }, "GHL sync: Sunfire application not attached to a contact matched without a birth date or Medicare ID");
   }
   return created ? "created" : "updated";
+}
+
+/** The contact has a Medicare ID on file and it isn't `mbi`. */
+async function mbiConflicts(tx: Tx, orgId: string, contactId: string, mbi: string | null): Promise<boolean> {
+  if (!mbi) return false;
+  const [cur] = await tx.select({ medicareIdHash: contactsTable.medicareIdHash }).from(contactsTable)
+    .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId))).limit(1);
+  return !!cur?.medicareIdHash && !mbiHashesFor(mbi).some((h) => h.equals(Buffer.from(cur.medicareIdHash!)));
 }
 
 /**
@@ -582,25 +593,25 @@ async function importSunfireApplication(
   tx: Tx,
   orgId: string,
   contactId: string,
-  agent: { id: string; userId: string | null } | null,
   app: SunfireApplication,
 ): Promise<void> {
   const p = app.parsed;
+  // A different Medicare ID on file means this application is someone else's
+  // (a contact merged on a shared phone or email): never attach PHI, or assign
+  // its agent, to the wrong person.
+  if (await mbiConflicts(tx, orgId, contactId, p.medicareNumber)) {
+    logger.warn({ orgId, contactId }, "GHL sync: Sunfire application's Medicare ID differs from the contact's; not attached");
+    return;
+  }
   const [cur] = await tx.select({
-    medicareIdHash: contactsTable.medicareIdHash,
+    assignedAgentId: contactsTable.assignedAgentId,
     healthConditions: contactsTable.healthConditions,
     pcpName: contactsTable.pcpName,
     preferredLanguage: contactsTable.preferredLanguage,
   }).from(contactsTable).where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId))).limit(1);
   if (!cur) return;
-  // A different Medicare ID on file means this application is someone else's
-  // (a shared phone or email): never attach PHI to the wrong person.
-  if (p.medicareNumber && cur.medicareIdHash
-    && !mbiHashesFor(p.medicareNumber).some((h) => h.equals(Buffer.from(cur.medicareIdHash!)))) {
-    logger.warn({ orgId, contactId }, "GHL sync: Sunfire application's Medicare ID differs from the contact's; not attached");
-    return;
-  }
 
+  const agent = await findWritingAgent(tx, orgId, p.agentNpn, p.agentEmail);
   const agentId = agent?.id ?? null;
   const enrollmentId = await upsertPolicyEnrollment(tx, orgId, contactId, agentId, p, "From Odyssey (Sunfire)");
   await applyCoverageLifecycle(tx, contactId, enrollmentId, p.policyStatus);
@@ -609,6 +620,7 @@ async function importSunfireApplication(
   const conditions = [...new Set([...(cur.healthConditions ?? []), ...app.healthConditions])];
   const patch: Partial<typeof contactsTable.$inferInsert> = {};
   if (conditions.length !== (cur.healthConditions ?? []).length) patch.healthConditions = conditions;
+  if (!cur.assignedAgentId && agentId) patch.assignedAgentId = agentId;
   if (!cur.pcpName && app.pcpName) patch.pcpName = app.pcpName;
   if (!cur.preferredLanguage && app.preferredLanguage) patch.preferredLanguage = app.preferredLanguage;
   if (Object.keys(patch).length > 0) {

@@ -986,10 +986,27 @@ describe("Sunfire applications in GHL custom fields", () => {
     expect(await appsFor(existing.id)).toHaveLength(0);
     const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, existing.id));
     expect(c!.healthConditions).toBeNull();
+    // None of the other person's application touches this contact.
+    expect(c).toMatchObject({ assignedAgentId: null, county: null, pcpName: null, preferredLanguage: null, dob: null });
+  });
+
+  it("continues one application when Sunfire's confirmation code arrives after the first sync", async () => {
+    const codeless = { ...base, confirmation_code: undefined, medicare_number: "3CD4EF5GH67" };
+    delete (codeless as Partial<typeof base>).confirmation_code;
+    const gc = ghlContact(20006, { customFields: values(codeless), dateUpdated: "2026-12-06T00:00:00.000Z" });
+    await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([gc]) });
+    const c = await contactByGhlId(gc.id);
+    expect((await appsFor(c.id)).map((a) => a.applicationKey)).toEqual([`ghl:${gc.id}:H1036-077-000:2027-01-01`]);
+
+    const coded = { ...gc, customFields: values({ ...codeless, confirmation_code: "SF-CONF-006" }), dateUpdated: "2026-12-07T00:00:00.000Z" };
+    await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([coded]) });
+    const apps = await appsFor(c.id);
+    expect(apps).toHaveLength(1);
+    expect(apps[0]).toMatchObject({ applicationKey: "SF-CONF-006", confirmationCode: "SF-CONF-006", currentVersion: 2 });
   });
 
   it("syncs contacts only when the token can't read custom fields", async () => {
-    const gc = ghlContact(20004, { customFields: values({ ...base, confirmation_code: "SF-CONF-004" }), dateUpdated: "2026-12-04T00:00:00.000Z" });
+    const gc = ghlContact(20004, { customFields: values({ ...base, confirmation_code: "SF-CONF-004" }), dateUpdated: "2026-12-10T00:00:00.000Z" });
     const r = await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([gc], 403) });
     expect(r.status).toBe("ok");
     const c = await contactByGhlId(gc.id);
@@ -998,7 +1015,7 @@ describe("Sunfire applications in GHL custom fields", () => {
 
   it("fails the run (cursor unmoved) when the field list can't be fetched for another reason", async () => {
     const [before] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, sorg.id));
-    const gc = ghlContact(20005, { customFields: values({ ...base, confirmation_code: "SF-CONF-005" }), dateUpdated: "2026-12-05T00:00:00.000Z" });
+    const gc = ghlContact(20005, { customFields: values({ ...base, confirmation_code: "SF-CONF-005" }), dateUpdated: "2026-12-11T00:00:00.000Z" });
     await expect(sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([gc], 400) })).rejects.toThrow(/custom fields failed: HTTP 400/);
     const [after] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, sorg.id));
     expect(after!.cursorUpdatedAt).toEqual(before!.cursorUpdatedAt);
