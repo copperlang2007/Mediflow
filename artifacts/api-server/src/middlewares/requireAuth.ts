@@ -165,6 +165,15 @@ async function applyViewAsContext(
       res.status(403).json({ error: "View-only mode does not allow this change", code: "VIEW_ONLY_MODE" });
       return false;
     }
+    const resource = path.match(/^\/api\/(contacts|agents)\/[^/]+$/)?.[1];
+    const allowedFields = resource === "contacts"
+      ? new Set(["firstName", "lastName", "email", "phone", "county", "stateCode", "zipCode", "preferredLanguage"])
+      : new Set(["firstName", "lastName", "email", "phone", "notes", "avatarUrl"]);
+    if (!req.body || typeof req.body !== "object" || Array.isArray(req.body) ||
+        Object.keys(req.body).some((field) => !allowedFields.has(field))) {
+      res.status(403).json({ error: "Support mode only permits basic profile fields", code: "SUPPORT_EDIT_SCOPE" });
+      return false;
+    }
     if (!authReq.mfaEnrolled || reason.length < 10 || reason.length > 240) {
       res.status(403).json({ error: "Support edits require MFA and a reason of 10–240 characters", code: "SUPPORT_EDIT_REQUIREMENTS" });
       return false;
