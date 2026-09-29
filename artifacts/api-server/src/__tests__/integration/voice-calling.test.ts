@@ -1196,6 +1196,101 @@ describe("everything is re-checked at dial time", () => {
   });
 });
 
+describe("phone and calling hours are re-checked when the call connects", () => {
+  const upd = async (id: string, set: Record<string, unknown>): Promise<void> => {
+    await db.update(schema.contactsTable).set(set as never).where(eq(schema.contactsTable.id, id));
+  };
+  async function rejected(sessionId: string, to: string, reason: string) {
+    const res = await postTwilio(VOICE, voiceParams(sessionId, to, admin.id));
+    expect(res.text).toContain("<Reject");
+    expect(res.text).not.toContain("<Dial");
+    const row = await sessionRow(sessionId);
+    expect(row.status).toBe("blocked");
+    expect(row.blockedReason).toContain(reason);
+    expect(row.twilioCallSid).toBeNull();
+  }
+
+  it("a phone number edited after the session was created is never dialed", async () => {
+    const { contact, sessionId, to } = await startedCall();
+    await upd(contact.id, { phone: "(503) 555-7777" });
+    await rejected(sessionId, to, "phone_changed");
+  });
+
+  it("a phone number removed after the session was created is never dialed", async () => {
+    const { contact, sessionId, to } = await startedCall();
+    await upd(contact.id, { phone: null });
+    await rejected(sessionId, to, "phone_changed");
+  });
+
+  it("a session created just before 9 PM local does not connect after the cutoff", async () => {
+    vi.setSystemTime(new Date("2026-06-16T03:59:30Z")); // 8:59:30 PM PDT
+    const { sessionId, to } = await startedCall();
+    vi.setSystemTime(new Date("2026-06-16T04:00:30Z")); // 9:00:30 PM PDT
+    await rejected(sessionId, to, "outside_calling_hours");
+  });
+
+  it("still connects inside the window", async () => {
+    vi.setSystemTime(new Date("2026-06-16T03:00:00Z")); // 8:00 PM PDT
+    const { sessionId, to } = await startedCall();
+    vi.setSystemTime(new Date("2026-06-16T03:01:00Z"));
+    const res = await postTwilio(VOICE, voiceParams(sessionId, to, admin.id));
+    expect(res.text).toContain("<Dial");
+  });
+
+  it("a state change that moves the contact to a zone that is now past 9 PM blocks the connect", async () => {
+    vi.setSystemTime(new Date("2026-06-16T02:00:00Z")); // 7 PM PDT = 10 PM EDT
+    const { contact, sessionId, to } = await startedCall();
+    await upd(contact.id, { stateCode: "NY" });
+    await rejected(sessionId, to, "outside_calling_hours");
+  });
+
+  it("a contact whose state was removed (timezone unresolvable) fails closed", async () => {
+    const { contact, sessionId, to } = await startedCall();
+    await upd(contact.id, { stateCode: null });
+    await rejected(sessionId, to, "outside_calling_hours");
+  });
+});
+
+describe("limits follow the number being dialed", () => {
+  it("correcting a contact's phone resets the limits for the new number; the old number stays limited", async () => {
+    const c = await newContact();
+    for (let i = 0; i < 3; i++) {
+      await db.insert(schema.callSessionsTable).values({
+        id: randomUUID(), orgId: org.id, contactId: c.id, userId: admin.id, toNumber: c.e164,
+        status: "completed", twilioCallSid: newSid(), createdAt: new Date(NOON_PT.getTime() - (2 + i) * 3_600_000),
+      });
+    }
+    expect((await place(admin.id, c.id)).body.code).toBe("MAX_ATTEMPTS_EXCEEDED");
+
+    // Another contact still holding the OLD number is held by its history...
+    const household = await newContact();
+    await db.update(schema.contactsTable).set({ phone: c.e164 }).where(eq(schema.contactsTable.id, household.id));
+    expect((await place(admin.id, household.id)).body.code).toBe("MAX_ATTEMPTS_EXCEEDED");
+
+    // ...while the corrected contact, on a new number, starts fresh.
+    await db.update(schema.contactsTable).set({ phone: "(503) 555-6543" }).where(eq(schema.contactsTable.id, c.id));
+    const res = await place(admin.id, c.id);
+    expect(res.status).toBe(201);
+    expect(res.body.to).toBe("+15035556543");
+  });
+});
+
+describe("audit action for cancel", () => {
+  it("creating a session is audited as create, canceling it as update", async () => {
+    const c = await newContact();
+    const placed = await place(admin.id, c.id);
+    const id = placed.body.callSessionId as string;
+    await request(app).post(`/api/softphone/calls/${id}/cancel`).set(A(admin.id));
+    await vi.waitFor(async () => {
+      const rows = await db.select().from(schema.auditLogTable).where(eq(schema.auditLogTable.resourceId, id));
+      const byPath = (suffix: string) => rows.find((r) => String((r.changes as { path?: string }).path).endsWith(suffix));
+      expect(byPath("/cancel")?.action).toBe("update");
+      const create = rows.find((r) => (r.changes as { method?: string }).method === "POST" && !String((r.changes as { path?: string }).path).endsWith("/cancel"));
+      expect(create?.action).toBe("create");
+    });
+  });
+});
+
 describe("a canceled row that was dialed still counts", () => {
   it("cooldown: canceled WITH a Twilio SID blocks an immediate redial", async () => {
     const c = await newContact();

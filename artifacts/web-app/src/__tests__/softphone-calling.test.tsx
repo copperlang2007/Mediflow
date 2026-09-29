@@ -292,7 +292,7 @@ describe("Softphone browser calling states", () => {
     expect(await screen.findByText("Ringing…")).toBeInTheDocument();
 
     // Deselect the contact mid-call (the card's Clear button).
-    const clear = screen.getAllByRole("button", { name: /^Clear$/ }).find((b) => !(b as HTMLButtonElement).disabled)!;
+    const clear = screen.getAllByRole("button", { name: /^Clear$/ }).filter((b) => !(b as HTMLButtonElement).disabled).at(-1)!; // the contact card's Clear (the dial pad's comes first)
     fireEvent.click(clear);
     await waitFor(() => expect(screen.queryByText("Caller")).toBeInTheDocument());
     await waitFor(() => expect(screen.getAllByText("Joan Park")).toHaveLength(1));
@@ -318,6 +318,48 @@ describe("Softphone browser calling states", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Skip$/ }));
     await waitFor(() => expect(screen.queryByText("Call ended")).not.toBeInTheDocument());
     for (const b of screen.getAllByRole("button", { name: /^Call$/ })) expect(b).toBeEnabled();
+  });
+
+  it("never calls the previously selected contact for a different number on the pad", async () => {
+    routes["/api/softphone/voice-token"] = () => json(TOKEN);
+    routes["/api/softphone/calls"] = () => json({ callSessionId: "sess-9", to: "+15035551234" }, 201);
+    renderAt("/dialer?contact=c-1");
+    await screen.findByText(/Browser calling: ready/);
+    await screen.findAllByText("Joan Park");
+    const pad = screen.getByLabelText("Phone number") as HTMLInputElement;
+    // A deep-linked contact puts its own number on the pad, and Call is ready.
+    await waitFor(() => expect(pad.value).toBe("(503) 555-1234"));
+    for (const b of screen.getAllByRole("button", { name: /^Call$/ })) expect(b).toBeEnabled();
+
+    // Edit the pad to another number and click at once (inside the 300ms lookup debounce).
+    fireEvent.change(pad, { target: { value: "5035559999" } });
+    for (const b of screen.getAllByRole("button", { name: /^Call$/ })) {
+      expect(b).toBeDisabled();
+      fireEvent.click(b);
+    }
+    expect(screen.getByTestId("call-hint")).toHaveTextContent(/isn't Joan's number/);
+
+    // Clearing the pad also disables it.
+    fireEvent.change(pad, { target: { value: "" } });
+    for (const b of screen.getAllByRole("button", { name: /^Call$/ })) expect(b).toBeDisabled();
+
+    await act(async () => { await new Promise((r) => setTimeout(r, 400)); });
+    expect(calledUrls().some((u) => u.includes("/api/softphone/calls"))).toBe(false);
+    expect(fake.state.connectParams).toHaveLength(0);
+
+    // Typing the contact's own number back (any formatting) re-enables Call.
+    fireEvent.change(pad, { target: { value: "503-555-1234" } });
+    for (const b of screen.getAllByRole("button", { name: /^Call$/ })) expect(b).toBeEnabled();
+  });
+
+  it("sameNumber compares the last 10 digits in any formatting", async () => {
+    const { sameNumber } = await import("@/pages/DialerPage");
+    expect(sameNumber("(503) 555-1234", "+15035551234")).toBe(true);
+    expect(sameNumber("503.555.1234", "5035551234")).toBe(true);
+    expect(sameNumber("5035551234", "5035551235")).toBe(false);
+    expect(sameNumber("", "5035551234")).toBe(false);
+    expect(sameNumber("555-1234", "555-1234")).toBe(false); // too short to identify anyone
+    expect(sameNumber(null, undefined)).toBe(false);
   });
 
   it("the manual 'Log a call' form never offers DO_NOT_CALL (it can't create an opt-out)", async () => {

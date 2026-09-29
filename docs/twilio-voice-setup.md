@@ -87,8 +87,10 @@ the settings that are missing (never their values).
 - Lets only agents whose profile is **active** place calls. Suspended, offboarding,
   offboarded and still-onboarding profiles are refused, and cannot borrow another
   agent's license.
-- Re-checks consent, opt-outs and the contact's status at the moment the call
-  connects, in case something changed after the "OK to call" check.
+- Re-checks consent, opt-outs, the contact's status, the contact's current phone
+  number and calling hours (in the contact's current time zone) at the moment
+  the call connects, in case something changed after the "OK to call" check.
+  If the phone number was edited in between, the old number is never dialed.
 - Caps repeat calls (see limits above) and records every refused attempt, with
   the reason, so there is an audit trail.
 - Lets an agent dial only contacts assigned to them. Admins can call any contact

@@ -25,6 +25,8 @@ import {
 } from "@workspace/db";
 import {
   runPreclearance,
+  resolveTimezone,
+  isWithinCallingHours,
   type PreclearanceFailure,
   type ProductLine,
 } from "../dialer/preclearance";
@@ -299,8 +301,12 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
 
     const limitReasons: BlockReason[] = [];
     const windowStart = new Date(now.getTime() - limits.windowHours * 3_600_000);
+    // Limits follow the number actually being dialed: a contact whose phone was
+    // corrected does not inherit the old number's history, while everyone
+    // sharing a number (a household) shares it. Only when there is no valid
+    // number do we fall back to the contact.
     const sameTarget = toNumber
-      ? or(eq(callSessionsTable.contactId, contact.id), eq(callSessionsTable.toNumber, toNumber))
+      ? eq(callSessionsTable.toNumber, toNumber)
       : eq(callSessionsTable.contactId, contact.id);
 
     // Abandoned attempts (never reached Twilio) don't count toward the limits
@@ -521,7 +527,10 @@ export async function blockUnusedSession(sessionId: string, reason: string): Pro
  */
 export async function recheckContactAtDial(
   session: CallSession,
-): Promise<"ok" | "opted_out" | "contact_ineligible" | "no_consent"> {
+  now: Date = new Date(),
+): Promise<
+  "ok" | "opted_out" | "contact_ineligible" | "no_consent" | "phone_changed" | "outside_calling_hours"
+> {
   if (await isNumberOptedOutAnyOrg(session.toNumber)) return "opted_out";
   if (!session.contactId) return "contact_ineligible";
   const [c] = await db
@@ -531,15 +540,25 @@ export async function recheckContactAtDial(
       optOutSms: contactsTable.optOutSms,
       tcpaConsentAt: contactsTable.tcpaConsentAt,
       tcpaConsentSource: contactsTable.tcpaConsentSource,
+      phone: contactsTable.phone,
+      stateCode: contactsTable.stateCode,
     })
     .from(contactsTable)
     .where(and(eq(contactsTable.id, session.contactId), eq(contactsTable.orgId, session.orgId)))
     .limit(1);
   if (!c || c.deletedAt || c.status === "do_not_contact") return "contact_ineligible";
+  // The number was precleared for THIS number. If the contact's phone was edited
+  // since, the stored number is stale: never dial it.
+  if (toDialableE164(c.phone) !== session.toNumber) return "phone_changed";
   // The contact's own opt-out flag (set by a STOP or a do-not-call disposition).
   if (c.optOutSms) return "opted_out";
   // Consent could have been withdrawn/removed since preclearance; voice consent is unconditional.
   if (!c.tcpaConsentAt || !c.tcpaConsentSource?.trim()) return "no_consent";
+  // Calling hours in the contact's CURRENT timezone, at connect time: a session
+  // created just before the cutoff must not connect after it, and a state change
+  // can change the zone. An unresolvable zone fails closed, as in preclearance.
+  const tz = resolveTimezone(c.stateCode ?? undefined, undefined);
+  if (!tz || !isWithinCallingHours(now, tz)) return "outside_calling_hours";
   return "ok";
 }
 

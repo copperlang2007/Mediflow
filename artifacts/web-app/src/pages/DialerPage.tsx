@@ -59,6 +59,12 @@ import {
   type PrecheckFailure,
 } from "@/lib/portalDialer/api";
 
+/** True when two phone strings are the same number (last 10 digits, any formatting). */
+export function sameNumber(a: string | null | undefined, b: string | null | undefined): boolean {
+  const key = (v: string | null | undefined) => (v ?? "").replace(/\D/g, "").slice(-10);
+  return key(a).length >= 10 && key(a) === key(b);
+}
+
 const KEYS: { d: string; sub?: string }[] = [
   { d: "1" }, { d: "2", sub: "ABC" }, { d: "3", sub: "DEF" },
   { d: "4", sub: "GHI" }, { d: "5", sub: "JKL" }, { d: "6", sub: "MNO" },
@@ -362,6 +368,14 @@ export default function DialerPage() {
   const contact: ContactLite | null =
     picked && picked.id === pickedId ? picked : pickedId && fetched ? (fetched as unknown as ContactLite) : null;
 
+  // A contact opened by id (deep link) shows its number on the pad, so what is
+  // displayed is what will be called. Only on contact change: clearing the pad
+  // afterwards must not silently refill it.
+  useEffect(() => {
+    if (contact?.phone && number === "") setNumber(formatPhone(contact.phone));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contact?.id, contact?.phone]);
+
   // A single exact match pops the screen automatically.
   useEffect(() => {
     const rows = lookup.data?.data;
@@ -392,12 +406,16 @@ export default function DialerPage() {
     : readiness.state === "checking" ? "Checking browser calling…"
     : !contact ? "Pick a contact on file — you can only call contacts."
     : !contact.phone ? "This contact has no phone number."
+    : !sameNumber(number, contact.phone)
+      ? `The number on the pad isn't ${contact.firstName}'s number. Pick the contact again, or clear the pad.`
     : callEnded ? "Save or skip the last call's notes first."
     : callActive ? "A call is in progress."
     : null;
   const canPlaceCall = callBlockedHint === null;
   const placeCall = () => {
-    if (contact && canPlaceCall) void softphone.start(contact.id, `${contact.firstName} ${contact.lastName}`);
+    // Re-check at click time (the pad may have been edited within the lookup
+    // debounce): never call a previously selected contact for a different number.
+    if (contact && canPlaceCall && sameNumber(number, contact.phone)) void softphone.start(contact.id, `${contact.firstName} ${contact.lastName}`);
   };
 
   return (

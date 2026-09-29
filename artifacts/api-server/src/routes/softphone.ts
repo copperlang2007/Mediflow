@@ -58,14 +58,20 @@ const router: IRouter = Router();
 
 // Audit every state-changing call route (POST/PATCH). Reads are not audited.
 router.use(
-  routerAuditMiddleware(router, "call", undefined, {
-    shouldAudit: (req) => !(req as Request & { skipAudit?: boolean }).skipAudit,
-    getResourceId: (req) => {
-      const fromParam = req.params.id;
-      if (typeof fromParam === "string") return fromParam;
-      return (req as Request & { callSessionId?: string }).callSessionId ?? null;
+  routerAuditMiddleware(
+    router,
+    "call",
+    // POST /softphone/calls creates a session; cancel (POST) and PATCH change an existing one.
+    (req) => (req.method === "PATCH" || req.path.endsWith("/cancel") ? "update" : "create"),
+    {
+      shouldAudit: (req) => !(req as Request & { skipAudit?: boolean }).skipAudit,
+      getResourceId: (req) => {
+        const fromParam = req.params.id;
+        if (typeof fromParam === "string") return fromParam;
+        return (req as Request & { callSessionId?: string }).callSessionId ?? null;
+      },
     },
-  }),
+  ),
 );
 
 /** Digits only; the last 10 are what a US number is matched on. */
