@@ -27,7 +27,7 @@ function useViewAsAgencies(enabled: boolean) {
   const [mfaRequired, setMfaRequired] = useState(false);
   const [activeOrgId] = useState<string | null>(readActiveOrgId);
   const [supportReason, setSupportReason] = useState<string | null>(() => {
-    try { return globalThis.localStorage?.getItem(SUPPORT_REASON_KEY) ?? null; } catch { return null; }
+    try { return globalThis.sessionStorage?.getItem(SUPPORT_REASON_KEY) ?? null; } catch { return null; }
   });
 
   useEffect(() => {
@@ -44,13 +44,13 @@ function useViewAsAgencies(enabled: boolean) {
 
   const setView = (orgId: string) => {
     if (!orgId) return;
-    localStorage.removeItem(SUPPORT_REASON_KEY);
+    sessionStorage.removeItem(SUPPORT_REASON_KEY);
     localStorage.setItem(VIEW_AS_KEY, orgId);
     window.location.reload();
   };
   const exitView = () => {
     localStorage.removeItem(VIEW_AS_KEY);
-    localStorage.removeItem(SUPPORT_REASON_KEY);
+    sessionStorage.removeItem(SUPPORT_REASON_KEY);
     window.location.reload();
   };
 
@@ -61,11 +61,11 @@ function useViewAsAgencies(enabled: boolean) {
       window.alert("Enter a reason between 10 and 240 characters.");
       return;
     }
-    localStorage.setItem(SUPPORT_REASON_KEY, reason);
+    sessionStorage.setItem(SUPPORT_REASON_KEY, reason);
     setSupportReason(reason);
   };
   const disableSupportEdit = () => {
-    localStorage.removeItem(SUPPORT_REASON_KEY);
+    sessionStorage.removeItem(SUPPORT_REASON_KEY);
     setSupportReason(null);
   };
 
