@@ -9,14 +9,16 @@
  *                                   their policies and enrollment applications.
  *
  * Agents have no `contact:read` (the agency-wide CRM stays with back-office
- * roles); these routes resolve the agent from the session (agentsTable.userId
- * + orgId, like /agents/me/backoffice) and only ever return that agent's
- * clients. The servicing agent needs the health answers to find the plans a
- * client qualifies for, so PHI is unmasked here; the full application view
- * (routes/enrollmentApplications.ts) stays audited on every open.
+ * roles); these routes are for the `agent` role, resolve the agent from the
+ * session (agentsTable.userId + orgId) and only ever return that agent's
+ * clients: assigned to them, or holding a still-pending/active policy they
+ * wrote (lib/phiAccess.ts). The servicing agent needs the health answers to
+ * find the plans a client qualifies for, so PHI is unmasked for exactly those
+ * clients; the full application view (routes/enrollmentApplications.ts) stays
+ * audited on every open.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, asc, desc, eq, exists, ilike, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNull, or, sql, type SQL } from "drizzle-orm";
 import {
   db,
   carriersTable,
@@ -25,24 +27,12 @@ import {
   enrollmentsTable,
 } from "@workspace/db";
 import { requireAuth, type AuthenticatedRequest } from "../middlewares/requireAuth";
-import { ownAgentId } from "../lib/appointments";
-import { mayViewFullApplication } from "../lib/phiAccess";
+import { mayViewFullApplication, phiViewerAgentId, servicedByAgent, servicedWritingAgentId } from "../lib/phiAccess";
 import { serializeContact } from "../lib/serializeContact";
 
 const router: IRouter = Router();
 
-const NO_AGENT = "No agent record is linked to your account.";
-
-/** Contacts this agent services: assigned to them, or holding an enrollment they wrote. */
-function servicedBy(agentId: string): SQL {
-  return or(
-    eq(contactsTable.assignedAgentId, agentId),
-    exists(
-      db.select({ one: sql`1` }).from(enrollmentsTable)
-        .where(and(eq(enrollmentsTable.contactId, contactsTable.id), eq(enrollmentsTable.agentId, agentId))),
-    ),
-  )!;
-}
+const NO_AGENT = "My clients is for agents: no agent record is linked to your account.";
 
 function clampInt(raw: unknown, fallback: number, min: number, max: number): number {
   const n = Number(raw);
@@ -54,13 +44,13 @@ router.get(
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const agentId = await ownAgentId(authReq.orgId, authReq.userId);
+    const agentId = await phiViewerAgentId(authReq);
     if (!agentId) { res.status(404).json({ error: NO_AGENT }); return; }
 
     const search = typeof req.query.search === "string" ? req.query.search.trim().slice(0, 100) : "";
     const limit = clampInt(req.query.limit, 50, 1, 200);
     const offset = clampInt(req.query.offset, 0, 0, 1_000_000);
-    const conditions: SQL[] = [eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt), servicedBy(agentId)];
+    const conditions: SQL[] = [eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt), servicedByAgent(agentId)];
     if (search) {
       const q = `%${search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
       conditions.push(or(
@@ -100,12 +90,12 @@ router.get(
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const agentId = await ownAgentId(authReq.orgId, authReq.userId);
+    const agentId = await phiViewerAgentId(authReq);
     if (!agentId) { res.status(404).json({ error: NO_AGENT }); return; }
     const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
 
     const [contact] = await db.select().from(contactsTable)
-      .where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt), servicedBy(agentId)))
+      .where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt), servicedByAgent(agentId)))
       .limit(1);
     // Not one of this agent's clients looks the same as no such client.
     if (!contact) { res.status(404).json({ error: "Client not found" }); return; }
@@ -142,7 +132,7 @@ router.get(
         signatureDate: enrollmentApplicationsTable.signatureDate,
         agentEmail: enrollmentApplicationsTable.agentEmail,
         updatedAt: enrollmentApplicationsTable.updatedAt,
-        writingAgentId: enrollmentsTable.agentId,
+        writingAgentId: servicedWritingAgentId,
       }).from(enrollmentApplicationsTable)
         .leftJoin(enrollmentsTable, eq(enrollmentsTable.id, enrollmentApplicationsTable.enrollmentId))
         .where(and(eq(enrollmentApplicationsTable.orgId, authReq.orgId), eq(enrollmentApplicationsTable.contactId, contact.id)))

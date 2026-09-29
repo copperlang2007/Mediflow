@@ -26,7 +26,7 @@ import {
 import { requireMfa } from "../middlewares/requireMfa";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { PHI_PRIVILEGED_ROLES } from "../lib/permissions";
-import { mayViewFullApplication, phiViewerAgentId } from "../lib/phiAccess";
+import { mayViewFullApplication, phiViewerAgentId, servicedWritingAgentId } from "../lib/phiAccess";
 import { isPolicyEvent, parsePolicyEvent } from "../lib/integrations/enrollhere/policyEvent";
 
 const router: IRouter = Router();
@@ -38,10 +38,14 @@ const router: IRouter = Router();
 function sunfireFieldIds(payload: Record<string, unknown>): { medicareNumber: string | null; medicaidNumber: string | null } | null {
   if (payload.source !== "gohighlevel" || typeof payload.fields !== "object" || payload.fields === null) return null;
   const fields = payload.fields as Record<string, unknown>;
+  // GHL merge keys are unique per sub-account, so one match is expected; if a
+  // payload ever carries two (a renamed or duplicated field), show neither
+  // rather than risk putting another person's number at the top.
   const pick = (...keys: string[]): string | null => {
     for (const key of keys) {
-      const hit = Object.entries(fields).find(([label, v]) => label.endsWith(`(${key})`) && typeof v === "string" && v.trim());
-      if (hit) return (hit[1] as string).trim();
+      const hits = Object.entries(fields).filter(([label, v]) => label.endsWith(`(${key})`) && typeof v === "string" && v.trim());
+      if (hits.length === 1) return (hits[0]![1] as string).trim();
+      if (hits.length > 1) return null;
     }
     return null;
   };
@@ -82,7 +86,7 @@ router.get(
     const [contact] = await db.select({ id: contactsTable.id, assignedAgentId: contactsTable.assignedAgentId }).from(contactsTable)
       .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
-    const rows = await db.select({ ...summaryColumns, writingAgentId: enrollmentsTable.agentId }).from(enrollmentApplicationsTable)
+    const rows = await db.select({ ...summaryColumns, writingAgentId: servicedWritingAgentId }).from(enrollmentApplicationsTable)
       .leftJoin(enrollmentsTable, eq(enrollmentsTable.id, enrollmentApplicationsTable.enrollmentId))
       .where(and(eq(enrollmentApplicationsTable.orgId, authReq.orgId), eq(enrollmentApplicationsTable.contactId, contactId)))
       .orderBy(desc(enrollmentApplicationsTable.updatedAt));
@@ -113,7 +117,7 @@ router.get(
     const [found] = await db.select({
       app: enrollmentApplicationsTable,
       assignedAgentId: contactsTable.assignedAgentId,
-      writingAgentId: enrollmentsTable.agentId,
+      writingAgentId: servicedWritingAgentId,
     }).from(enrollmentApplicationsTable)
       .innerJoin(contactsTable, and(
         eq(contactsTable.id, enrollmentApplicationsTable.contactId),
@@ -123,9 +127,12 @@ router.get(
       .leftJoin(enrollmentsTable, eq(enrollmentsTable.id, enrollmentApplicationsTable.enrollmentId))
       .where(and(eq(enrollmentApplicationsTable.id, id), eq(enrollmentApplicationsTable.orgId, authReq.orgId))).limit(1);
     const app = found?.app;
-    if (!app) { res.status(404).json({ error: "Application not found" }); return; }
-    if (!mayViewFullApplication(authReq.userRole, viewerAgentId, found.assignedAgentId, found.writingAgentId)) {
-      res.status(403).json({ error: FULL_VIEW_REFUSED });
+    const privileged = PHI_PRIVILEGED_ROLES.has(authReq.userRole);
+    // An agent gets the same 403 for "not yours" and "no such application",
+    // so application ids can't be probed.
+    if (!app || !mayViewFullApplication(authReq.userRole, viewerAgentId, found.assignedAgentId, found.writingAgentId)) {
+      if (!privileged) { res.status(403).json({ error: FULL_VIEW_REFUSED }); return; }
+      res.status(404).json({ error: "Application not found" });
       return;
     }
 
