@@ -27,7 +27,7 @@ import {
   enrollmentsTable,
 } from "@workspace/db";
 import { requireAuth, type AuthenticatedRequest } from "../middlewares/requireAuth";
-import { mayViewFullApplication, phiViewerAgentId, servicedByAgent, servicedWritingAgentId } from "../lib/phiAccess";
+import { applicationAccessColumns, mayViewFullApplication, phiViewerAgent, servicedByAgent } from "../lib/phiAccess";
 import { serializeContact } from "../lib/serializeContact";
 
 const router: IRouter = Router();
@@ -44,8 +44,9 @@ router.get(
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const agentId = await phiViewerAgentId(authReq);
-    if (!agentId) { res.status(404).json({ error: NO_AGENT }); return; }
+    const viewer = await phiViewerAgent(authReq);
+    const agentId = viewer?.id;
+    if (!viewer || !agentId) { res.status(404).json({ error: NO_AGENT }); return; }
 
     const search = typeof req.query.search === "string" ? req.query.search.trim().slice(0, 100) : "";
     const limit = clampInt(req.query.limit, 50, 1, 200);
@@ -90,8 +91,9 @@ router.get(
   requireAuth,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const agentId = await phiViewerAgentId(authReq);
-    if (!agentId) { res.status(404).json({ error: NO_AGENT }); return; }
+    const viewer = await phiViewerAgent(authReq);
+    const agentId = viewer?.id;
+    if (!viewer || !agentId) { res.status(404).json({ error: NO_AGENT }); return; }
     const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
 
     const [contact] = await db.select().from(contactsTable)
@@ -118,7 +120,7 @@ router.get(
         .leftJoin(carriersTable, eq(carriersTable.id, enrollmentsTable.carrierId))
         .where(and(eq(enrollmentsTable.orgId, authReq.orgId), eq(enrollmentsTable.contactId, contact.id)))
         .orderBy(desc(enrollmentsTable.planYear), desc(enrollmentsTable.effectiveDate)),
-      db.select({
+      db.select({ app: {
         id: enrollmentApplicationsTable.id,
         source: enrollmentApplicationsTable.source,
         confirmationCode: enrollmentApplicationsTable.confirmationCode,
@@ -132,8 +134,8 @@ router.get(
         signatureDate: enrollmentApplicationsTable.signatureDate,
         agentEmail: enrollmentApplicationsTable.agentEmail,
         updatedAt: enrollmentApplicationsTable.updatedAt,
-        writingAgentId: servicedWritingAgentId,
-      }).from(enrollmentApplicationsTable)
+      }, access: applicationAccessColumns }).from(enrollmentApplicationsTable)
+        .innerJoin(contactsTable, eq(contactsTable.id, enrollmentApplicationsTable.contactId))
         .leftJoin(enrollmentsTable, eq(enrollmentsTable.id, enrollmentApplicationsTable.enrollmentId))
         .where(and(eq(enrollmentApplicationsTable.orgId, authReq.orgId), eq(enrollmentApplicationsTable.contactId, contact.id)))
         .orderBy(desc(enrollmentApplicationsTable.updatedAt)),
@@ -143,9 +145,9 @@ router.get(
     res.json({
       contact: serializeContact(contact, authReq.userRole, true),
       policies,
-      applications: applications.map(({ writingAgentId, ...a }) => ({
-        ...a,
-        canViewFull: mayViewFullApplication(authReq.userRole, agentId, contact.assignedAgentId, writingAgentId),
+      applications: applications.map(({ app, access }) => ({
+        ...app,
+        canViewFull: mayViewFullApplication(authReq.userRole, viewer, access),
       })),
     });
   },

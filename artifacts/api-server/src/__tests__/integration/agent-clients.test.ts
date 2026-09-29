@@ -56,12 +56,26 @@ let appEnded: string;
 let appAmbiguous: string;
 let appFallback: string;
 let supportUser: { id: string };
+let notInForce: { id: string };
+let appNotInForce: string;
+let appShared: string;
+let appAgreeing: string;
+let suspendedUser: { id: string };
 
-async function seedApplication(contactId: string, enrollmentId: string | null, fields: Record<string, string>): Promise<string> {
+const NPN_A = "17654321";
+const NPN_B = "18765432";
+
+async function seedApplication(
+  contactId: string,
+  enrollmentId: string | null,
+  fields: Record<string, string>,
+  writer: { agentNpn?: string; policyStatus?: string } = {},
+): Promise<string> {
   const id = randomUUID();
   await tdb.insert(enrollmentApplicationsTable).values({
     id, orgId: org.id, source: "gohighlevel", applicationKey: `key-${id}`, contactId, enrollmentId,
     planName: "Humana Gold Plus", carrierName: "Humana", currentVersion: 1,
+    agentNpn: writer.agentNpn ?? null, policyStatus: writer.policyStatus ?? null,
   });
   const { encrypted, hash } = encryptPii(JSON.stringify({ source: "gohighlevel", ghlContactId: "g1", fields }));
   await tdb.insert(enrollmentApplicationVersionsTable).values({
@@ -89,8 +103,8 @@ beforeAll(async () => {
   userB = await seedUser(tdb, { orgId: org.id, role: "agent" });
   const agentA = await seedAgent(tdb, { orgId: org.id });
   const agentB = await seedAgent(tdb, { orgId: org.id });
-  await tdb.update(agentsTable).set({ userId: userA.id }).where(eq(agentsTable.id, agentA.id));
-  await tdb.update(agentsTable).set({ userId: userB.id }).where(eq(agentsTable.id, agentB.id));
+  await tdb.update(agentsTable).set({ userId: userA.id, npn: NPN_A }).where(eq(agentsTable.id, agentA.id));
+  await tdb.update(agentsTable).set({ userId: userB.id, npn: NPN_B }).where(eq(agentsTable.id, agentB.id));
 
   mine = await seedContact(tdb, {
     orgId: org.id, firstName: "Rosa", lastName: "Alvarez", medicareId: "1EG4TE5MK73",
@@ -105,12 +119,12 @@ beforeAll(async () => {
   await tdb.update(contactsTable).set({ assignedAgentId: agentB.id }).where(eq(contactsTable.id, ended.id));
 
   const written = await seedEnrollment(wroteForOther.id, agentA.id);
-  appWritten = await seedApplication(wroteForOther.id, written, { "Medicare Number (medicare_number)": "3CD4EF5GH67", "Has COPD (has_copd)": "Yes" });
+  appWritten = await seedApplication(wroteForOther.id, written, { "Medicare Number (medicare_number)": "3CD4EF5GH67", "Has COPD (has_copd)": "Yes" }, { agentNpn: NPN_A });
   const theirs = await seedEnrollment(notMine.id, agentB.id);
-  appNotMine = await seedApplication(notMine.id, theirs, { "Medicare Number (medicare_number)": "2AB3CD4EF56" });
+  appNotMine = await seedApplication(notMine.id, theirs, { "Medicare Number (medicare_number)": "2AB3CD4EF56" }, { agentNpn: NPN_B });
   // A policy agent A wrote that has since been cancelled: no longer theirs to service.
   const cancelled = await seedEnrollment(ended.id, agentA.id, "cancelled");
-  appEnded = await seedApplication(ended.id, cancelled, { "Medicare Number (medicare_number)": "5DE6FG7HJ89" });
+  appEnded = await seedApplication(ended.id, cancelled, { "Medicare Number (medicare_number)": "5DE6FG7HJ89" }, { agentNpn: NPN_A });
   appAmbiguous = await seedApplication(mine.id, null, {
     "Spouse Medicare Number (medicare_number)": "9SP1OU2SE34",
     "Medicare Number (medicare_number)": "1EG4TE5MK73",
@@ -120,6 +134,26 @@ beforeAll(async () => {
     "Medicare Number (medicare_number)": "1EG4TE5MK73",
     "Applicant HICN (applicanthicn)": "7HJ2CK3AB45",
   });
+  appAgreeing = await seedApplication(mine.id, null, {
+    "Medicare Number (medicare_number)": "1EG4-TE5-MK73",
+    "Applicant HICN (applicanthicn)": "1EG4TE5MK73",
+  });
+  // The carrier feed reports "not in force": the enrollment stays `pending`,
+  // but the writing agent no longer services it.
+  notInForce = await seedContact(tdb, { orgId: org.id, firstName: "Frank", lastName: "Hale", medicareId: "6EF7GH8JK90" });
+  await tdb.update(contactsTable).set({ assignedAgentId: agentB.id }).where(eq(contactsTable.id, notInForce.id));
+  const inactive = await seedEnrollment(notInForce.id, agentA.id);
+  appNotInForce = await seedApplication(notInForce.id, inactive, {}, { agentNpn: NPN_A, policyStatus: "POL_NOT_INFORCE" });
+  // Two policies share one enrollment row, which keeps its first writer (B):
+  // A wrote this application, so A may open it and B (not assigned) may not.
+  const sharedClient = await seedContact(tdb, { orgId: org.id, firstName: "Gail", lastName: "Moss", medicareId: "7FG8HJ9KL01" });
+  const shared = await seedEnrollment(sharedClient.id, agentB.id);
+  appShared = await seedApplication(sharedClient.id, shared, { "Medicare Number (medicare_number)": "7FG8HJ9KL01" }, { agentNpn: NPN_A });
+  // A suspended agent keeps their login but services no one.
+  suspendedUser = await seedUser(tdb, { orgId: org.id, role: "agent" });
+  const suspended = await seedAgent(tdb, { orgId: org.id });
+  await tdb.update(agentsTable).set({ userId: suspendedUser.id, status: "suspended", npn: "19876543" }).where(eq(agentsTable.id, suspended.id));
+  await tdb.update(contactsTable).set({ assignedAgentId: suspended.id }).where(eq(contactsTable.id, ended.id));
   // A back-office user who happens to have a linked agent row gains nothing from it.
   supportUser = await seedUser(tdb, { orgId: org.id, role: "agent_support" });
   const supportAgent = await seedAgent(tdb, { orgId: org.id });
@@ -214,12 +248,32 @@ describe("My clients", () => {
     expect(missing.body).toEqual(other.body);
   });
 
+  it("treats a carrier 'not in force' status as ended for the writing agent", async () => {
+    const list = await request(app).get("/api/agents/me/clients?limit=200").set(withAuth(userA.id));
+    expect(list.body.data.map((c: { id: string }) => c.id)).not.toContain(notInForce.id);
+    expect((await request(app).get(`/api/agents/me/clients/${notInForce.id}`).set(withAuth(userA.id))).status).toBe(404);
+    expect((await request(app).get(`/api/applications/${appNotInForce}/full`).set(withAuth(userA.id))).status).toBe(403);
+  });
+
+  it("authorizes an application's own writer, not whoever else is on a shared enrollment row", async () => {
+    expect((await request(app).get(`/api/applications/${appShared}/full`).set(withAuth(userA.id))).status).toBe(200);
+    expect((await request(app).get(`/api/applications/${appShared}/full`).set(withAuth(userB.id))).status).toBe(403);
+  });
+
+  it("gives a suspended agent nothing, even for clients still assigned to them", async () => {
+    expect((await request(app).get("/api/agents/me/clients").set(withAuth(suspendedUser.id))).status).toBe(404);
+    expect((await request(app).get(`/api/applications/${appEnded}/full`).set(withAuth(suspendedUser.id))).status).toBe(403);
+  });
+
   it("shows no Medicare ID at the top when the fields are ambiguous", async () => {
     const res = await request(app).get(`/api/applications/${appAmbiguous}/full`).set(withAuth(userA.id));
     expect(res.status).toBe(200);
     expect(res.body.medicareId).toBeNull();
-    // An unambiguous fallback field is still used.
+    // Every alias counts: a HICN that differs from the others doesn't break the tie.
     const fallback = await request(app).get(`/api/applications/${appFallback}/full`).set(withAuth(userA.id));
-    expect(fallback.body.medicareId).toBe("7HJ2CK3AB45");
+    expect(fallback.body.medicareId).toBeNull();
+    // Fields that agree (formatting aside) are shown.
+    const agreeing = await request(app).get(`/api/applications/${appAgreeing}/full`).set(withAuth(userA.id));
+    expect(agreeing.body.medicareId).toBe("1EG4TE5MK73");
   });
 });
