@@ -719,3 +719,68 @@ describe("GHL client resilience", () => {
     expect(calls).toBe(1);
   });
 });
+
+describe("GHL custom field definitions", () => {
+  const defs = {
+    customFields: [
+      { id: "cf-2", name: "Plan Name", fieldKey: "contact.plan_name", dataType: "TEXT", model: "contact" },
+      { id: "cf-1", name: "Carrier", fieldKey: "contact.carrier", dataType: "SINGLE_OPTIONS", model: "contact" },
+      { id: "cf-3", name: "Deal Value", fieldKey: "opportunity.deal_value", dataType: "NUMERICAL", model: "opportunity" },
+      { id: "", name: "broken" },
+    ],
+  };
+
+  it("requests contact fields with the location id and returns definitions only, sorted by name", async () => {
+    const { listContactCustomFields } = await import("../../lib/integrations/ghl/client");
+    const seen: { url: string; init: RequestInit }[] = [];
+    const impl = (async (url: string, init: RequestInit) => {
+      seen.push({ url, init });
+      return new Response(JSON.stringify(defs), { status: 200 });
+    }) as unknown as typeof fetch;
+    const fields = await listContactCustomFields({ token: TOKEN, locationId: LOCATION }, impl);
+    expect(seen[0]!.url).toBe(`https://services.leadconnectorhq.com/locations/${LOCATION}/customFields?model=contact`);
+    expect(seen[0]!.init.method).toBe("GET");
+    expect((seen[0]!.init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TOKEN}`);
+    expect(fields).toEqual([
+      { id: "cf-1", name: "Carrier", fieldKey: "contact.carrier", dataType: "SINGLE_OPTIONS" },
+      { id: "cf-2", name: "Plan Name", fieldKey: "contact.plan_name", dataType: "TEXT" },
+    ]);
+  });
+
+  it("names the missing scope on a 403 and never echoes the upstream body", async () => {
+    const { listContactCustomFields } = await import("../../lib/integrations/ghl/client");
+    const denied = (async () => new Response(`echo: Bearer ${TOKEN}`, { status: 403 })) as unknown as typeof fetch;
+    const err = await listContactCustomFields({ token: TOKEN, locationId: LOCATION }, denied).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/custom fields failed: HTTP 403.*locations\/customFields\.readonly/);
+    expect((err as Error).message).not.toContain(TOKEN);
+  });
+
+  it("serves the definitions to admins through the API", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (async () => new Response(JSON.stringify(defs), { status: 200 })) as unknown as typeof fetch,
+    );
+    try {
+      const res = await request(app).get("/api/integrations/ghl/custom-fields").set(withAuth(admin.id));
+      expect(res.status).toBe(200);
+      expect(res.body.locationId).toBe(LOCATION);
+      expect(res.body.fields.map((f: { name: string }) => f.name)).toEqual(["Carrier", "Plan Name"]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("returns GHL's admin-safe error when the token lacks the scope", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (async () => new Response("nope", { status: 401 })) as unknown as typeof fetch,
+    );
+    try {
+      const res = await request(app).get("/api/integrations/ghl/custom-fields").set(withAuth(admin.id));
+      expect(res.status).toBe(502);
+      expect(res.body.error).toMatch(/HTTP 401/);
+      expect(JSON.stringify(res.body)).not.toContain(TOKEN);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

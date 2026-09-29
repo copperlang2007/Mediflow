@@ -1,9 +1,11 @@
 /**
- * Minimal GoHighLevel (LeadConnector) API v2 client — contacts search only.
+ * Minimal GoHighLevel (LeadConnector) API v2 client — contacts search and
+ * custom-field definitions.
  *
  * Auth: a sub-account **Private Integration** token, sent as a Bearer token
  * with the mandatory `Version: 2021-07-28` header (GHL OpenAPI spec,
- * apps/contacts.json). Scope needed: `contacts.readonly`.
+ * apps/contacts.json). Scopes: `contacts.readonly`, and
+ * `locations/customFields.readonly` for the field list.
  *
  * Endpoint: `POST /contacts/search` — the documented replacement for the
  * deprecated `GET /contacts/`, and the only one that can filter on
@@ -82,30 +84,36 @@ const MAX_HONORED_RETRY_AFTER_MS = 60_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, Math.min(ms, MAX_HONORED_RETRY_AFTER_MS)));
 
-export async function searchContacts(params: SearchParams, fetchImpl: FetchLike = fetch): Promise<SearchPage> {
-  const body: Record<string, unknown> = {
-    locationId: params.locationId,
-    pageLimit: params.pageLimit ?? GHL_PAGE_LIMIT,
-    sort: [{ field: "dateUpdated", direction: "asc" }],
-  };
-  if (params.updatedSince) {
-    body.filters = [{ field: "dateUpdated", operator: "range", value: { gte: params.updatedSince.toISOString() } }];
-  }
-  if (params.searchAfter?.length) body.searchAfter = params.searchAfter;
-  else body.page = params.page ?? 1;
+/** Where a request came from, for log lines and the admin-facing error message. */
+type RequestLabel = "contacts search" | "custom fields";
 
+/**
+ * One GHL API call with the shared retry policy: network errors and 429/5xx
+ * are retried with backoff (honouring a short `Retry-After`); a long
+ * cooldown ends the run instead of blocking the worker. Returns the OK
+ * response; any other status throws a `GhlApiError` that never includes the
+ * upstream body (a proxy or error page could echo the Authorization header).
+ */
+async function ghlRequest(
+  label: RequestLabel,
+  path: string,
+  token: string,
+  init: { method: "GET" } | { method: "POST"; body: unknown },
+  scopeHint: string,
+  fetchImpl: FetchLike,
+): Promise<Response> {
   for (let attempt = 1; ; attempt++) {
     let res: Response;
     try {
-      res = await fetchImpl(`${GHL_API_BASE}/contacts/search`, {
-        method: "POST",
+      res = await fetchImpl(`${GHL_API_BASE}${path}`, {
+        method: init.method,
         headers: {
-          Authorization: `Bearer ${params.token}`,
+          Authorization: `Bearer ${token}`,
           Version: GHL_API_VERSION,
           Accept: "application/json",
-          "Content-Type": "application/json",
+          ...(init.method === "POST" ? { "Content-Type": "application/json" } : {}),
         },
-        body: JSON.stringify(body),
+        ...(init.method === "POST" ? { body: JSON.stringify(init.body) } : {}),
         signal: AbortSignal.timeout(30_000),
       });
     } catch (err) {
@@ -113,7 +121,7 @@ export async function searchContacts(params: SearchParams, fetchImpl: FetchLike 
       // retry like a 5xx rather than abandoning the run.
       if (attempt < MAX_ATTEMPTS) {
         const waitMs = 1000 * 2 ** attempt;
-        logger.warn({ attempt, waitMs, error: err instanceof Error ? err.name : "unknown" }, "GHL search: network error, retrying");
+        logger.warn({ attempt, waitMs, error: err instanceof Error ? err.name : "unknown" }, `GHL ${label}: network error, retrying`);
         await sleep(waitMs);
         continue;
       }
@@ -135,7 +143,7 @@ export async function searchContacts(params: SearchParams, fetchImpl: FetchLike 
       }
       // A Retry-After in the past (clock skew) must not mean "no wait at all".
       const waitMs = retryAfterMs && retryAfterMs > 0 ? retryAfterMs : 1000 * 2 ** attempt;
-      logger.warn({ status: res.status, attempt, waitMs }, "GHL search: retrying");
+      logger.warn({ status: res.status, attempt, waitMs }, `GHL ${label}: retrying`);
       await sleep(waitMs);
       continue;
     }
@@ -146,22 +154,66 @@ export async function searchContacts(params: SearchParams, fetchImpl: FetchLike 
       // (including the Authorization header) back to us.
       await res.body?.cancel().catch(() => undefined);
       const hint = res.status === 401 || res.status === 403
-        ? " — check the Private Integration token and that it has the contacts.readonly scope for this location"
+        ? ` — check the Private Integration token and that it has the ${scopeHint} scope for this location`
         : res.status === 422 || res.status === 400
-          ? " — GHL rejected the search request; the request format may need updating"
+          ? ` — GHL rejected the ${label} request; the request format may need updating`
           : "";
-      throw new GhlApiError(`GHL contacts search failed: HTTP ${res.status}${hint}`, res.status);
+      throw new GhlApiError(`GHL ${label} failed: HTTP ${res.status}${hint}`, res.status);
     }
-
-    const json = (await res.json()) as { contacts?: GhlContact[]; total?: number; count?: number; searchAfter?: (string | number)[] };
-    const contacts = Array.isArray(json.contacts) ? json.contacts : [];
-    const last = contacts[contacts.length - 1];
-    return {
-      contacts,
-      total: typeof json.total === "number" ? json.total : typeof json.count === "number" ? json.count : null,
-      searchAfter: Array.isArray(json.searchAfter) && json.searchAfter.length
-        ? json.searchAfter
-        : last?.searchAfter?.length ? last.searchAfter : null,
-    };
+    return res;
   }
+}
+
+export async function searchContacts(params: SearchParams, fetchImpl: FetchLike = fetch): Promise<SearchPage> {
+  const body: Record<string, unknown> = {
+    locationId: params.locationId,
+    pageLimit: params.pageLimit ?? GHL_PAGE_LIMIT,
+    sort: [{ field: "dateUpdated", direction: "asc" }],
+  };
+  if (params.updatedSince) {
+    body.filters = [{ field: "dateUpdated", operator: "range", value: { gte: params.updatedSince.toISOString() } }];
+  }
+  if (params.searchAfter?.length) body.searchAfter = params.searchAfter;
+  else body.page = params.page ?? 1;
+
+  const res = await ghlRequest("contacts search", "/contacts/search", params.token, { method: "POST", body }, "contacts.readonly", fetchImpl);
+  const json = (await res.json()) as { contacts?: GhlContact[]; total?: number; count?: number; searchAfter?: (string | number)[] };
+  const contacts = Array.isArray(json.contacts) ? json.contacts : [];
+  const last = contacts[contacts.length - 1];
+  return {
+    contacts,
+    total: typeof json.total === "number" ? json.total : typeof json.count === "number" ? json.count : null,
+    searchAfter: Array.isArray(json.searchAfter) && json.searchAfter.length
+      ? json.searchAfter
+      : last?.searchAfter?.length ? last.searchAfter : null,
+  };
+}
+
+/** A custom field's definition — name and type only, never a contact's value. */
+export interface GhlCustomField {
+  id: string;
+  name: string;
+  /** Merge key, e.g. `contact.medicare_number`. */
+  fieldKey: string | null;
+  dataType: string | null;
+}
+
+/**
+ * The contact custom fields defined in a sub-account
+ * (`GET /locations/:locationId/customFields?model=contact`, scope
+ * `locations/customFields.readonly`). Definitions only: this call never
+ * returns a contact's data, so it is safe to show to an admin mapping fields.
+ */
+export async function listContactCustomFields(
+  params: { token: string; locationId: string },
+  fetchImpl: FetchLike = fetch,
+): Promise<GhlCustomField[]> {
+  const path = `/locations/${encodeURIComponent(params.locationId)}/customFields?model=contact`;
+  const res = await ghlRequest("custom fields", path, params.token, { method: "GET" }, "locations/customFields.readonly", fetchImpl);
+  const json = (await res.json()) as { customFields?: Array<Record<string, unknown>> };
+  const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+  return (Array.isArray(json.customFields) ? json.customFields : [])
+    .filter((f) => str(f.id) && str(f.name) && (f.model === undefined || f.model === "contact"))
+    .map((f) => ({ id: str(f.id)!, name: str(f.name)!, fieldKey: str(f.fieldKey), dataType: str(f.dataType) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }

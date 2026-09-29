@@ -38,6 +38,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { EmptyState, PageHeader, SectionCard, StatusPill } from "@/components/shared";
 import { downloadCsvText, downloadExport } from "@/lib/exports";
+import { GhlConnectionCard } from "@/components/integrations/GhlConnectionCard";
 
 type Kind = "clients" | "policies" | "agents";
 
@@ -120,6 +121,8 @@ export default function DataToolsPage() {
           </TabsContent>
         ))}
       </Tabs>
+
+      {IMPORT_ROLES.includes(role) && <GhlConnectionCard />}
 
       {IMPORT_ROLES.includes(role) && (
         <SectionCard title="Recent imports" icon={History} description="The last imports anyone in your agency ran, newest first.">
