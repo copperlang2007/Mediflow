@@ -63,6 +63,7 @@ Twilio (for example the microphone was blocked) does not count.
 | `DIAL_MAX_ATTEMPTS` | 3 | Most calls to one contact or number in the window below. |
 | `DIAL_WINDOW_HOURS` | 24 | Length of that window. |
 | `DIAL_REDIAL_COOLDOWN_MINUTES` | 30 | Minimum wait before calling the same contact or number again. |
+| `DIAL_MAX_UNCLAIMED_ATTEMPTS` | 30 | Most attempts to one number in the window that never connected (for example a blocked microphone). Past this, Mediflow refuses new attempts until the window passes. |
 
 ## How to check it worked
 

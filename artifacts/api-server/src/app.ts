@@ -172,8 +172,14 @@ app.use("/sse/notifications", apiCors);
 // drop or retry the callback). They are exempt here; they keep their own
 // dedicated limiter (routes/voiceWebhooks.ts) and X-Twilio-Signature check.
 // originalUrl, not path: under `app.use("/api", …)` req.path has "/api" stripped.
+// EXACT paths only — an unknown subpath such as /voice-fake stays rate limited.
+const VOICE_WEBHOOK_PATHS: ReadonlySet<string> = new Set([
+  "/api/webhooks/twilio/voice",
+  "/api/webhooks/twilio/voice-status",
+  "/api/webhooks/twilio/voice-notice",
+]);
 const isVoiceWebhook = (req: Request): boolean =>
-  req.originalUrl.split("?")[0]!.startsWith("/api/webhooks/twilio/voice");
+  VOICE_WEBHOOK_PATHS.has(req.originalUrl.split("?")[0]!);
 
 const globalLimiter = rateLimit({
   skip: isVoiceWebhook,

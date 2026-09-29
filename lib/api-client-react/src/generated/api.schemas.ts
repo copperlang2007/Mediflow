@@ -3140,6 +3140,7 @@ export const CallBlockReasonCode = {
   AGENT_NOT_ELIGIBLE: "AGENT_NOT_ELIGIBLE",
   MAX_ATTEMPTS_EXCEEDED: "MAX_ATTEMPTS_EXCEEDED",
   REDIAL_COOLDOWN: "REDIAL_COOLDOWN",
+  TOO_MANY_ABANDONED_ATTEMPTS: "TOO_MANY_ABANDONED_ATTEMPTS",
 } as const;
 
 export interface CallBlockReason {
@@ -3151,7 +3152,8 @@ export interface CallBlockedResponse {
   error: string;
   code?: string;
   reasons: CallBlockReason[];
-  callSessionId: string;
+  /** Absent when refused without storing a row (TOO_MANY_ABANDONED_ATTEMPTS) */
+  callSessionId?: string;
 }
 
 export type CallingUnavailableStatus =

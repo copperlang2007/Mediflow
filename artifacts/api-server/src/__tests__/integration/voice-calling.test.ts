@@ -735,6 +735,83 @@ describe("voice webhooks are exempt from the per-IP limiters", () => {
   });
 });
 
+describe("rate-limit exemption covers only the three exact voice webhook paths", () => {
+  it("unknown subpaths stay limited; the real paths use only their dedicated limiter", async () => {
+    for (const path of ["/api/webhooks/twilio/voice-fake", "/api/webhooks/twilio/voice/extra", "/api/webhooks/twilio/voicemail"]) {
+      const res = await request(app).post(path).type("form").send({ CallSid: newSid() });
+      expect(res.headers["ratelimit-limit"], path).toBeDefined();
+      expect(res.headers["ratelimit-limit"], path).not.toBe("1200"); // not the dedicated webhook budget
+    }
+    for (const path of [VOICE, STATUS, NOTICE]) {
+      const res = await postTwilio(path, { CallSid: newSid() });
+      expect(res.headers["ratelimit-limit"], path).toBe("1200"); // only the dedicated webhook limiter
+    }
+    // A query string does not change which path it is.
+    const withQuery = await request(app).post(`${NOTICE}?x=1`).type("form").send({ CallSid: newSid() });
+    expect(withQuery.headers["ratelimit-limit"]).toBe("1200");
+  });
+});
+
+describe("abandoned attempts have their own ceiling", () => {
+  async function seedAbandoned(c: { id: string; e164: string }, n: number) {
+    for (let i = 0; i < n; i++) {
+      await db.insert(schema.callSessionsTable).values({
+        id: randomUUID(), orgId: org.id, contactId: c.id, userId: admin.id, toNumber: c.e164,
+        status: i % 2 === 0 ? "initiated" : "canceled",
+        createdAt: new Date(NOON_PT.getTime() - (10 + i) * 60_000), // past the 2 minute claim window
+      });
+    }
+  }
+  const rowCount = async (contactId: string) =>
+    (await db.select().from(schema.callSessionsTable).where(eq(schema.callSessionsTable.contactId, contactId))).length;
+
+  it("at 30 unclaimed initiated/canceled rows in 24h the next attempt is refused with a clear code and stores no row", async () => {
+    const c = await newContact();
+    await seedAbandoned(c, 30);
+    const res = await place(admin.id, c.id);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("TOO_MANY_ABANDONED_ATTEMPTS");
+    expect(res.body.reasons[0].detail).toContain("never connected");
+    expect(res.body.callSessionId).toBeUndefined();
+    expect(await rowCount(c.id)).toBe(30);
+  });
+
+  it("just under the ceiling an ordinary retry still works (TTL logic unchanged)", async () => {
+    const c = await newContact();
+    await seedAbandoned(c, 29);
+    expect((await place(admin.id, c.id)).status).toBe(201);
+  });
+
+  it("abandoned rows older than the window do not count", async () => {
+    const c = await newContact();
+    for (let i = 0; i < 30; i++) {
+      await db.insert(schema.callSessionsTable).values({
+        id: randomUUID(), orgId: org.id, contactId: c.id, userId: admin.id, toNumber: c.e164,
+        status: "canceled", createdAt: new Date(NOON_PT.getTime() - (30 + i) * 3_600_000),
+      });
+    }
+    expect((await place(admin.id, c.id)).status).toBe(201);
+  });
+});
+
+describe("cancel audit", () => {
+  it("one place + two cancels writes exactly one cancel audit row", async () => {
+    const c = await newContact();
+    const placed = await place(admin.id, c.id);
+    const id = placed.body.callSessionId as string;
+    const cancel = () => request(app).post(`/api/softphone/calls/${id}/cancel`).set(A(admin.id));
+    expect((await cancel()).status).toBe(200);
+    expect((await cancel()).status).toBe(200);
+    const cancelRows = async () =>
+      (await db.select().from(schema.auditLogTable).where(eq(schema.auditLogTable.resourceId, id))).filter(
+        (r) => String((r.changes as { path?: string }).path).endsWith("/cancel"),
+      );
+    await vi.waitFor(async () => expect((await cancelRows()).length).toBeGreaterThanOrEqual(1));
+    await new Promise((r) => setTimeout(r, 150)); // let any (wrongly) pending second write land
+    expect(await cancelRows()).toHaveLength(1);
+  });
+});
+
 describe("POST /api/webhooks/twilio/voice-status", () => {
   async function ringing() {
     const started = await startedCall();

@@ -30,6 +30,8 @@ type AuditOptions = {
   includeReads?: boolean;
   viewOnlyReads?: boolean;
   getResourceId?: (req: Request) => string | null;
+  /** Evaluated when the response finishes; return false to skip the audit row (e.g. an idempotent no-op). */
+  shouldAudit?: (req: Request, res: Response) => boolean;
 };
 
 /**
@@ -124,6 +126,7 @@ function prepareAuditEntry(
 
   return () => {
     const authReq = req as AuthenticatedRequest;
+    if (options.shouldAudit && !options.shouldAudit(req, res)) return;
     if (viewOnlyReads && !authReq.viewOnly && !authReq.supportEdit) return;
     const userId = authReq.userId ?? null;
     const orgId = authReq.orgId ?? null;

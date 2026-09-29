@@ -15,12 +15,20 @@ export interface DialLimits {
   windowHours: number;
   /** Minimum gap between two attempts to the same contact/number, minutes. */
   redialCooldownMinutes: number;
+  /**
+   * Ceiling on attempts that never reached Twilio (unclaimed `initiated` /
+   * `canceled` rows) per contact/number per window. They don't count toward
+   * the limits above, so this is what stops a scripted client from piling up
+   * rows once they are past the claim window.
+   */
+  maxUnclaimedAttempts: number;
 }
 
 export const DEFAULT_DIAL_LIMITS: DialLimits = {
   maxAttempts: 3,
   windowHours: 24,
   redialCooldownMinutes: 30,
+  maxUnclaimedAttempts: 30,
 };
 
 function positiveInt(raw: string | undefined, fallback: number): number {
@@ -37,5 +45,6 @@ export function resolveDialLimits(env: NodeJS.ProcessEnv = process.env): DialLim
       env.DIAL_REDIAL_COOLDOWN_MINUTES,
       DEFAULT_DIAL_LIMITS.redialCooldownMinutes,
     ),
+    maxUnclaimedAttempts: positiveInt(env.DIAL_MAX_UNCLAIMED_ATTEMPTS, DEFAULT_DIAL_LIMITS.maxUnclaimedAttempts),
   };
 }

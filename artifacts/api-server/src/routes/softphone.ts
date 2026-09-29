@@ -59,6 +59,7 @@ const router: IRouter = Router();
 // Audit every state-changing call route (POST/PATCH). Reads are not audited.
 router.use(
   routerAuditMiddleware(router, "call", undefined, {
+    shouldAudit: (req) => !(req as Request & { skipAudit?: boolean }).skipAudit,
     getResourceId: (req) => {
       const fromParam = req.params.id;
       if (typeof fromParam === "string") return fromParam;
@@ -412,6 +413,14 @@ router.post(
       case "needs_setup":
         res.status(503).json({ status: "needs_setup", missing: result.missing });
         return;
+      case "throttled":
+        // Refused without storing a row (abandoned-attempt ceiling).
+        res.status(409).json({
+          error: result.reasons[0]?.detail ?? "Too many call attempts.",
+          code: result.reasons[0]?.code,
+          reasons: result.reasons,
+        });
+        return;
       case "blocked":
         (req as Request & { callSessionId?: string }).callSessionId = result.callSessionId;
         res.status(409).json({
@@ -560,6 +569,8 @@ router.post(
       return;
     }
     const outcome = await cancelUnclaimedSession(row.id, authReq.orgId);
+    // Only the first real state change is audited; an idempotent repeat is not.
+    if (outcome === "already_canceled") (req as Request & { skipAudit?: boolean }).skipAudit = true;
     if (outcome === "already_used") {
       res.status(409).json({ error: "This call already reached Twilio and cannot be canceled" });
       return;

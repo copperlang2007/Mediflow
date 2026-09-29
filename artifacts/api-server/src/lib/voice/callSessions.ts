@@ -12,7 +12,7 @@
  * read, stored or logged, and phone numbers never go to logs or the audit log.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, gte, inArray, isNotNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, count, eq, gte, inArray, isNotNull, lt, ne, or, sql } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import {
   db,
@@ -78,7 +78,8 @@ export type BlockCode =
   | "INVALID_NUMBER"
   | "AGENT_NOT_ELIGIBLE"
   | "MAX_ATTEMPTS_EXCEEDED"
-  | "REDIAL_COOLDOWN";
+  | "REDIAL_COOLDOWN"
+  | "TOO_MANY_ABANDONED_ATTEMPTS";
 
 export interface BlockReason {
   code: BlockCode;
@@ -89,6 +90,8 @@ export type PlaceCallResult =
   | { kind: "not_found" }
   | { kind: "needs_setup"; missing: VoiceEnvName[] }
   | { kind: "blocked"; callSessionId: string; reasons: BlockReason[] }
+  // Over the abandoned-attempt ceiling: refused WITHOUT storing another row.
+  | { kind: "throttled"; reasons: BlockReason[] }
   | { kind: "ok"; callSessionId: string; to: string };
 
 const AGENT_CODES = new Set<PreclearanceFailure["code"]>([
@@ -274,6 +277,34 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
     const sameTarget = toNumber
       ? or(eq(callSessionsTable.contactId, contact.id), eq(callSessionsTable.toNumber, toNumber))
       : eq(callSessionsTable.contactId, contact.id);
+
+    // Abandoned attempts (never reached Twilio) don't count toward the limits
+    // below, so cap them separately: past the ceiling refuse WITHOUT storing
+    // another row, so a scripted client cannot grow the table without bound.
+    const [{ n: abandoned = 0 } = {}] = await tx
+      .select({ n: count() })
+      .from(callSessionsTable)
+      .where(
+        and(
+          eq(callSessionsTable.orgId, input.orgId),
+          sameTarget,
+          gte(callSessionsTable.createdAt, windowStart),
+          sql`${callSessionsTable.twilioCallSid} IS NULL`,
+          inArray(callSessionsTable.status, ["initiated", "canceled"]),
+        ),
+      );
+    if (Number(abandoned) >= limits.maxUnclaimedAttempts) {
+      return {
+        throttled: true,
+        reasons: [
+          {
+            code: "TOO_MANY_ABANDONED_ATTEMPTS",
+            detail: `too many call attempts to this number never connected (${Number(abandoned)} in the last ${limits.windowHours} hours, limit ${limits.maxUnclaimedAttempts}); try again later or contact your administrator`,
+          },
+        ] as BlockReason[],
+      } as const;
+    }
+
     const recent = await tx
       .select({ createdAt: callSessionsTable.createdAt })
       .from(callSessionsTable)
@@ -355,8 +386,9 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
     return blocked ? ({ blocked: true, reasons: all } as const) : ({ blocked: false } as const);
   });
 
+  if ("throttled" in result) return { kind: "throttled", reasons: result.reasons };
   if (result.blocked) {
-    return { kind: "blocked", callSessionId: sessionId, reasons: result.reasons };
+    return { kind: "blocked", callSessionId: sessionId, reasons: result.reasons ?? [] };
   }
   return { kind: "ok", callSessionId: sessionId, to: toNumber! };
 }
@@ -418,7 +450,7 @@ export async function claimSessionForDial(
 export async function cancelUnclaimedSession(
   sessionId: string,
   orgId: string,
-): Promise<"canceled" | "already_used" | "not_found"> {
+): Promise<"canceled" | "already_canceled" | "already_used" | "not_found"> {
   const rows = await db
     .update(callSessionsTable)
     .set({ status: "canceled" })
@@ -438,7 +470,7 @@ export async function cancelUnclaimedSession(
     .where(and(eq(callSessionsTable.id, sessionId), eq(callSessionsTable.orgId, orgId)))
     .limit(1);
   if (!exists) return "not_found";
-  return exists.status === "canceled" ? "canceled" : "already_used";
+  return exists.status === "canceled" ? "already_canceled" : "already_used";
 }
 
 /** Mark an unused (`initiated`) session blocked. Never touches a used session. */
