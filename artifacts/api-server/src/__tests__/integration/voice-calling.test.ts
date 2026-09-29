@@ -1104,7 +1104,7 @@ describe("answered inference from a parent-leg completed callback", () => {
   });
 
   it("completed with duration 0, or no duration at all, is NOT answered", async () => {
-    for (const extra of [{ CallDuration: "0" }, {}]) {
+    for (const extra of [{ CallDuration: "0" }, {}] as Record<string, string>[]) {
       const { sessionId, sid } = await claimed();
       await postTwilio(STATUS, { CallSid: sid, CallStatus: "completed", ...extra });
       expect((await sessionRow(sessionId)).answeredAt).toBeNull();

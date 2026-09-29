@@ -393,7 +393,7 @@ export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult>
     return blocked ? ({ blocked: true, reasons: all } as const) : ({ blocked: false } as const);
   });
 
-  if ("throttled" in result) return { kind: "throttled", reasons: result.reasons };
+  if ("throttled" in result) return { kind: "throttled", reasons: result.reasons ?? [] };
   if (result.blocked) {
     return { kind: "blocked", callSessionId: sessionId, reasons: result.reasons ?? [] };
   }
