@@ -7,7 +7,7 @@ import { Loader2, Lock, Search, Sparkles, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { StatusPill } from "@/components/shared";
-import { useContactSearch, formatPhone, type ContactLite } from "@/lib/portalDialer/api";
+import { useContactSearch, useSoftphoneContactSearch, formatPhone, type ContactLite } from "@/lib/portalDialer/api";
 
 /**
  * Friendly "this part isn't built yet" note. Says plainly what will happen,
@@ -80,18 +80,21 @@ export function NoAccess({ what }: { what: string }) {
 
 /**
  * Type-ahead contact search (name, email or phone) over `GET /contacts`.
- * Calls `onSelect` with the picked contact.
+ * Calls `onSelect` with the picked contact. `source="softphone"` searches the
+ * self-scoped softphone endpoint (dialer fields only) instead of `GET /contacts`.
  */
 export function ContactPicker({
   onSelect,
   placeholder = "Search clients by name, phone or email…",
   className,
   autoFocus,
+  source = "contacts",
 }: {
   onSelect: (c: ContactLite) => void;
   placeholder?: string;
   className?: string;
   autoFocus?: boolean;
+  source?: "contacts" | "softphone";
 }) {
   const [text, setText] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -111,7 +114,9 @@ export function ContactPicker({
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  const { data, isFetching, isError } = useContactSearch(debounced, open);
+  const general = useContactSearch(debounced, open && source === "contacts");
+  const dialer = useSoftphoneContactSearch(debounced, open && source === "softphone");
+  const { data, isFetching, isError } = source === "softphone" ? dialer : general;
   const results = data?.data ?? [];
   const showList = open && debounced.trim().length >= 2;
 

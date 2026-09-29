@@ -39,10 +39,9 @@ import { useIsAdmin } from "@/lib/auth/useIsAdmin";
 import { apiRequest } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useContactCallSummaries } from "@/lib/crm/callSummaries";
-import { useGetContact } from "@workspace/api-client-react";
 import {
-  CONTACT_READ_ROLES,
   CONTACT_UPDATE_ROLES,
+  SOFTPHONE_ROLES,
   RECENT_CALLS_KEY,
   SUPERVISOR_ROLES,
   contactActivitiesKey,
@@ -51,7 +50,9 @@ import {
   manualLogDispositions,
   useContactCallLogs,
   useDispositions,
+  useOwnCallSessions,
   usePhoneLookup,
+  useSoftphoneContact,
   usePrecheck,
   useRecentCalls,
   type ContactLite,
@@ -240,6 +241,33 @@ function CallSummariesCard({ contactId }: { contactId: string }) {
   );
 }
 
+/** Agents' view of a contact's history: only their own call sessions (no contact timeline). */
+function OwnCallHistoryCard({ contactId }: { contactId: string }) {
+  const { data, isLoading } = useOwnCallSessions(contactId);
+  const rows = data?.data ?? [];
+  return (
+    <SectionCard title="Your calls with this contact" icon={ClipboardList} contentClassName="pt-0">
+      {isLoading ? (
+        <Skeleton className="h-24 w-full" />
+      ) : rows.length === 0 ? (
+        <EmptyState compact icon={PhoneCall} title="No calls on record" description="Calls you place to this contact will show here." />
+      ) : (
+        <ul className="divide-y divide-border/60">
+          {rows.map((r) => (
+            <li key={r.id} className="flex items-start justify-between gap-2 py-2 text-sm">
+              <span className="min-w-0">
+                <span className="line-clamp-2">{r.notes || `Call ${r.status.replace("_", " ")}`}</span>
+                <span className="text-xs text-muted-foreground">{formatDistanceToNow(new Date(r.startedAt ?? r.createdAt), { addSuffix: true })}</span>
+              </span>
+              {r.dispositionCode && <StatusPill tone="neutral">{r.dispositionCode.replace("_", " ").toLowerCase()}</StatusPill>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </SectionCard>
+  );
+}
+
 function LogCallCard({ contact, canLog, notesId }: { contact: ContactLite | null; canLog: boolean; notesId: string }) {
   const qc = useQueryClient();
   const { data: dispositions } = useDispositions();
@@ -334,8 +362,10 @@ function LogCallCard({ contact, canLog, notesId }: { contact: ContactLite | null
 }
 
 export default function DialerPage() {
-  const { role, isLoading: roleLoading } = useIsAdmin(CONTACT_READ_ROLES);
-  const allowed = !!role && (CONTACT_READ_ROLES as readonly string[]).includes(role);
+  const { role, isLoading: roleLoading } = useIsAdmin(SOFTPHONE_ROLES);
+  const allowed = !!role && (SOFTPHONE_ROLES as readonly string[]).includes(role);
+  // The plain `agent` is served the self-scoped softphone endpoints only.
+  const isAgentRole = role === "agent";
   const canLog = !!role && (CONTACT_UPDATE_ROLES as readonly string[]).includes(role);
   const canCall = !!role && (CALL_CREATE_ROLES as readonly string[]).includes(role);
   const isSetupAdmin = !!role && (SUPERVISOR_ROLES as readonly string[]).includes(role);
@@ -364,9 +394,9 @@ export default function DialerPage() {
   const lookup = usePhoneLookup(allowed ? debouncedNumber : "");
   const recent = useRecentCalls(allowed);
   // Contact picked by id only (recent call / deep link) — fetch full record.
-  const { data: fetched } = useGetContact(pickedId ?? "", { query: { enabled: allowed && !!pickedId && picked?.id !== pickedId } as never });
+  const { data: fetched } = useSoftphoneContact(pickedId, allowed && !!pickedId && picked?.id !== pickedId);
   const contact: ContactLite | null =
-    picked && picked.id === pickedId ? picked : pickedId && fetched ? (fetched as unknown as ContactLite) : null;
+    picked && picked.id === pickedId ? picked : pickedId && fetched ? fetched : null;
 
   // A contact opened by id (deep link) shows its number on the pad, so what is
   // displayed is what will be called. Only on contact change: clearing the pad
@@ -392,6 +422,26 @@ export default function DialerPage() {
   };
 
   if (!roleLoading && role && !allowed) return <NoAccess what="the softphone" />;
+
+  // A self-scoped agent whose profile is unlinked (404) or not active (409) is
+  // refused by the API; say so plainly instead of showing a broken dialer.
+  const blockedStatus = (recent.error as { status?: number } | null)?.status;
+  if (isAgentRole && (blockedStatus === 404 || blockedStatus === 409)) {
+    return (
+      <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+        <PageHeader title="Softphone Dialer" subtitle="Call your assigned contacts from your browser" />
+        <EmptyState
+          icon={Phone}
+          title="Softphone isn't available for your account yet"
+          description={
+            blockedStatus === 404
+              ? "Your login isn't linked to an agent profile. Ask your agency administrator to link it."
+              : "Your agent profile isn't active, so calling is turned off. Ask your agency administrator if this is unexpected."
+          }
+        />
+      </div>
+    );
+  }
 
   const digits = number.replace(/\D/g, "");
   const lookupRows = lookup.data?.data ?? [];
@@ -548,7 +598,14 @@ export default function DialerPage() {
                   title="No caller selected"
                   description="Type a number on the dial pad, pick a recent call, or search by name."
                 />
-                <ContactPicker onSelect={choose} placeholder="Or search by name…" />
+                <ContactPicker
+                  source="softphone"
+                  onSelect={choose}
+                  placeholder={isAgentRole ? "Or search your contacts by name…" : "Or search by name…"}
+                />
+                {isAgentRole && (
+                  <p className="text-xs text-muted-foreground">You can look up and call contacts assigned to you.</p>
+                )}
               </div>
             ) : (
               <div>
@@ -573,9 +630,11 @@ export default function DialerPage() {
                   <div><span className="text-xs text-muted-foreground">State · ZIP</span><p>{[contact.stateCode, contact.zipCode].filter(Boolean).join(" · ") || "—"}</p></div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" asChild>
-                    <Link href={`/crm/contacts/${contact.id}`}>Open contact <ExternalLink className="ml-1 h-3.5 w-3.5" /></Link>
-                  </Button>
+                  {!isAgentRole && (
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href={`/crm/contacts/${contact.id}`}>Open contact <ExternalLink className="ml-1 h-3.5 w-3.5" /></Link>
+                    </Button>
+                  )}
                   <Button size="sm" className="bg-success text-white hover:bg-success/90" onClick={placeCall} disabled={!canPlaceCall}>
                     <PhoneCall className="mr-1.5 h-3.5 w-3.5" /> Call
                   </Button>
@@ -585,7 +644,7 @@ export default function DialerPage() {
           </SectionCard>
 
           {contact && <OkToCallCard contactId={contact.id} stateCode={contact.stateCode} />}
-          {contact && <CallSummariesCard contactId={contact.id} />}
+          {contact && (isAgentRole ? <OwnCallHistoryCard contactId={contact.id} /> : <CallSummariesCard contactId={contact.id} />)}
         </div>
 
         {/* Column 3 — log a call + roadmap */}

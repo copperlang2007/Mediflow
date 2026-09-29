@@ -16,6 +16,7 @@ import DialerPage, { describeFailure } from "@/pages/DialerPage";
 import SupervisorPage from "@/pages/SupervisorPage";
 import QuotingPage from "@/pages/QuotingPage";
 import { normalizeAppointments } from "@/lib/portalDialer/api";
+import { visibleNavGroups } from "@/components/layout/nav-config";
 
 const ADMIN = { id: "u-admin", orgId: "o-1", email: "a@example.com", fullName: "Admin", role: "agency_admin", isActive: true };
 const AGENT = { ...ADMIN, id: "u-agent", role: "agent" };
@@ -112,6 +113,61 @@ describe("Softphone page", () => {
     expect(await screen.findByText(/Browser calling: (needs setup|unavailable)/)).toBeInTheDocument();
     expect(await screen.findByText("No calls logged yet")).toBeInTheDocument();
     expect(screen.queryByText(/00:00/)).not.toBeInTheDocument();
+  });
+});
+
+describe("Softphone page - agent role (self-scoped)", () => {
+  const calledUrls = () => (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => String(c[0]));
+
+  it("is in the agent's nav, and the page opens instead of showing no-access", async () => {
+    const hrefs = visibleNavGroups("agent").flatMap((g) => g.items.map((i) => i.href));
+    expect(hrefs).toContain("/dialer");
+    routes["/api/softphone/recent-calls"] = () => json({ data: [], total: 0 });
+    routes["/api/softphone/dispositions"] = () => json({ data: [] });
+    renderAt("/dialer", <DialerPage />, AGENT);
+    expect(screen.getByText("Dial Pad")).toBeInTheDocument();
+    expect(screen.queryByText(/don't have access to the softphone/)).not.toBeInTheDocument();
+    await screen.findByText("No calls logged yet");
+    expect(screen.getByText(/contacts assigned to you/)).toBeInTheDocument();
+    // Agents never touch the general contacts routes or the contact timeline.
+    expect(calledUrls().filter((u) => /\/api\/contacts/.test(u))).toEqual([]);
+  });
+
+  it("deep link loads the contact from the self-scoped endpoint only", async () => {
+    routes["/api/softphone/recent-calls"] = () => json({ data: [], total: 0 });
+    routes["/api/softphone/dispositions"] = () => json({ data: [] });
+    routes["/api/softphone/precheck"] = () => json({ error: "x" }, 500);
+    routes["/api/softphone/contacts/c-1"] = () => json({
+      id: "c-1", firstName: "Joan", lastName: "Park", email: null, phone: "+15035551234",
+      status: "enrolled", stateCode: "OR", zipCode: "97201", currentPlanType: "MAPD", assignedAgentId: "a-1",
+    });
+    routes["/api/softphone/calls"] = () => json({ data: [], total: 0 });
+    renderAt("/dialer?contact=c-1", <DialerPage />, AGENT);
+    expect(await screen.findByText("Joan Park")).toBeInTheDocument();
+    expect(await screen.findByText("Your calls with this contact")).toBeInTheDocument();
+    expect(screen.queryByText(/Open contact/)).not.toBeInTheDocument();
+    expect(calledUrls().filter((u) => /\/api\/contacts/.test(u))).toEqual([]);
+  });
+
+  it("shows a clear empty state for an unlinked agent (404)", async () => {
+    routes["/api/softphone/recent-calls"] = () => json({ error: "Agent profile not found" }, 404);
+    routes["/api/softphone/dispositions"] = () => json({ error: "Agent profile not found" }, 404);
+    renderAt("/dialer", <DialerPage />, AGENT);
+    expect(await screen.findByText(/isn't available for your account yet/)).toBeInTheDocument();
+    expect(screen.getByText(/isn't linked to an agent profile/)).toBeInTheDocument();
+    expect(screen.queryByText("Dial Pad")).not.toBeInTheDocument();
+  });
+
+  it("shows a clear empty state for a non-active agent (409)", async () => {
+    routes["/api/softphone/recent-calls"] = () => json({ error: "Your agent profile is not active" }, 409);
+    routes["/api/softphone/dispositions"] = () => json({ error: "Your agent profile is not active" }, 409);
+    renderAt("/dialer", <DialerPage />, AGENT);
+    expect(await screen.findByText(/profile isn't active/)).toBeInTheDocument();
+  });
+
+  it("other non-softphone roles are unchanged (viewer has no call:create but keeps the page)", () => {
+    const hrefs = visibleNavGroups("viewer").flatMap((g) => g.items.map((i) => i.href));
+    expect(hrefs).not.toContain("/dialer");
   });
 });
 

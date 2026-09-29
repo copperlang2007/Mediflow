@@ -113,7 +113,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/tasks", label: "Tasks", icon: CheckSquare, roles: ALL_ROLES, badge: "overdueTasks" },
       { href: "/onboarding", label: "My Onboarding", icon: ClipboardCheck, roles: ["agent"] },
       { href: "/calendar", label: "Calendar", icon: CalendarDays, roles: ALL_ROLES },
-      { href: "/dialer", label: "Softphone", icon: Phone, roles: BACK_OFFICE },
+      // Agents get the self-scoped softphone (own assigned contacts only; server-enforced).
+      { href: "/dialer", label: "Softphone", icon: Phone, roles: [...BACK_OFFICE, "agent"] },
       { href: "/supervisor", label: "Supervisor", icon: Headphones, roles: ADMINS },
     ],
   },

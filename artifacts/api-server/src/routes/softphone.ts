@@ -22,7 +22,7 @@
  * is left untouched on purpose.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import {
   db,
@@ -53,6 +53,7 @@ import { cancelUnclaimedSession, expireStaleLiveSessions, placeCall } from "../l
 import { mintVoiceToken, missingVoiceEnv } from "../lib/voice/voiceToken";
 import { recordPhoneOptOut } from "../lib/compliance/optOut";
 import { logger } from "../lib/logger";
+import { requireSoftphoneAccess, softphoneScope } from "../middlewares/agentSelfScope";
 
 const router: IRouter = Router();
 
@@ -92,10 +93,54 @@ const LookupQuery = z.object({
     }, "phone must contain 7-15 digits"),
 });
 
+/**
+ * The only contact fields the dialer needs. Never MBI / Medicare ID, birth
+ * date or health data. `email` is returned to back-office roles only (the
+ * self-scoped agent always gets null).
+ */
+const DIALER_CONTACT_COLUMNS = {
+  id: contactsTable.id,
+  firstName: contactsTable.firstName,
+  lastName: contactsTable.lastName,
+  phone: contactsTable.phone,
+  email: contactsTable.email,
+  status: contactsTable.status,
+  stateCode: contactsTable.stateCode,
+  zipCode: contactsTable.zipCode,
+  currentPlanType: contactsTable.currentPlanType,
+  assignedAgentId: contactsTable.assignedAgentId,
+};
+
+async function selectDialerContacts(
+  where: SQL | undefined,
+  res: Response,
+  opts: { limit: number; order: "recent" | "name" },
+) {
+  const rows = await db
+    .select(DIALER_CONTACT_COLUMNS)
+    .from(contactsTable)
+    .where(where)
+    .orderBy(
+      ...(opts.order === "name"
+        ? [asc(contactsTable.lastName), asc(contactsTable.firstName), asc(contactsTable.id)]
+        : [desc(contactsTable.updatedAt), asc(contactsTable.id)]),
+    )
+    .limit(opts.limit);
+  return softphoneScope(res).kind === "agent" ? rows.map((r) => ({ ...r, email: null })) : rows;
+}
+
+/** Org + not-deleted + (agent role) assigned to the caller's own active profile. */
+function dialerContactScope(orgId: string, res: Response): SQL[] {
+  const scope = softphoneScope(res);
+  const conds: SQL[] = [eq(contactsTable.orgId, orgId), isNull(contactsTable.deletedAt)];
+  if (scope.kind === "agent") conds.push(eq(contactsTable.assignedAgentId, scope.agentId));
+  return conds;
+}
+
 router.get(
   "/softphone/lookup",
   requireAuth,
-  requirePermission("contact", "read"),
+  requireSoftphoneAccess,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const parsed = LookupQuery.safeParse(req.query);
@@ -108,31 +153,76 @@ router.get(
     // "+1 (310) 555-0101", "3105550101" and "+13105550101" all find the same
     // contact regardless of how it was stored.
     const tail = digits.length > 10 ? digits.slice(-10) : digits;
-    const rows = await db
-      .select({
-        id: contactsTable.id,
-        firstName: contactsTable.firstName,
-        lastName: contactsTable.lastName,
-        phone: contactsTable.phone,
-        email: contactsTable.email,
-        status: contactsTable.status,
-        stateCode: contactsTable.stateCode,
-        zipCode: contactsTable.zipCode,
-        currentPlanType: contactsTable.currentPlanType,
-        assignedAgentId: contactsTable.assignedAgentId,
-      })
-      .from(contactsTable)
-      .where(
-        and(
-          eq(contactsTable.orgId, authReq.orgId),
-          isNull(contactsTable.deletedAt),
-          sql`${contactsTable.phone} IS NOT NULL`,
-          sql`regexp_replace(${contactsTable.phone}, '\\D', '', 'g') LIKE ${"%" + tail}`,
-        ),
-      )
-      .orderBy(desc(contactsTable.updatedAt))
-      .limit(10);
+    const rows = await selectDialerContacts(
+      and(
+        ...dialerContactScope(authReq.orgId, res),
+        sql`${contactsTable.phone} IS NOT NULL`,
+        sql`regexp_replace(${contactsTable.phone}, '\\D', '', 'g') LIKE ${"%" + tail}`,
+      ),
+      res,
+      { limit: 10, order: "recent" },
+    );
     res.json({ data: rows, total: rows.length });
+  },
+);
+
+// ---- Contact search / fetch for the dial pad --------------------------------
+
+const ContactSearchQuery = z.object({
+  search: z.string().trim().min(2).max(100),
+  limit: z.coerce.number().int().min(1).max(20).optional(),
+});
+
+/** GET /softphone/contacts?search= - dial-pad type-ahead (name / phone; email for back office only). */
+router.get(
+  "/softphone/contacts",
+  requireAuth,
+  requireSoftphoneAccess,
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const parsed = ContactSearchQuery.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Enter at least 2 characters to search." });
+      return;
+    }
+    const term = parsed.data.search.replace(/[\\%_]/g, (m) => "\\" + m);
+    const like = `%${term}%`;
+    const digits = phoneDigits(parsed.data.search);
+    const matchers: SQL[] = [
+      sql`(${contactsTable.firstName} || ' ' || ${contactsTable.lastName}) ILIKE ${like}`,
+      sql`(${contactsTable.lastName} || ' ' || ${contactsTable.firstName}) ILIKE ${like}`,
+    ];
+    if (digits.length >= 3) {
+      matchers.push(sql`regexp_replace(coalesce(${contactsTable.phone}, ''), '\\D', '', 'g') LIKE ${"%" + digits + "%"}`);
+    }
+    if (softphoneScope(res).kind === "all") matchers.push(sql`${contactsTable.email} ILIKE ${like}`);
+    const rows = await selectDialerContacts(
+      and(...dialerContactScope(authReq.orgId, res), sql`(${sql.join(matchers, sql` OR `)})`),
+      res,
+      { limit: parsed.data.limit ?? 8, order: "name" },
+    );
+    res.json({ data: rows, total: rows.length });
+  },
+);
+
+/** GET /softphone/contacts/:id - one dialer-safe contact (deep link / recent call). */
+router.get(
+  "/softphone/contacts/:id",
+  requireAuth,
+  requireSoftphoneAccess,
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const [row] = await selectDialerContacts(
+      and(...dialerContactScope(authReq.orgId, res), eq(contactsTable.id, id)),
+      res,
+      { limit: 1, order: "recent" },
+    );
+    if (!row) {
+      res.status(404).json({ error: "Contact not found" });
+      return;
+    }
+    res.json(row);
   },
 );
 
@@ -156,7 +246,7 @@ const AGENT_CODES = new Set<PreclearanceFailure["code"]>([
 router.get(
   "/softphone/precheck",
   requireAuth,
-  requirePermission("contact", "read"),
+  requireSoftphoneAccess,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const parsed = PrecheckQuery.safeParse(req.query);
@@ -176,18 +266,13 @@ router.get(
         assignedAgentId: contactsTable.assignedAgentId,
       })
       .from(contactsTable)
-      .where(
-        and(
-          eq(contactsTable.id, contactId),
-          eq(contactsTable.orgId, authReq.orgId),
-          isNull(contactsTable.deletedAt),
-        ),
-      )
+      .where(and(...dialerContactScope(authReq.orgId, res), eq(contactsTable.id, contactId)))
       .limit(1);
     if (!contact) {
       res.status(404).json({ error: "Contact not found" });
       return;
     }
+    const selfScope = softphoneScope(res);
 
     // Which agent's licensing to check: an explicit pick, else the signed-in
     // user's own agent record, else the contact's assigned agent. Always
@@ -199,7 +284,17 @@ router.get(
     };
     let agent: { id: string; firstName: string; lastName: string } | null = null;
     let agentSource: "requested" | "you" | "assigned" | null = null;
-    if (parsed.data.agentId) {
+    if (selfScope.kind === "agent") {
+      // Self-scoped: only ever the caller's own (active) profile; a different
+      // agentId is indistinguishable from a missing agent.
+      if (parsed.data.agentId && parsed.data.agentId !== selfScope.agentId) {
+        res.status(404).json({ error: "Agent not found" });
+        return;
+      }
+      [agent = null] = await db.select(agentSelect).from(agentsTable)
+        .where(and(eq(agentsTable.id, selfScope.agentId), eq(agentsTable.orgId, authReq.orgId))).limit(1);
+      agentSource = "you";
+    } else if (parsed.data.agentId) {
       [agent = null] = await db.select(agentSelect).from(agentsTable)
         .where(and(eq(agentsTable.id, parsed.data.agentId), eq(agentsTable.orgId, authReq.orgId))).limit(1);
       if (!agent) {
@@ -304,7 +399,7 @@ const RecentQuery = z.object({
 router.get(
   "/softphone/recent-calls",
   requireAuth,
-  requirePermission("contact", "read"),
+  requireSoftphoneAccess,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
     const parsed = RecentQuery.safeParse(req.query);
@@ -312,7 +407,8 @@ router.get(
       res.status(400).json({ error: "Invalid query", details: parsed.error.issues });
       return;
     }
-    const rows = await db
+    const agentOnly = softphoneScope(res).kind === "agent";
+    const rawRows = await db
       .select({
         id: activitiesTable.id,
         contactId: activitiesTable.contactId,
@@ -328,13 +424,29 @@ router.get(
         contactsTable,
         and(
           eq(contactsTable.id, activitiesTable.contactId),
-          eq(contactsTable.orgId, authReq.orgId),
-          isNull(contactsTable.deletedAt),
+          ...dialerContactScope(authReq.orgId, res),
         ),
       )
-      .where(and(eq(activitiesTable.orgId, authReq.orgId), eq(activitiesTable.type, "call_log")))
+      .where(
+        and(
+          eq(activitiesTable.orgId, authReq.orgId),
+          eq(activitiesTable.type, "call_log"),
+          // Agents: only their OWN calls, on contacts still assigned to them.
+          ...(agentOnly ? [eq(activitiesTable.createdBy, authReq.userId)] : []),
+        ),
+      )
       .orderBy(desc(activitiesTable.createdAt))
       .limit(parsed.data.limit ?? 15);
+    // Agents get only the two metadata keys the page renders, not the raw blob.
+    const rows = agentOnly
+      ? rawRows.map((r) => {
+          const meta = (r.metadata ?? {}) as Record<string, unknown>;
+          const safe: Record<string, string> = {};
+          if (typeof meta.disposition === "string") safe.disposition = meta.disposition;
+          if (typeof meta.direction === "string") safe.direction = meta.direction;
+          return { ...r, metadata: safe as Record<string, unknown> | null };
+        })
+      : rawRows;
     res.json({ data: rows, total: rows.length });
   },
 );
@@ -362,7 +474,7 @@ const DISPOSITION_LABELS: Record<CallDispositionCode, string> = {
 router.get(
   "/softphone/dispositions",
   requireAuth,
-  requirePermission("contact", "read"),
+  requireSoftphoneAccess,
   (_req: Request, res: Response): void => {
     res.json({
       data: CALL_DISPOSITION_CODES.map((code) => ({
@@ -531,7 +643,22 @@ router.get(
       .from(c)
       .leftJoin(
         contactsTable,
-        and(eq(contactsTable.id, c.contactId), eq(contactsTable.orgId, authReq.orgId)),
+        and(
+          eq(contactsTable.id, c.contactId),
+          eq(contactsTable.orgId, authReq.orgId),
+          // An agent sees a contact's name only while it is assigned to them.
+          ...(authReq.userRole === "agent"
+            ? [
+                inArray(
+                  contactsTable.assignedAgentId,
+                  db
+                    .select({ id: agentsTable.id })
+                    .from(agentsTable)
+                    .where(and(eq(agentsTable.orgId, authReq.orgId), eq(agentsTable.userId, authReq.userId))),
+                ),
+              ]
+            : []),
+        ),
       )
       .where(and(...conditions))
       // id breaks ties so pages never repeat or skip rows created in the same instant.
