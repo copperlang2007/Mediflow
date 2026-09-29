@@ -1005,6 +1005,26 @@ describe("Sunfire applications in GHL custom fields", () => {
     expect(apps[0]).toMatchObject({ applicationKey: "SF-CONF-006", confirmationCode: "SF-CONF-006", currentVersion: 2 });
   });
 
+  it("keeps two contacts carrying the same Sunfire code on separate applications", async () => {
+    const shared = { ...base, confirmation_code: "SF-CONF-SHARED", medicare_number: "4EF5GH6JK78" };
+    const a = ghlContact(20007, { customFields: values(shared), dateUpdated: "2026-12-08T00:00:00.000Z" });
+    const b = ghlContact(20008, { customFields: values({ ...shared, medicare_number: "5GH6JK7MN89" }), dateUpdated: "2026-12-09T00:00:00.000Z" });
+    await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([a, b]) });
+    const ca = await contactByGhlId(a.id);
+    const cb = await contactByGhlId(b.id);
+    const appsA = await appsFor(ca.id);
+    const appsB = await appsFor(cb.id);
+    expect(appsA.map((x) => [x.applicationKey, x.currentVersion])).toEqual([["SF-CONF-SHARED", 1]]);
+    expect(appsB.map((x) => x.applicationKey)).toEqual([`ghl:${b.id}:H1036-077-000:2027-01-01`]);
+  });
+
+  it("reads fields whose merge key has a prefix other than contact.", async () => {
+    const { readSunfireApplication } = await import("../../lib/integrations/ghl/sunfire");
+    const defs = new Map([["cf-x", { name: "Confirmation Code", key: "custom.confirmation_code" }], ["cf-p", { name: "Plan Name", key: "contact.plan_name" }]]);
+    const app = readSunfireApplication(ghlContact(1, { customFields: [{ id: "cf-x", value: "SF-X" }, { id: "cf-p", value: "Some Plan" }] }), defs);
+    expect(app?.parsed.confirmationCode).toBe("SF-X");
+  });
+
   it("syncs contacts only when the token can't read custom fields", async () => {
     const gc = ghlContact(20004, { customFields: values({ ...base, confirmation_code: "SF-CONF-004" }), dateUpdated: "2026-12-10T00:00:00.000Z" });
     const r = await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([gc], 403) });

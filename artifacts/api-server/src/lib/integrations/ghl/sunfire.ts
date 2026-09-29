@@ -58,7 +58,9 @@ export function customValues(gc: GhlContact, defs: FieldDefs): Map<string, { nam
   for (const f of gc.customFields ?? []) {
     const def = f && typeof f.id === "string" ? defs.get(f.id) : undefined;
     if (!def) continue;
-    const key = def.key.replace(/^contact\./, "");
+    // GHL merge keys are `contact.<key>`; strip any object prefix so a field
+    // under another prefix still matches the keys read below.
+    const key = def.key.replace(/^[a-z_]+\./i, "");
     if (isNeverStored(key)) continue;
     const value = asText(f.value);
     if (value) out.set(key, { name: def.name, value });

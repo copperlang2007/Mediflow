@@ -249,9 +249,11 @@ export async function storeApplication(
   const codelessKey = p.policyId ? `policy:${p.policyId}` : opts.fallbackKey ?? null;
 
   // Serialize writers for one policy so two deliveries can't both take
-  // version N+1. Locked on the codeless key when there is one, so a delivery
-  // that first carries the confirmation code still serializes with earlier ones.
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`enrollment-app:${orgId}:${codelessKey ?? applicationKey}`}, 0))`);
+  // version N+1. Locked on the policy id (or the caller's fallback key) when
+  // there is one, so a delivery that first carries the confirmation code still
+  // serializes with earlier ones. The EnrollHere lock string is unchanged, so
+  // old and new servers still exclude each other during a rolling deploy.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`enrollment-app:${orgId}:${p.policyId ?? codelessKey ?? applicationKey}`}, 0))`);
 
   // A delivery without the Sunfire code continues the record this policy
   // already has (whatever it is keyed on) rather than starting a second one.
@@ -274,6 +276,7 @@ export async function storeApplication(
       id: enrollmentApplicationsTable.id,
       key: enrollmentApplicationsTable.applicationKey,
       policyId: enrollmentApplicationsTable.externalPolicyId,
+      contactId: enrollmentApplicationsTable.contactId,
     })
       .from(enrollmentApplicationsTable)
       .where(and(
@@ -290,6 +293,12 @@ export async function storeApplication(
     // arriving without one earlier; it learns the id from this delivery.
     if (coded && coded.policyId && coded.policyId !== p.policyId) {
       logger.warn({ orgId, applicationId: coded.id }, "EnrollHere: Sunfire code already used by another policy; kept separate");
+      applicationKey = fallbackKey;
+    } else if (coded && !coded.policyId && !p.policyId && coded.contactId && links.contactId && coded.contactId !== links.contactId) {
+      // No policy ids to compare (GHL): the same code on a different person is
+      // a collision too. Taking the record over would put this person's
+      // payload in another person's application history.
+      logger.warn({ orgId, applicationId: coded.id }, "Sunfire code already used by another contact's application; kept separate");
       applicationKey = fallbackKey;
     } else if (codeless && !coded) {
       await tx.update(enrollmentApplicationsTable).set({ applicationKey: p.confirmationCode })
