@@ -43,6 +43,8 @@ const VOICE_ENV = {
   TWILIO_API_KEY_SECRET: API_KEY_SECRET,
   TWILIO_TWIML_APP_SID: "APcccccccccccccccccccccccccccccccc",
   TWILIO_VOICE_CALLER_ID: "+15035550100",
+  // Webhook signature verification needs it, so it is part of "ready".
+  TWILIO_AUTH_TOKEN: AUTH_TOKEN,
 } as const;
 
 // Noon in Portland (PDT) — inside the 8am–9pm window.
@@ -452,8 +454,19 @@ describe("GET /softphone/voice-token", () => {
     const partial = await request(app).get("/api/softphone/voice-token").set(A(admin.id));
     expect(partial.status).toBe(503);
     expect(partial.body.missing.sort()).toEqual(
-      ["TWILIO_API_KEY_SECRET", "TWILIO_TWIML_APP_SID", "TWILIO_VOICE_CALLER_ID"].sort(),
+      ["TWILIO_API_KEY_SECRET", "TWILIO_TWIML_APP_SID", "TWILIO_VOICE_CALLER_ID", "TWILIO_AUTH_TOKEN"].sort(),
     );
+  });
+
+  it("is not ready without TWILIO_AUTH_TOKEN (webhooks could never verify), for token and call start", async () => {
+    delete process.env.TWILIO_AUTH_TOKEN;
+    const res = await request(app).get("/api/softphone/voice-token").set(A(admin.id));
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ status: "needs_setup", missing: ["TWILIO_AUTH_TOKEN"] });
+    const c = await newContact();
+    const call = await place(admin.id, c.id);
+    expect(call.status).toBe(503);
+    expect(call.body).toEqual({ status: "needs_setup", missing: ["TWILIO_AUTH_TOKEN"] });
   });
 
   it("a malformed caller id is reported as needing setup", async () => {
@@ -656,6 +669,22 @@ describe("POST /api/webhooks/twilio/voice", () => {
     expect(dialed).toBeTruthy();
     expect(rejected).toBeTruthy();
     expect(JSON.stringify(rejected!.changes)).not.toMatch(/\+1503/);
+  });
+});
+
+describe("voice webhooks are exempt from the per-IP limiters", () => {
+  it("150 signed callbacks from one IP are never throttled, and unsigned ones are still refused", async () => {
+    // The user limiter allows 100/min per IP; Twilio's callbacks share IPs.
+    for (let i = 0; i < 150; i++) {
+      const res = await postTwilio(NOTICE, { CallSid: newSid(), n: String(i) });
+      expect(res.status).toBe(200);
+    }
+    const unsigned = await postTwilio(NOTICE, { CallSid: newSid() }, { noSignature: true });
+    expect(unsigned.status).toBe(403);
+    const forged = await postTwilio(STATUS, { CallSid: newSid(), CallStatus: "completed" }, { badSignature: true });
+    expect(forged.status).toBe(403);
+    const forgedVoice = await postTwilio(VOICE, { CallSid: newSid() }, { badSignature: true });
+    expect(forgedVoice.status).toBe(403);
   });
 });
 

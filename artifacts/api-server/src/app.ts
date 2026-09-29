@@ -167,7 +167,16 @@ app.use("/api", apiCors);
 app.use("/sse/notifications", apiCors);
 
 // Global rate limit: 500 requests / 15 minutes per IP
+// Twilio Voice webhooks come from Twilio's shared egress IPs, not from users, so
+// the per-IP budgets below would throttle real call events (a 429 makes Twilio
+// drop or retry the callback). They are exempt here; they keep their own
+// dedicated limiter (routes/voiceWebhooks.ts) and X-Twilio-Signature check.
+// originalUrl, not path: under `app.use("/api", …)` req.path has "/api" stripped.
+const isVoiceWebhook = (req: Request): boolean =>
+  req.originalUrl.split("?")[0]!.startsWith("/api/webhooks/twilio/voice");
+
 const globalLimiter = rateLimit({
+  skip: isVoiceWebhook,
   windowMs: 15 * 60 * 1000,
   max: 500,
   standardHeaders: true,
@@ -278,6 +287,7 @@ if (!isDemoMode()) {
 // Applied AFTER clerkMiddleware so getAuth(req) is populated.
 // Falls back to IP for unauthenticated requests.
 const userLimiter = rateLimit({
+  skip: isVoiceWebhook,
   windowMs: 60 * 1000,
   // Demo mode keys by IP (no Clerk userId), so multiple walkthrough viewers
   // behind one office/VPN egress share a budget — raise it so they aren't

@@ -18,6 +18,9 @@ export const VOICE_ENV_NAMES = [
   "TWILIO_API_KEY_SECRET",
   "TWILIO_TWIML_APP_SID",
   "TWILIO_VOICE_CALLER_ID",
+  // Not used to mint the token, but every voice webhook verifies Twilio's
+  // signature with it — without it no call could ever connect or be logged.
+  "TWILIO_AUTH_TOKEN",
 ] as const;
 export type VoiceEnvName = (typeof VOICE_ENV_NAMES)[number];
 

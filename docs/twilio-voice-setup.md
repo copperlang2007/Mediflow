@@ -13,10 +13,10 @@ call is placed. In the demo site, calling is always off.
 Mediflow never lets a browser dial a number it typed. An agent picks a contact,
 Mediflow checks it is OK to call (consent, do-not-call, calling hours, agent
 license), and only then tells Twilio to dial the number saved on that contact.
-Twilio needs five pieces of information to allow that, and one web address to
+Twilio needs six pieces of information to allow that, and one web address to
 send events back to.
 
-## The five settings
+## The six settings
 
 Create each in the [Twilio Console](https://console.twilio.com), then add it to
 Mediflow's environment settings **using exactly these names**. Never paste the
@@ -29,6 +29,7 @@ values into email, chat or a document, and never commit them to the code.
 | `TWILIO_API_KEY_SECRET` | Shown **once**, on the same screen as the key above. Copy it straight into Mediflow's settings. | The secret half of that key. If you lose it, delete the key and make a new one. |
 | `TWILIO_TWIML_APP_SID` | Voice, then Manage, then **TwiML Apps**, then **Create new TwiML App**. Starts with `AP`. | The "app" that decides what happens when a call starts. See the two web addresses below. |
 | `TWILIO_VOICE_CALLER_ID` | Phone Numbers, then Manage, then Active numbers (buy one or use one you own). Enter it like `+15035550100`. | The number the person you call will see. Must be a Twilio number or one verified in Twilio. |
+| `TWILIO_AUTH_TOKEN` | Console home, "Account Info", Auth Token. Text messaging already uses it, so it may be set. | Mediflow uses it to prove each call event really came from Twilio. Without it every call event is refused, so calling stays on "Needs setup". |
 
 On the TwiML App, set:
 
@@ -38,13 +39,12 @@ On the TwiML App, set:
 Replace `YOUR-MEDIFLOW-ADDRESS` with the address agents use to open Mediflow
 (no trailing slash).
 
-## Two settings that must already exist
+## One more setting to check
 
-These are the same ones text messaging uses, so they may already be set:
+This is the same one text messaging uses, so it may already be set:
 
 | Setting name | What it is |
 |---|---|
-| `TWILIO_AUTH_TOKEN` | Console home, "Account Info", Auth Token. Mediflow uses it to prove a message really came from Twilio. Without it every call event is refused. |
 | `TWILIO_WEBHOOK_PUBLIC_HOST` | Your Mediflow address, for example `https://app.youragency.com`. It must match what you typed into the TwiML App exactly, or Twilio's signature will not verify. |
 
 ## Optional safety limits
