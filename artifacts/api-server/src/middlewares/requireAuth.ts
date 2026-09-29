@@ -1,6 +1,7 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { getAuth } from "@clerk/express";
-import { db, usersTable, organizationsTable, orgSettingsTable, sessionActivityTable } from "@workspace/db";
+import { randomUUID } from "node:crypto";
+import { db, usersTable, organizationsTable, orgSettingsTable, sessionActivityTable, auditLogTable } from "@workspace/db";
 import { eq, lt } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
 import { isDemoMode, demoUserId } from "../lib/demoMode";
@@ -176,6 +177,26 @@ async function applyViewAsContext(
     }
     if (!authReq.mfaEnrolled || reason.length < 10 || reason.length > 240) {
       res.status(403).json({ error: "Support edits require MFA and a reason of 10–240 characters", code: "SUPPORT_EDIT_REQUIREMENTS" });
+      return false;
+    }
+    // Persist the actor, target, and stated purpose before allowing a write.
+    // A failed audit insert must leave the agency data unchanged.
+    try {
+      await db.insert(auditLogTable).values({
+        id: randomUUID(),
+        orgId: organization.id,
+        userId: authReq.userId,
+        userRole: authReq.userRole,
+        action: "update",
+        resourceType: resource === "contacts" ? "contact" : "agent",
+        resourceId: path.split("/").at(-1) ?? null,
+        ipAddress: req.ip ?? null,
+        userAgent: req.headers["user-agent"] ?? null,
+        changes: { supportEdit: true, phase: "attempt", reason, realOrgId, viewingOrgId: organization.id, path },
+      }).execute();
+    } catch (err) {
+      req.log.error({ err, realOrgId, viewingOrgId: organization.id }, "Support edit audit unavailable");
+      res.status(503).json({ error: "Support edit audit unavailable", code: "SUPPORT_AUDIT_UNAVAILABLE" });
       return false;
     }
     authReq.viewOnly = false;
