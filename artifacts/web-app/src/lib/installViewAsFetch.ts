@@ -19,7 +19,7 @@ export function installViewAsFetch(): void {
     const supportPath = /\/api\/(contacts|agents)\/[^/]+$/.test(url.pathname);
     if (method === "PATCH" && supportPath) {
       let reason: string | null = null;
-      try { reason = globalThis.localStorage?.getItem("mediflow:support-edit-reason") ?? null; } catch { /* storage unavailable */ }
+      try { reason = globalThis.sessionStorage?.getItem("mediflow:support-edit-reason") ?? null; } catch { /* storage unavailable */ }
       if (reason) {
         headers.set("X-MediFlow-Support-Edit", "true");
         headers.set("X-MediFlow-Support-Reason", reason);
