@@ -16,7 +16,7 @@ export function installViewAsFetch(): void {
     new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
     headers.set("X-MediFlow-View-Org", orgId);
     const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
-    const supportPath = /^\/api\/(contacts|agents)\/[^/]+$/.test(url.pathname);
+    const supportPath = /\/api\/(contacts|agents)\/[^/]+$/.test(url.pathname);
     if (method === "PATCH" && supportPath) {
       let reason: string | null = null;
       try { reason = globalThis.localStorage?.getItem("mediflow:support-edit-reason") ?? null; } catch { /* storage unavailable */ }
