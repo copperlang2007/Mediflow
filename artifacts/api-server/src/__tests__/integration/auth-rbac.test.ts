@@ -23,7 +23,7 @@ vi.mock("@workspace/db", dbF);
 vi.mock("@clerk/express", clerkF);
 vi.mock("../../lib/jobs", jobsF);
 
-import { bootTestDb, shutdownTestDb, withAuth } from "../helpers/testApp";
+import { bootTestDb, shutdownTestDb, withAuth, withMfaAuth } from "../helpers/testApp";
 import {
   seedOrg,
   seedUser,
@@ -216,6 +216,56 @@ describe("Auth & RBAC integration", () => {
       expect(res.body.code).toBe("VIEW_ONLY_MODE");
     }
   });
+  it("allows an MFA-enrolled super admin to update a selected agency contact with an audited reason", async () => {
+    const handle = await bootTestDb();
+    const contact = await seedContact(handle.db, { orgId: orgB.id });
+    const reason = "Agency requested correction to the contact profile";
+    const res = await request(app)
+      .patch(`/api/contacts/${contact.id}`)
+      .set(withMfaAuth(superAdmin.id, true))
+      .set("X-MediFlow-View-Org", orgB.id)
+      .set("X-MediFlow-Support-Edit", "true")
+      .set("X-MediFlow-Support-Reason", reason)
+      .send({ firstName: "Corrected" });
+    expect(res.status).toBe(200);
+    expect(res.body.firstName).toBe("Corrected");
+    const { auditLogTable } = await import("@workspace/db");
+    const { eq } = await import("drizzle-orm");
+    await vi.waitFor(async () => {
+      const rows = await handle.db.select().from(auditLogTable).where(eq(auditLogTable.orgId, orgB.id));
+      expect(rows).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          userId: superAdmin.id,
+          action: "update",
+          changes: expect.objectContaining({
+            supportEdit: true,
+            supportReason: reason,
+            realOrgId: orgA.id,
+            viewingOrgId: orgB.id,
+          }),
+        }),
+      ]));
+    });
+  });
+
+  it("keeps cross-agency writes blocked without MFA, a reason, or an allowed path", async () => {
+    const contact = await seedContact((await bootTestDb()).db, { orgId: orgB.id });
+    const base = () => request(app).patch(`/api/contacts/${contact.id}`)
+      .set("X-MediFlow-View-Org", orgB.id)
+      .set("X-MediFlow-Support-Edit", "true")
+      .send({ firstName: "Denied" });
+    expect((await base().set(withMfaAuth(superAdmin.id, false))
+      .set("X-MediFlow-Support-Reason", "Agency requested this correction")).body.code).toBe("SUPPORT_EDIT_REQUIREMENTS");
+    expect((await base().set(withMfaAuth(superAdmin.id, true))).body.code).toBe("SUPPORT_EDIT_REQUIREMENTS");
+    const forbidden = await request(app).delete(`/api/contacts/${contact.id}`)
+      .set(withMfaAuth(superAdmin.id, true))
+      .set("X-MediFlow-View-Org", orgB.id)
+      .set("X-MediFlow-Support-Edit", "true")
+      .set("X-MediFlow-Support-Reason", "Agency requested this correction");
+    expect(forbidden.status).toBe(403);
+    expect(forbidden.body.code).toBe("VIEW_ONLY_MODE");
+  });
+
   it("rejects view-as headers from non-super-admin users", async () => {
     const res = await request(app)
       .get("/api/contacts")
