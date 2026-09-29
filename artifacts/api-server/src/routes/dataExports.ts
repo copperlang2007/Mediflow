@@ -11,10 +11,10 @@
  *   - a `data_export_log` row per export, so the export-anomaly worker sees it;
  *   - org-scoped queries only.
  *
- * PHI handling is IDENTICAL to the existing contacts export:
- *   - contacts go through `serializeContact`, so the Medicare ID is decrypted
- *     only for PHI-privileged roles and masked (`***-**-****`) for everyone
- *     else; DOB and health conditions are never included in the columns;
+ * PHI handling:
+ *   - the Medicare ID (MBI) is NEVER exported, for any role — it is not in the
+ *     column set, so neither the header nor any value can appear. DOB and
+ *     health conditions are never included either;
  *   - the permission is the same one the bulk export requires
  *     (`contact:update`).
  * The policies export carries no Medicare ID at all, and the agent export
@@ -65,9 +65,9 @@ function sendCsv(res: Response, name: string, csv: string, truncated: boolean): 
   res.send(csv);
 }
 
-// Same column set as the contacts bulk `export_csv` action.
+// Same column set as the contacts bulk `export_csv` action (no Medicare ID).
 const CONTACT_HEADERS = [
-  "id", "firstName", "lastName", "email", "phone", "status", "medicareId",
+  "id", "firstName", "lastName", "email", "phone", "status",
   "currentPlanType", "stateCode", "zipCode", "leadSource", "createdAt",
 ] as const;
 

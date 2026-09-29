@@ -2,7 +2,7 @@
  * Data Import / Export (agencyBRIDGE DataToolsPage).
  *
  *   Export: whole-book CSVs from `/api/reports/{contacts,policies,agents}/export`
- *           — same step-up confirm, audit log and Medicare-ID masking as the
+ *           — same step-up confirm and audit log as the
  *           existing exports.
  *   Import: the existing, validated import wizards on /data-migration
  *           (generic CSV for clients + their plans, Monday.com for agents),
@@ -43,7 +43,7 @@ type Kind = "clients" | "policies" | "agents";
 
 /** Columns in each export — must match api-server routes/dataExports.ts. */
 export const EXPORT_COLUMNS: Record<Kind, string[]> = {
-  clients: ["id", "firstName", "lastName", "email", "phone", "status", "medicareId", "currentPlanType", "stateCode", "zipCode", "leadSource", "createdAt"],
+  clients: ["id", "firstName", "lastName", "email", "phone", "status", "currentPlanType", "stateCode", "zipCode", "leadSource", "createdAt"],
   policies: ["policyId", "contactId", "clientName", "carrier", "planType", "planName", "planId", "planYear", "policyNumber", "applicationDate", "effectiveDate", "effectuated", "status", "disenrolledDate", "writingAgent"],
   agents: ["id", "firstName", "lastName", "email", "phone", "npn", "status", "hireDate", "createdAt"],
 };
@@ -71,8 +71,6 @@ const EXPORT_ROLES: Record<Kind, string[]> = {
   agents: ["super_admin", "agency_admin", "compliance_manager"],
 };
 const IMPORT_ROLES = ["super_admin", "agency_admin"];
-
-const PHI_PRIVILEGED = ["super_admin", "agency_admin", "compliance_manager"];
 
 type Summary = { total: number };
 
@@ -201,9 +199,7 @@ function ExportCard({ kind, role, count }: { kind: Kind; role: string; count: nu
       <p className="mt-3 flex items-start gap-2 text-xs text-muted-foreground">
         <ShieldCheck className="h-4 w-4 shrink-0 text-accent" />
         {kind === "clients"
-          ? PHI_PRIVILEGED.includes(role)
-            ? "This file includes Medicare IDs. Every export is recorded in the audit log — store the file securely and delete it when you're done."
-            : "Medicare IDs are hidden (***-**-****) for your role. Every export is recorded in the audit log."
+          ? "Medicare IDs are never included in exports. Every export is recorded in the audit log."
           : kind === "policies"
             ? "No Medicare IDs are included. Every export is recorded in the audit log."
             : "Contracting details (SSN, EIN, date of birth) are never exported. Every export is recorded in the audit log."}
