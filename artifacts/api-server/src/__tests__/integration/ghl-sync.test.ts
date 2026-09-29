@@ -783,4 +783,31 @@ describe("GHL custom field definitions", () => {
       spy.mockRestore();
     }
   });
+
+  it("drains each retried error body and doesn't promise a scheduled retry for the field list", async () => {
+    const { listContactCustomFields } = await import("../../lib/integrations/ghl/client");
+    let drained = 0;
+    let calls = 0;
+    const body = () => new ReadableStream({ cancel() { drained++; } });
+    const flaky = (async () => {
+      calls++;
+      return calls === 1
+        ? new Response(body(), { status: 503, headers: { "Retry-After": "1" } })
+        : new Response(JSON.stringify(defs), { status: 200 });
+    }) as unknown as typeof fetch;
+    vi.useFakeTimers();
+    try {
+      const p = listContactCustomFields({ token: TOKEN, locationId: LOCATION }, flaky);
+      await vi.runAllTimersAsync();
+      await expect(p).resolves.toHaveLength(2);
+      expect(drained).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const cooling = (async () => new Response("", { status: 429, headers: { "Retry-After": "3600" } })) as unknown as typeof fetch;
+    const err = (await listContactCustomFields({ token: TOKEN, locationId: LOCATION }, cooling).catch((e: Error) => e)) as Error;
+    expect(err.message).toMatch(/retry after 3600s — try again after that/);
+    expect(err.message).not.toMatch(/scheduled sync/);
+  });
 });

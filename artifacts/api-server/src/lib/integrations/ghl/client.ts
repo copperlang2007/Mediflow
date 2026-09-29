@@ -136,11 +136,19 @@ async function ghlRequest(
         // attempts and can extend the ban. End this run; the next scheduled
         // run resumes from the saved cursor.
         await res.body?.cancel().catch(() => undefined);
+        // Only the contacts sync is re-run on a schedule; an admin-triggered
+        // call must not promise an automatic retry.
+        const next = label === "contacts search"
+          ? " — the next scheduled sync will resume where this one stopped"
+          : " — try again after that";
         throw new GhlApiError(
-          `GHL rate limit: HTTP ${res.status}, retry after ${Math.ceil(retryAfterMs / 1000)}s — the next scheduled sync will resume where this one stopped`,
+          `GHL rate limit: HTTP ${res.status}, retry after ${Math.ceil(retryAfterMs / 1000)}s${next}`,
           res.status,
         );
       }
+      // Drain the unused error body before waiting, so the connection can be
+      // reused instead of staying pinned through the backoff.
+      await res.body?.cancel().catch(() => undefined);
       // A Retry-After in the past (clock skew) must not mean "no wait at all".
       const waitMs = retryAfterMs && retryAfterMs > 0 ? retryAfterMs : 1000 * 2 ** attempt;
       logger.warn({ status: res.status, attempt, waitMs }, `GHL ${label}: retrying`);
