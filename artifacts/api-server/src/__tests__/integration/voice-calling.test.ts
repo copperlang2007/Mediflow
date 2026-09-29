@@ -1083,6 +1083,91 @@ describe("DO_NOT_CALL only for an answered call", () => {
   });
 });
 
+describe("answered inference from a parent-leg completed callback", () => {
+  const dnc = (id: string) =>
+    request(app).patch(`/api/softphone/calls/${id}`).set(A(admin.id)).send({ dispositionCode: "DO_NOT_CALL" });
+
+  async function claimed() {
+    const started = await startedCall();
+    const sid = newSid();
+    await postTwilio(VOICE, voiceParams(started.sessionId, started.to, admin.id, sid));
+    return { ...started, sid };
+  }
+
+  it("CallStatus=completed with talk time and no DialCallStatus counts as answered", async () => {
+    const { sessionId, sid } = await claimed();
+    await postTwilio(STATUS, { CallSid: sid, CallStatus: "completed", CallDuration: "75" });
+    const row = await sessionRow(sessionId);
+    expect(row.answeredAt).not.toBeNull();
+    expect(row.durationSeconds).toBe(75);
+    expect((await dnc(sessionId)).status).toBe(200);
+  });
+
+  it("completed with duration 0, or no duration at all, is NOT answered", async () => {
+    for (const extra of [{ CallDuration: "0" }, {}]) {
+      const { sessionId, sid } = await claimed();
+      await postTwilio(STATUS, { CallSid: sid, CallStatus: "completed", ...extra });
+      expect((await sessionRow(sessionId)).answeredAt).toBeNull();
+      expect((await dnc(sessionId)).status).toBe(409);
+    }
+  });
+});
+
+describe("notes can be cleared and the timeline follows", () => {
+  it("null and empty notes propagate to the call_log metadata", async () => {
+    const { sessionId, to } = await startedCall();
+    const sid = newSid();
+    await postTwilio(VOICE, voiceParams(sessionId, to, admin.id, sid));
+    await postTwilio(STATUS, { CallSid: sid, DialCallStatus: "completed", DialCallDuration: "20" });
+    const activityId = (await sessionRow(sessionId)).activityId!;
+    const patch = (body: Record<string, unknown>) =>
+      request(app).patch(`/api/softphone/calls/${sessionId}`).set(A(admin.id)).send(body);
+    const meta = async () =>
+      (await db.select().from(schema.activitiesTable).where(eq(schema.activitiesTable.id, activityId)))[0]!.metadata as Record<string, unknown>;
+
+    await patch({ notes: "first note" });
+    expect((await meta()).notes).toBe("first note");
+    await patch({ notes: null });
+    expect((await sessionRow(sessionId)).notes).toBeNull();
+    expect((await meta()).notes).toBeNull();
+
+    await patch({ notes: "again" });
+    await patch({ notes: "" });
+    expect((await sessionRow(sessionId)).notes).toBeNull();
+    expect((await meta()).notes).toBeNull();
+  });
+});
+
+describe("cancel of a blocked session, and the stale-session probe", () => {
+  it("a blocked session is an idempotent no-op (200, not 'reached Twilio'), with no audit row", async () => {
+    const c = await newContact({ consent: false });
+    const blocked = await place(admin.id, c.id);
+    const id = blocked.body.callSessionId as string;
+    const res = await request(app).post(`/api/softphone/calls/${id}/cancel`).set(A(admin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("blocked");
+    expect((await sessionRow(id)).status).toBe("blocked");
+    await new Promise((r) => setTimeout(r, 150));
+    const rows = (await db.select().from(schema.auditLogTable).where(eq(schema.auditLogTable.resourceId, id))).filter(
+      (r) => String((r.changes as { path?: string }).path).endsWith("/cancel"),
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("expireStaleLiveSessions does nothing (returns 0) when nothing is stale, and expires exactly the stale rows", async () => {
+    const { expireStaleLiveSessions } = await import("../../lib/voice/callSessions");
+    const probeOrg = await seedOrg(db, { id: `vc-probe-${randomUUID().slice(0, 8)}` });
+    expect(await expireStaleLiveSessions(db, probeOrg.id, NOON_PT)).toBe(0);
+    const staleAt = new Date(NOON_PT.getTime() - 5 * 3_600_000);
+    await db.insert(schema.callSessionsTable).values([
+      { id: randomUUID(), orgId: probeOrg.id, toNumber: "+15035554001", status: "ringing", twilioCallSid: newSid(), startedAt: staleAt, createdAt: staleAt },
+      { id: randomUUID(), orgId: probeOrg.id, toNumber: "+15035554002", status: "ringing", twilioCallSid: newSid(), startedAt: NOON_PT, createdAt: NOON_PT },
+    ]);
+    expect(await expireStaleLiveSessions(db, probeOrg.id, NOON_PT)).toBe(1);
+    expect(await expireStaleLiveSessions(db, probeOrg.id, NOON_PT)).toBe(0);
+  });
+});
+
 describe("disposition saved before the status callback", () => {
   it("the call_log created later carries the already-saved disposition and notes", async () => {
     const { contact, sessionId, to } = await startedCall();

@@ -59,16 +59,23 @@ export async function expireStaleLiveSessions(
   now: Date = new Date(),
 ): Promise<number> {
   const cutoff = new Date(now.getTime() - MAX_LIVE_CALL_MS);
+  const stale = and(
+    eq(callSessionsTable.orgId, orgId),
+    inArray(callSessionsTable.status, ["ringing", "in_progress"]),
+    lt(sql`coalesce(${callSessionsTable.startedAt}, ${callSessionsTable.createdAt})`, cutoff),
+  );
+  // Cheap read probe first: listing must not open a write on every request
+  // when (as is almost always the case) nothing is stale.
+  const [probe] = await handle
+    .select({ id: callSessionsTable.id })
+    .from(callSessionsTable)
+    .where(stale)
+    .limit(1);
+  if (!probe) return 0;
   const rows = await handle
     .update(callSessionsTable)
     .set({ status: "failed", endedAt: now })
-    .where(
-      and(
-        eq(callSessionsTable.orgId, orgId),
-        inArray(callSessionsTable.status, ["ringing", "in_progress"]),
-        lt(sql`coalesce(${callSessionsTable.startedAt}, ${callSessionsTable.createdAt})`, cutoff),
-      ),
-    )
+    .where(stale)
     .returning({ id: callSessionsTable.id });
   return rows.length;
 }
@@ -450,7 +457,7 @@ export async function claimSessionForDial(
 export async function cancelUnclaimedSession(
   sessionId: string,
   orgId: string,
-): Promise<"canceled" | "already_canceled" | "already_used" | "not_found"> {
+): Promise<"canceled" | "already_canceled" | "blocked" | "already_used" | "not_found"> {
   const rows = await db
     .update(callSessionsTable)
     .set({ status: "canceled" })
@@ -470,7 +477,9 @@ export async function cancelUnclaimedSession(
     .where(and(eq(callSessionsTable.id, sessionId), eq(callSessionsTable.orgId, orgId)))
     .limit(1);
   if (!exists) return "not_found";
-  return exists.status === "canceled" ? "already_canceled" : "already_used";
+  if (exists.status === "canceled") return "already_canceled";
+  if (exists.status === "blocked") return "blocked"; // never dialable; nothing to cancel
+  return "already_used";
 }
 
 /** Mark an unused (`initiated`) session blocked. Never touches a used session. */
@@ -575,8 +584,6 @@ export async function applyStatusUpdate(input: {
   callSid: string;
   twilioStatus: string | undefined;
   durationRaw?: string;
-  /** True for a <Dial action> result: status/duration describe the CALLEE leg. */
-  calleeLeg?: boolean;
   now?: Date;
 }): Promise<StatusUpdateOutcome> {
   const next = mapTwilioStatus(input.twilioStatus);
@@ -607,7 +614,9 @@ export async function applyStatusUpdate(input: {
       // A callee leg that completed with talk time proves the call was answered
       // even when no in-progress event was ever delivered. (DO_NOT_CALL relies on
       // `answeredAt`, so it is only ever inferred from callee-leg evidence.)
-      if (input.calleeLeg && next === "completed" && !row.answeredAt && reported && reported > 0) {
+      // (Either leg: with answerOnBridge the browser leg only answers at the
+      // bridge, so its duration is talk time. Zero or missing means NOT answered.)
+      if (next === "completed" && !row.answeredAt && reported && reported > 0) {
         patch.answeredAt = new Date(now.getTime() - reported * 1000);
       }
       const computed =

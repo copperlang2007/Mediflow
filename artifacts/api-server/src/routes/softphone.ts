@@ -570,7 +570,14 @@ router.post(
     }
     const outcome = await cancelUnclaimedSession(row.id, authReq.orgId);
     // Only the first real state change is audited; an idempotent repeat is not.
-    if (outcome === "already_canceled") (req as Request & { skipAudit?: boolean }).skipAudit = true;
+    if (outcome === "already_canceled" || outcome === "blocked") {
+      (req as Request & { skipAudit?: boolean }).skipAudit = true;
+    }
+    if (outcome === "blocked") {
+      // Idempotent no-op: a blocked session was never dialable, so there is nothing to cancel.
+      res.json({ id: row.id, status: "blocked" });
+      return;
+    }
     if (outcome === "already_used") {
       res.status(409).json({ error: "This call already reached Twilio and cannot be canceled" });
       return;
@@ -650,7 +657,8 @@ router.patch(
       // activity does not exist yet, the status callback copies these from the row.)
       const activityMeta: Record<string, unknown> = {};
       if (patch.dispositionCode) activityMeta.disposition = patch.dispositionCode;
-      if (typeof patch.notes === "string") activityMeta.notes = patch.notes;
+      // Whenever notes were explicitly provided (including cleared to null).
+      if (parsed.data.notes !== undefined) activityMeta.notes = patch.notes ?? null;
       if (row.activityId && Object.keys(activityMeta).length > 0) {
         await tx
           .update(activitiesTable)
