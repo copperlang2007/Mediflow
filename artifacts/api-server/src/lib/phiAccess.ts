@@ -72,10 +72,13 @@ export interface ApplicationAccessFacts {
 
 const digits = (v: string | null | undefined) => (v ?? "").replace(/\D/g, "");
 
-/** The application records this agent as its writer (NPN, else email). */
+/**
+ * The application records this agent as its writer: by NPN when it carries
+ * one (a mismatched NPN never falls back to email), else by email.
+ */
 function wroteApplication(viewer: PhiViewerAgent, f: ApplicationAccessFacts): boolean {
   const npn = digits(f.agentNpn);
-  if (npn && digits(viewer.npn) === npn) return true;
+  if (npn) return digits(viewer.npn) === npn;
   const email = f.agentEmail?.trim().toLowerCase();
   return !!email && viewer.email?.trim().toLowerCase() === email;
 }
@@ -114,26 +117,49 @@ export const applicationAccessColumns = {
   hasEnrollment: sql<boolean>`${enrollmentsTable.id} is not null`,
 };
 
+/** SQL twin of isEndedStatus() (lib/integrations/enrollhere/policyEvent.ts) on a raw policy status. */
+function endedStatusSql(col: SQL): SQL {
+  const u = sql`upper(coalesce(${col}, ''))`;
+  return sql`(${u} ~ ${NEGATIVE_INFORCE_SQL} or (${u} !~ 'INFORCE|IN_FORCE|ACTIVE|EFFECTUATED' and ${u} ~ 'CANCEL|WITHDRAW|RESCIND|TERMINAT|DISENROLL|LAPSE|DECLIN|REJECT|DENIED|DENY'))`;
+}
+
 /**
- * Contacts this agent services: assigned to them, or holding a policy they
- * wrote that is still in play (pending/active, not disenrolled, and no
- * application on it reporting "not in force").
+ * Contacts this agent services:
+ *   - assigned to them; or
+ *   - holding an application this agent wrote (its NPN, else its email, as in
+ *     wroteApplication) whose policy is still in play: not reported ended,
+ *     and its enrollment (if any) pending/active and not disenrolled; or
+ *   - holding a pending/active, not disenrolled enrollment recorded with this
+ *     agent that carries no application (a manual or CSV entry). An
+ *     enrollment with applications is judged by their writers instead, since
+ *     a shared enrollment row keeps only its first writer.
  */
-export function servicedByAgent(agentId: string): SQL {
+export function servicedByAgent(viewer: PhiViewerAgent): SQL {
+  const a = enrollmentApplicationsTable;
+  const e = enrollmentsTable;
+  const npn = digits(viewer.npn);
+  const email = viewer.email?.trim().toLowerCase() ?? "";
+  const appNpn = sql`regexp_replace(coalesce(${a.agentNpn}, ''), '[^0-9]', '', 'g')`;
+  const wroteIt = sql`(case when ${appNpn} <> '' then ${appNpn} = ${npn} else ${email} <> '' and lower(trim(coalesce(${a.agentEmail}, ''))) = ${email} end)`;
+  const enrollmentLive = and(inArray(e.status, [...SERVICED_ENROLLMENT_STATUSES]), isNull(e.disenrolledDate));
   return or(
-    eq(contactsTable.assignedAgentId, agentId),
+    eq(contactsTable.assignedAgentId, viewer.id),
     exists(
-      db.select({ one: sql`1` }).from(enrollmentsTable).where(and(
-        eq(enrollmentsTable.contactId, contactsTable.id),
-        eq(enrollmentsTable.agentId, agentId),
-        inArray(enrollmentsTable.status, [...SERVICED_ENROLLMENT_STATUSES]),
-        isNull(enrollmentsTable.disenrolledDate),
-        not(exists(
-          db.select({ one: sql`1` }).from(enrollmentApplicationsTable).where(and(
-            eq(enrollmentApplicationsTable.enrollmentId, enrollmentsTable.id),
-            sql`upper(coalesce(${enrollmentApplicationsTable.policyStatus}, '')) ~ ${NEGATIVE_INFORCE_SQL}`,
-          )),
+      db.select({ one: sql`1` }).from(a)
+        .leftJoin(e, eq(e.id, a.enrollmentId))
+        .where(and(
+          eq(a.contactId, contactsTable.id),
+          wroteIt,
+          not(endedStatusSql(sql`${a.policyStatus}`)),
+          or(isNull(a.enrollmentId), enrollmentLive),
         )),
+    ),
+    exists(
+      db.select({ one: sql`1` }).from(e).where(and(
+        eq(e.contactId, contactsTable.id),
+        eq(e.agentId, viewer.id),
+        enrollmentLive,
+        not(exists(db.select({ one: sql`1` }).from(a).where(eq(a.enrollmentId, e.id)))),
       )),
     ),
   )!;

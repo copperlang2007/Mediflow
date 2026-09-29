@@ -51,7 +51,7 @@ router.get(
     const search = typeof req.query.search === "string" ? req.query.search.trim().slice(0, 100) : "";
     const limit = clampInt(req.query.limit, 50, 1, 200);
     const offset = clampInt(req.query.offset, 0, 0, 1_000_000);
-    const conditions: SQL[] = [eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt), servicedByAgent(agentId)];
+    const conditions: SQL[] = [eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt), servicedByAgent(viewer)];
     if (search) {
       const q = `%${search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
       conditions.push(or(
@@ -97,7 +97,7 @@ router.get(
     const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
 
     const [contact] = await db.select().from(contactsTable)
-      .where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt), servicedByAgent(agentId)))
+      .where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt), servicedByAgent(viewer)))
       .limit(1);
     // Not one of this agent's clients looks the same as no such client.
     if (!contact) { res.status(404).json({ error: "Client not found" }); return; }
