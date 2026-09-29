@@ -164,6 +164,16 @@ describe("GHL feed", () => {
     expect((await orgContacts()).find((c) => c.firstName === "First1")).toMatchObject({ optOutSms: true, optOutEmail: true });
   });
 
+  it("records GHL's latest DND flag on the link (and mirrors it on later syncs)", async () => {
+    const [link] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, "ghl-1"));
+    expect(link!.externalDnd).toBe(true);
+    await sync.runGhlSync(cfg(), { fetchImpl: fakeGhl([{ ...ghlContact(1), email: "one@example.com", dnd: false, dateUpdated: "2026-03-02T00:00:00.000Z" }]).impl });
+    const [after] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, "ghl-1"));
+    expect(after!.externalDnd).toBe(false);
+    // The contact's own opt-out flags are never turned back off.
+    expect((await orgContacts()).find((c) => c.firstName === "First1")).toMatchObject({ optOutSms: true, optOutEmail: true });
+  });
+
   it("stops at the page cap, reports more_pending, and resumes from the cursor", async () => {
     const org2 = await seedOrg(tdb, { id: "ghl-org-2" });
     process.env.GHL_SYNC_ORG_IDS = `${org.id},${org2.id}`;
@@ -526,6 +536,10 @@ describe("GHL feed", () => {
     await sync.runGhlSync(cfg13, { fetchImpl: fakeGhl([ghlContact(13200, { firstName: "Bob", lastName: "Anderson", phone: "+15125557777", dnd: true })]).impl });
     const [after] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, sr.id));
     expect(after).toMatchObject({ optOutSms: false, optOutEmail: false });
+    // The flag was not applied to the contact, but the link remembers GHL said DND,
+    // so imported-client voice consent can never treat this contact as unflagged.
+    const [link] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.orgId, org13.id));
+    expect(link).toMatchObject({ contactId: sr.id, externalDnd: true });
   });
 
   it("ignores an unparseable GHL dateUpdated instead of failing the contact", async () => {

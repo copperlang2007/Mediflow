@@ -1,7 +1,7 @@
 /**
  * Inbound third-party integrations (EnrollHere webhooks, GoHighLevel feed).
  */
-import { pgTable, text, timestamp, integer, jsonb, index, unique, date, customType } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, integer, jsonb, index, unique, date, customType } from "drizzle-orm/pg-core";
 import { organizationsTable } from "./core";
 import { contactsTable, activitiesTable } from "./crm";
 import { enrollmentsTable } from "./enrollments";
@@ -63,6 +63,12 @@ export const externalContactLinksTable = pgTable(
      */
     contactId: text("contact_id").references(() => contactsTable.id, { onDelete: "set null" }),
     externalUpdatedAt: timestamp("external_updated_at", { withTimezone: true }),
+    /**
+     * The external system's latest do-not-disturb flag for this record, kept
+     * even when the sync could not apply it to the contact (weak identity
+     * match). Imported-client voice consent requires this to be false.
+     */
+    externalDnd: boolean("external_dnd").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
