@@ -430,7 +430,7 @@
       "breakpoints": true
     },
     {
-      "idx": 62,
+      "idx": 61,
       "version": "7",
       "when": 1792200000000,
       "tag": "0062_call_scoring",
