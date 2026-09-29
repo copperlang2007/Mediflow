@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -48,5 +48,30 @@ describe("GhlConnectionCard", () => {
     });
     renderCard();
     expect(await screen.findByText(/custom fields failed: HTTP 403/)).toBeInTheDocument();
+  });
+
+  it("queues a full re-read only after confirmation", async () => {
+    customFetch.mockImplementation(async (url: string, init?: { method?: string; body?: string }) => {
+      if (url.endsWith("/status")) return { configured: true, locationId: "loc-1", lastRunAt: null, lastStatus: "ok", lastError: null, lastRun: null };
+      if (url.endsWith("/sync")) return { queued: true, full: JSON.parse(init!.body!).full, alreadyRunning: false };
+      return { locationId: "loc-1", fields: [] };
+    });
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: "Re-read all contacts" }));
+    expect(customFetch).not.toHaveBeenCalledWith("/api/integrations/ghl/sync", expect.anything());
+    fireEvent.click(screen.getByRole("button", { name: "Yes, re-read all" }));
+    expect(await screen.findByText(/Full re-read queued/)).toBeInTheDocument();
+    expect(customFetch).toHaveBeenCalledWith("/api/integrations/ghl/sync", expect.objectContaining({ method: "POST", body: JSON.stringify({ full: true }) }));
+  });
+
+  it("queues an incremental sync", async () => {
+    customFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith("/status")) return { configured: true, locationId: "loc-1", lastRunAt: null, lastStatus: "ok", lastError: null, lastRun: null };
+      if (url.endsWith("/sync")) return { queued: true, full: false, alreadyRunning: false };
+      return { locationId: "loc-1", fields: [] };
+    });
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: "Sync now" }));
+    expect(await screen.findByText(/Sync queued/)).toBeInTheDocument();
   });
 });

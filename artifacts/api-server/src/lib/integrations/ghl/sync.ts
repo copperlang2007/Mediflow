@@ -18,6 +18,13 @@
  * DND flag turns agencyBRIDGE opt-outs ON (never off), because honoring an
  * opt-out is the compliant direction.
  *
+ * Sunfire applications: when a contact carries Sunfire enrollment data in its
+ * custom fields (INSUREitALL's Odyssey sub-account), the application is
+ * imported like an EnrollHere policy (see ghl/sunfire.ts): the enrollment row,
+ * the encrypted and versioned application record, the writing agent (by NPN),
+ * and fill-blanks contact details. It is attached only to a contact we are
+ * sure is this person, never to a weak (household) match.
+ *
  * Config (env, synced from Secret Manager in production):
  *   GHL_SYNC_ORG_IDS                         agencyBRIDGE org ids, separated by "," or ";"
  *   GHL_PRIVATE_INTEGRATION_TOKEN[_<ORGID>]  sub-account Private Integration token (secret)
@@ -25,10 +32,12 @@
  */
 import { and, eq, isNull, lt, or, sql, TransactionRollbackError } from "drizzle-orm";
 import { randomUUID } from "crypto";
-import { db, contactsTable, externalContactLinksTable, ghlSyncStateTable } from "@workspace/db";
-import { fillBlanks, loadMatcher, upsertContact, type Tx, isStrongMatch } from "../../contactImport";
+import { db, activitiesTable, agentsTable, contactsTable, externalContactLinksTable, ghlSyncStateTable } from "@workspace/db";
+import { fillBlanks, loadAgentsByEmail, loadMatcher, mbiHashesFor, upsertContact, type Tx, isStrongMatch } from "../../contactImport";
 import { interpretPayloadContact } from "../payload";
-import { searchContacts, GHL_PAGE_LIMIT, type GhlContact } from "./client";
+import { applyCoverageLifecycle, storeApplication, upsertPolicyEnrollment } from "../enrollhere/applicationStore";
+import { searchContacts, listContactCustomFields, GhlApiError, GHL_PAGE_LIMIT, type GhlContact } from "./client";
+import { readSunfireApplication, type FieldDefs, type SunfireApplication } from "./sunfire";
 import { logger } from "../../logger";
 import { ghlSyncRunsTotal } from "../../metrics";
 
@@ -198,6 +207,8 @@ export async function runGhlSync(
   let failedOnPage = 0;
   let morePending = false;
   let runMax: Date | null = null;
+  /** Custom field definitions, fetched once per run and only when a contact carries custom fields. */
+  let defs: FieldDefs | null = null;
 
   try {
     for (;;) {
@@ -207,12 +218,15 @@ export async function runGhlSync(
         opts.fetchImpl,
       );
       pages++;
+      if (!defs && page.contacts.some((c) => Array.isArray(c.customFields) && c.customFields.length > 0)) {
+        defs = await loadFieldDefs(cfg, opts.fetchImpl);
+      }
       let cursor: Date | null = null;
       failedOnPage = 0;
       for (const gc of page.contacts) {
         let outcome: "created" | "updated" | "skipped";
         try {
-          outcome = await db.transaction((tx) => syncOneContact(tx, orgId, gc));
+          outcome = await db.transaction((tx) => syncOneContact(tx, orgId, gc, defs ?? undefined));
           consecutiveFailures = 0;
         } catch (err) {
           // One malformed contact must not pin the cursor and stall every
@@ -353,6 +367,25 @@ export function safeErrorMessage(err: unknown): string {
   return err.message.split(/\r?\nparams:/, 1)[0]!.slice(0, 500);
 }
 
+/**
+ * The sub-account's custom field definitions (id → name and merge key). A
+ * token without the custom-fields scope (401/403) syncs contacts only; any
+ * other failure fails the run before the cursor moves, so no application is
+ * skipped over.
+ */
+async function loadFieldDefs(cfg: GhlConfig, fetchImpl?: typeof fetch): Promise<FieldDefs> {
+  try {
+    const fields = await listContactCustomFields({ token: cfg.token, locationId: cfg.locationId }, fetchImpl);
+    return new Map(fields.filter((f) => f.fieldKey).map((f) => [f.id, { name: f.name, key: f.fieldKey! }]));
+  } catch (err) {
+    if (err instanceof GhlApiError && (err.status === 401 || err.status === 403)) {
+      warnOnce(`fields:${cfg.orgId}`, () => logger.warn({ orgId: cfg.orgId, status: err.status }, "GHL sync: custom fields not readable (token lacks locations/customFields.readonly); Sunfire applications are not imported"));
+      return new Map();
+    }
+    throw err;
+  }
+}
+
 class LeaseLostError extends Error {
   constructor() {
     super("GHL sync lease lost");
@@ -361,8 +394,25 @@ class LeaseLostError extends Error {
 }
 
 /** Write one GHL contact. Returns which counter it lands in. */
-export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Promise<"created" | "updated" | "skipped"> {
-  const interpreted = interpretPayloadContact({
+export async function syncOneContact(
+  tx: Tx,
+  orgId: string,
+  gc: GhlContact,
+  defs: FieldDefs = new Map(),
+): Promise<"created" | "updated" | "skipped"> {
+  let application = defs.size > 0 ? readSunfireApplication(gc, defs) : null;
+  const [link] = await tx.select().from(externalContactLinksTable).where(and(
+    eq(externalContactLinksTable.orgId, orgId),
+    eq(externalContactLinksTable.source, GHL_SOURCE),
+    eq(externalContactLinksTable.externalId, gc.id),
+  )).limit(1);
+  // An application whose Medicare ID differs from the linked contact's is
+  // someone else's: none of it (identifiers, details, agent) touches them.
+  if (application && link?.contactId && await mbiConflicts(tx, orgId, link.contactId, application.parsed.medicareNumber)) {
+    logger.warn({ orgId, contactId: link.contactId }, "GHL sync: Sunfire application's Medicare ID differs from the contact's; not attached");
+    application = null;
+  }
+  const flat: Record<string, string> = {
     first_name: gc.firstName ?? "",
     last_name: gc.lastName ?? "",
     full_name: gc.contactName ?? "",
@@ -374,7 +424,11 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
     state: gc.state ?? "",
     zip: gc.postalCode ?? "",
     lead_source: gc.source ?? "",
-  });
+  };
+  // The application's Medicare ID, birth date and county fill what the
+  // standard fields leave blank (and a Medicare ID makes the match exact).
+  for (const [k, v] of Object.entries(application?.contactFlat ?? {})) if (!flat[k]) flat[k] = v;
+  const interpreted = interpretPayloadContact(flat);
   const contact = interpreted.contact;
   // GHL allows phone-only leads; a contact here needs a first and last name.
   if (!contact || !gc.id) return "skipped";
@@ -383,12 +437,6 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
   if (gc.dnd) contact.optOut = true;
   const parsedUpdated = gc.dateUpdated ? new Date(gc.dateUpdated) : null;
   const externalUpdatedAt = parsedUpdated && !Number.isNaN(parsedUpdated.getTime()) ? parsedUpdated : null;
-
-  const [link] = await tx.select().from(externalContactLinksTable).where(and(
-    eq(externalContactLinksTable.orgId, orgId),
-    eq(externalContactLinksTable.source, GHL_SOURCE),
-    eq(externalContactLinksTable.externalId, gc.id),
-  )).limit(1);
 
   let contactId: string;
   let created = false;
@@ -491,5 +539,116 @@ export async function syncOneContact(tx: Tx, orgId: string, gc: GhlContact): Pro
       .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId), isNull(contactsTable.deletedAt),
         sql`(${contactsTable.optOutSms} = false OR ${contactsTable.optOutEmail} = false)`));
   }
+  if (application) {
+    if (sureOfIdentity) await importSunfireApplication(tx, orgId, contactId, application);
+    else logger.info({ orgId, ghlContactId: gc.id }, "GHL sync: Sunfire application not attached to a contact matched without a birth date or Medicare ID");
+  }
   return created ? "created" : "updated";
+}
+
+/** The contact has a Medicare ID on file and it isn't `mbi`. */
+async function mbiConflicts(tx: Tx, orgId: string, contactId: string, mbi: string | null): Promise<boolean> {
+  if (!mbi) return false;
+  const [cur] = await tx.select({ medicareIdHash: contactsTable.medicareIdHash }).from(contactsTable)
+    .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId))).limit(1);
+  return !!cur?.medicareIdHash && !mbiHashesFor(mbi).some((h) => h.equals(Buffer.from(cur.medicareIdHash!)));
+}
+
+/**
+ * The writing agent: by NPN (the reliable identifier across Sunfire and
+ * agencyBRIDGE), else by email. An offboarded agent is used only when no
+ * current agent carries the NPN.
+ */
+async function findWritingAgent(
+  tx: Tx,
+  orgId: string,
+  npn: string | null,
+  email: string | null,
+): Promise<{ id: string; userId: string | null } | null> {
+  const digits = npn?.replace(/\D/g, "");
+  if (digits) {
+    const rows = await tx.select({ id: agentsTable.id, userId: agentsTable.userId, status: agentsTable.status })
+      .from(agentsTable)
+      .where(and(eq(agentsTable.orgId, orgId), sql`regexp_replace(coalesce(${agentsTable.npn}, ''), '[^0-9]', '', 'g') = ${digits}`));
+    const pick = rows.find((r) => r.status !== "offboarded") ?? rows[0];
+    if (pick) return { id: pick.id, userId: pick.userId };
+  }
+  if (email) {
+    const id = (await loadAgentsByEmail(orgId, tx, email)).get(email) ?? null;
+    if (id) {
+      const [row] = await tx.select({ userId: agentsTable.userId }).from(agentsTable).where(eq(agentsTable.id, id)).limit(1);
+      return { id, userId: row?.userId ?? null };
+    }
+  }
+  return null;
+}
+
+/**
+ * Write a Sunfire application read from a GHL contact: the enrollment, the
+ * coverage lifecycle, the encrypted application record, fill-blanks contact
+ * details and qualifying health conditions, and an activity when the
+ * application is new or changed.
+ */
+async function importSunfireApplication(
+  tx: Tx,
+  orgId: string,
+  contactId: string,
+  app: SunfireApplication,
+): Promise<void> {
+  const p = app.parsed;
+  // A different Medicare ID on file means this application is someone else's
+  // (a contact merged on a shared phone or email): never attach PHI, or assign
+  // its agent, to the wrong person.
+  if (await mbiConflicts(tx, orgId, contactId, p.medicareNumber)) {
+    logger.warn({ orgId, contactId }, "GHL sync: Sunfire application's Medicare ID differs from the contact's; not attached");
+    return;
+  }
+  const [cur] = await tx.select({
+    assignedAgentId: contactsTable.assignedAgentId,
+    healthConditions: contactsTable.healthConditions,
+    pcpName: contactsTable.pcpName,
+    preferredLanguage: contactsTable.preferredLanguage,
+  }).from(contactsTable).where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId))).limit(1);
+  if (!cur) return;
+
+  const agent = await findWritingAgent(tx, orgId, p.agentNpn, p.agentEmail);
+  const agentId = agent?.id ?? null;
+  const enrollmentId = await upsertPolicyEnrollment(tx, orgId, contactId, agentId, p, "From Odyssey (Sunfire)");
+  await applyCoverageLifecycle(tx, contactId, enrollmentId, p.policyStatus);
+  const stored = await storeApplication(tx, orgId, p, { contactId, enrollmentId }, { source: GHL_SOURCE, fallbackKey: app.fallbackKey });
+
+  const conditions = [...new Set([...(cur.healthConditions ?? []), ...app.healthConditions])];
+  const patch: Partial<typeof contactsTable.$inferInsert> = {};
+  if (conditions.length !== (cur.healthConditions ?? []).length) patch.healthConditions = conditions;
+  if (!cur.assignedAgentId && agentId) patch.assignedAgentId = agentId;
+  if (!cur.pcpName && app.pcpName) patch.pcpName = app.pcpName;
+  if (!cur.preferredLanguage && app.preferredLanguage) patch.preferredLanguage = app.preferredLanguage;
+  if (Object.keys(patch).length > 0) {
+    await tx.update(contactsTable).set(patch).where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, orgId)));
+  }
+
+  if (stored?.newVersion) {
+    const summary = [
+      `Odyssey (Sunfire): application ${stored.version > 1 ? "updated" : "received"}`,
+      p.planName ? ` — ${p.planName}` : null,
+      p.effectiveDate ? `, effective ${p.effectiveDate}` : null,
+      p.policyStatus ? ` (${p.policyStatus.replace(/_/g, " ").toLowerCase()})` : null,
+    ].filter(Boolean).join("");
+    await tx.insert(activitiesTable).values({
+      id: randomUUID(),
+      orgId,
+      contactId,
+      agentId,
+      createdBy: agent?.userId ?? null,
+      type: "enrollment",
+      body: summary,
+      metadata: {
+        source: GHL_SOURCE,
+        eventType: p.eventType,
+        enrollmentId,
+        applicationId: stored.applicationId,
+        applicationVersion: stored.version,
+      },
+    });
+  }
 }

@@ -433,7 +433,7 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
  * hash is over that spelling. Check both the canonical and the 4-3-4 dashed
  * forms so an import finds either.
  */
-function mbiHashesFor(canonical: string): Buffer[] {
+export function mbiHashesFor(canonical: string): Buffer[] {
   return [hashMedicareId(canonical), hashMedicareId(dashedMbi(canonical))];
 }
 

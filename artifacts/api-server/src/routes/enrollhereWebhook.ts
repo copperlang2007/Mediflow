@@ -35,14 +35,13 @@
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import crypto, { randomUUID } from "crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   db,
   activitiesTable,
   organizationsTable,
   agentsTable,
   contactsTable,
-  enrollmentsTable,
   externalContactLinksTable,
   integrationEventsTable,
 } from "@workspace/db";
@@ -52,8 +51,8 @@ import { fillBlanks, findDeletedPerson, loadAgentsByEmail, loadMatcher, upsertCo
 import { normalizePhone } from "../lib/csvImport";
 import { logger } from "../lib/logger";
 import { captureWorkerError } from "../lib/sentry";
-import { isEndedStatus, isPolicyEvent, mapPolicyStatus, parsePolicyEvent } from "../lib/integrations/enrollhere/policyEvent";
-import { storeApplication, upsertPolicyEnrollment } from "../lib/integrations/enrollhere/applicationStore";
+import { isPolicyEvent, parsePolicyEvent } from "../lib/integrations/enrollhere/policyEvent";
+import { applyCoverageLifecycle, storeApplication, upsertPolicyEnrollment } from "../lib/integrations/enrollhere/applicationStore";
 
 const router: IRouter = Router();
 const SOURCE = "enrollhere";
@@ -447,24 +446,7 @@ async function handlePolicyEvent(req: RawBodyRequest, res: Response, orgId: stri
       }
 
       const enrollmentId = await upsertPolicyEnrollment(tx, orgId, contactId, agentId, parsed);
-      // Lifecycle follows coverage. In force: a lead or prospect becomes an
-      // enrolled client (so retention and AEP renewals include them). Ended
-      // (cancelled, terminated, declined, inactive): an enrolled client with no
-      // other in-force coverage becomes "lost", a former client, not a new
-      // prospect. Other statuses (retained, lost, do_not_contact) are the
-      // agency's call and are left alone.
-      const lifecycle = mapPolicyStatus(parsed.policyStatus);
-      if (enrollmentId && lifecycle.effectuated) {
-        await tx.update(contactsTable).set({ status: "enrolled" })
-          .where(and(eq(contactsTable.id, contactId), inArray(contactsTable.status, ["lead", "prospect"])));
-      } else if (enrollmentId && isEndedStatus(parsed.policyStatus)) {
-        const [stillCovered] = await tx.select({ id: enrollmentsTable.id }).from(enrollmentsTable)
-          .where(and(eq(enrollmentsTable.contactId, contactId), eq(enrollmentsTable.effectuated, true))).limit(1);
-        if (!stillCovered) {
-          await tx.update(contactsTable).set({ status: "lost" })
-            .where(and(eq(contactsTable.id, contactId), eq(contactsTable.status, "enrolled")));
-        }
-      }
+      await applyCoverageLifecycle(tx, contactId, enrollmentId, parsed.policyStatus);
       const stored = await storeApplication(tx, orgId, parsed, { contactId, enrollmentId });
 
       const label = parsed.eventType.replace(/^PE_/, "").replace(/_/g, " ").toLowerCase();

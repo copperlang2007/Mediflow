@@ -24,6 +24,7 @@ vi.mock("@workspace/db", dbF);
 vi.mock("@clerk/express", clerkF);
 vi.mock("../../lib/jobs", jobsF);
 
+import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { contactsTable, externalContactLinksTable, ghlSyncStateTable } from "@workspace/db/schema";
 import { bootTestDb, shutdownTestDb, withAuth, getEnqueuedJobs, clearEnqueuedJobs } from "../helpers/testApp";
@@ -809,5 +810,235 @@ describe("GHL custom field definitions", () => {
     const err = (await listContactCustomFields({ token: TOKEN, locationId: LOCATION }, cooling).catch((e: Error) => e)) as Error;
     expect(err.message).toMatch(/retry after 3600s — try again after that/);
     expect(err.message).not.toMatch(/scheduled sync/);
+  });
+});
+
+describe("Sunfire applications in GHL custom fields", () => {
+  const FIELDS = [
+    ["cf-conf", "Confirmation Code", "confirmation_code"],
+    ["cf-carrier", "Carrier Name", "carrier_name"],
+    ["cf-plan", "Plan Name", "plan_name"],
+    ["cf-contract", "CMS Contract ID", "cms_contract_id"],
+    ["cf-planid", "CMS Plan ID", "cms_plan_id"],
+    ["cf-seg", "CMS Segment ID", "cms_segment_id"],
+    ["cf-eff", "Effective Date", "effective_date"],
+    ["cf-sig", "Signature Date", "signature_date"],
+    ["cf-status", "Confirmation Status", "confirmation_status"],
+    ["cf-npn", "Agent NPN", "agent_npn"],
+    ["cf-mbi", "Medicare Number", "medicare_number"],
+    ["cf-medicaid", "Medicaid Number", "medicaid_number"],
+    ["cf-dob", "DOB", "dob"],
+    ["cf-county", "County", "county"],
+    ["cf-pcp", "PCP Name", "pcp_name"],
+    ["cf-lang", "Language", "language"],
+    ["cf-copd", "Has COPD", "has_copd"],
+    ["cf-chf", "Has CHF", "has_chf"],
+    ["cf-diabetes", "Has Diabetes", "has_diabetes"],
+    ["cf-ssn", "SSN", "ssn"],
+    ["cf-bank", "Bank Account Number", "bank_account_number"],
+    ["cf-routing", "Routing Number", "routing_number"],
+  ] as const;
+  const defsBody = { customFields: FIELDS.map(([id, name, key]) => ({ id, name, fieldKey: `contact.${key}`, dataType: "TEXT", model: "contact" })) };
+  const values = (v: Partial<Record<(typeof FIELDS)[number][2], unknown>>) =>
+    Object.entries(v).map(([key, value]) => ({ id: FIELDS.find((f) => f[2] === key)![0], value }));
+
+  const base = {
+    confirmation_code: "SF-CONF-001",
+    carrier_name: "Humana",
+    plan_name: "Humana Gold Plus H1036-077 (HMO)",
+    cms_contract_id: "H1036",
+    cms_plan_id: "77",
+    effective_date: "2027-01-01",
+    signature_date: "2026-10-20",
+    confirmation_status: "Submitted",
+    agent_npn: "17654321",
+    medicare_number: "1EG4-TE5-MK73",
+    medicaid_number: "TX-998877",
+    dob: "03/07/1951",
+    county: "Travis",
+    pcp_name: "Dr. Alvarez",
+    language: "Spanish",
+    has_copd: "Yes",
+    has_chf: "No",
+    has_diabetes: ["Yes"],
+    ssn: "123-45-6789",
+    bank_account_number: "000111222",
+    routing_number: "111000025",
+  };
+
+  let sorg: { id: string };
+  let agentId: string;
+  let fieldCalls = 0;
+  const scfg = () => ({ orgId: sorg.id, token: TOKEN, locationId: "loc-sunfire" });
+  /** GHL serving both the field definitions and `store`. */
+  const ghlWithFields = (store: GhlContact[], fieldsStatus = 200) => {
+    const contacts = fakeGhl(store).impl;
+    return (async (url: string, init: RequestInit) => {
+      if (url.includes("/customFields")) {
+        fieldCalls++;
+        return new Response(fieldsStatus === 200 ? JSON.stringify(defsBody) : "denied", { status: fieldsStatus });
+      }
+      return contacts(url, init);
+    }) as unknown as typeof fetch;
+  };
+  const appsFor = async (contactId: string) => {
+    const { enrollmentApplicationsTable } = await import("@workspace/db/schema");
+    return tdb.select().from(enrollmentApplicationsTable).where(eq(enrollmentApplicationsTable.contactId, contactId));
+  };
+  const contactByGhlId = async (ghlId: string) => {
+    const [link] = await tdb.select().from(externalContactLinksTable).where(eq(externalContactLinksTable.externalId, ghlId));
+    const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, link!.contactId!));
+    return c!;
+  };
+
+  beforeAll(async () => {
+    const { agentsTable } = await import("@workspace/db/schema");
+    const { seedAgent } = await import("../helpers/testDb");
+    sorg = await seedOrg(tdb, { id: "ghl-sunfire-org" });
+    const agent = await seedAgent(tdb, { orgId: sorg.id, email: "writer@agency.example" });
+    agentId = agent.id;
+    await tdb.update(agentsTable).set({ npn: "17654321" }).where(eq(agentsTable.id, agentId));
+  });
+
+  it("imports the policy, the encrypted application and the contact details; never SSN or bank data", async () => {
+    const { enrollmentsTable, enrollmentApplicationVersionsTable, activitiesTable } = await import("@workspace/db/schema");
+    const { decryptPii } = await import("@workspace/db/encryption/pii");
+    const { decryptMedicareId } = await import("@workspace/db/encryption/medicareId");
+    fieldCalls = 0;
+    const gc = ghlContact(20001, { email: "rosa@example.com", customFields: values(base) });
+    const r = await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([gc]) });
+    expect(r).toMatchObject({ status: "ok", created: 1 });
+    expect(fieldCalls).toBe(1);
+
+    const c = await contactByGhlId(gc.id);
+    expect(c.assignedAgentId).toBe(agentId);
+    expect(c.status).toBe("lead"); // submitted, not yet in force
+    expect(decryptMedicareId(c.medicareIdEncrypted!)).toBe("1EG4TE5MK73");
+    expect(c.dob!.toISOString().slice(0, 10)).toBe("1951-03-07");
+    expect(c).toMatchObject({ county: "Travis", pcpName: "Dr. Alvarez", preferredLanguage: "Spanish" });
+    expect(c.healthConditions).toEqual(["COPD", "Diabetes"]);
+
+    const [enr] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.contactId, c.id));
+    expect(enr).toMatchObject({
+      planType: "MA", planYear: 2027, planId: "H1036-077-000", planName: base.plan_name,
+      agentId, status: "pending", effectuated: false, notes: "From Odyssey (Sunfire)",
+    });
+
+    const [app] = await appsFor(c.id);
+    expect(app).toMatchObject({
+      source: "gohighlevel", applicationKey: "SF-CONF-001", enrollmentId: enr!.id,
+      carrierName: "Humana", agentNpn: "17654321", policyStatus: "SUBMITTED", currentVersion: 1,
+    });
+    expect(app!.medicareIdEncrypted).not.toBeNull();
+    expect(app!.medicaidNumberEncrypted).not.toBeNull();
+    const [v] = await tdb.select().from(enrollmentApplicationVersionsTable).where(eq(enrollmentApplicationVersionsTable.applicationId, app!.id));
+    const payload = JSON.parse(decryptPii(v!.payloadEncrypted));
+    expect(payload).toMatchObject({ source: "gohighlevel", ghlContactId: gc.id });
+    expect(payload.fields["Has COPD (has_copd)"]).toBe("Yes");
+    expect(payload.fields["Has CHF (has_chf)"]).toBe("No");
+    const text = JSON.stringify(payload);
+    expect(text).not.toMatch(/123-45-6789|000111222|111000025|SSN|Bank|Routing/);
+
+    const acts = await tdb.select().from(activitiesTable).where(eq(activitiesTable.contactId, c.id));
+    expect(acts).toHaveLength(1);
+    expect(acts[0]!.body).toMatch(/^Odyssey \(Sunfire\): application received — Humana Gold Plus/);
+    expect(acts[0]!.body).not.toMatch(/COPD|Diabetes/);
+  });
+
+  it("a re-read adds nothing; an in-force update versions the application and enrolls the client", async () => {
+    const { enrollmentsTable, activitiesTable } = await import("@workspace/db/schema");
+    const gc = ghlContact(20001, { email: "rosa@example.com", customFields: values(base), dateUpdated: "2026-11-01T00:00:00.000Z" });
+    await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([gc]) });
+    const c = await contactByGhlId(gc.id);
+    expect((await appsFor(c.id))[0]!.currentVersion).toBe(1);
+    expect(await tdb.select().from(activitiesTable).where(eq(activitiesTable.contactId, c.id))).toHaveLength(1);
+
+    const inForce = { ...gc, customFields: values({ ...base, confirmation_status: "In Force" }), dateUpdated: "2026-12-01T00:00:00.000Z" };
+    await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([inForce]) });
+    const [app] = await appsFor(c.id);
+    expect(app).toMatchObject({ currentVersion: 2, policyStatus: "IN_FORCE" });
+    const enrs = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.contactId, c.id));
+    expect(enrs).toHaveLength(1);
+    expect(enrs[0]).toMatchObject({ status: "active", effectuated: true });
+    expect((await contactByGhlId(gc.id)).status).toBe("enrolled");
+  });
+
+  it("infers a PDP from the contract prefix and keys an application without a code on the plan", async () => {
+    const { enrollmentsTable } = await import("@workspace/db/schema");
+    const gc = ghlContact(20002, {
+      customFields: values({ carrier_name: "Wellcare", plan_name: "Wellcare Value Script", cms_contract_id: "S4802", cms_plan_id: "1", effective_date: "2027-01-01" }),
+      dateUpdated: "2026-12-02T00:00:00.000Z",
+    });
+    await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([gc]) });
+    const c = await contactByGhlId(gc.id);
+    const [enr] = await tdb.select().from(enrollmentsTable).where(eq(enrollmentsTable.contactId, c.id));
+    expect(enr).toMatchObject({ planType: "PDP", planId: "S4802-001-000" });
+    const [app] = await appsFor(c.id);
+    expect(app!.applicationKey).toBe(`ghl:${gc.id}:S4802-001-000:2027-01-01`);
+    expect(c.assignedAgentId).toBeNull();
+  });
+
+  it("never attaches an application whose Medicare ID differs from the contact's", async () => {
+    const existing = await seedContact(tdb, { orgId: sorg.id, firstName: "Carmen", lastName: "Ortiz", email: "carmen@example.com", medicareId: "2AB3CD4EF56" });
+    await tdb.insert(externalContactLinksTable).values({ id: randomUUID(), orgId: sorg.id, source: "gohighlevel", externalId: "ghl-20003", contactId: existing.id });
+    const gc = ghlContact(20003, { firstName: "Carmen", lastName: "Ortiz", customFields: values({ ...base, confirmation_code: "SF-CONF-003" }), dateUpdated: "2026-12-03T00:00:00.000Z" });
+    await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([gc]) });
+    expect(await appsFor(existing.id)).toHaveLength(0);
+    const [c] = await tdb.select().from(contactsTable).where(eq(contactsTable.id, existing.id));
+    expect(c!.healthConditions).toBeNull();
+    // None of the other person's application touches this contact.
+    expect(c).toMatchObject({ assignedAgentId: null, county: null, pcpName: null, preferredLanguage: null, dob: null });
+  });
+
+  it("continues one application when Sunfire's confirmation code arrives after the first sync", async () => {
+    const codeless = { ...base, confirmation_code: undefined, medicare_number: "3CD4EF5GH67" };
+    delete (codeless as Partial<typeof base>).confirmation_code;
+    const gc = ghlContact(20006, { customFields: values(codeless), dateUpdated: "2026-12-06T00:00:00.000Z" });
+    await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([gc]) });
+    const c = await contactByGhlId(gc.id);
+    expect((await appsFor(c.id)).map((a) => a.applicationKey)).toEqual([`ghl:${gc.id}:H1036-077-000:2027-01-01`]);
+
+    const coded = { ...gc, customFields: values({ ...codeless, confirmation_code: "SF-CONF-006" }), dateUpdated: "2026-12-07T00:00:00.000Z" };
+    await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([coded]) });
+    const apps = await appsFor(c.id);
+    expect(apps).toHaveLength(1);
+    expect(apps[0]).toMatchObject({ applicationKey: "SF-CONF-006", confirmationCode: "SF-CONF-006", currentVersion: 2 });
+  });
+
+  it("keeps two contacts carrying the same Sunfire code on separate applications", async () => {
+    const shared = { ...base, confirmation_code: "SF-CONF-SHARED", medicare_number: "4EF5GH6JK78" };
+    const a = ghlContact(20007, { customFields: values(shared), dateUpdated: "2026-12-08T00:00:00.000Z" });
+    const b = ghlContact(20008, { customFields: values({ ...shared, medicare_number: "5GH6JK7MN89" }), dateUpdated: "2026-12-09T00:00:00.000Z" });
+    await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([a, b]) });
+    const ca = await contactByGhlId(a.id);
+    const cb = await contactByGhlId(b.id);
+    const appsA = await appsFor(ca.id);
+    const appsB = await appsFor(cb.id);
+    expect(appsA.map((x) => [x.applicationKey, x.currentVersion])).toEqual([["SF-CONF-SHARED", 1]]);
+    expect(appsB.map((x) => x.applicationKey)).toEqual([`ghl:${b.id}:H1036-077-000:2027-01-01`]);
+  });
+
+  it("reads fields whose merge key has a prefix other than contact.", async () => {
+    const { readSunfireApplication } = await import("../../lib/integrations/ghl/sunfire");
+    const defs = new Map([["cf-x", { name: "Confirmation Code", key: "custom.confirmation_code" }], ["cf-p", { name: "Plan Name", key: "contact.plan_name" }]]);
+    const app = readSunfireApplication(ghlContact(1, { customFields: [{ id: "cf-x", value: "SF-X" }, { id: "cf-p", value: "Some Plan" }] }), defs);
+    expect(app?.parsed.confirmationCode).toBe("SF-X");
+  });
+
+  it("syncs contacts only when the token can't read custom fields", async () => {
+    const gc = ghlContact(20004, { customFields: values({ ...base, confirmation_code: "SF-CONF-004" }), dateUpdated: "2026-12-10T00:00:00.000Z" });
+    const r = await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([gc], 403) });
+    expect(r.status).toBe("ok");
+    const c = await contactByGhlId(gc.id);
+    expect(await appsFor(c.id)).toHaveLength(0);
+  });
+
+  it("fails the run (cursor unmoved) when the field list can't be fetched for another reason", async () => {
+    const [before] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, sorg.id));
+    const gc = ghlContact(20005, { customFields: values({ ...base, confirmation_code: "SF-CONF-005" }), dateUpdated: "2026-12-11T00:00:00.000Z" });
+    await expect(sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([gc], 400) })).rejects.toThrow(/custom fields failed: HTTP 400/);
+    const [after] = await tdb.select().from(ghlSyncStateTable).where(eq(ghlSyncStateTable.orgId, sorg.id));
+    expect(after!.cursorUpdatedAt).toEqual(before!.cursorUpdatedAt);
+    expect(after!.lastStatus).toBe("error");
   });
 });

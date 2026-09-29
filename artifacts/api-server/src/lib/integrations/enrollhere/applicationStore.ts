@@ -1,10 +1,12 @@
 /**
- * Writes an EnrollHere policy event: the enrollment row and the full
- * application record (encrypted, versioned).
+ * Writes a policy application: the enrollment row and the full application
+ * record (encrypted, versioned). Used by the EnrollHere receiver and by the
+ * GoHighLevel sync for Sunfire applications carried in custom fields.
  *
  * Application record rules:
  *   - one record per (org, source, applicationKey); the key is the Sunfire
- *     confirmation code, or `policy:<EnrollHere policy id>` when there is none;
+ *     confirmation code, or `policy:<EnrollHere policy id>` (or the caller's
+ *     fallback key) when there is none;
  *   - every distinct payload is kept as an encrypted version (AES-GCM, the
  *     same PHI key as contact data); an identical redelivery adds nothing;
  *   - only plan / carrier / dates / status / agent are plain columns; the
@@ -14,6 +16,7 @@
 import { randomUUID } from "crypto";
 import { and, eq, inArray, isNull, max, ne, sql } from "drizzle-orm";
 import {
+  contactsTable,
   enrollmentsTable,
   enrollmentApplicationsTable,
   enrollmentApplicationVersionsTable,
@@ -23,7 +26,7 @@ import {
 import { canonicalJson } from "../payload";
 import { resolveCarrier, type Tx } from "../../contactImport";
 import { syncContactCoverageProjection } from "../../../routes/enrollments";
-import { mapPolicyStatus, type ParsedPolicyEvent } from "./policyEvent";
+import { isEndedStatus, mapPolicyStatus, type ParsedPolicyEvent } from "./policyEvent";
 import { logger } from "../../logger";
 
 export const APPLICATION_SOURCE = "enrollhere";
@@ -40,6 +43,7 @@ export async function upsertPolicyEnrollment(
   contactId: string,
   agentId: string | null,
   p: ParsedPolicyEvent,
+  note = "From EnrollHere",
 ): Promise<string | null> {
   if (!p.planType || !p.effectiveDate) return null;
   let carrierId = p.carrierName ? await resolveCarrier(tx, orgId, p.carrierName, new Map(), []) : null;
@@ -146,7 +150,7 @@ export async function upsertPolicyEnrollment(
     effectiveDate: p.effectiveDate,
     effectuated,
     status,
-    notes: "From EnrollHere",
+    notes: note,
   }).onConflictDoUpdate({
     target: [enrollmentsTable.contactId, enrollmentsTable.planYear, enrollmentsTable.planType, enrollmentsTable.carrierId],
     // EnrollHere is the source of truth for status on its own policies; plan
@@ -163,6 +167,33 @@ export async function upsertPolicyEnrollment(
   }).returning({ id: enrollmentsTable.id });
   await syncContactCoverageProjection(contactId, orgId, tx);
   return row?.id ?? null;
+}
+
+/**
+ * Lifecycle follows coverage. In force: a lead or prospect becomes an enrolled
+ * client (so retention and AEP renewals include them). Ended (cancelled,
+ * terminated, declined, inactive): an enrolled client with no other in-force
+ * coverage becomes "lost", a former client, not a new prospect. Other statuses
+ * (retained, lost, do_not_contact) are the agency's call and are left alone.
+ */
+export async function applyCoverageLifecycle(
+  tx: Tx,
+  contactId: string,
+  enrollmentId: string | null,
+  policyStatus: string | null,
+): Promise<void> {
+  if (!enrollmentId) return;
+  if (mapPolicyStatus(policyStatus).effectuated) {
+    await tx.update(contactsTable).set({ status: "enrolled" })
+      .where(and(eq(contactsTable.id, contactId), inArray(contactsTable.status, ["lead", "prospect"])));
+  } else if (isEndedStatus(policyStatus)) {
+    const [stillCovered] = await tx.select({ id: enrollmentsTable.id }).from(enrollmentsTable)
+      .where(and(eq(enrollmentsTable.contactId, contactId), eq(enrollmentsTable.effectuated, true))).limit(1);
+    if (!stillCovered) {
+      await tx.update(contactsTable).set({ status: "lost" })
+        .where(and(eq(contactsTable.id, contactId), eq(contactsTable.status, "enrolled")));
+    }
+  }
 }
 
 /**
@@ -207,14 +238,22 @@ export async function storeApplication(
   orgId: string,
   p: ParsedPolicyEvent,
   links: { contactId: string | null; enrollmentId: string | null },
+  opts: { source?: string; fallbackKey?: string | null } = {},
 ): Promise<StoredApplication | null> {
-  let applicationKey = p.confirmationCode ?? (p.policyId ? `policy:${p.policyId}` : null);
+  const source = opts.source ?? APPLICATION_SOURCE;
+  let applicationKey = p.confirmationCode ?? (p.policyId ? `policy:${p.policyId}` : null) ?? opts.fallbackKey ?? null;
   if (!applicationKey) return null;
 
+  // The key this application had before it carried a Sunfire code: the
+  // EnrollHere policy id, or the caller's fallback (GHL: contact + plan).
+  const codelessKey = p.policyId ? `policy:${p.policyId}` : opts.fallbackKey ?? null;
+
   // Serialize writers for one policy so two deliveries can't both take
-  // version N+1. Locked on the policy id when there is one, so a delivery that
-  // first carries the confirmation code still serializes with earlier ones.
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`enrollment-app:${orgId}:${p.policyId ?? applicationKey}`}, 0))`);
+  // version N+1. Locked on the policy id (or the caller's fallback key) when
+  // there is one, so a delivery that first carries the confirmation code still
+  // serializes with earlier ones. The EnrollHere lock string is unchanged, so
+  // old and new servers still exclude each other during a rolling deploy.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`enrollment-app:${orgId}:${p.policyId ?? codelessKey ?? applicationKey}`}, 0))`);
 
   // A delivery without the Sunfire code continues the record this policy
   // already has (whatever it is keyed on) rather than starting a second one.
@@ -222,7 +261,7 @@ export async function storeApplication(
     const [known] = await tx.select({ key: enrollmentApplicationsTable.applicationKey }).from(enrollmentApplicationsTable)
       .where(and(
         eq(enrollmentApplicationsTable.orgId, orgId),
-        eq(enrollmentApplicationsTable.source, APPLICATION_SOURCE),
+        eq(enrollmentApplicationsTable.source, source),
         eq(enrollmentApplicationsTable.externalPolicyId, p.policyId),
       )).limit(1);
     if (known) applicationKey = known.key;
@@ -231,17 +270,18 @@ export async function storeApplication(
   // The policy was first stored without a Sunfire code: re-key that record so
   // its history continues on one application instead of splitting in two. A
   // code already held by another policy's record is never taken over.
-  if (p.confirmationCode && p.policyId) {
-    const fallbackKey = `policy:${p.policyId}`;
+  if (p.confirmationCode && codelessKey) {
+    const fallbackKey = codelessKey;
     const rows = await tx.select({
       id: enrollmentApplicationsTable.id,
       key: enrollmentApplicationsTable.applicationKey,
       policyId: enrollmentApplicationsTable.externalPolicyId,
+      contactId: enrollmentApplicationsTable.contactId,
     })
       .from(enrollmentApplicationsTable)
       .where(and(
         eq(enrollmentApplicationsTable.orgId, orgId),
-        eq(enrollmentApplicationsTable.source, APPLICATION_SOURCE),
+        eq(enrollmentApplicationsTable.source, source),
         inArray(enrollmentApplicationsTable.applicationKey, [fallbackKey, p.confirmationCode]),
       ));
     const codeless = rows.find((r) => r.key === fallbackKey);
@@ -254,12 +294,17 @@ export async function storeApplication(
     if (coded && coded.policyId && coded.policyId !== p.policyId) {
       logger.warn({ orgId, applicationId: coded.id }, "EnrollHere: Sunfire code already used by another policy; kept separate");
       applicationKey = fallbackKey;
+    } else if (coded && !coded.policyId && !p.policyId && coded.contactId && links.contactId && coded.contactId !== links.contactId) {
+      // No policy ids to compare (GHL): the same code on a different person is
+      // a collision too. Taking the record over would put this person's
+      // payload in another person's application history.
+      logger.warn({ orgId, applicationId: coded.id }, "Sunfire code already used by another contact's application; kept separate");
+      applicationKey = fallbackKey;
     } else if (codeless && !coded) {
       await tx.update(enrollmentApplicationsTable).set({ applicationKey: p.confirmationCode })
         .where(eq(enrollmentApplicationsTable.id, codeless.id));
     }
   }
-
 
   const mbi = p.medicareNumber ? encryptMedicareId(p.medicareNumber) : null;
   const medicaid = p.medicaidNumber ? encryptPii(p.medicaidNumber).encrypted : null;
@@ -318,7 +363,7 @@ export async function storeApplication(
   const [app] = await tx.insert(enrollmentApplicationsTable).values({
     id: randomUUID(),
     orgId,
-    source: APPLICATION_SOURCE,
+    source,
     applicationKey,
     contactId: links.contactId,
     enrollmentId: links.enrollmentId,
