@@ -119,6 +119,8 @@ export type AuthenticatedRequest = Request & {
   realOrgId?: string;
   viewingOrgId?: string;
   viewOnly?: boolean;
+  supportEdit?: boolean;
+  supportReason?: string;
 };
 
 async function applyViewAsContext(
@@ -130,6 +132,7 @@ async function applyViewAsContext(
   const requestedOrgId = req.get("X-MediFlow-View-Org")?.trim();
   authReq.realOrgId = realOrgId;
   authReq.viewOnly = false;
+  authReq.supportEdit = false;
   if (!requestedOrgId) return true;
   if (authReq.userRole !== "super_admin") {
     res.status(403).json({ error: "Only super admins can view an agency" });
@@ -152,8 +155,23 @@ async function applyViewAsContext(
   authReq.viewingOrgId = organization.id;
   authReq.viewOnly = true;
   if (!["GET", "HEAD", "OPTIONS"].includes(req.method.toUpperCase())) {
-    res.status(403).json({ error: "View-only mode does not allow changes", code: "VIEW_ONLY_MODE" });
-    return false;
+    // Cross-agency writes are opt-in and limited to profile edits. Other
+    // operations (messages, billing, exports, deletion, invitations) stay blocked.
+    const supportEdit = req.get("X-MediFlow-Support-Edit") === "true";
+    const reason = req.get("X-MediFlow-Support-Reason")?.trim() ?? "";
+    const path = req.originalUrl.split("?")[0];
+    const allowedPath = /^\/api\/(contacts|agents)\/[^/]+$/.test(path);
+    if (!supportEdit || req.method.toUpperCase() !== "PATCH" || !allowedPath) {
+      res.status(403).json({ error: "View-only mode does not allow this change", code: "VIEW_ONLY_MODE" });
+      return false;
+    }
+    if (!authReq.mfaEnrolled || reason.length < 10 || reason.length > 240) {
+      res.status(403).json({ error: "Support edits require MFA and a reason of 10–240 characters", code: "SUPPORT_EDIT_REQUIREMENTS" });
+      return false;
+    }
+    authReq.viewOnly = false;
+    authReq.supportEdit = true;
+    authReq.supportReason = reason;
   }
   return true;
 }
@@ -258,7 +276,7 @@ export const requireAuth = async (
   authReq.userRole = user.role as Role;
   authReq.mfaEnrolled = mfaEnrolled;
   if (!(await applyViewAsContext(req, res, authReq, user.orgId))) return;
-  authReq.log = req.log.child({ userId: user.id, orgId: authReq.orgId, realOrgId: user.orgId, role: user.role, viewOnly: authReq.viewOnly });
+  authReq.log = req.log.child({ userId: user.id, orgId: authReq.orgId, realOrgId: user.orgId, role: user.role, viewOnly: authReq.viewOnly, supportEdit: authReq.supportEdit });
 
   next();
 };
