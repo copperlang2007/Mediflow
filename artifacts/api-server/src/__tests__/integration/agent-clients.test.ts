@@ -61,6 +61,8 @@ let appNotInForce: string;
 let appShared: string;
 let appAgreeing: string;
 let suspendedUser: { id: string };
+let sharedClient: { id: string };
+let appEmailMismatch: string;
 
 const NPN_A = "17654321";
 const NPN_B = "18765432";
@@ -69,13 +71,13 @@ async function seedApplication(
   contactId: string,
   enrollmentId: string | null,
   fields: Record<string, string>,
-  writer: { agentNpn?: string; policyStatus?: string } = {},
+  writer: { agentNpn?: string; agentEmail?: string; policyStatus?: string } = {},
 ): Promise<string> {
   const id = randomUUID();
   await tdb.insert(enrollmentApplicationsTable).values({
     id, orgId: org.id, source: "gohighlevel", applicationKey: `key-${id}`, contactId, enrollmentId,
     planName: "Humana Gold Plus", carrierName: "Humana", currentVersion: 1,
-    agentNpn: writer.agentNpn ?? null, policyStatus: writer.policyStatus ?? null,
+    agentNpn: writer.agentNpn ?? null, agentEmail: writer.agentEmail ?? null, policyStatus: writer.policyStatus ?? null,
   });
   const { encrypted, hash } = encryptPii(JSON.stringify({ source: "gohighlevel", ghlContactId: "g1", fields }));
   await tdb.insert(enrollmentApplicationVersionsTable).values({
@@ -84,10 +86,10 @@ async function seedApplication(
   return id;
 }
 
-async function seedEnrollment(contactId: string, agentId: string, status: "pending" | "cancelled" = "pending"): Promise<string> {
+async function seedEnrollment(contactId: string, agentId: string, status: "pending" | "cancelled" = "pending", planYear = 2027): Promise<string> {
   const id = randomUUID();
   await tdb.insert(enrollmentsTable).values({
-    id, orgId: org.id, contactId, agentId, planType: "MA", planYear: 2027, effectiveDate: "2027-01-01", planName: "Humana Gold Plus", status,
+    id, orgId: org.id, contactId, agentId, planType: "MA", planYear, effectiveDate: "2027-01-01", planName: "Humana Gold Plus", status,
   });
   return id;
 }
@@ -146,9 +148,13 @@ beforeAll(async () => {
   appNotInForce = await seedApplication(notInForce.id, inactive, {}, { agentNpn: NPN_A, policyStatus: "POL_NOT_INFORCE" });
   // Two policies share one enrollment row, which keeps its first writer (B):
   // A wrote this application, so A may open it and B (not assigned) may not.
-  const sharedClient = await seedContact(tdb, { orgId: org.id, firstName: "Gail", lastName: "Moss", medicareId: "7FG8HJ9KL01" });
+  sharedClient = await seedContact(tdb, { orgId: org.id, firstName: "Gail", lastName: "Moss", medicareId: "7FG8HJ9KL01" });
   const shared = await seedEnrollment(sharedClient.id, agentB.id);
   appShared = await seedApplication(sharedClient.id, shared, { "Medicare Number (medicare_number)": "7FG8HJ9KL01" }, { agentNpn: NPN_A });
+  // The application names B by NPN; A's email on it doesn't make it A's.
+  const agentAEmail = (await tdb.select({ email: agentsTable.email }).from(agentsTable).where(eq(agentsTable.id, agentA.id)))[0]!.email;
+  const theirsToo = await seedEnrollment(notMine.id, agentB.id, "pending", 2028);
+  appEmailMismatch = await seedApplication(notMine.id, theirsToo, {}, { agentNpn: NPN_B, agentEmail: agentAEmail });
   // A suspended agent keeps their login but services no one.
   suspendedUser = await seedUser(tdb, { orgId: org.id, role: "agent" });
   const suspended = await seedAgent(tdb, { orgId: org.id });
@@ -170,8 +176,8 @@ describe("My clients", () => {
     const res = await request(app).get("/api/agents/me/clients").set(withAuth(userA.id));
     expect(res.status).toBe(200);
     expect(res.headers["cache-control"]).toBe("no-store");
-    expect(res.body.total).toBe(2);
-    expect(res.body.data.map((c: { lastName: string }) => c.lastName)).toEqual(["Alvarez", "Ortiz"]);
+    expect(res.body.total).toBe(3);
+    expect(res.body.data.map((c: { lastName: string }) => c.lastName)).toEqual(["Alvarez", "Moss", "Ortiz"]);
     // The list never carries the Medicare ID or health conditions.
     expect(JSON.stringify(res.body)).not.toMatch(/medicare|COPD|1EG4/i);
 
@@ -258,6 +264,16 @@ describe("My clients", () => {
   it("authorizes an application's own writer, not whoever else is on a shared enrollment row", async () => {
     expect((await request(app).get(`/api/applications/${appShared}/full`).set(withAuth(userA.id))).status).toBe(200);
     expect((await request(app).get(`/api/applications/${appShared}/full`).set(withAuth(userB.id))).status).toBe(403);
+    // The client (and their PHI) follows the application's writer too.
+    const mineToo = await request(app).get(`/api/agents/me/clients/${sharedClient.id}`).set(withAuth(userA.id));
+    expect(mineToo.status).toBe(200);
+    expect(mineToo.body.contact.medicareId).toBe("7FG8HJ9KL01");
+    expect((await request(app).get(`/api/agents/me/clients/${sharedClient.id}`).set(withAuth(userB.id))).status).toBe(404);
+  });
+
+  it("never falls back to email when the application's NPN names another agent", async () => {
+    expect((await request(app).get(`/api/applications/${appEmailMismatch}/full`).set(withAuth(userA.id))).status).toBe(403);
+    expect((await request(app).get(`/api/agents/me/clients/${notMine.id}`).set(withAuth(userA.id))).status).toBe(404);
   });
 
   it("gives a suspended agent nothing, even for clients still assigned to them", async () => {
