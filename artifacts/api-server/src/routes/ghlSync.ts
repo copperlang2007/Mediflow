@@ -4,6 +4,10 @@
  *   GET  /integrations/ghl/status   configured?, cursor, last run, counts
  *   POST /integrations/ghl/sync     { full?: boolean } — queue a pull now;
  *                                   `full` re-reads everything (backfill)
+ *   GET  /integrations/ghl/custom-fields  the sub-account's contact custom
+ *                                   field definitions (names and types only,
+ *                                   never a contact's value) — used to map
+ *                                   fields such as Sunfire plan data
  *
  * The token itself is never returned. See lib/integrations/ghl/sync.ts.
  */
@@ -13,6 +17,8 @@ import { db, ghlSyncStateTable } from "@workspace/db";
 import { requireAuth, requireRole, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { enqueue, JOB_NAMES } from "../lib/jobs";
 import { LEASE_MINUTES, ghlConfigFor, requestFullResync } from "../lib/integrations/ghl/sync";
+import { GhlApiError, listContactCustomFields } from "../lib/integrations/ghl/client";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -67,6 +73,35 @@ router.post(
       return;
     }
     res.status(202).json({ queued: true, full, alreadyRunning });
+  },
+);
+
+router.get(
+  "/integrations/ghl/custom-fields",
+  requireAuth,
+  requireRole("super_admin", "agency_admin"),
+  async (req: Request, res: Response): Promise<void> => {
+    const { orgId } = req as AuthenticatedRequest;
+    const cfg = ghlConfigFor(orgId);
+    if (!cfg) {
+      res.status(400).json({
+        error: "GoHighLevel isn't connected for this agency yet. An administrator needs to add the Private Integration token and location id.",
+      });
+      return;
+    }
+    try {
+      const fields = await listContactCustomFields({ token: cfg.token, locationId: cfg.locationId });
+      res.json({ locationId: cfg.locationId, fields });
+    } catch (err) {
+      // GhlApiError messages are written for admins and never carry the token
+      // or the upstream body; anything else stays in the log.
+      if (err instanceof GhlApiError) {
+        res.status(502).json({ error: err.message });
+        return;
+      }
+      logger.error({ err, orgId }, "GHL custom fields: request failed");
+      res.status(502).json({ error: "Couldn't reach GoHighLevel. Please retry." });
+    }
   },
 );
 
