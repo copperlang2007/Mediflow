@@ -216,6 +216,49 @@ describe("Auth & RBAC integration", () => {
       expect(res.body.code).toBe("VIEW_ONLY_MODE");
     }
   });
+  it("lets a super admin viewing an agency invite, resend and revoke there, audited", async () => {
+    const handle = await bootTestDb();
+    const asSuper = <T extends { set: (k: Record<string, string>) => T }>(call: T) =>
+      call.set(withMfaAuth(superAdmin.id, true)).set({ "X-MediFlow-View-Org": orgB.id } as Record<string, string>);
+
+    const created = await asSuper(request(app).post("/api/invitations")).send({ email: "first.admin@orgb.test", role: "agency_admin" });
+    expect(created.status).toBe(201);
+    expect(created.body.acceptUrl).toMatch(/accept-invite/);
+    const { userInvitationsTable, auditLogTable } = await import("@workspace/db");
+    const { eq, and } = await import("drizzle-orm");
+    const [row] = await handle.db.select().from(userInvitationsTable).where(eq(userInvitationsTable.id, created.body.invitation.id));
+    expect(row).toMatchObject({ orgId: orgB.id, role: "agency_admin", invitedByUserId: superAdmin.id });
+
+    const resent = await asSuper(request(app).post(`/api/invitations/${row.id}/resend`)).send({});
+    expect(resent.status).toBe(200);
+    const revoked = await asSuper(request(app).delete(`/api/invitations/${row.id}`));
+    expect(revoked.status).toBe(200);
+    expect(revoked.body.invitation.status).toBe("revoked");
+
+    const audits = (await handle.db.select().from(auditLogTable)
+      .where(and(eq(auditLogTable.orgId, orgB.id), eq(auditLogTable.resourceType, "invitation"))))
+      .filter((a) => (a.changes as { crossAgency?: boolean } | null)?.crossAgency === true);
+    expect(audits.map((a) => a.action).sort()).toEqual(["create", "delete", "update"]);
+    for (const a of audits) {
+      expect(a.userId).toBe(superAdmin.id);
+      expect(a.changes).toMatchObject({ crossAgency: true, realOrgId: orgA.id, viewingOrgId: orgB.id });
+    }
+  });
+
+  it("keeps other cross-agency writes blocked next to the invitation routes", async () => {
+    const res = await request(app).post("/api/invitations/accept")
+      .set(withMfaAuth(superAdmin.id, true))
+      .set("X-MediFlow-View-Org", orgB.id)
+      .send({ token: "x".repeat(40), fullName: "Nobody" });
+    expect(res.body.invitation).toBeUndefined();
+    const org = await request(app).put("/api/org-settings")
+      .set(withMfaAuth(superAdmin.id, true))
+      .set("X-MediFlow-View-Org", orgB.id)
+      .send({ ahipReminderEnabled: false });
+    expect(org.status).toBe(403);
+    expect(org.body.code).toBe("VIEW_ONLY_MODE");
+  });
+
   it("allows an MFA-enrolled super admin to update a selected agency contact with an audited reason", async () => {
     const handle = await bootTestDb();
     const contact = await seedContact(handle.db, { orgId: orgB.id });
