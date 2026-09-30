@@ -160,6 +160,7 @@ export function DncQueue({
                       moreCandidates={item.moreCandidates ?? false}
                       numbers={item.numbers ?? []}
                       channel={item.channel ?? "phone"}
+                      channelAssumed={item.channelAssumed ?? false}
                       emailOnFile={item.emailOnFile ?? null}
                     />
                   ) : (

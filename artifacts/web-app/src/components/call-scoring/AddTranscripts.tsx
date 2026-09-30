@@ -36,6 +36,9 @@ interface ImportResponse {
     unlabelledSpeakers: number;
     needContactPick: number;
     notLinkedToClient: number;
+    filesWithWarnings?: number;
+    agentAmbiguousName?: number;
+    agentNotFound?: number;
     manifest: { rows: number; unmatchedManifestRows: number; problems: string[] } | null;
     aiReview: string;
     note: string;
@@ -282,6 +285,9 @@ function BulkImport({ config, onShowDnc }: { config: CsConfig | undefined; onSho
             {out.summary.errors > 0 ? `${out.summary.errors} could not be scored. ` : ""}
             {out.summary.unlabelledSpeakers > 0 ? `${out.summary.unlabelledSpeakers} have no speaker labels. ` : ""}
             {out.summary.needContactPick > 0 ? `${out.summary.needContactPick} match more than one client by phone. ` : ""}
+            {out.summary.agentNotFound ? `${out.summary.agentNotFound} had an agent in the manifest that was not found. ` : ""}
+            {out.summary.agentAmbiguousName ? `${out.summary.agentAmbiguousName} had an agent name that matches more than one person. ` : ""}
+            {out.summary.filesWithWarnings ? `${out.summary.filesWithWarnings} file${out.summary.filesWithWarnings === 1 ? " has" : "s have"} warnings (see the list). ` : ""}
             {out.summary.manifest && out.summary.manifest.unmatchedManifestRows > 0 ? `${out.summary.manifest.unmatchedManifestRows} manifest rows had no file. ` : ""}
             {out.summary.aiReview}
           </p>

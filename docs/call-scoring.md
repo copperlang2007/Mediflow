@@ -113,9 +113,14 @@ A reviewer chooses:
   that number. If more than one client shares the number, the reviewer picks the
   right one, or searches when more share it than can be listed. Clicking twice,
   or two people clicking at once, still records exactly one opt-out.
-  If the client who owns that number also has an email address on file, it is
-  added to the email opt-out list in the same step, so a confirmed stop request
-  does not leave email flowing.
+  If the client who owns that number also has an email address on file, the
+  screen says so (with the address masked) and a box, ticked by default, adds it
+  to the email opt-out list in the same step, so a confirmed stop request does
+  not leave email flowing. Unticking it adds the phone number only, and the audit
+  entry records the choice. Leaving it out of the request counts as ticked.
+  When the words do not say whether the client meant phone or email ("unsubscribe
+  me", "take me off your list"), the screen asks the reviewer to choose; nothing
+  is dropped for being unclear.
   A request that is about **email only** ("stop emailing me") is different: a
   phone opt-out would not stop email, so it goes through the email opt-out. It
   needs a linked client with an email address, adds that address to the email

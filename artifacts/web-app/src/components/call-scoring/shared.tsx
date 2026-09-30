@@ -192,11 +192,12 @@ export interface CsDncItem {
   callDate: string | null;
   externalRef: string | null;
   speakerMode: string;
-  contact: { id: string; name: string; phoneLast4: string | null } | null;
+  contact: { id: string; name: string; phoneLast4: string | null; maskedEmail?: string | null } | null;
   contactMatch: string;
-  candidates: Array<{ id: string; name: string; phoneLast4: string | null }>;
+  candidates: Array<{ id: string; name: string; phoneLast4: string | null; maskedEmail?: string | null }>;
   moreCandidates?: boolean;
   channel?: "phone" | "email";
+  channelAssumed?: boolean;
   emailOnFile?: boolean | null;
   numbers?: Array<{ source: "transcript" | "contact"; last4: string | null }>;
   agent: { id: string; name: string } | null;

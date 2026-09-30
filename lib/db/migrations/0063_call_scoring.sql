@@ -17,6 +17,20 @@
 -- in this migration deletes anything; purged_at exists for a future,
 -- explicitly approved purge job.
 
+-- Email opt-outs need a uniqueness guarantee of their own: the (org, phone,
+-- channel) index ignores them because phone is NULL. Two concurrent email
+-- opt-outs for one address could each insert a row. First collapse any existing
+-- duplicates (case-insensitive), keeping the EARLIEST row of each; the rows are
+-- equivalent, so nothing is lost. Then add the partial unique index.
+DELETE FROM "opt_outs" a
+USING "opt_outs" b
+WHERE a."channel" = 'email' AND b."channel" = 'email'
+  AND a."email" IS NOT NULL AND b."email" IS NOT NULL
+  AND a."org_id" = b."org_id"
+  AND lower(a."email") = lower(b."email")
+  AND (a."opted_out_at", a."id") > (b."opted_out_at", b."id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "opt_outs_org_email_channel_unique" ON "opt_outs" ("org_id", lower("email"), "channel") WHERE "channel" = 'email' AND "email" IS NOT NULL;--> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "call_transcripts" (
 	"id" text PRIMARY KEY NOT NULL,
 	"org_id" text NOT NULL REFERENCES "organizations"("id"),

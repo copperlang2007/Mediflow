@@ -21,7 +21,15 @@ interface Candidate {
   id: string;
   name: string;
   phoneLast4: string | null;
+  maskedEmail?: string | null;
 }
+
+/** "jane@example.com" -> "j***@example.com". The full address is never shown. */
+const maskEmail = (email: string | null | undefined) => {
+  const e = (email ?? "").trim();
+  const at = e.lastIndexOf("@");
+  return at < 1 ? null : `${e[0]}***${e.slice(at)}`;
+};
 
 export interface NumberOption {
   source: "transcript" | "contact";
@@ -32,6 +40,7 @@ type Choice = "transcript" | "contact" | "typed" | "";
 
 interface SearchContact {
   id: string;
+  email?: string | null;
   firstName?: string | null;
   lastName?: string | null;
   phone?: string | null;
@@ -49,20 +58,26 @@ export function DncResolveControls({
   moreCandidates = false,
   numbers = [],
   channel = "phone",
+  channelAssumed = false,
   emailOnFile = null,
   onDone,
 }: {
   findingId: string;
-  contact: { id: string; name: string } | null;
+  contact: { id: string; name: string; maskedEmail?: string | null } | null;
   candidates?: Candidate[];
   moreCandidates?: boolean;
   numbers?: NumberOption[];
   /** "email" when the client asked to stop EMAIL only (resolved through the email opt-out). */
   channel?: "phone" | "email";
+  /** True when the words did not name a channel: the reviewer confirms which one. */
+  channelAssumed?: boolean;
   emailOnFile?: boolean | null;
   onDone?: () => void;
 }) {
-  const isEmail = channel === "email";
+  const [channelChoice, setChannelChoice] = useState<"phone" | "email">(channel);
+  const isEmail = channelChoice === "email";
+  const [alsoEmail, setAlsoEmail] = useState(true);
+  const [pickedMaskedEmail, setPickedMaskedEmail] = useState<string | null>(null);
   const qc = useQueryClient();
   const [pool, setPool] = useState<Candidate[]>(candidates);
   const [pickedId, setPickedId] = useState<string>("");
@@ -93,6 +108,7 @@ export function DncResolveControls({
     id: c.id,
     name: `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed contact",
     phoneLast4: last4Of(c.phone),
+    maskedEmail: maskEmail(c.email),
   }));
 
   // The numbers the reviewer may confirm: the ones on file, plus the picked client's, plus "type one".
@@ -145,25 +161,53 @@ export function DncResolveControls({
     ? Boolean(contact ? emailOnFile !== false : pickedId)
     : choice !== "" && (!needsTyped || phone.replace(/\D/g, "").length >= 7) && !(mustPick && !pickedId);
 
+  // The client whose email would ALSO be added when a phone request is confirmed.
+  const emailToShow = pickedId ? pickedMaskedEmail : (contact?.maskedEmail ?? null);
+  const showAlsoEmail = !isEmail && !dismissing && Boolean(emailToShow);
+
   const confirm = () =>
     resolve.mutate(
       isEmail
-        ? { action: "add_opt_out", ...(pickedId ? { contactId: pickedId } : {}) }
+        ? { action: "add_opt_out", ...(channelAssumed ? { channel: "email" } : {}), ...(pickedId ? { contactId: pickedId } : {}) }
         : {
             action: "add_opt_out",
             phoneSource: choice,
+            ...(channelAssumed ? { channel: "phone" } : {}),
             ...(pickedId ? { contactId: pickedId } : {}),
             ...(needsTyped ? { phone: phone.trim() } : {}),
+            ...(showAlsoEmail ? { alsoOptOutEmail: alsoEmail } : {}),
           },
     );
 
   const pick = (c: Candidate) => {
     setPickedId(c.id);
     setPickedLast4(c.phoneLast4);
+    setPickedMaskedEmail(c.maskedEmail ?? null);
   };
 
   return (
     <div className="space-y-3">
+      {channelAssumed && !dismissing && (
+        <fieldset className="space-y-1.5">
+          <legend className="text-xs font-medium text-muted-foreground">The words do not say which kind of contact to stop. This request is about:</legend>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="radio" name={`channel-${findingId}`} value="phone" checked={channelChoice === "phone"} onChange={() => setChannelChoice("phone")} />
+            <span>Phone calls and texts</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="radio" name={`channel-${findingId}`} value="email" checked={channelChoice === "email"} onChange={() => setChannelChoice("email")} />
+            <span>Email</span>
+          </label>
+        </fieldset>
+      )}
+      {showAlsoEmail && (
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" className="mt-1" checked={alsoEmail} onChange={(e) => setAlsoEmail(e.target.checked)} />
+          <span>
+            This will also add <strong>{emailToShow}</strong> to the email opt-out list, so email stops as well. Uncheck to add the phone number only.
+          </span>
+        </label>
+      )}
       {isEmail && (
         <p className="text-sm">
           This is a request to stop <strong>email</strong>. It is added to the email opt-out list for the client's email address, and no phone number is added.

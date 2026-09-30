@@ -162,22 +162,41 @@ export function dncLooksNegated(before: string, mode: DncPattern["negation"]): b
 }
 
 /**
- * Which channel the request is about. "email" only when the words name email and
- * nothing else ("stop emailing me"): an opt-out on the phone list would not stop
- * email, so those go through the email opt-out path. Everything else is "phone".
+ * Which channel the request is about.
+ *  - "email" when the words name email and no phone word ("stop emailing me").
+ *  - "phone" when they name a phone word (call, text, number...), even if email
+ *    is named too.
+ *  - Otherwise the words do not say ("unsubscribe me", "opt out", "take me off your
+ *    list", "do not contact me"): the SENTENCE decides if it can; if it cannot the
+ *    channel is a default AND `assumed` is true, and the reviewer chooses the
+ *    channel explicitly. "unsubscribe" / "opt out" default to email; the rest to
+ *    phone (the stricter default for a bare "do not contact").
+ * Nothing is ever dropped because the channel is unclear.
  */
 export type DncChannel = "phone" | "email";
 
 const EMAIL_WORDS = /\b(?:emails?|emailing|e mail)\b/;
-const OTHER_CHANNEL_WORDS =
-  /\b(?:calls?|calling|phones?|phoning|phone calls|texts?|texting|messages?|messaging|sms|ring|ringing|number|contact|contacting|mail|unsubscribe|opt|dnc|do not call|dont call|bothering|harassing|pestering|leave)\b/;
+const PHONE_WORDS = /\b(?:calls?|calling|phones?|phoning|phone calls|texts?|texting|text messages?|sms|ring|ringing|number|voicemails?)\b/;
+const MAILING_GENERIC = /\b(?:unsubscribe|opt)\b/;
 
-export function channelOf(matched: string): DncChannel {
-  return EMAIL_WORDS.test(matched) && !OTHER_CHANNEL_WORDS.test(matched.replace(EMAIL_WORDS, " ")) ? "email" : "phone";
+export function classifyChannel(matched: string, sentence = ""): { channel: DncChannel; assumed: boolean } {
+  if (EMAIL_WORDS.test(matched) && !PHONE_WORDS.test(matched)) return { channel: "email", assumed: false };
+  if (PHONE_WORDS.test(matched)) return { channel: "phone", assumed: false };
+  const sentenceEmail = EMAIL_WORDS.test(sentence);
+  const sentencePhone = PHONE_WORDS.test(sentence);
+  if (sentenceEmail && !sentencePhone) return { channel: "email", assumed: false };
+  if (sentencePhone) return { channel: "phone", assumed: false };
+  return { channel: MAILING_GENERIC.test(matched) ? "email" : "phone", assumed: true };
+}
+
+export function channelOf(matched: string, sentence = ""): DncChannel {
+  return classifyChannel(matched, sentence).channel;
 }
 
 export interface DncFinding {
   channel: DncChannel;
+  /** True when the words did not name a channel: the reviewer confirms which one. */
+  channelAssumed: boolean;
   utteranceId: number;
   startOffset: number;
   endOffset: number;
@@ -226,14 +245,17 @@ function scanUtterance(u: Utterance): DncFinding | null {
     const endOffset = (map[h.to - 1] ?? u.text.length - 1) + 1;
     const before = wordsBefore(u, startOffset, 6, "clause");
     if (dncLooksNegated(before, h.negation)) continue;
+    const quote = sentenceAround(u.text, startOffset, endOffset);
+    const klass = classifyChannel(norm.slice(h.from, h.to), normalizeMapped(quote).norm);
     return {
-      channel: channelOf(norm.slice(h.from, h.to)),
+      channel: klass.channel,
+      channelAssumed: klass.assumed,
       utteranceId: u.id,
       startOffset,
       endOffset,
       startSec: u.startSec,
       role: u.role,
-      quote: sentenceAround(u.text, startOffset, endOffset),
+      quote,
       patternId: h.id,
       fingerprint: `dnc:${u.id}:${startOffset}`,
     };

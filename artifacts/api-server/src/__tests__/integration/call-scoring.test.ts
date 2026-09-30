@@ -1165,6 +1165,108 @@ describe("review fixes: a confirmed stop request blocks email too", () => {
   });
 });
 
+describe("review fixes: email opt-outs are atomic", () => {
+  it("two parallel calls for the same address make one row, and exactly one reports it was newly added", async () => {
+    const { recordEmailOptOut } = await import("../../lib/compliance/optOut");
+    const email = `Race-${randomUUID().slice(0, 8)}@Example.test`;
+    const c = await seedContact(handle.db, { orgId: org.id, firstName: "Race", lastName: "Mail", email });
+    const run = (addr: string) => handle.db.transaction((tx) => recordEmailOptOut(tx as never, { orgId: org.id, contactId: c.id, email: addr, source: "call_review" }));
+    const [a, b] = await Promise.all([run(email), run(email.toLowerCase())]);
+    expect([a.alreadyOnList, b.alreadyOnList].sort()).toEqual([false, true]);
+    const rows = (await handle.db.select().from(schema.optOutsTable).where(eq(schema.optOutsTable.orgId, org.id))).filter((o) => o.channel === "email" && o.email?.toLowerCase() === email.toLowerCase());
+    expect(rows).toHaveLength(1);
+  });
+
+  it("the database refuses a second email opt-out that differs only in case, and the other writers tolerate that", async () => {
+    const email = `dupe-${randomUUID().slice(0, 8)}@example.test`;
+    await handle.db.insert(schema.optOutsTable).values({ id: randomUUID(), orgId: org.id, email, channel: "email", source: "unsubscribe_link" });
+    await expect(
+      handle.db.insert(schema.optOutsTable).values({ id: randomUUID(), orgId: org.id, email: email.toUpperCase(), channel: "email", source: "complaint" }),
+    ).rejects.toThrow();
+    // Same statement shape the unsubscribe route and the complaint handler now use.
+    await handle.db.insert(schema.optOutsTable).values({ id: randomUUID(), orgId: org.id, email: email.toUpperCase(), channel: "email", source: "complaint" }).onConflictDoNothing();
+    const rows = (await handle.db.select().from(schema.optOutsTable).where(eq(schema.optOutsTable.orgId, org.id))).filter((o) => o.email?.toLowerCase() === email);
+    expect(rows).toHaveLength(1);
+    // The same address in another org is independent.
+    await handle.db.insert(schema.optOutsTable).values({ id: randomUUID(), orgId: otherOrg.id, email, channel: "email", source: "complaint" });
+  });
+});
+
+describe("review fixes: the email coupling is visible and optional; ambiguous channels are chosen", () => {
+  const resolve = (userId: string, findingId: string, body: Record<string, unknown>) =>
+    request(app).post(`/api/call-scoring/dnc-review/${findingId}/resolve`).set(withAuth(userId)).send(body);
+  async function make(line: string, phone: string, extra: Record<string, unknown> = {}) {
+    const email = `couple-${randomUUID().slice(0, 8)}@example.test`;
+    const c = await seedContact(handle.db, { orgId: org.id, firstName: "Couple", lastName: "Test", email });
+    await setPhone(c.id, phone);
+    const t = await createScored(transcriptText([line]), { contactId: c.id, ...extra });
+    const [f] = await handle.db
+      .select()
+      .from(schema.callScoreFindingsTable)
+      .where(and(eq(schema.callScoreFindingsTable.transcriptId, t.transcriptId), eq(schema.callScoreFindingsTable.kind, "dnc")));
+    return { c, email, t, findingId: f!.id };
+  }
+  const optOutRows = async (email: string) =>
+    (await handle.db.select().from(schema.optOutsTable).where(eq(schema.optOutsTable.orgId, org.id))).filter((o) => o.channel === "email" && o.email?.toLowerCase() === email.toLowerCase());
+  const auditChanges = async (transcriptId: string) => {
+    await settle();
+    const rows = (await handle.db.select().from(schema.auditLogTable).where(eq(schema.auditLogTable.resourceId, transcriptId))).filter((a) => a.action === "call_dnc_opt_out");
+    return rows.map((r) => r.changes as Record<string, unknown>);
+  };
+
+  it("shows a masked email for the client and never the full address", async () => {
+    const { c, email, t } = await make("Customer: Stop calling me.", "(310) 555-0801");
+    const q = await request(app).get(`/api/call-scoring/dnc-review?status=all&transcriptId=${t.transcriptId}`).set(withAuth(admin.id)).expect(200);
+    expect(q.body.items[0].contact.maskedEmail).toBe(`c***@${email.split("@")[1]}`);
+    expect(JSON.stringify(q.body)).not.toContain(email);
+    expect(q.body.items[0].contact.id).toBe(c.id);
+  });
+
+  it("alsoOptOutEmail:false records the phone only, and the audit row records the choice", async () => {
+    const { c, email, t, findingId } = await make("Customer: Stop calling me.", "(310) 555-0802");
+    const res = await resolve(admin.id, findingId, { action: "add_opt_out", phoneSource: "contact", alsoOptOutEmail: false });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.optOut.emailsRecorded).toBeUndefined();
+    expect(await optOutRows(email)).toHaveLength(0);
+    const [row] = await handle.db.select().from(schema.contactsTable).where(eq(schema.contactsTable.id, c.id));
+    expect(row!.optOutSms).toBe(true);
+    expect(row!.optOutEmail).toBe(false);
+    const [changes] = await auditChanges(t.transcriptId);
+    expect(changes).toMatchObject({ alsoOptOutEmailChoice: false, emailAlsoRecorded: false });
+    expect(JSON.stringify(changes)).not.toContain(email);
+  });
+
+  it("alsoOptOutEmail:true, or omitted, blocks both (the safe default)", async () => {
+    const one = await make("Customer: Stop calling me.", "(310) 555-0803");
+    const r1 = await resolve(admin.id, one.findingId, { action: "add_opt_out", phoneSource: "contact", alsoOptOutEmail: true });
+    expect(r1.body.optOut.emailsRecorded).toBe(1);
+    expect(await optOutRows(one.email)).toHaveLength(1);
+    const two = await make("Customer: Stop calling me.", "(310) 555-0804");
+    const r2 = await resolve(admin.id, two.findingId, { action: "add_opt_out", phoneSource: "contact" });
+    expect(r2.body.optOut.emailsRecorded).toBe(1);
+    expect((await auditChanges(two.t.transcriptId))[0]).toMatchObject({ alsoOptOutEmailChoice: true, emailAlsoRecorded: true });
+  });
+
+  it("wording that names no channel is flagged as assumed and the reviewer's explicit channel is honoured", async () => {
+    const a = await make("Customer: Please unsubscribe me from your list.", "(310) 555-0805");
+    const q = await request(app).get(`/api/call-scoring/dnc-review?status=all&transcriptId=${a.t.transcriptId}`).set(withAuth(admin.id)).expect(200);
+    expect(q.body.items[0]).toMatchObject({ channel: "email", channelAssumed: true });
+    expect(q.body.items[0].numbers.length).toBeGreaterThan(0); // the reviewer can still switch to phone
+    // Chosen as phone: the phone is added (and, by default, the email too).
+    const phone = await resolve(admin.id, a.findingId, { action: "add_opt_out", channel: "phone", phoneSource: "contact" });
+    expect(phone.status, JSON.stringify(phone.body)).toBe(200);
+    expect(phone.body.optOut.phonesRecorded).toBe(1);
+    expect((await auditChanges(a.t.transcriptId))[0]).toMatchObject({ channelChosenByReviewer: true });
+
+    // Default channel (email) works with no phone at all.
+    const b = await make("Customer: Please unsubscribe me from your list.", "(310) 555-0806");
+    const email = await resolve(admin.id, b.findingId, { action: "add_opt_out", channel: "email" });
+    expect(email.status, JSON.stringify(email.body)).toBe(200);
+    expect(email.body.optOut).toMatchObject({ channel: "email", emailsRecorded: 1, phonesRecorded: 0 });
+    expect(await optOutRows(b.email)).toHaveLength(1);
+  });
+});
+
 describe("review fixes: history survives a hard delete of the contact it references", () => {
   it("allows the ON DELETE SET NULL update but nothing else", async () => {
     const c = await seedContact(handle.db, { orgId: org.id, firstName: "Gone", lastName: "Soon" });
@@ -1271,6 +1373,16 @@ describe("bulk import (look-back)", () => {
     if (manifest !== undefined) r = r.attach("manifest", Buffer.from(manifest), "manifest.csv");
     return r;
   }
+
+  it("counts manifest agents that are ambiguous or not found, and files with warnings", async () => {
+    await seedAgent(handle.db, { orgId: org.id, firstName: "Twin", lastName: "Agent", email: `twin1-${randomUUID().slice(0, 6)}@agency.example` });
+    await seedAgent(handle.db, { orgId: org.id, firstName: "Twin", lastName: "Agent", email: `twin2-${randomUUID().slice(0, 6)}@agency.example` });
+    const files = [file("a1.txt", transcriptText()), file("a2.txt", transcriptText()), file("a3.txt", transcriptText()), file("a4.txt", transcriptText())];
+    const manifest = ["filename,agent", "a1.txt,Twin Agent", "a2.txt,Nobody Here", "a3.txt,Dana Brooks", "a4.txt,"].join("\n");
+    const res = await importReq(admin.id, files, manifest);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.summary).toMatchObject({ scored: 4, agentAmbiguousName: 1, agentNotFound: 1, filesWithWarnings: 2 });
+  });
 
   it("scores each file, applies the manifest, reports per-file results and a DNC summary, and adds no opt-outs", async () => {
     const before = await handle.db.select().from(schema.optOutsTable).where(eq(schema.optOutsTable.orgId, org.id));

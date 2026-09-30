@@ -107,6 +107,7 @@ export interface PhoneCandidateRow {
   first: string | null;
   last: string | null;
   phone: string | null;
+  email: string | null;
 }
 
 /**
@@ -131,6 +132,7 @@ export async function matchContactsByPhoneKeys(
       first: contactsTable.firstName,
       last: contactsTable.lastName,
       phone: contactsTable.phone,
+      email: contactsTable.email,
       key: sql<string>`${keyed}`.as("match_key"),
       rn: sql<number>`row_number() OVER (PARTITION BY ${keyed} ORDER BY ${contactsTable.id})`.as("rn"),
     })
@@ -138,13 +140,13 @@ export async function matchContactsByPhoneKeys(
     .where(and(eq(contactsTable.orgId, orgId), sql`${contactsTable.deletedAt} IS NULL`, inArray(keyed, usable)))
     .as("ranked");
   const rows = await handle
-    .select({ id: ranked.id, first: ranked.first, last: ranked.last, phone: ranked.phone, key: ranked.key })
+    .select({ id: ranked.id, first: ranked.first, last: ranked.last, phone: ranked.phone, email: ranked.email, key: ranked.key })
     .from(ranked)
     .where(sql`${ranked.rn} <= ${MAX_PHONE_CANDIDATES + 1}`)
     .orderBy(ranked.key, ranked.id);
   for (const r of rows) {
     const e = out.get(r.key) ?? { candidates: [], more: false };
-    if (e.candidates.length < MAX_PHONE_CANDIDATES) e.candidates.push({ id: r.id, first: r.first, last: r.last, phone: r.phone });
+    if (e.candidates.length < MAX_PHONE_CANDIDATES) e.candidates.push({ id: r.id, first: r.first, last: r.last, phone: r.phone, email: r.email });
     else e.more = true;
     out.set(r.key, e);
   }
@@ -323,6 +325,7 @@ export async function persistScore(
         coaching: null,
         patternId: d.patternId,
         channel: d.channel,
+        channelAssumed: d.channelAssumed,
       }),
     });
   }

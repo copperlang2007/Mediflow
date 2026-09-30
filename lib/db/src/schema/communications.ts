@@ -155,6 +155,10 @@ export const optOutsTable = pgTable(
       t.phone,
       t.channel,
     ),
+    // One email opt-out per (org, address, case-insensitive) (migration 0063).
+    uniqueIndex("opt_outs_org_email_channel_unique")
+      .on(t.orgId, sql`lower(${t.email})`, t.channel)
+      .where(sql`${t.channel} = 'email' AND ${t.email} IS NOT NULL`),
     // Format-independent opt-out matching (migration 0051).
     index("opt_outs_phone_last10_channel_idx").on(
       sql`(right(regexp_replace(coalesce(${t.phone}, ''), '[^0-9]', '', 'g'), 10))`,

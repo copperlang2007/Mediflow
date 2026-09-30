@@ -45,6 +45,8 @@ export interface DncCandidate {
   id: string;
   name: string;
   phoneLast4: string | null;
+  /** Masked (first letter and domain only). */
+  maskedEmail: string | null;
 }
 
 /** A number the reviewer may confirm. Only the last four digits are ever sent to the browser. */
@@ -68,7 +70,7 @@ export interface DncQueueItem {
   callDate: string | null;
   externalRef: string | null;
   speakerMode: string;
-  contact: { id: string; name: string; phoneLast4: string | null } | null;
+  contact: { id: string; name: string; phoneLast4: string | null; maskedEmail: string | null } | null;
   contactMatch: string;
   /** Contacts sharing the transcript's phone number, when it was ambiguous (bounded). */
   candidates: DncCandidate[];
@@ -76,12 +78,22 @@ export interface DncQueueItem {
   moreCandidates: boolean;
   /** "email" when the client asked to stop EMAIL only: it is resolved through the email opt-out and needs a linked client with an email. */
   channel: "phone" | "email";
+  /** True when the words did not name a channel, so the reviewer confirms which one. */
+  channelAssumed: boolean;
   /** For email requests: whether the linked client has an email address on file (never the address itself). */
   emailOnFile: boolean | null;
   /** The numbers on file for this request; the reviewer confirms one (or types another). */
   numbers: DncNumberOption[];
   agent: { id: string; name: string } | null;
   resolution: { action: DncAction; note: string | null; reviewerName: string | null; at: string } | null;
+}
+
+/** "jane.doe@example.com" -> "j***@example.com". The full address is never sent to the browser. */
+export function maskEmail(email: string | null | undefined): string | null {
+  const e = (email ?? "").trim();
+  const at = e.lastIndexOf("@");
+  if (at < 1) return null;
+  return `${e[0]}***${e.slice(at)}`;
 }
 
 const last4 = (phone: string | null | undefined): string | null => {
@@ -199,11 +211,12 @@ export async function listDncQueue(
   const matches = await matchContactsByPhoneKeys(handle, args.orgId, [...ambiguousKeys]);
 
   const items: DncQueueItem[] = rows.map((r) => {
-    const payload = open<{ quote: string | null; channel?: "phone" | "email" }>(r.finding.evidenceEncrypted);
+    const payload = open<{ quote: string | null; channel?: "phone" | "email"; channelAssumed?: boolean }>(r.finding.evidenceEncrypted);
     const channel: "phone" | "email" = payload?.channel === "email" ? "email" : "phone";
+    const channelAssumed = payload?.channelAssumed === true;
     const resolution = resolutions.get(`${r.finding.transcriptId}|${r.finding.fingerprint}`);
     const c = r.contactId ? contacts.get(r.contactId) : undefined;
-    const contact: DncQueueItem["contact"] = c ? { id: c.id, name: fullName(c.first, c.last), phoneLast4: last4(c.phone) } : null;
+    const contact: DncQueueItem["contact"] = c ? { id: c.id, name: fullName(c.first, c.last), phoneLast4: last4(c.phone), maskedEmail: maskEmail(c.email) } : null;
     const tPhone = payloadPhone.get(r.finding.transcriptId) ?? null;
 
     let candidates: DncCandidate[] = [];
@@ -211,12 +224,12 @@ export async function listDncQueue(
     if (!contact && !resolution && r.contactMatch === "phone_ambiguous") {
       const key = phoneMatchKey(tPhone);
       const m = key ? matches.get(key) : undefined;
-      candidates = (m?.candidates ?? []).map((x) => ({ id: x.id, name: fullName(x.first, x.last), phoneLast4: last4(x.phone) }));
+      candidates = (m?.candidates ?? []).map((x) => ({ id: x.id, name: fullName(x.first, x.last), phoneLast4: last4(x.phone), maskedEmail: maskEmail(x.email) }));
       moreCandidates = m?.more ?? false;
     }
 
     const numbers: DncNumberOption[] = [];
-    if (channel === "phone" && !resolution) {
+    if ((channel === "phone" || channelAssumed) && !resolution) {
       const tKey = phoneMatchKey(tPhone);
       if (tKey && tKey.length >= 10) numbers.push({ source: "transcript", last4: last4(tPhone) });
       const cKey = phoneMatchKey(c?.phone ?? null);
@@ -245,7 +258,8 @@ export async function listDncQueue(
       candidates,
       moreCandidates,
       channel,
-      emailOnFile: channel === "email" ? Boolean(c?.email && c.email.trim()) : null,
+      channelAssumed,
+      emailOnFile: c ? Boolean(c.email && c.email.trim()) : null,
       numbers,
       agent: a ? { id: a.id, name: fullName(a.first, a.last) } : null,
       resolution: resolution
@@ -292,6 +306,10 @@ export async function resolveDncFinding(args: {
   phoneSource?: PhoneSource | undefined;
   /** The number itself, when phoneSource is "typed". */
   phone?: string | undefined;
+  /** The reviewer's explicit channel when the words did not name one. Otherwise the detected channel is used. */
+  channel?: "phone" | "email" | undefined;
+  /** Phone requests only: also add the owning client's email to the email opt-out list. Default true (fail-safe). */
+  alsoOptOutEmail?: boolean | undefined;
 }): Promise<ResolveResult> {
   const { orgId } = args;
   const [finding] = await db
@@ -384,7 +402,8 @@ export async function resolveDncFinding(args: {
 
   // ---- add_opt_out: never automatic, always a person's click ----------------
   const findingPayload = open<{ channel?: "phone" | "email" }>(finding.evidenceEncrypted);
-  if (findingPayload?.channel === "email") {
+  const effectiveChannel: "phone" | "email" = args.channel ?? (findingPayload?.channel === "email" ? "email" : "phone");
+  if (effectiveChannel === "email") {
     // An email-only request ("stop emailing me"): a phone opt-out would leave the
     // email flowing, so this goes through the email opt-out and needs a linked client.
     const wantedId = args.contactId ?? transcript.contactId ?? null;
@@ -429,7 +448,7 @@ export async function resolveDncFinding(args: {
           .where(and(eq(callTranscriptsTable.id, transcript.id), eq(callTranscriptsTable.orgId, orgId)));
       }
       // Never the quote, the address or the note.
-      await tx.insert(auditLogTable).values(audit("call_dnc_opt_out", { via: "call_review", channel: "email", contactId: target.id, emailsRecorded: 1, alreadyOnList: alreadyOnList ? 1 : 0 }));
+      await tx.insert(auditLogTable).values(audit("call_dnc_opt_out", { via: "call_review", channel: "email", channelChosenByReviewer: Boolean(args.channel), contactId: target.id, emailsRecorded: 1, alreadyOnList: alreadyOnList ? 1 : 0 }));
       return {
         ok: true,
         status: "resolved",
@@ -465,10 +484,10 @@ export async function resolveDncFinding(args: {
     const candidates: DncCandidate[] = [];
     if (m?.candidateIds.length) {
       const rows = await db
-        .select({ id: contactsTable.id, first: contactsTable.firstName, last: contactsTable.lastName, phone: contactsTable.phone })
+        .select({ id: contactsTable.id, first: contactsTable.firstName, last: contactsTable.lastName, phone: contactsTable.phone, email: contactsTable.email })
         .from(contactsTable)
         .where(and(eq(contactsTable.orgId, orgId), inArray(contactsTable.id, m.candidateIds)));
-      for (const c of rows) candidates.push({ id: c.id, name: fullName(c.first, c.last), phoneLast4: last4(c.phone) });
+      for (const c of rows) candidates.push({ id: c.id, name: fullName(c.first, c.last), phoneLast4: last4(c.phone), maskedEmail: maskEmail(c.email) });
     }
     return {
       ok: false,
@@ -519,7 +538,8 @@ export async function resolveDncFinding(args: {
     // opt-out list in the same transaction.
     const linkedEmail = linked?.email?.trim() || null;
     let emailRecorded = false;
-    if (linked && linkedEmail) {
+    const wantsEmail = args.alsoOptOutEmail !== false;
+    if (linked && linkedEmail && wantsEmail) {
       await recordEmailOptOut(tx, { orgId, contactId: linked.id, email: linkedEmail, source: "call_review" });
       emailRecorded = true;
     }
@@ -532,7 +552,7 @@ export async function resolveDncFinding(args: {
     }
     await tx
       .insert(auditLogTable)
-      .values(audit("call_dnc_opt_out", { via: "call_review", phoneSource: args.phoneSource, contactId: linked?.id ?? null, phonesRecorded: 1, emailAlsoRecorded: emailRecorded, alreadyOnList }));
+      .values(audit("call_dnc_opt_out", { via: "call_review", phoneSource: args.phoneSource, contactId: linked?.id ?? null, phonesRecorded: 1, alsoOptOutEmailChoice: wantsEmail, emailAlsoRecorded: emailRecorded, channelChosenByReviewer: Boolean(args.channel), alreadyOnList }));
     return {
       ok: true,
       status: "resolved",

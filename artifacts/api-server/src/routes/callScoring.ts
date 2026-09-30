@@ -406,6 +406,8 @@ const ResolveBody = z.object({
   note: optional(z.string().trim().max(2000)),
   contactId: optional(z.string().trim().max(100)),
   phoneSource: optional(z.enum(["transcript", "contact", "typed"])),
+  channel: optional(z.enum(["phone", "email"])),
+  alsoOptOutEmail: boolField,
   phone: phoneField,
 });
 
@@ -676,6 +678,9 @@ router.post(
 
     const results: ImportFileResult[] = [];
     const used = new Set<string>();
+    let agentAmbiguousName = 0;
+    let agentNotFound = 0;
+    const ambiguousAgentKeys = new Set<string>();
     for (const f of transcripts) {
       const filename = f.originalname.slice(0, 200);
       const warnings: string[] = [];
@@ -696,7 +701,14 @@ router.post(
       if (m?.agent) {
         const hit = agentByKey.get(m.agent.trim().toLowerCase());
         if (hit) agentId = hit;
-        else warnings.push(hit === null ? "The agent in the manifest matches more than one person, so no agent was set." : "The agent in the manifest was not found, so no agent was set.");
+        else if (hit === null) {
+          agentAmbiguousName++;
+          ambiguousAgentKeys.add(m.agent.trim().toLowerCase());
+          warnings.push("The agent in the manifest matches more than one person, so no agent was set.");
+        } else {
+          agentNotFound++;
+          warnings.push("The agent in the manifest was not found, so no agent was set.");
+        }
       }
       let callDate: Date | null = null;
       if (m?.date) {
@@ -777,6 +789,14 @@ router.post(
       }
     }
 
+    if (agentAmbiguousName > 0) {
+      // Ids of the agents that share the ambiguous name/email key: no names, emails or file names.
+      const conflictingAgentIds = agentRows
+        .filter((ag) => [ag.id.toLowerCase(), (ag.email ?? "").toLowerCase(), `${ag.first} ${ag.last}`.trim().toLowerCase()].some((k) => ambiguousAgentKeys.has(k)))
+        .map((ag) => ag.id);
+      logger.warn({ orgId: authReq.orgId, agentAmbiguousName, conflictingAgentIds }, "call scoring import: manifest agent matched more than one agent");
+    }
+
     const scored = results.filter((r) => r.status === "scored");
     const summary = {
       files: results.length,
@@ -788,6 +808,9 @@ router.post(
         fail: scored.filter((r) => r.compliance === "fail").length,
         review: scored.filter((r) => r.compliance === "review").length,
       },
+      filesWithWarnings: results.filter((r) => (r.warnings?.length ?? 0) > 0).length,
+      agentAmbiguousName,
+      agentNotFound,
       possibleDncFiles: scored.filter((r) => (r.dncFlags ?? 0) > 0).length,
       possibleDncRequests: scored.reduce((n, r) => n + (r.dncFlags ?? 0), 0),
       unlabelledSpeakers: scored.filter((r) => r.speakerMode === "unlabelled").length,

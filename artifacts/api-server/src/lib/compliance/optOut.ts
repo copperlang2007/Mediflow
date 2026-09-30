@@ -49,27 +49,19 @@ export async function recordEmailOptOut(
   handle: AnyDb,
   opts: { orgId: string; contactId: string; email: string; source: string },
 ): Promise<{ alreadyOnList: boolean }> {
-  const [existing] = await handle
-    .select({ id: optOutsTable.id })
-    .from(optOutsTable)
-    .where(
-      and(
-        eq(optOutsTable.orgId, opts.orgId),
-        eq(optOutsTable.channel, "email"),
-        sql`lower(${optOutsTable.email}) = lower(${opts.email})`,
-      ),
-    )
-    .limit(1);
-  if (!existing) {
-    await handle
-      .insert(optOutsTable)
-      .values({ id: randomUUID(), orgId: opts.orgId, email: opts.email, channel: "email", source: opts.source });
-  }
+  // Atomic: the partial unique index on (org, lower(email)) for the email
+  // channel makes concurrent calls insert exactly one row; whoever gets a row
+  // back is the one that added it.
+  const inserted = await handle
+    .insert(optOutsTable)
+    .values({ id: randomUUID(), orgId: opts.orgId, email: opts.email, channel: "email", source: opts.source })
+    .onConflictDoNothing()
+    .returning({ id: optOutsTable.id });
   await handle
     .update(contactsTable)
     .set({ optOutEmail: true })
     .where(and(eq(contactsTable.id, opts.contactId), eq(contactsTable.orgId, opts.orgId)));
-  return { alreadyOnList: Boolean(existing) };
+  return { alreadyOnList: inserted.length === 0 };
 }
 
 /** Record a do-not-contact request for `phone` in `orgId`. Idempotent. */

@@ -438,15 +438,29 @@ describe("an AI 'not applicable' on a critical item needs a person", () => {
 });
 
 describe("do-not-contact detector: channel", () => {
-  it("labels email-only requests as email and everything else as phone", () => {
-    const at = (text: string) => detectDncRequests(tx([utt(0, 1, "agent", "Hello."), utt(1, 6, "client", text)]))[0];
-    expect(at("Please stop emailing me.")?.channel).toBe("email");
-    expect(at("No more emails please.")?.channel).toBe("email");
-    expect(at("Remove my email from your list.")?.channel).toBe("email");
-    expect(at("Stop calling me.")?.channel).toBe("phone");
-    expect(at("Please stop texting me.")?.channel).toBe("phone");
-    expect(at("Do not contact me again.")?.channel).toBe("phone");
-    expect(at("Stop calling and emailing me.")?.channel).toBe("phone");
+  const at = (text: string) => detectDncRequests(tx([utt(0, 1, "agent", "Hello."), utt(1, 6, "client", text)]))[0];
+  it("labels explicit email requests as email and explicit phone requests as phone", () => {
+    for (const t of ["Please stop emailing me.", "No more emails please.", "Remove my email from your list.", "Please opt out of your emails."]) {
+      expect(at(t), t).toMatchObject({ channel: "email", channelAssumed: false });
+    }
+    for (const t of ["Stop calling me.", "Please stop texting me.", "Stop calling and emailing me."]) {
+      expect(at(t), t).toMatchObject({ channel: "phone", channelAssumed: false });
+    }
+  });
+
+  it("classifies unsubscribe / opt-out wording as email, but flags it as assumed so the reviewer chooses", () => {
+    for (const t of ["Please unsubscribe me from your list.", "Just opt me out.", "Unsubscribe."]) {
+      expect(at(t), t).toMatchObject({ channel: "email", channelAssumed: true });
+    }
+  });
+
+  it("a phone word in the same sentence makes an unsubscribe / opt-out a phone request", () => {
+    expect(at("Unsubscribe me, I am tired of the calls.")).toMatchObject({ channel: "phone", channelAssumed: false });
+    expect(at("Opt me out of the texts.")).toMatchObject({ channel: "phone", channelAssumed: false });
+  });
+
+  it("a bare 'do not contact me' stays a phone request and is marked assumed (never dropped)", () => {
+    expect(at("Do not contact me again.")).toMatchObject({ channel: "phone", channelAssumed: true });
   });
 });
 

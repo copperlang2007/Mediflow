@@ -256,7 +256,7 @@ export async function applyEmailComplaint(opts: {
           email,
           channel: "email",
           source: "complaint",
-        });
+        }).onConflictDoNothing();
       }
     }
 

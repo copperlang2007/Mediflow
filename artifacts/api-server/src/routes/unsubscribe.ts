@@ -100,7 +100,7 @@ router.post(UNSUBSCRIBE_PATH, async (req: Request, res: Response): Promise<void>
         email: contact.email,
         channel: "email",
         source: "unsubscribe_link",
-      });
+      }).onConflictDoNothing();
       await tx.insert(auditLogTable).values({
         id: randomUUID(),
         orgId: claims.orgId,

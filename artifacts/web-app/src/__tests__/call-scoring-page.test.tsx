@@ -619,6 +619,71 @@ describe("Possible do-not-contact requests tab", () => {
     expect(within(row).getByLabelText("Search for the client")).toBeInTheDocument();
   });
 
+  it("shows the email coupling with a masked address, checked by default, and unchecking skips it", async () => {
+    let posted: Call | null = null;
+    setup({
+      "GET /api/call-scoring/dnc-review": () => ({
+        items: [dncItem({ contact: { id: "c1", name: "Uma Unique", phoneLast4: "0111", maskedEmail: "u***@example.com" }, emailOnFile: true })],
+        total: 1,
+        note: "n",
+      }),
+      "POST /api/call-scoring/dnc-review/d1/resolve": (c) => ((posted = c), { status: "resolved", action: "add_opt_out", optOut: { phonesRecorded: 1, alreadyOnList: 0, contactId: "c1" } }),
+    });
+    renderPage();
+    await openTab();
+    const row = await screen.findByTestId("dnc-item");
+    const box = within(row).getByRole("checkbox") as HTMLInputElement;
+    expect(within(row).getByText("u***@example.com")).toBeInTheDocument();
+    expect(box.checked).toBe(true);
+    await userEvent.click(box);
+    expect(box.checked).toBe(false);
+    await userEvent.click(within(row).getByLabelText(/Number ending 0111/));
+    await userEvent.click(within(row).getByRole("button", { name: "Add to do-not-contact list" }));
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted!.body).toEqual({ action: "add_opt_out", phoneSource: "transcript", alsoOptOutEmail: false });
+  });
+
+  it("with the coupling left on, the choice is sent as true", async () => {
+    let posted: Call | null = null;
+    setup({
+      "GET /api/call-scoring/dnc-review": () => ({
+        items: [dncItem({ contact: { id: "c1", name: "Uma Unique", phoneLast4: "0111", maskedEmail: "u***@example.com" } })],
+        total: 1,
+        note: "n",
+      }),
+      "POST /api/call-scoring/dnc-review/d1/resolve": (c) => ((posted = c), { status: "resolved", action: "add_opt_out", optOut: { phonesRecorded: 1, emailsRecorded: 1, alreadyOnList: 0, contactId: "c1" } }),
+    });
+    renderPage();
+    await openTab();
+    const row = await screen.findByTestId("dnc-item");
+    await userEvent.click(within(row).getByLabelText(/Number ending 0111/));
+    await userEvent.click(within(row).getByRole("button", { name: "Add to do-not-contact list" }));
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted!.body).toEqual({ action: "add_opt_out", phoneSource: "transcript", alsoOptOutEmail: true });
+  });
+
+  it("when the words do not name a channel the reviewer chooses one, and the choice is sent", async () => {
+    let posted: Call | null = null;
+    setup({
+      "GET /api/call-scoring/dnc-review": () => ({
+        items: [dncItem({ channel: "email", channelAssumed: true, emailOnFile: true, quote: "Please unsubscribe me from your list." })],
+        total: 1,
+        note: "n",
+      }),
+      "POST /api/call-scoring/dnc-review/d1/resolve": (c) => ((posted = c), { status: "resolved", action: "add_opt_out", optOut: { phonesRecorded: 1, alreadyOnList: 0, contactId: "c1" } }),
+    });
+    renderPage();
+    await openTab();
+    const row = await screen.findByTestId("dnc-item");
+    expect(within(row).getByText(/do not say which kind of contact/)).toBeInTheDocument();
+    expect((within(row).getByLabelText("Email") as HTMLInputElement).checked).toBe(true);
+    await userEvent.click(within(row).getByLabelText("Phone calls and texts"));
+    await userEvent.click(within(row).getByLabelText(/Number ending 0111/));
+    await userEvent.click(within(row).getByRole("button", { name: "Add to do-not-contact list" }));
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted!.body).toEqual({ action: "add_opt_out", channel: "phone", phoneSource: "transcript" });
+  });
+
   it("shows an honest empty state", async () => {
     setup({ "GET /api/call-scoring/dnc-review": () => ({ items: [], total: 0, note: "n" }) });
     renderPage();
@@ -683,6 +748,9 @@ describe("Add transcripts", () => {
           unlabelledSpeakers: 1,
           needContactPick: 0,
           notLinkedToClient: 2,
+          filesWithWarnings: 1,
+          agentAmbiguousName: 1,
+          agentNotFound: 2,
           manifest: { rows: 3, unmatchedManifestRows: 0, problems: [] },
           aiReview: "Not run for bulk imports.",
           note: "n",
@@ -706,5 +774,8 @@ describe("Add transcripts", () => {
     expect(within(out).getByText("Not scored")).toBeInTheDocument();
     expect(within(out).getByText(/Audio transcription is not set up yet\./)).toBeInTheDocument();
     expect(within(out).getByText(/Not listed in the manifest/)).toBeInTheDocument();
+    expect(within(out).getByText(/2 had an agent in the manifest that was not found/)).toBeInTheDocument();
+    expect(within(out).getByText(/1 had an agent name that matches more than one person/)).toBeInTheDocument();
+    expect(within(out).getByText(/1 file has warnings/)).toBeInTheDocument();
   });
 });
