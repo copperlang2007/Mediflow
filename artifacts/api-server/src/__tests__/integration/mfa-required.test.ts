@@ -36,7 +36,7 @@ vi.mock("@workspace/db", dbF);
 vi.mock("@clerk/express", clerkF);
 vi.mock("../../lib/jobs", jobsF);
 
-import { bootTestDb, shutdownTestDb, withMfaAuth } from "../helpers/testApp";
+import { bootTestDb, shutdownTestDb, withMfaAuth, clerkTwoFactorByUser } from "../helpers/testApp";
 import { seedOrg, seedUser } from "../helpers/testDb";
 
 import type { Express } from "express";
@@ -186,6 +186,33 @@ describe("MFA required for every user (HIPAA technical safeguard)", () => {
       .get("/api/automations/rules")
       .set(withMfaAuth(agent.id, true));
     expect(res.body.error).not.toBe("mfa_required");
+  });
+
+  it("falls back to Clerk's API when the session token has no MFA claim (template missing)", async () => {
+    const { db } = await bootTestDb();
+    const enrolled = await seedUser(db, { orgId: org.id, role: "agent" });
+    const notEnrolled = await seedUser(db, { orgId: org.id, role: "agent" });
+    clerkTwoFactorByUser.set(enrolled.id, true);
+    clerkTwoFactorByUser.set(notEnrolled.id, false);
+    const absent = (id: string) => ({ ...withMfaAuth(id, false), "x-test-mfa-enrolled": "absent" });
+
+    const ok = await request(app).get("/api/agents/me/clients").set(absent(enrolled.id));
+    expect(ok.body.error).not.toBe("mfa_required");
+    const status = await request(app).get("/api/auth/status").set(absent(enrolled.id));
+    expect(status.body).toMatchObject({ mfaEnrolled: true });
+
+    const denied = await request(app).get("/api/agents/me/clients").set(absent(notEnrolled.id));
+    expect(denied.status).toBe(403);
+    expect(denied.body).toMatchObject({ error: "mfa_required" });
+  });
+
+  it("does not consult Clerk when the claim is present and false", async () => {
+    const { db } = await bootTestDb();
+    const u = await seedUser(db, { orgId: org.id, role: "agent" });
+    clerkTwoFactorByUser.set(u.id, true);
+    const res = await request(app).get("/api/agents/me/clients").set(withMfaAuth(u.id, false));
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ error: "mfa_required" });
   });
 
   it("reports MFA state on /auth/status, which stays reachable without MFA", async () => {

@@ -1,5 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
+import { clerkClient } from "@clerk/express";
 import { type AuthenticatedRequest } from "./requireAuth";
+import { logger } from "../lib/logger";
 
 // HIPAA technical safeguard: every user must have MFA enrolled. requireAuth
 // enforces it on every authenticated request; requireMfa repeats the check on
@@ -37,6 +39,45 @@ export function mfaEnrolledFromAuth(auth: unknown): boolean {
   const isOn = (v: unknown) => v === true || v === "true";
   return isOn(claims.two_factor) || isOn(claims.two_factor_authentication) || isOn(claims.mfa)
     || a.user?.twoFactorEnabled === true;
+}
+
+const MFA_CLAIMS = ["two_factor", "two_factor_authentication", "mfa"] as const;
+const LOOKUP_TTL_MS = 60_000;
+const lookupCache = new Map<string, { enrolled: boolean; at: number }>();
+let lastMissingClaimWarning = 0;
+
+/**
+ * MFA enrollment for a request. Reads the session claim; when the token
+ * carries no MFA claim at all (the Clerk session-token template is missing),
+ * asks Clerk's backend API instead, cached for a minute per user, and logs a
+ * distinct warning so a missing template is diagnosable rather than a
+ * lockout of every user. A failed lookup counts as not enrolled.
+ */
+export async function resolveMfaEnrolled(auth: unknown): Promise<boolean> {
+  if (mfaEnrolledFromAuth(auth)) return true;
+  const a = (auth ?? {}) as { userId?: unknown; sessionClaims?: unknown };
+  const claims = (a.sessionClaims ?? {}) as Record<string, unknown>;
+  if (MFA_CLAIMS.some((k) => k in claims)) return false;
+  if (typeof a.userId !== "string" || !a.userId) return false;
+
+  if (Date.now() - lastMissingClaimWarning > 10 * 60_000) {
+    lastMissingClaimWarning = Date.now();
+    logger.warn(
+      { event: "mfa_claim_absent_from_jwt" },
+      "Clerk session token has no two_factor claim; add { \"two_factor\": \"{{user.two_factor_enabled}}\" } under Sessions > Customize session token. Falling back to the Clerk API.",
+    );
+  }
+  const cached = lookupCache.get(a.userId);
+  if (cached && Date.now() - cached.at < LOOKUP_TTL_MS) return cached.enrolled;
+  try {
+    const user = await clerkClient.users.getUser(a.userId);
+    const enrolled = user.twoFactorEnabled === true;
+    lookupCache.set(a.userId, { enrolled, at: Date.now() });
+    return enrolled;
+  } catch (err) {
+    logger.error({ err, event: "mfa_lookup_failed" }, "Clerk user lookup for MFA failed");
+    return false;
+  }
 }
 
 export function requireMfa(

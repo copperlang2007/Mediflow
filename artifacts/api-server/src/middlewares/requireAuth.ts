@@ -5,7 +5,7 @@ import { db, usersTable, organizationsTable, orgSettingsTable, sessionActivityTa
 import { eq, lt } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
 import { isDemoMode, demoUserId } from "../lib/demoMode";
-import { mfaEnforced, mfaEnrolledFromAuth, MFA_REQUIRED_MESSAGE } from "./requireMfa";
+import { mfaEnforced, mfaEnrolledFromAuth, resolveMfaEnrolled, MFA_REQUIRED_MESSAGE } from "./requireMfa";
 
 // TTL cache for org session timeout settings (refresh every 60 s)
 const orgTimeoutCache = new Map<string, { timeoutMinutes: number; fetchedAt: number }>();
@@ -281,7 +281,7 @@ export const requireAuth = async (
     }
   }
 
-  const mfaEnrolled = mfaEnrolledFromAuth(auth);
+  const mfaEnrolled = mfaEnforced() ? await resolveMfaEnrolled(auth) : mfaEnrolledFromAuth(auth);
 
   const authReq = req as AuthenticatedRequest;
   authReq.userId = user.id;
