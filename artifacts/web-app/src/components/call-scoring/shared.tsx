@@ -196,6 +196,8 @@ export interface CsDncItem {
   contactMatch: string;
   candidates: Array<{ id: string; name: string; phoneLast4: string | null }>;
   moreCandidates?: boolean;
+  channel?: "phone" | "email";
+  emailOnFile?: boolean | null;
   numbers?: Array<{ source: "transcript" | "contact"; last4: string | null }>;
   agent: { id: string; name: string } | null;
   resolution: { action: string; note: string | null; reviewerName: string | null; at: string } | null;

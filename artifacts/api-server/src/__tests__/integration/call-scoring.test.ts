@@ -1017,6 +1017,191 @@ describe("review fixes: assembleEffective is linear", () => {
 });
 
 
+describe("review fixes: concurrent identical uploads score once", () => {
+  it("5 concurrent identical uploads make exactly 1 AI call and 1 row", async () => {
+    let aiCalls = 0;
+    (globalThis as { __CS_AI_CLIENT__?: unknown }).__CS_AI_CLIENT__ = {
+      chat: {
+        completions: {
+          create: async () => {
+            aiCalls++;
+            await new Promise((r) => setTimeout(r, 60));
+            return { choices: [{ message: { content: JSON.stringify({ criteria: [] }) } }] };
+          },
+        },
+      },
+    };
+    const ref = `mutex-${randomUUID()}`;
+    const text = transcriptText();
+    const results = await Promise.all(Array.from({ length: 5 }, () => post(admin.id, { text, externalRef: ref })));
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses, JSON.stringify(results.map((r) => r.body))).toEqual([201, 409, 409, 409, 409]);
+    expect(aiCalls).toBe(1);
+    const rows = (await handle.db.select().from(schema.callTranscriptsTable).where(eq(schema.callTranscriptsTable.orgId, org.id))).filter((r) => r.externalRef === ref);
+    expect(rows).toHaveLength(1);
+  });
+});
+
+describe("review fixes: email-only requests use the email opt-out", () => {
+  const resolve = (userId: string, findingId: string, body: Record<string, unknown>) =>
+    request(app).post(`/api/call-scoring/dnc-review/${findingId}/resolve`).set(withAuth(userId)).send(body);
+  async function emailRequest(extra: Record<string, unknown>) {
+    const t = await createScored(transcriptText(["Customer: Please stop emailing me."]), extra);
+    const [finding] = await handle.db
+      .select()
+      .from(schema.callScoreFindingsTable)
+      .where(and(eq(schema.callScoreFindingsTable.transcriptId, t.transcriptId), eq(schema.callScoreFindingsTable.kind, "dnc")));
+    return { ...t, findingId: finding!.id };
+  }
+  const emailOptOuts = async (email: string) =>
+    (await handle.db.select().from(schema.optOutsTable).where(eq(schema.optOutsTable.orgId, org.id))).filter((o) => o.channel === "email" && o.email?.toLowerCase() === email.toLowerCase());
+
+  it("is flagged as email, needs a linked client with an email, and records only the email opt-out", async () => {
+    const c = await seedContact(handle.db, { orgId: org.id, firstName: "Mail", lastName: "Only", email: `mail-${randomUUID().slice(0, 8)}@example.test` });
+    await setPhone(c.id, "(310) 555-0401");
+    const t = await emailRequest({ contactId: c.id, phone: "+13105550401" });
+
+    const q = await request(app).get(`/api/call-scoring/dnc-review?status=all&transcriptId=${t.transcriptId}`).set(withAuth(admin.id)).expect(200);
+    expect(q.body.items).toHaveLength(1);
+    expect(q.body.items[0]).toMatchObject({ channel: "email", emailOnFile: true, numbers: [] });
+    expect(JSON.stringify(q.body)).not.toContain(c.email!);
+
+    const res = await resolve(admin.id, t.findingId, { action: "add_opt_out" });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.optOut).toMatchObject({ channel: "email", emailsRecorded: 1, phonesRecorded: 0, contactId: c.id });
+    expect(await emailOptOuts(c.email!)).toHaveLength(1);
+    const [row] = await handle.db.select().from(schema.contactsTable).where(eq(schema.contactsTable.id, c.id));
+    expect(row!.optOutEmail).toBe(true);
+    expect(row!.optOutSms).toBe(false); // the phone was not asked to stop
+    const phoneRows = (await handle.db.select().from(schema.optOutsTable).where(eq(schema.optOutsTable.orgId, org.id))).filter((o) => o.phone === "+13105550401");
+    expect(phoneRows).toHaveLength(0);
+
+    // Idempotent, and the audit row carries no address.
+    const again = await resolve(admin.id, t.findingId, { action: "add_opt_out" });
+    expect(again.body.status).toBe("already_resolved");
+    expect(await emailOptOuts(c.email!)).toHaveLength(1);
+    await settle();
+    const audits = (await handle.db.select().from(schema.auditLogTable).where(eq(schema.auditLogTable.resourceId, t.transcriptId))).filter((a) => a.action === "call_dnc_opt_out");
+    expect(audits).toHaveLength(1);
+    expect(JSON.stringify(audits)).not.toContain(c.email!);
+    expect(JSON.stringify(audits)).not.toContain("stop emailing");
+  });
+
+  it("refuses without a linked client, and when the client has no email", async () => {
+    const t = await emailRequest({ phone: "+13105550402" });
+    const none = await resolve(admin.id, t.findingId, { action: "add_opt_out" });
+    expect(none.status).toBe(400);
+    expect(none.body.code).toBe("contact_required");
+    const noEmail = await seedContact(handle.db, { orgId: org.id, firstName: "No", lastName: "Email" });
+    const t2 = await emailRequest({ contactId: noEmail.id });
+    const res = await resolve(admin.id, t2.findingId, { action: "add_opt_out" });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("email_required");
+    // A client can be picked at resolution time.
+    const withEmail = await seedContact(handle.db, { orgId: org.id, firstName: "Has", lastName: "Email", email: `has-${randomUUID().slice(0, 8)}@example.test` });
+    const picked = await resolve(admin.id, t.findingId, { action: "add_opt_out", contactId: withEmail.id });
+    expect(picked.status, JSON.stringify(picked.body)).toBe(200);
+    expect(await emailOptOuts(withEmail.email!)).toHaveLength(1);
+  });
+});
+
+describe("review fixes: history survives a hard delete of the contact it references", () => {
+  it("allows the ON DELETE SET NULL update but nothing else", async () => {
+    const c = await seedContact(handle.db, { orgId: org.id, firstName: "Gone", lastName: "Soon" });
+    await setPhone(c.id, "(310) 555-0501");
+    const t = await createScored(transcriptText(["Customer: Do not call me again."]), { contactId: c.id, phone: "+13105550501" });
+    const [finding] = await handle.db
+      .select()
+      .from(schema.callScoreFindingsTable)
+      .where(and(eq(schema.callScoreFindingsTable.transcriptId, t.transcriptId), eq(schema.callScoreFindingsTable.kind, "dnc")));
+    const res = await request(app)
+      .post(`/api/call-scoring/dnc-review/${finding!.id}/resolve`)
+      .set(withAuth(admin.id))
+      .send({ action: "add_opt_out", phoneSource: "contact", note: "confirmed" });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const [before] = await handle.db.select().from(schema.callScoreReviewsTable).where(eq(schema.callScoreReviewsTable.transcriptId, t.transcriptId));
+    expect(before!.contactId).toBe(c.id);
+
+    // Other edits are still refused.
+    await expect(handle.pg.exec(`UPDATE call_score_reviews SET note_encrypted = NULL WHERE id = '${before!.id}'`)).rejects.toThrow(/immutable/);
+    await expect(handle.pg.exec(`UPDATE call_score_reviews SET reviewer_role = 'x' WHERE id = '${before!.id}'`)).rejects.toThrow(/immutable/);
+    await expect(handle.pg.exec(`UPDATE call_score_reviews SET contact_id = '${contactUnique.id}' WHERE id = '${before!.id}'`)).rejects.toThrow(/immutable/);
+    await expect(handle.pg.exec(`UPDATE call_scores SET score = 1 WHERE id = '${t.scoreId}'`)).rejects.toThrow(/immutable/);
+
+    // The hard delete goes through and nulls the reference.
+    await handle.db.delete(schema.contactsTable).where(eq(schema.contactsTable.id, c.id));
+    const [after] = await handle.db.select().from(schema.callScoreReviewsTable).where(eq(schema.callScoreReviewsTable.id, before!.id));
+    expect(after!.contactId).toBeNull();
+    expect(after!.verdict).toBe("opt_out_added");
+    const [tr] = await handle.db.select().from(schema.callTranscriptsTable).where(eq(schema.callTranscriptsTable.id, t.transcriptId));
+    expect(tr!.contactId).toBeNull();
+
+    // The reviewer / scorer references may be cleared the same way (and only that way).
+    await handle.pg.exec(`UPDATE call_score_reviews SET reviewer_user_id = NULL WHERE id = '${before!.id}'`);
+    await handle.pg.exec(`UPDATE call_scores SET scored_by = NULL WHERE id = '${t.scoreId}'`);
+  });
+});
+
+describe("review fixes: pass mark comes from the rubric version the call was scored under", () => {
+  it("shows no threshold and flags a version change when the checklist has changed since", async () => {
+    const t = await createScored(transcriptText());
+    const [score] = await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.id, t.scoreId));
+    const current = await request(app).get(`/api/call-scoring/transcripts/${t.transcriptId}`).set(withAuth(admin.id)).expect(200);
+    expect(current.body.score.rubric.passThreshold).toBe(80);
+    expect(current.body.score.rubric.versionChanged).toBe(false);
+    expect(current.body.score.effective.meetsStandard).not.toBeNull();
+
+    // A newer score row recorded under a version the built-in checklist no longer has.
+    await handle.db.insert(schema.callScoresTable).values({
+      ...score!,
+      id: `old-version-${randomUUID()}`,
+      rubricVersion: "1999.1",
+      createdAt: new Date(score!.createdAt.getTime() + 60_000),
+    });
+    const old = await request(app).get(`/api/call-scoring/transcripts/${t.transcriptId}`).set(withAuth(admin.id)).expect(200);
+    expect(old.body.score.rubric.version).toBe("1999.1");
+    expect(old.body.score.rubric.passThreshold).toBeNull();
+    expect(old.body.score.rubric.versionChanged).toBe(true);
+    expect(old.body.score.effective.meetsStandard).toBeNull();
+    const list = await request(app).get("/api/call-scoring/transcripts?limit=100").set(withAuth(admin.id)).expect(200);
+    expect(list.body.items.find((i: { id: string }) => i.id === t.transcriptId).meetsStandard).toBeNull();
+  });
+});
+
+describe("review fixes: shared numbers are bounded in SQL", () => {
+  it("a number shared by 120 contacts yields at most cap+1 rows and says there are more", async () => {
+    const phone = "(310) 555-0600";
+    for (let i = 0; i < 120; i++) {
+      const c = await seedContact(handle.db, { orgId: org.id, firstName: `Bulk${i}`, lastName: "Shared" });
+      await setPhone(c.id, phone);
+    }
+    const other = await seedContact(handle.db, { orgId: org.id, firstName: "Solo", lastName: "Shared" });
+    await setPhone(other.id, "(310) 555-0601");
+    // Count the rows that actually leave SQL by wrapping the driver's query call.
+    const seen: number[] = [];
+    const pg = handle.pg as unknown as { query: (...a: unknown[]) => Promise<{ rows?: unknown[] }> };
+    const original = pg.query.bind(pg);
+    pg.query = async (...a: unknown[]) => {
+      const r = await original(...a);
+      seen.push(r.rows?.length ?? 0);
+      return r;
+    };
+    let out: Awaited<ReturnType<typeof storeLib.matchContactsByPhoneKeys>>;
+    try {
+      out = await storeLib.matchContactsByPhoneKeys(handle.db as never, org.id, ["3105550600", "3105550601"]);
+    } finally {
+      pg.query = original;
+    }
+    const shared = out.get("3105550600")!;
+    expect(shared.candidates).toHaveLength(storeLib.MAX_PHONE_CANDIDATES);
+    expect(shared.more).toBe(true);
+    expect(out.get("3105550601")!.more).toBe(false);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(Math.max(...seen)).toBeGreaterThanOrEqual(storeLib.MAX_PHONE_CANDIDATES + 1);
+    expect(Math.max(...seen)).toBeLessThanOrEqual(storeLib.MAX_PHONE_CANDIDATES + 1 + 1); // shared key's cap+1 rows plus the solo contact
+  });
+});
+
 describe("bulk import (look-back)", () => {
   const file = (name: string, body: string) => ({ name, body: Buffer.from(body) });
   function importReq(userId: string, files: Array<{ name: string; body: Buffer }>, manifest?: string, fields: Record<string, string> = {}) {

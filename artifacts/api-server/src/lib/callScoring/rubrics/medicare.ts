@@ -129,13 +129,16 @@ export const medicareRubric: Rubric = {
       severity: "critical",
       kind: "required",
       evaluator: "hybrid",
-      // The confirmation must come before the agent starts on specific plans.
+      // The confirmation must come before the agent starts on SPECIFIC plans. Only
+      // statements that describe a plan's features or costs set the limit, so an
+      // opener like "our plan is to walk through your options" or "are you
+      // interested in a Humana product" does not. Kept narrow on purpose; a real
+      // premature pitch still sends the item to a person.
       mustPrecede: [
-        "(humana|aetna|united ?healthcare|uhc|wellcare|cigna|anthem|blue cross|kaiser|devoted|clover|bcbs)",
-        "(this|that|the|our|your) (plan|policy) (has|comes with|includes|offers|covers|is|would|will)",
-        "(premium|copay|co pay|deductible|out of pocket maximum|maximum out of pocket|formulary|in network|part d deductible)s? (is|are|of|would be|will be|starts|start|comes|come)",
-        "(zero|no|\\d+) (dollar )?(premium|copay|co pay)",
-        "(plan|plans) (that|which) (has|have|includes|include|covers|cover)",
+        "(humana|aetna|united ?healthcare|uhc|wellcare|cigna|anthem|blue cross|kaiser|devoted|clover|bcbs) (?:[a-z0-9]+ ){0,3}?(ppo|hmo|dsnp|snp|pdp|plan) (has|comes with|includes|offers|covers|gives|is a|is an|is the)",
+        "(this|that|the|your) (plan|policy) (has|comes with|includes|offers|covers)",
+        "(premium|copay|co pay|deductible|out of pocket maximum|maximum out of pocket|part d deductible)s? (is|are|would be|will be|starts at|of) (zero|free|only|just|\\d+)",
+        "(has|comes with|includes|with) (a )?(zero|no|\\d+) (dollar )?(premium|copay|co pay)",
       ],
       patterns: [
         "scope of (the )?appointment",

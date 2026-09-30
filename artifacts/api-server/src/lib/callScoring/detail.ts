@@ -92,6 +92,14 @@ interface ScoredFilter {
 }
 
 /**
+ * KNOWN FOLLOW-UP (performance at very large volumes, ~50K transcripts): each
+ * 500-row batch costs about six queries, because the rubric, effective
+ * compliance and open-DNC filters depend on the latest score and on human
+ * reviews, which are assembled in memory. The next step is to push those
+ * filters into SQL (latest score per transcript, review overrides and DNC
+ * resolutions as joins). Deliberately not done in this PR: correctness first,
+ * and the scan is bounded by SCAN_CEILING.
+ *
  * Newest-first transcripts that match ALL the filters, with their current and
  * effective scores. The SQL-level filters run in the query; the rubric,
  * effective-compliance and open-DNC filters depend on the latest score and on
@@ -162,7 +170,9 @@ export async function buildList(args: ListArgs & ScanOptions & { rubricId?: stri
     total: filtered.length,
     truncated,
     items: page.map(({ row, score, eff }) => {
-      const rubric = rubricFor(score.rubricId);
+      // The pass mark comes only from the rubric VERSION the call was scored under.
+      const current = rubricFor(score.rubricId);
+      const rubric = current && current.version === score.rubricVersion ? current : null;
       return {
         id: row.id,
         createdAt: row.createdAt.toISOString(),
@@ -442,8 +452,11 @@ export async function buildDetail(orgId: string, transcriptId: string, scope: Sc
         id: score.rubricId,
         version: score.rubricVersion,
         name: rubric?.name ?? score.rubricId,
-        passThreshold: rubric?.passThreshold ?? null,
+        // Only the version the score was made under supplies a pass mark. If the
+        // built-in checklist has changed since, no threshold is shown.
+        passThreshold: rubricMatches?.passThreshold ?? null,
         currentVersion: rubric?.version ?? null,
+        versionChanged: Boolean(rubric && !rubricMatches),
       },
       method: score.method,
       ai: { status: score.aiStatus, model: score.aiModel, error: score.aiError },
@@ -460,7 +473,7 @@ export async function buildDetail(orgId: string, transcriptId: string, scope: Sc
         criticalFailures: eff.effective.criticalFailures,
         needsReview: eff.effective.needsReview,
         openDnc: eff.openDnc,
-        meetsStandard: rubric ? meetsStandard(rubric, eff.effective) : null,
+        meetsStandard: rubricMatches ? meetsStandard(rubricMatches, eff.effective) : null,
       },
     },
     criteria,

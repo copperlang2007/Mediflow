@@ -62,7 +62,7 @@ You will find it in the sidebar under **Compliance > Call scoring**.
 | A critical item has not been graded | The call is **Needs review**, never a silent pass |
 | AI says "pass" but its quoted words are not in the transcript | **Needs review** |
 | AI clears a phrase the rules flagged on a critical item | **Needs review** |
-| AI says "not applicable" on a critical required item | **Needs review** |
+| AI says "not applicable" on a critical item (required or judgment) | **Needs review** until a person confirms |
 | AI is not set up, errors, or times out | Judgment items are **Needs review** |
 | The file has no agent label, so a hit (or a disclosure) can't be pinned on the agent | **Needs review**, never a failure and never a pass |
 | AI quotes words from a speaker who is not identified as the agent | **Needs review** |
@@ -83,9 +83,17 @@ identified". If there are no labels, every turn is treated as unknown and the
 score tells you so. If there are no timestamps, times are estimated from word
 counts and the score tells you that too.
 
+In a call where only some turns are labelled, the unlabelled turns are still
+searched, but anything found only there is "speaker not confirmed": it goes to a
+person and can neither pass nor fail the agent on its own. Phrases only match
+across turns that sit next to each other in time; words from different parts of
+the call are never joined into one phrase.
+
 A speaker's role comes only from that turn's own explicit role or label. A
-generic label such as "Speaker 1" never inherits a role from another turn, and a
-caption cue with no speaker tag is "unknown", not the previous speaker.
+generic label such as "Speaker 1" never inherits a role from another turn, a
+caption cue with no speaker tag is "unknown" (and is never merged with the cue
+next to it), and a plain-text line without its own label is its own unknown turn,
+not a continuation of the line above.
 
 ## Possible do-not-contact requests
 
@@ -105,6 +113,10 @@ A reviewer chooses:
   that number. If more than one client shares the number, the reviewer picks the
   right one, or searches when more share it than can be listed. Clicking twice,
   or two people clicking at once, still records exactly one opt-out.
+  A request that is about **email only** ("stop emailing me") is different: a
+  phone opt-out would not stop email, so it goes through the email opt-out. It
+  needs a linked client with an email address, adds that address to the email
+  opt-out list (source "call review") and adds no phone number.
 - **Not a request**: needs a short note saying why. Nothing is added.
 
 A transcript is linked to a client by phone number only when exactly one client
@@ -184,6 +196,13 @@ code. When you have chosen one, phase 2b can add:
 
 - One file up to 1 MB; up to 50 files per import; pasted text up to 500,000
   characters.
+- Known follow-up: at very large volumes (tens of thousands of transcripts) the
+  list scans in batches of 500 and assembles the effective result in memory. The
+  next step is to push the rubric, compliance and open-request filters into SQL.
+  It is bounded (and says so when cut off) but not built in this first version.
+- The pass mark shown for a call is the one from the checklist version it was
+  scored under. If the built-in checklist has changed since, no pass mark is
+  shown and the screen says the version changed.
 - The list and summary look at up to 5,000 transcripts that match your filters
   (newest first; filters are applied while scanning, so an old match is not
   hidden behind newer ones) and say so when they are cut off. The list and the

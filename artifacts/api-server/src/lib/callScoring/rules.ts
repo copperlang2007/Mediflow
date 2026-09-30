@@ -224,9 +224,31 @@ export function runRules(rubric: Rubric, transcript: ParsedTranscript): RuleFind
   const streams = buildStreams(transcript.utterances);
   const estimated = transcript.timing === "estimated";
   return ruleCriteria(rubric).map((c) => {
-    const { stream, unverified } = streamFor(streams, c.speaker ?? "agent");
-    return c.kind === "prohibited"
-      ? scanProhibited(c, stream, unverified, estimated)
-      : scanRequired(c, stream, unverified, estimated);
+    const want = c.speaker ?? "agent";
+    const scan = (s: SpeechStream, unverified: boolean) =>
+      c.kind === "prohibited" ? scanProhibited(c, s, unverified, estimated) : scanRequired(c, s, unverified, estimated);
+    const { stream, unverified } = streamFor(streams, want);
+    const primary = scan(stream, unverified);
+    // In a PARTLY labelled transcript the unattributed turns could be the
+    // agent's (or the client's), so they are searched too. Anything found only
+    // there is speaker-unverified and goes to a person; it never passes or fails
+    // on its own.
+    if (unverified || want === "any" || want === "unknown" || streams.unknown.isEmpty) return primary;
+    const extra = scan(streams.unknown, true);
+    return c.kind === "prohibited" ? mergeProhibited(primary, extra) : mergeRequired(primary, extra);
   });
+}
+
+function mergeProhibited(primary: RuleFinding, extra: RuleFinding): RuleFinding {
+  // A hit by an identified speaker stands as it is.
+  if (primary.violated || !extra.evidence.length) return primary;
+  const evidence = [...primary.evidence, ...extra.evidence];
+  const violated = extra.violated;
+  return { ...primary, evidence, violated, negatedOnly: evidence.length > 0 && !violated, speakerUnverified: true };
+}
+
+function mergeRequired(primary: RuleFinding, extra: RuleFinding): RuleFinding {
+  if (primary.satisfied || !extra.satisfied) return primary;
+  // Said only in unattributed speech: possibly the client. Not credit until a person confirms.
+  return { ...extra, speakerUnverified: true };
 }

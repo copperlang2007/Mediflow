@@ -22,6 +22,32 @@ import { contentDigest } from "./seal";
 import { getRubric } from "./rubrics";
 import type { ParsedTranscript, Rubric, TranscriptFormat } from "./types";
 
+/**
+ * In-process keyed mutex. Concurrent uploads of the same call queue behind the
+ * first one, so only the first pays for scoring (and the AI call); the rest
+ * re-run the duplicate check afterwards and find the winner. No database
+ * transaction is held while waiting. The unique (org_id, content_digest) index
+ * remains the guarantee across server instances.
+ */
+const keyLocks = new Map<string, Promise<void>>();
+
+async function withKeyLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const previous = keyLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => gate);
+  keyLocks.set(key, tail);
+  await previous;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (keyLocks.get(key) === tail) keyLocks.delete(key);
+  }
+}
+
 export interface Note {
   code: string;
   message: string;
@@ -166,12 +192,17 @@ export async function ingestTranscript(input: IngestInput): Promise<IngestResult
     agentId = sessionAgentId;
   }
 
+  const digest = contentDigest(parsed);
+  return withKeyLock(`${orgId}|${digest.toString("hex")}`, () => scoreAndStore());
+
+  async function scoreAndStore(): Promise<IngestResult> {
   // Same original speech already scored in this org? Do not create a second copy.
-  // (Cheap early exit; the unique index in persistScoredTranscript is the atomic guard.)
+  // (Cheap early exit, re-run by every waiter; the unique index in
+  // persistScoredTranscript is the guarantee across instances.)
   const [dup] = await db
     .select({ id: callTranscriptsTable.id })
     .from(callTranscriptsTable)
-    .where(and(eq(callTranscriptsTable.orgId, orgId), eq(callTranscriptsTable.contentDigest, contentDigest(parsed))))
+    .where(and(eq(callTranscriptsTable.orgId, orgId), eq(callTranscriptsTable.contentDigest, digest)))
     .limit(1);
   if (dup) return { kind: "duplicate", transcriptId: dup.id };
 
@@ -223,6 +254,7 @@ export async function ingestTranscript(input: IngestInput): Promise<IngestResult
     kind: "ok",
     summary: summarize(ids.transcriptId, ids.scoreId, run, parsed, contactId, contactMatch, Boolean(input.phone)),
   };
+  }
 }
 
 function summarize(

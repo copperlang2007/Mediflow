@@ -376,6 +376,7 @@ router.get(
 // Registered BEFORE /transcripts/:id-style params so "dnc-review" is never read as an id.
 const DncListQuery = z.object({
   status: z.enum(["open", "resolved", "all"]).default("open"),
+  transcriptId: optional(z.string().trim().max(100)),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).max(100_000).default(0),
 });

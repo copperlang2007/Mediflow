@@ -121,24 +121,32 @@ export async function matchContactsByPhoneKeys(
   const out = new Map<string, { candidates: PhoneCandidateRow[]; more: boolean }>();
   const usable = [...new Set(keys.filter((k) => k.length >= 10))];
   if (!usable.length) return out;
-  const rows = await handle
-    .select({ id: contactsTable.id, first: contactsTable.firstName, last: contactsTable.lastName, phone: contactsTable.phone })
+  // Bounded IN SQL: at most cap+1 rows per number come back (a window function
+  // numbers each key's contacts), so a number shared by hundreds of contacts
+  // cannot blow up the payload. The (cap+1)th row only says "there are more".
+  const keyed = sql`${phoneMatchKeySql(contactsTable.phone)}`;
+  const ranked = handle
+    .select({
+      id: contactsTable.id,
+      first: contactsTable.firstName,
+      last: contactsTable.lastName,
+      phone: contactsTable.phone,
+      key: sql<string>`${keyed}`.as("match_key"),
+      rn: sql<number>`row_number() OVER (PARTITION BY ${keyed} ORDER BY ${contactsTable.id})`.as("rn"),
+    })
     .from(contactsTable)
-    .where(
-      and(
-        eq(contactsTable.orgId, orgId),
-        sql`${contactsTable.deletedAt} IS NULL`,
-        inArray(phoneMatchKeySql(contactsTable.phone), usable),
-      ),
-    )
-    .orderBy(contactsTable.id);
+    .where(and(eq(contactsTable.orgId, orgId), sql`${contactsTable.deletedAt} IS NULL`, inArray(keyed, usable)))
+    .as("ranked");
+  const rows = await handle
+    .select({ id: ranked.id, first: ranked.first, last: ranked.last, phone: ranked.phone, key: ranked.key })
+    .from(ranked)
+    .where(sql`${ranked.rn} <= ${MAX_PHONE_CANDIDATES + 1}`)
+    .orderBy(ranked.key, ranked.id);
   for (const r of rows) {
-    const k = phoneMatchKey(r.phone);
-    if (!k) continue;
-    const e = out.get(k) ?? { candidates: [], more: false };
-    if (e.candidates.length < MAX_PHONE_CANDIDATES) e.candidates.push(r);
+    const e = out.get(r.key) ?? { candidates: [], more: false };
+    if (e.candidates.length < MAX_PHONE_CANDIDATES) e.candidates.push({ id: r.id, first: r.first, last: r.last, phone: r.phone });
     else e.more = true;
-    out.set(k, e);
+    out.set(r.key, e);
   }
   return out;
 }
@@ -314,6 +322,7 @@ export async function persistScore(
         rationale: "Wording that may be a request to stop contact. A person must confirm before anything changes.",
         coaching: null,
         patternId: d.patternId,
+        channel: d.channel,
       }),
     });
   }

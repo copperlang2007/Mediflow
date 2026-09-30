@@ -37,6 +37,39 @@ export async function isNumberOptedOutAnyOrg(
   return Boolean(row);
 }
 
+/**
+ * Record an EMAIL do-not-contact request for a contact. Idempotent: one
+ * `opt_outs` row per (org, email) on the email channel, and the contact's
+ * `opt_out_email` flag. Returns whether the email was already on the list.
+ * (A phone opt-out does not stop email; this is the email path.)
+ */
+export async function recordEmailOptOut(
+  handle: AnyDb,
+  opts: { orgId: string; contactId: string; email: string; source: string },
+): Promise<{ alreadyOnList: boolean }> {
+  const [existing] = await handle
+    .select({ id: optOutsTable.id })
+    .from(optOutsTable)
+    .where(
+      and(
+        eq(optOutsTable.orgId, opts.orgId),
+        eq(optOutsTable.channel, "email"),
+        sql`lower(${optOutsTable.email}) = lower(${opts.email})`,
+      ),
+    )
+    .limit(1);
+  if (!existing) {
+    await handle
+      .insert(optOutsTable)
+      .values({ id: randomUUID(), orgId: opts.orgId, email: opts.email, channel: "email", source: opts.source });
+  }
+  await handle
+    .update(contactsTable)
+    .set({ optOutEmail: true })
+    .where(and(eq(contactsTable.id, opts.contactId), eq(contactsTable.orgId, opts.orgId)));
+  return { alreadyOnList: Boolean(existing) };
+}
+
 /** Record a do-not-contact request for `phone` in `orgId`. Idempotent. */
 export async function recordPhoneOptOut(
   handle: AnyDb,

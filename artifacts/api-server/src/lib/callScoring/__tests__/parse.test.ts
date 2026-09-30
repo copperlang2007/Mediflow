@@ -45,8 +45,10 @@ Dana Brooks (Agent): This call is being recorded.`;
     const t = parseTranscript("[00:05] Customer: I have a question\n[00:09] Agent: Sure, how can I help?\nThis continues.", {
       filename: "call.txt",
     });
-    expect(t.utterances.map((u) => u.role)).toEqual(["client", "agent"]);
-    expect(t.utterances[1]!.text).toBe("Sure, how can I help? This continues.");
+    // A line with no label of its own is an unknown turn, never folded into the agent's turn.
+    expect(t.utterances.map((u) => u.role)).toEqual(["client", "agent", "unknown"]);
+    expect(t.utterances[1]!.text).toBe("Sure, how can I help?");
+    expect(t.utterances[2]!.text).toBe("This continues.");
     expect(t.utterances[1]!.startSec).toBe(9);
   });
 

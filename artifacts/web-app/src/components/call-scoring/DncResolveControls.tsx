@@ -48,6 +48,8 @@ export function DncResolveControls({
   candidates = [],
   moreCandidates = false,
   numbers = [],
+  channel = "phone",
+  emailOnFile = null,
   onDone,
 }: {
   findingId: string;
@@ -55,8 +57,12 @@ export function DncResolveControls({
   candidates?: Candidate[];
   moreCandidates?: boolean;
   numbers?: NumberOption[];
+  /** "email" when the client asked to stop EMAIL only (resolved through the email opt-out). */
+  channel?: "phone" | "email";
+  emailOnFile?: boolean | null;
   onDone?: () => void;
 }) {
+  const isEmail = channel === "email";
   const qc = useQueryClient();
   const [pool, setPool] = useState<Candidate[]>(candidates);
   const [pickedId, setPickedId] = useState<string>("");
@@ -74,8 +80,8 @@ export function DncResolveControls({
     return () => clearTimeout(t);
   }, [search]);
 
-  const mustPick = !contact && pool.length > 0;
-  const canSearch = !contact && (pool.length > 0 || moreCandidates);
+  const mustPick = !contact && (pool.length > 0 || isEmail);
+  const canSearch = !contact && (pool.length > 0 || moreCandidates || isEmail);
 
   const { data: found } = useQuery({
     queryKey: [...QK, "contact-search", debounced],
@@ -126,7 +132,7 @@ export function DncResolveControls({
       if (data?.code === "pick_contact" && data.candidates) {
         setPool(data.candidates);
         setProblem("More than one client uses this number. Pick the right one, then confirm.");
-      } else if (data?.code === "phone_required") {
+      } else if (data?.code === "phone_required" || data?.code === "contact_required" || data?.code === "email_required") {
         setProblem(apiMessage(err, "Confirm the number that asked for no contact."));
       } else {
         setProblem(apiMessage(err, "That did not work. Nothing was changed."));
@@ -134,16 +140,22 @@ export function DncResolveControls({
     },
   });
 
-  const needsTyped = choice === "typed";
-  const confirmReady = choice !== "" && (!needsTyped || phone.replace(/\D/g, "").length >= 7) && !(mustPick && !pickedId);
+  const needsTyped = !isEmail && choice === "typed";
+  const confirmReady = isEmail
+    ? Boolean(contact ? emailOnFile !== false : pickedId)
+    : choice !== "" && (!needsTyped || phone.replace(/\D/g, "").length >= 7) && !(mustPick && !pickedId);
 
   const confirm = () =>
-    resolve.mutate({
-      action: "add_opt_out",
-      phoneSource: choice,
-      ...(pickedId ? { contactId: pickedId } : {}),
-      ...(needsTyped ? { phone: phone.trim() } : {}),
-    });
+    resolve.mutate(
+      isEmail
+        ? { action: "add_opt_out", ...(pickedId ? { contactId: pickedId } : {}) }
+        : {
+            action: "add_opt_out",
+            phoneSource: choice,
+            ...(pickedId ? { contactId: pickedId } : {}),
+            ...(needsTyped ? { phone: phone.trim() } : {}),
+          },
+    );
 
   const pick = (c: Candidate) => {
     setPickedId(c.id);
@@ -152,7 +164,14 @@ export function DncResolveControls({
 
   return (
     <div className="space-y-3">
-      {mustPick && (
+      {isEmail && (
+        <p className="text-sm">
+          This is a request to stop <strong>email</strong>. It is added to the email opt-out list for the client's email address, and no phone number is added.
+          {contact && emailOnFile === false ? " This client has no email address on file, so there is nothing to add." : ""}
+          {!contact ? " Pick the client below first." : ""}
+        </p>
+      )}
+      {mustPick && pool.length > 0 && (
         <fieldset className="space-y-1.5">
           <legend className="text-xs font-medium text-muted-foreground">Which client is this?</legend>
           {pool.map((c) => (
@@ -199,7 +218,7 @@ export function DncResolveControls({
           )}
         </div>
       )}
-      {!dismissing && (
+      {!dismissing && !isEmail && (
         <fieldset className="space-y-1.5">
           <legend className="text-xs font-medium text-muted-foreground">Which number asked to stop? Only this number is added.</legend>
           {options.map((o) => (

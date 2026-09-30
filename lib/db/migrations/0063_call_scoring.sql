@@ -139,8 +139,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS "call_score_reviews_dnc_once_key" ON "call_sco
 
 -- The automatic result is immutable. Scores never change after insert; a
 -- finding may only have its encrypted evidence cleared (a future approved
--- purge). Reviews are append-only. Deletes stay possible so an approved purge
--- of a transcript can cascade.
+-- purge). Reviews are append-only. The ONLY other update allowed is the one
+-- PostgreSQL itself runs for `ON DELETE SET NULL` foreign keys (a contact or a
+-- user being hard-deleted): contact_id / reviewer_user_id / scored_by may go
+-- from a value to NULL and nothing else may change, so an approved contact
+-- delete is not blocked by the history that referenced it. Deletes stay
+-- possible so an approved purge of a transcript can cascade.
 CREATE OR REPLACE FUNCTION call_scoring_immutable()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -149,6 +153,17 @@ BEGIN
   IF TG_TABLE_NAME = 'call_score_findings' THEN
     IF NEW.evidence_encrypted IS NULL
        AND (to_jsonb(NEW) - 'evidence_encrypted') = (to_jsonb(OLD) - 'evidence_encrypted') THEN
+      RETURN NEW;
+    END IF;
+  ELSIF TG_TABLE_NAME = 'call_score_reviews' THEN
+    IF (to_jsonb(NEW) - 'contact_id' - 'reviewer_user_id') = (to_jsonb(OLD) - 'contact_id' - 'reviewer_user_id')
+       AND (NEW.contact_id IS NULL OR NEW.contact_id IS NOT DISTINCT FROM OLD.contact_id)
+       AND (NEW.reviewer_user_id IS NULL OR NEW.reviewer_user_id IS NOT DISTINCT FROM OLD.reviewer_user_id) THEN
+      RETURN NEW;
+    END IF;
+  ELSIF TG_TABLE_NAME = 'call_scores' THEN
+    IF (to_jsonb(NEW) - 'scored_by') = (to_jsonb(OLD) - 'scored_by')
+       AND (NEW.scored_by IS NULL OR NEW.scored_by IS NOT DISTINCT FROM OLD.scored_by) THEN
       RETURN NEW;
     END IF;
   END IF;

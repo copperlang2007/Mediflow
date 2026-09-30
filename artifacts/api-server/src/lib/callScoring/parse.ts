@@ -161,9 +161,10 @@ function parsePlainText(text: string): RawUtterance[] {
   for (const l of lines) {
     const m = LABELLED_LINE.exec(l);
     if (!m) {
-      const prev = out[out.length - 1];
-      if (prev) prev.text += ` ${l}`;
-      else out.push({ speaker: "Speaker", text: l });
+      // A line with no label of its own is an UNKNOWN turn. It is never folded
+      // into the previous labelled turn, so a client's "stop calling me" on an
+      // unlabelled line cannot become agent speech.
+      out.push({ speaker: "Speaker", text: l });
       continue;
     }
     const ts = m[1] ?? m[3];
@@ -181,6 +182,9 @@ function parsePlainText(text: string): RawUtterance[] {
 // WebVTT / SRT
 // ---------------------------------------------------------------------------
 
+/** The label of a cue that names no speaker. Such cues are never merged with a neighbour. */
+const UNTAGGED = "Speaker";
+
 function parseCaptions(text: string): RawUtterance[] {
   const out: RawUtterance[] = [];
   const blocks = text.replace(/\r/g, "").split(/\n{2,}/);
@@ -194,7 +198,7 @@ function parseCaptions(text: string): RawUtterance[] {
     let body = lines.slice(timeIdx + 1).join(" ").trim();
     // A cue with no speaker tag stays unknown: it is NOT assumed to be the same
     // speaker as the previous cue.
-    let speaker = "Speaker";
+    let speaker = UNTAGGED;
     const voice = /^<v(?:\.[^ >]*)? ([^>]+)>/.exec(body);
     if (voice) {
       speaker = voice[1]!.trim();
@@ -217,6 +221,8 @@ function mergeRuns(items: RawUtterance[]): RawUtterance[] {
     const prev = out[out.length - 1];
     if (
       prev &&
+      // Untagged cues could be different people: never join them.
+      it.speaker !== UNTAGGED &&
       prev.speaker === it.speaker &&
       typeof prev.end === "number" &&
       typeof it.start === "number" &&

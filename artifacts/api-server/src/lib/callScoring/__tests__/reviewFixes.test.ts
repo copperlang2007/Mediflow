@@ -79,6 +79,41 @@ Please stop calling me.`;
   });
 });
 
+describe("captions: untagged cues are never merged", () => {
+  it("keeps two adjacent untagged cues as two utterances and still finds the request", () => {
+    const vtt = `WEBVTT
+
+1
+00:00:01.000 --> 00:00:03.000
+Thanks for calling today.
+
+2
+00:00:03.200 --> 00:00:05.000
+Please stop calling me.`;
+    const t = parseTranscript(vtt, { filename: "x.vtt" });
+    expect(t.utterances).toHaveLength(2);
+    expect(t.utterances.map((u) => u.role)).toEqual(["unknown", "unknown"]);
+    expect(t.utterances[0]!.text).toBe("Thanks for calling today.");
+    expect(t.utterances[1]!.text).toBe("Please stop calling me.");
+    expect(detectDncRequests(t)).toHaveLength(1);
+  });
+
+  it("still merges consecutive cues that carry the same explicit speaker tag", () => {
+    const vtt = `WEBVTT
+
+1
+00:00:01.000 --> 00:00:03.000
+Agent: Thanks for calling
+
+2
+00:00:03.200 --> 00:00:05.000
+Agent: today.`;
+    const t = parseTranscript(vtt, { filename: "x.vtt" });
+    expect(t.utterances).toHaveLength(1);
+    expect(t.utterances[0]!.role).toBe("agent");
+  });
+});
+
 describe("redaction", () => {
   it("masks seven-digit local numbers and keeps 1-800-MEDICARE", () => {
     const out = redactPHI("Call me at 555-0123 or 555 0123, or read 1-800-MEDICARE and 1-800-633-4227.");
@@ -255,6 +290,42 @@ describe("scope of appointment must come before plan-specific discussion", () =>
   });
 });
 
+describe("scope of appointment: benign openers do not set the ordering limit", () => {
+  const soa = "Before we go on I need to confirm the scope of appointment, is it okay to discuss Medicare Advantage plans?";
+  const openers = [
+    "Our plan is to walk through your options together.",
+    "Are you interested in a Humana product today?",
+    "The premium is not something we set, the carriers do.",
+    "There is a zero dollar premium option out there.",
+    "Plans that have great coverage are what we look for.",
+  ];
+  for (const opener of openers) {
+    it(`passes when "${opener}" comes before a valid scope of appointment`, async () => {
+      const t = tx(
+        [utt(0, 2, "agent", "Thanks for calling, this is Dana."), utt(1, 6, "agent", opener), utt(2, 12, "agent", soa), utt(3, 20, "client", "Yes.")].map((x, i) => ({ ...x, id: i })),
+      );
+      const c = byId(await runScoring({ rubric: medicareRubric, transcript: t, ai: "off" })).scope_of_appointment!;
+      expect(c.status).toBe("pass");
+    });
+  }
+
+  const pitches = [
+    "The Humana Gold Plus plan has a zero dollar premium.",
+    "This plan has a low copay for specialists.",
+    "The premium is zero dollars and the deductible is zero.",
+    "That plan comes with a zero dollar copay for primary care.",
+  ];
+  for (const pitch of pitches) {
+    it(`a real pitch ("${pitch}") before the scope of appointment still needs review`, async () => {
+      const t = tx(
+        [utt(0, 2, "agent", "Thanks for calling, this is Dana."), utt(1, 8, "agent", pitch), utt(2, 16, "agent", soa)].map((x, i) => ({ ...x, id: i })),
+      );
+      const c = byId(await runScoring({ rubric: medicareRubric, transcript: t, ai: "off" })).scope_of_appointment!;
+      expect(c.status).toBe("needs_review");
+    });
+  }
+});
+
 describe("needs analysis is the agent's work", () => {
   const client = [
     "My doctors are Dr Patel and a specialist.",
@@ -278,6 +349,104 @@ describe("needs analysis is the agent's work", () => {
     const t = tx(client.map((c, i) => utt(i, 10 + i * 6, "unknown", c)));
     const c = byId(await runScoring({ rubric: medicareRubric, transcript: t, ai: "off" })).needs_analysis!;
     expect(c.status).toBe("needs_review");
+  });
+});
+
+describe("partly labelled transcripts: unknown turns still count as unverified", () => {
+  it("a prohibited phrase in an unattributed turn goes to a person, even though the agent is labelled", async () => {
+    const t = tx([
+      utt(0, 2, "agent", "Thanks for calling, how can I help?"),
+      utt(1, 8, "unknown", "Hi, I'm calling from Medicare about your plan."),
+      utt(2, 14, "client", "Okay."),
+    ]);
+    const c = byId(await runScoring({ rubric: medicareRubric, transcript: t, ai: "off" })).no_government_affiliation!;
+    expect(c.status).toBe("needs_review");
+    expect(c.evidence[0]!.quote.toLowerCase()).toContain("calling from medicare");
+  });
+
+  it("an identified agent's own violation still fails", async () => {
+    const t = tx([utt(0, 2, "agent", "Hi, I'm calling from Medicare about your plan."), utt(1, 8, "unknown", "Okay.")]);
+    const c = byId(await runScoring({ rubric: medicareRubric, transcript: t, ai: "off" })).no_government_affiliation!;
+    expect(c.status).toBe("fail");
+  });
+
+  it("a disclosure found only in an unattributed turn is needs review, not a pass", async () => {
+    const t = tx([
+      utt(0, 2, "agent", "Thanks for calling."),
+      utt(1, 8, "unknown", "We do not offer every plan available in your area. We represent 7 organizations which offer 42 products. Call Medicare.gov."),
+    ]);
+    const c = byId(await runScoring({ rubric: medicareRubric, transcript: t, ai: "off" })).tpmo_disclaimer!;
+    expect(c.status).toBe("needs_review");
+  });
+});
+
+describe("plain text: an unlabelled line is an unknown turn", () => {
+  it("does not turn a client's line after an agent turn into agent speech", () => {
+    const t = parseTranscript("Agent: Thanks for calling today.\nStop calling me.", { filename: "c.txt" });
+    expect(t.utterances.map((u) => u.role)).toEqual(["agent", "unknown"]);
+    expect(detectDncRequests(t)).toHaveLength(1);
+  });
+});
+
+describe("phrases never join across other turns or long gaps", () => {
+  it("'we do not' at 5s and 'offer every plan' at 90s do not form one phrase", async () => {
+    const t = tx([
+      utt(0, 5, "agent", "We do not"),
+      utt(1, 20, "client", "What?"),
+      utt(2, 90, "agent", "offer every plan available in your area."),
+    ]);
+    const f = runRules(medicareRubric, t).find((x) => x.criterionId === "tpmo_disclaimer")!;
+    expect(f.componentsFound).not.toContain("not_every_plan");
+  });
+
+  it("an intervening client turn breaks the phrase even with no time gap", async () => {
+    const t = tx([
+      utt(0, 5, "agent", "We do not offer"),
+      utt(1, 9, "client", "Hm."),
+      utt(2, 10, "agent", "every plan available in your area."),
+    ]);
+    const f = runRules(medicareRubric, t).find((x) => x.criterionId === "tpmo_disclaimer")!;
+    expect(f.componentsFound).not.toContain("not_every_plan");
+  });
+
+  it("consecutive turns close in time still join (a disclosure split across segments)", () => {
+    const t = tx([
+      utt(0, 5, "agent", "We do not offer every plan"),
+      utt(1, 10, "agent", "available in your area."),
+    ]);
+    const f = runRules(medicareRubric, t).find((x) => x.criterionId === "tpmo_disclaimer")!;
+    expect(f.componentsFound).toContain("not_every_plan");
+  });
+});
+
+describe("an AI 'not applicable' on a critical item needs a person", () => {
+  it("keeps the critical AI-only item at needs review and the call out of 'pass'", async () => {
+    const t = tx([utt(0, 2, "agent", "Thanks for calling."), utt(1, 6, "client", "Hi.")]);
+    const reviewer = reviewerWith((id) => (id === "informed_enrollment" ? { ...judged(id, "na"), scorePercent: 0 } : null));
+    const r = await runScoring({ rubric: medicareRubric, transcript: t, reviewer });
+    expect(byId(r).informed_enrollment!.status).toBe("needs_review");
+    expect(r.totals.needsReview).toContain("informed_enrollment");
+    expect(r.totals.compliance).not.toBe("pass");
+  });
+
+  it("a non-critical AI 'not applicable' is still accepted", async () => {
+    const t = tx([utt(0, 2, "agent", "Thanks for calling."), utt(1, 6, "client", "Hi.")]);
+    const reviewer = reviewerWith((id) => (id === "objection_handling" ? judged(id, "na") : null));
+    const r = await runScoring({ rubric: medicareRubric, transcript: t, reviewer });
+    expect(byId(r).objection_handling!.status).toBe("na");
+  });
+});
+
+describe("do-not-contact detector: channel", () => {
+  it("labels email-only requests as email and everything else as phone", () => {
+    const at = (text: string) => detectDncRequests(tx([utt(0, 1, "agent", "Hello."), utt(1, 6, "client", text)]))[0];
+    expect(at("Please stop emailing me.")?.channel).toBe("email");
+    expect(at("No more emails please.")?.channel).toBe("email");
+    expect(at("Remove my email from your list.")?.channel).toBe("email");
+    expect(at("Stop calling me.")?.channel).toBe("phone");
+    expect(at("Please stop texting me.")?.channel).toBe("phone");
+    expect(at("Do not contact me again.")?.channel).toBe("phone");
+    expect(at("Stop calling and emailing me.")?.channel).toBe("phone");
   });
 });
 

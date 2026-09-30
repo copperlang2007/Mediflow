@@ -59,6 +59,9 @@ export function compilePatterns(patterns: readonly string[]): RegExp[] {
   return patterns.map((p) => new RegExp(`\\b(?:${p})\\b`, "g"));
 }
 
+/** Longest silence across which two consecutive turns may still form one phrase. */
+export const MAX_JOIN_GAP_SEC = 5;
+
 interface Segment {
   utteranceId: number;
   from: number;
@@ -88,12 +91,22 @@ export class SpeechStream {
   text = "";
   private segments: Segment[] = [];
   private byId = new Map<number, Utterance>();
+  private last: Utterance | null = null;
 
   append(u: Utterance): void {
     const { norm, map } = normalizeMapped(u.text);
     this.byId.set(u.id, u);
     if (!norm) return;
-    if (this.text) this.text += " ";
+    if (this.text) {
+      // Words only join a phrase across ADJACENT turns close in time. If another
+      // speaker's turn sits between them, or there is a long gap, a hard break
+      // ("|" - which no pattern can match across) keeps "we do not" at 5s and
+      // "offer every plan" at 90s from becoming one phrase credited at 5s.
+      const prev = this.last;
+      const adjacent = prev !== null && u.id === prev.id + 1 && u.startSec - prev.endSec <= MAX_JOIN_GAP_SEC;
+      this.text += adjacent ? " " : " | ";
+    }
+    this.last = u;
     const from = this.text.length;
     this.text += norm;
     this.segments.push({ utteranceId: u.id, from, to: this.text.length, map, raw: u.text });

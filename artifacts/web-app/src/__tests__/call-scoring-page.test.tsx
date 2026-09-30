@@ -341,6 +341,25 @@ describe("Call detail", () => {
     expect(screen.getAllByText(/not legal advice and not a compliance certification/i).length).toBeGreaterThanOrEqual(2);
   });
 
+  it("the do-not-contact controls in the call view offer the same number choices as the queue", async () => {
+    let posted: Call | null = null;
+    setup({
+      "GET /api/call-scoring/transcripts/t1": () => detail(),
+      "GET /api/call-scoring/dnc-review": () => ({ items: [dncItem({ transcriptId: "t1", findingId: "d1" })], total: 1, note: "n" }),
+      "POST /api/call-scoring/dnc-review/d1/resolve": (c) => ((posted = c), { status: "resolved", action: "add_opt_out", optOut: { phonesRecorded: 1, alreadyOnList: 0, contactId: "c1" } }),
+    });
+    renderPage();
+    await userEvent.click(await screen.findByText("REC-1001"));
+    const region = await screen.findByRole("region", { name: "Possible do-not-contact requests" });
+    const confirm = await within(region).findByRole("button", { name: "Add to do-not-contact list" });
+    expect(confirm).toBeDisabled();
+    await userEvent.click(within(region).getByLabelText(/Number ending 0111 \(given with this call\)/));
+    await userEvent.click(confirm);
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted!.body).toEqual({ action: "add_opt_out", phoneSource: "transcript" });
+    expect(state.calls.some((c) => c.url.includes("dnc-review?") && c.url.includes("transcriptId=t1"))).toBe(true);
+  });
+
   it("saves a human override with a required note and never edits the automatic result", async () => {
     let saved: Call | null = null;
     setup({
@@ -563,6 +582,41 @@ describe("Possible do-not-contact requests tab", () => {
     expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "Previous" }));
     expect(await screen.findByText("Showing 51-100 of 120")).toBeInTheDocument();
+  });
+
+  it("an email-only request is resolved through the email opt-out: no number to pick, a client is required", async () => {
+    let posted: Call | null = null;
+    setup({
+      "GET /api/call-scoring/dnc-review": () => ({
+        items: [dncItem({ channel: "email", emailOnFile: true, numbers: [], quote: "Please stop emailing me." })],
+        total: 1,
+        note: "n",
+      }),
+      "POST /api/call-scoring/dnc-review/d1/resolve": (c) => ((posted = c), { status: "resolved", action: "add_opt_out", optOut: { channel: "email", emailsRecorded: 1, phonesRecorded: 0, alreadyOnList: 0, contactId: "c1" } }),
+    });
+    renderPage();
+    await openTab();
+    const row = await screen.findByTestId("dnc-item");
+    expect(within(row).getByText(/request to stop/)).toHaveTextContent(/email/);
+    expect(within(row).queryByLabelText(/Number ending/)).not.toBeInTheDocument();
+    await userEvent.click(within(row).getByRole("button", { name: "Add to do-not-contact list" }));
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted!.body).toEqual({ action: "add_opt_out" });
+  });
+
+  it("an email-only request with no client asks the reviewer to pick one first", async () => {
+    setup({
+      "GET /api/call-scoring/dnc-review": () => ({
+        items: [dncItem({ channel: "email", emailOnFile: null, numbers: [], contact: null, contactMatch: "none" })],
+        total: 1,
+        note: "n",
+      }),
+    });
+    renderPage();
+    await openTab();
+    const row = await screen.findByTestId("dnc-item");
+    expect(within(row).getByRole("button", { name: "Add to do-not-contact list" })).toBeDisabled();
+    expect(within(row).getByLabelText("Search for the client")).toBeInTheDocument();
   });
 
   it("shows an honest empty state", async () => {

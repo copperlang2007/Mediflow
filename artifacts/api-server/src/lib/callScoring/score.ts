@@ -208,7 +208,20 @@ function judgeByAi(
       "llm",
     );
   }
-  if (ai.status === "na") return result(c, "na", 0, [], ai.rationale, "llm");
+  if (ai.status === "na") {
+    // An AI alone cannot take a critical item out of the score and the gate.
+    if (c.severity === "critical") {
+      return result(
+        c,
+        "needs_review",
+        0,
+        [],
+        `The AI reviewer marked this not applicable. A person must confirm that before a critical item is left out. ${ai.rationale}`,
+        "llm",
+      );
+    }
+    return result(c, "na", 0, [], ai.rationale, "llm");
+  }
   const verified = verifyEvidence(ai, byUtt);
   const evidence = fromExpectedSpeaker(c, verified);
   if (!evidence.length) {
@@ -369,7 +382,7 @@ function judgeProhibited(
           "needs_review",
           0,
           f.evidence,
-          "Flagged phrasing found, but the file has no agent label, so it cannot be tied to the agent. A person needs to check who said it.",
+          "Flagged phrasing found in speech with no agent label, so it cannot be tied to the agent. A person needs to check who said it.",
           "rules",
         );
       }

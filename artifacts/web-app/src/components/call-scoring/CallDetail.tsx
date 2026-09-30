@@ -30,6 +30,7 @@ import {
   scoreCaveats,
   type CsCriterion,
   type CsDetail,
+  type CsDncItem,
   type CsEvidence,
 } from "./shared";
 
@@ -38,6 +39,30 @@ interface Jump {
   start: number | null;
   end: number | null;
   multi: boolean;
+}
+
+/**
+ * The same resolution controls the queue shows, with the same data (numbers on
+ * file, ambiguous clients, the email/phone channel), fetched for this call.
+ */
+function DetailDncControls({ transcriptId, findingId, contact }: { transcriptId: string; findingId: string; contact: { id: string; name: string } | null }) {
+  const { data, isLoading } = useQuery({
+    queryKey: [...QK, "dnc-for-call", transcriptId],
+    queryFn: () => customFetch<{ items: CsDncItem[] }>(`/api/call-scoring/dnc-review?status=all&transcriptId=${encodeURIComponent(transcriptId)}&limit=200`),
+  });
+  if (isLoading) return <Skeleton className="h-16 w-full" />;
+  const item = data?.items.find((i) => i.findingId === findingId);
+  return (
+    <DncResolveControls
+      findingId={findingId}
+      contact={item?.contact ?? contact}
+      candidates={item?.candidates ?? []}
+      moreCandidates={item?.moreCandidates ?? false}
+      numbers={item?.numbers ?? []}
+      channel={item?.channel ?? "phone"}
+      emailOnFile={item?.emailOnFile ?? null}
+    />
+  );
 }
 
 function OverrideControls({ transcriptId, criterion }: { transcriptId: string; criterion: CsCriterion }) {
@@ -287,7 +312,7 @@ export function CallDetail({ transcriptId, canReview, onClose }: { transcriptId:
                     <div className="mt-2">
                       {d.status === "open" ? (
                         canReview ? (
-                          <DncResolveControls findingId={d.findingId} contact={data.transcript.contact} />
+                          <DetailDncControls transcriptId={data.transcript.id} findingId={d.findingId} contact={data.transcript.contact} />
                         ) : (
                           <p className="text-sm text-muted-foreground">Waiting for a compliance reviewer.</p>
                         )

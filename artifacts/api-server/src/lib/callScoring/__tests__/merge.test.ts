@@ -119,8 +119,9 @@ describe("with an AI reviewer", () => {
     expect(by.no_government_affiliation!.status).toBe("needs_review"); // fake quote -> human
     expect(by.plan_explanation!.status).toBe("pass");
     expect(by.plan_explanation!.evidence[0]!.utteranceId).toBe(costId);
-    // A critical judgment item the AI marked N/A is still a valid N/A (judgment), not a required disclosure.
-    expect(by.informed_enrollment!.status).toBe("na");
+    // An AI cannot take a CRITICAL item out of the score and the gate by itself: a person confirms N/A.
+    expect(by.informed_enrollment!.status).toBe("needs_review");
+    expect(by.informed_enrollment!.rationale).toMatch(/person must confirm/i);
     expect(r.ai).toEqual({ status: "used", model: "fake-reviewer", error: null });
     expect(r.totals.compliance).toBe("review");
   });

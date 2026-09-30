@@ -30,7 +30,7 @@ import {
   usersTable,
   agentsTable,
 } from "@workspace/db";
-import { recordPhoneOptOut } from "../compliance/optOut";
+import { recordEmailOptOut, recordPhoneOptOut } from "../compliance/optOut";
 import { phoneMatchKey, phoneMatchKeySql } from "../compliance/phone";
 import { normalizePhone } from "../csvImport";
 import { MAX_PHONE_CANDIDATES, matchContactByPhone, matchContactsByPhoneKeys, openTranscript, type AnyDb } from "./store";
@@ -74,6 +74,10 @@ export interface DncQueueItem {
   candidates: DncCandidate[];
   /** True when more contacts share the number than `candidates` lists. */
   moreCandidates: boolean;
+  /** "email" when the client asked to stop EMAIL only: it is resolved through the email opt-out and needs a linked client with an email. */
+  channel: "phone" | "email";
+  /** For email requests: whether the linked client has an email address on file (never the address itself). */
+  emailOnFile: boolean | null;
   /** The numbers on file for this request; the reviewer confirms one (or types another). */
   numbers: DncNumberOption[];
   agent: { id: string; name: string } | null;
@@ -94,7 +98,7 @@ const fullName = (f: string | null, l: string | null) => `${f ?? ""} ${l ?? ""}`
  */
 export async function listDncQueue(
   handle: AnyDb,
-  args: { orgId: string; status: "open" | "resolved" | "all"; limit: number; offset: number },
+  args: { orgId: string; status: "open" | "resolved" | "all"; limit: number; offset: number; transcriptId?: string | undefined },
 ): Promise<{ items: DncQueueItem[]; total: number }> {
   const f = callScoreFindingsTable;
   const currentScores = sql`(SELECT DISTINCT ON (transcript_id) id FROM call_scores WHERE org_id = ${args.orgId} ORDER BY transcript_id, created_at DESC, id DESC)`;
@@ -104,6 +108,7 @@ export async function listDncQueue(
     eq(f.kind, "dnc"),
     sql`${f.scoreId} IN ${currentScores}`,
     args.status === "open" ? sql`NOT ${resolvedExists}` : args.status === "resolved" ? resolvedExists : undefined,
+    args.transcriptId ? eq(f.transcriptId, args.transcriptId) : undefined,
   );
 
   const [{ n } = { n: 0 }] = await handle.select({ n: sql<number>`count(*)::int` }).from(f).where(where);
@@ -116,7 +121,6 @@ export async function listDncQueue(
       callDate: callTranscriptsTable.callDate,
       externalRef: callTranscriptsTable.externalRef,
       speakerMode: callTranscriptsTable.speakerMode,
-      transcriptEncrypted: callTranscriptsTable.transcriptEncrypted,
     })
     .from(f)
     .innerJoin(callTranscriptsTable, and(eq(callTranscriptsTable.id, f.transcriptId), eq(callTranscriptsTable.orgId, f.orgId)))
@@ -127,12 +131,6 @@ export async function listDncQueue(
   if (!rows.length) return { items: [], total: n };
 
   const transcriptIds = [...new Set(rows.map((r) => r.finding.transcriptId))];
-  const payloadPhone = new Map<string, string | null>();
-  for (const r of rows) {
-    if (!payloadPhone.has(r.finding.transcriptId)) {
-      payloadPhone.set(r.finding.transcriptId, open<{ phone: string | null }>(r.transcriptEncrypted)?.phone ?? null);
-    }
-  }
 
   // One query for every resolution on the page (with the reviewer's name).
   const resolutionRows = await handle
@@ -155,11 +153,28 @@ export async function listDncQueue(
     );
   const resolutions = new Map(resolutionRows.map((x) => [`${x.transcriptId}|${x.fingerprint}`, x]));
 
+  // The encrypted transcript (which holds the phone given with the upload) is
+  // NOT part of the page query. It is fetched, in one batch, only for the
+  // transcripts that still have an OPEN request on this page: that is the only
+  // case where the reviewer needs to see which number to confirm. Resolved
+  // rows never decrypt it.
+  const openTranscriptIds = [
+    ...new Set(rows.filter((r) => !resolutions.has(`${r.finding.transcriptId}|${r.finding.fingerprint}`)).map((r) => r.finding.transcriptId)),
+  ];
+  const payloadPhone = new Map<string, string | null>();
+  if (openTranscriptIds.length) {
+    const encRows = await handle
+      .select({ id: callTranscriptsTable.id, enc: callTranscriptsTable.transcriptEncrypted })
+      .from(callTranscriptsTable)
+      .where(and(eq(callTranscriptsTable.orgId, args.orgId), inArray(callTranscriptsTable.id, openTranscriptIds)));
+    for (const e of encRows) payloadPhone.set(e.id, open<{ phone: string | null }>(e.enc)?.phone ?? null);
+  }
+
   // One query for the linked contacts, one for the agents.
   const contactIds = [...new Set(rows.map((r) => r.contactId).filter((x): x is string => Boolean(x)))];
   const contactRows = contactIds.length
     ? await handle
-        .select({ id: contactsTable.id, first: contactsTable.firstName, last: contactsTable.lastName, phone: contactsTable.phone })
+        .select({ id: contactsTable.id, first: contactsTable.firstName, last: contactsTable.lastName, phone: contactsTable.phone, email: contactsTable.email })
         .from(contactsTable)
         .where(and(eq(contactsTable.orgId, args.orgId), inArray(contactsTable.id, contactIds)))
     : [];
@@ -177,13 +192,15 @@ export async function listDncQueue(
   const ambiguousKeys = new Set<string>();
   for (const r of rows) {
     if (r.contactId || r.contactMatch !== "phone_ambiguous") continue;
+    if (resolutions.has(`${r.finding.transcriptId}|${r.finding.fingerprint}`)) continue;
     const key = phoneMatchKey(payloadPhone.get(r.finding.transcriptId) ?? null);
     if (key && key.length >= 10) ambiguousKeys.add(key);
   }
   const matches = await matchContactsByPhoneKeys(handle, args.orgId, [...ambiguousKeys]);
 
   const items: DncQueueItem[] = rows.map((r) => {
-    const payload = open<{ quote: string | null }>(r.finding.evidenceEncrypted);
+    const payload = open<{ quote: string | null; channel?: "phone" | "email" }>(r.finding.evidenceEncrypted);
+    const channel: "phone" | "email" = payload?.channel === "email" ? "email" : "phone";
     const resolution = resolutions.get(`${r.finding.transcriptId}|${r.finding.fingerprint}`);
     const c = r.contactId ? contacts.get(r.contactId) : undefined;
     const contact: DncQueueItem["contact"] = c ? { id: c.id, name: fullName(c.first, c.last), phoneLast4: last4(c.phone) } : null;
@@ -191,7 +208,7 @@ export async function listDncQueue(
 
     let candidates: DncCandidate[] = [];
     let moreCandidates = false;
-    if (!contact && r.contactMatch === "phone_ambiguous") {
+    if (!contact && !resolution && r.contactMatch === "phone_ambiguous") {
       const key = phoneMatchKey(tPhone);
       const m = key ? matches.get(key) : undefined;
       candidates = (m?.candidates ?? []).map((x) => ({ id: x.id, name: fullName(x.first, x.last), phoneLast4: last4(x.phone) }));
@@ -199,10 +216,12 @@ export async function listDncQueue(
     }
 
     const numbers: DncNumberOption[] = [];
-    const tKey = phoneMatchKey(tPhone);
-    if (tKey && tKey.length >= 10) numbers.push({ source: "transcript", last4: last4(tPhone) });
-    const cKey = phoneMatchKey(c?.phone ?? null);
-    if (cKey && cKey.length >= 10 && cKey !== tKey) numbers.push({ source: "contact", last4: last4(c?.phone) });
+    if (channel === "phone" && !resolution) {
+      const tKey = phoneMatchKey(tPhone);
+      if (tKey && tKey.length >= 10) numbers.push({ source: "transcript", last4: last4(tPhone) });
+      const cKey = phoneMatchKey(c?.phone ?? null);
+      if (cKey && cKey.length >= 10 && cKey !== tKey) numbers.push({ source: "contact", last4: last4(c?.phone) });
+    }
 
     const a = r.agentId ? agents.get(r.agentId) : undefined;
     const note = resolution ? open<{ note: string }>(resolution.note)?.note ?? null : null;
@@ -225,6 +244,8 @@ export async function listDncQueue(
       contactMatch: r.contactMatch,
       candidates,
       moreCandidates,
+      channel,
+      emailOnFile: channel === "email" ? Boolean(c?.email && c.email.trim()) : null,
       numbers,
       agent: a ? { id: a.id, name: fullName(a.first, a.last) } : null,
       resolution: resolution
@@ -245,7 +266,7 @@ export type ResolveResult =
       ok: true;
       status: "resolved" | "already_resolved";
       action: DncAction;
-      optOut: { phonesRecorded: number; alreadyOnList: number; contactId: string | null } | null;
+      optOut: { phonesRecorded: number; emailsRecorded?: number; alreadyOnList: number; contactId: string | null; channel?: "phone" | "email" } | null;
     }
   | { ok: false; httpStatus: number; code: string; message: string; candidates?: DncCandidate[] };
 
@@ -362,6 +383,62 @@ export async function resolveDncFinding(args: {
   }
 
   // ---- add_opt_out: never automatic, always a person's click ----------------
+  const findingPayload = open<{ channel?: "phone" | "email" }>(finding.evidenceEncrypted);
+  if (findingPayload?.channel === "email") {
+    // An email-only request ("stop emailing me"): a phone opt-out would leave the
+    // email flowing, so this goes through the email opt-out and needs a linked client.
+    const wantedId = args.contactId ?? transcript.contactId ?? null;
+    let emailContact: { id: string; email: string | null } | null = null;
+    if (wantedId) {
+      const [c] = await db
+        .select({ id: contactsTable.id, email: contactsTable.email })
+        .from(contactsTable)
+        .where(and(eq(contactsTable.id, wantedId), eq(contactsTable.orgId, orgId), sql`${contactsTable.deletedAt} IS NULL`))
+        .limit(1);
+      if (!c && args.contactId) return { ok: false, httpStatus: 404, code: "contact_not_found", message: "Contact not found." };
+      emailContact = c ?? null;
+    }
+    if (!emailContact) {
+      return {
+        ok: false,
+        httpStatus: 400,
+        code: "contact_required",
+        message: "This is a request to stop email. Pick the client whose email should be added to the opt-out list.",
+      };
+    }
+    const emailAddress = emailContact.email?.trim();
+    if (!emailAddress) {
+      return { ok: false, httpStatus: 400, code: "email_required", message: "That client has no email address on file, so there is nothing to add." };
+    }
+    const target = emailContact;
+    return db.transaction(async (tx): Promise<ResolveResult> => {
+      const [inserted] = await tx
+        .insert(callScoreReviewsTable)
+        .values({ id: randomUUID(), ...reviewBase, verdict: "opt_out_added", contactId: target.id, optOutRecorded: true })
+        .onConflictDoNothing()
+        .returning({ id: callScoreReviewsTable.id });
+      if (!inserted) {
+        const again = await existingFor(tx);
+        return again ? alreadyResult(again.verdict, again.contactId) : { ok: false, httpStatus: 409, code: "conflict", message: "Try again." };
+      }
+      const { alreadyOnList } = await recordEmailOptOut(tx, { orgId, contactId: target.id, email: emailAddress, source: "call_review" });
+      if (target.id !== transcript.contactId) {
+        await tx
+          .update(callTranscriptsTable)
+          .set({ contactId: target.id, contactMatch: "explicit" })
+          .where(and(eq(callTranscriptsTable.id, transcript.id), eq(callTranscriptsTable.orgId, orgId)));
+      }
+      // Never the quote, the address or the note.
+      await tx.insert(auditLogTable).values(audit("call_dnc_opt_out", { via: "call_review", channel: "email", contactId: target.id, emailsRecorded: 1, alreadyOnList: alreadyOnList ? 1 : 0 }));
+      return {
+        ok: true,
+        status: "resolved",
+        action: "add_opt_out",
+        optOut: { phonesRecorded: 0, emailsRecorded: 1, alreadyOnList: alreadyOnList ? 1 : 0, contactId: target.id, channel: "email" },
+      };
+    });
+  }
+
   // The reviewer confirms ONE number. Nothing else is recorded.
   if (!args.phoneSource) {
     return {

@@ -161,7 +161,23 @@ export function dncLooksNegated(before: string, mode: DncPattern["negation"]): b
   return false;
 }
 
+/**
+ * Which channel the request is about. "email" only when the words name email and
+ * nothing else ("stop emailing me"): an opt-out on the phone list would not stop
+ * email, so those go through the email opt-out path. Everything else is "phone".
+ */
+export type DncChannel = "phone" | "email";
+
+const EMAIL_WORDS = /\b(?:emails?|emailing|e mail)\b/;
+const OTHER_CHANNEL_WORDS =
+  /\b(?:calls?|calling|phones?|phoning|phone calls|texts?|texting|messages?|messaging|sms|ring|ringing|number|contact|contacting|mail|unsubscribe|opt|dnc|do not call|dont call|bothering|harassing|pestering|leave)\b/;
+
+export function channelOf(matched: string): DncChannel {
+  return EMAIL_WORDS.test(matched) && !OTHER_CHANNEL_WORDS.test(matched.replace(EMAIL_WORDS, " ")) ? "email" : "phone";
+}
+
 export interface DncFinding {
+  channel: DncChannel;
   utteranceId: number;
   startOffset: number;
   endOffset: number;
@@ -211,6 +227,7 @@ function scanUtterance(u: Utterance): DncFinding | null {
     const before = wordsBefore(u, startOffset, 6, "clause");
     if (dncLooksNegated(before, h.negation)) continue;
     return {
+      channel: channelOf(norm.slice(h.from, h.to)),
       utteranceId: u.id,
       startOffset,
       endOffset,

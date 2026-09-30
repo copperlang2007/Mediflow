@@ -159,6 +159,8 @@ export function DncQueue({
                       candidates={item.candidates}
                       moreCandidates={item.moreCandidates ?? false}
                       numbers={item.numbers ?? []}
+                      channel={item.channel ?? "phone"}
+                      emailOnFile={item.emailOnFile ?? null}
                     />
                   ) : (
                     <p className="text-sm text-muted-foreground">
