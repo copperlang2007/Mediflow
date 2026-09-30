@@ -68,6 +68,8 @@ let appFreestanding: string;
 let corrected: { id: string };
 let appCorrected: string;
 let appMbiAndHicn: string;
+let legacy: { id: string };
+let appLegacy: string;
 
 const NPN_A = "17654321";
 const NPN_B = "18765432";
@@ -175,6 +177,11 @@ beforeAll(async () => {
     "Medicare Number (medicare_number)": "1EG4TE5MK73",
     "Applicant HICN (applicanthicn)": "123456789A",
   });
+  // A legacy application naming no writer at all: its enrollment's agent (A) wrote it.
+  legacy = await seedContact(tdb, { orgId: org.id, firstName: "Jo", lastName: "Lane", medicareId: "1JK2LM3NP45" });
+  await tdb.update(contactsTable).set({ assignedAgentId: agentB.id }).where(eq(contactsTable.id, legacy.id));
+  const legacyEnr = await seedEnrollment(legacy.id, agentA.id);
+  appLegacy = await seedApplication(legacy.id, legacyEnr, {});
   // A suspended agent keeps their login but services no one.
   suspendedUser = await seedUser(tdb, { orgId: org.id, role: "agent" });
   const suspended = await seedAgent(tdb, { orgId: org.id });
@@ -196,8 +203,8 @@ describe("My clients", () => {
     const res = await request(app).get("/api/agents/me/clients").set(withAuth(userA.id));
     expect(res.status).toBe(200);
     expect(res.headers["cache-control"]).toBe("no-store");
-    expect(res.body.total).toBe(4);
-    expect(res.body.data.map((c: { lastName: string }) => c.lastName)).toEqual(["Alvarez", "Cole", "Moss", "Ortiz"]);
+    expect(res.body.total).toBe(5);
+    expect(res.body.data.map((c: { lastName: string }) => c.lastName)).toEqual(["Alvarez", "Cole", "Lane", "Moss", "Ortiz"]);
     // The list never carries the Medicare ID or health conditions.
     expect(JSON.stringify(res.body)).not.toMatch(/medicare|COPD|1EG4/i);
 
@@ -302,6 +309,14 @@ describe("My clients", () => {
     expect(detail.status).toBe(200);
     expect(detail.body.policies[0].writtenByMe).toBe(true);
     expect((await request(app).get(`/api/applications/${appCorrected}/full`).set(withAuth(userA.id))).status).toBe(200);
+  });
+
+  it("credits an application that names no writer to its enrollment's agent", async () => {
+    const d = await request(app).get(`/api/agents/me/clients/${legacy.id}`).set(withAuth(userA.id));
+    expect(d.status).toBe(200);
+    expect(d.body.policies[0].writtenByMe).toBe(true);
+    expect(d.body.applications[0].canViewFull).toBe(true);
+    expect((await request(app).get(`/api/applications/${appLegacy}/full`).set(withAuth(userA.id))).status).toBe(200);
   });
 
   it("labels a shared enrollment 'written by you' from the application's writer", async () => {
