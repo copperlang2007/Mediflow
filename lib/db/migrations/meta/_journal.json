@@ -435,8 +435,6 @@
       "when": 1792100000000,
       "tag": "0061_contact_match_indexes",
       "breakpoints": true
-<<<<<<< HEAD
-=======
     },
     {
       "idx": 62,
@@ -444,7 +442,6 @@
       "when": 1792200000000,
       "tag": "0062_application_writing_agent",
       "breakpoints": true
->>>>>>> origin/main
     }
   ]
 }
