@@ -60,6 +60,22 @@ const CONCURRENT_PREBUILDS: ReadonlyArray<{ name: string; table: string; definit
     table: "opt_outs",
     definition: "((right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10)), channel)",
   },
+  // 0061: contact de-duplication lookups (loadMatcher).
+  {
+    name: "contacts_org_lower_email_idx",
+    table: "contacts",
+    definition: "(org_id, lower(email)) WHERE email IS NOT NULL",
+  },
+  {
+    name: "contacts_org_lower_last_name_idx",
+    table: "contacts",
+    definition: "(org_id, lower(last_name))",
+  },
+  {
+    name: "contacts_org_medicare_id_hash_idx",
+    table: "contacts",
+    definition: "(org_id, medicare_id_hash) WHERE medicare_id_hash IS NOT NULL",
+  },
 ];
 
 async function prebuildIndexesConcurrently(client: pg.Client): Promise<void> {

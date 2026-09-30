@@ -48,6 +48,13 @@ export const LEASE_MINUTES = 30;
 const MAX_CONSECUTIVE_CONTACT_FAILURES = 5;
 /** Per-run page cap (100 contacts/page). A larger backfill continues in the next job. */
 export const DEFAULT_MAX_PAGES = 50;
+/**
+ * Per-run time budget. A run stops after the page in progress once this has
+ * elapsed and the worker queues the continuation at once, so a large backfill
+ * moves in steady batches well inside the lease (LEASE_MINUTES) and the job's
+ * expiry, instead of one long run being taken over mid-way.
+ */
+export const RUN_BUDGET_MS = 10 * 60_000;
 
 export interface GhlConfig {
   orgId: string;
@@ -144,10 +151,11 @@ export interface GhlSyncResult {
 
 export async function runGhlSync(
   cfg: GhlConfig,
-  opts: { full?: boolean; maxPages?: number; fetchImpl?: typeof fetch } = {},
+  opts: { full?: boolean; maxPages?: number; budgetMs?: number; fetchImpl?: typeof fetch } = {},
 ): Promise<GhlSyncResult> {
   const { orgId, locationId } = cfg;
   const maxPages = opts.maxPages ?? DEFAULT_MAX_PAGES;
+  const deadline = Date.now() + (opts.budgetMs ?? RUN_BUDGET_MS);
 
   await db.insert(ghlSyncStateTable).values({ orgId, locationId }).onConflictDoNothing();
 
@@ -212,7 +220,7 @@ export async function runGhlSync(
 
   try {
     for (;;) {
-      if (pages >= maxPages) { morePending = true; break; }
+      if (pages >= maxPages || (pages > 0 && Date.now() >= deadline)) { morePending = true; break; }
       const page = await searchContacts(
         { token: cfg.token, locationId, updatedSince: since, searchAfter, page: pageNo, pageLimit: GHL_PAGE_LIMIT },
         opts.fetchImpl,

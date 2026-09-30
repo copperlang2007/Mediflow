@@ -428,6 +428,13 @@
       "when": 1792000000000,
       "tag": "0060_imported_client_consent_basis",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1792100000000,
+      "tag": "0061_contact_match_indexes",
+      "breakpoints": true
     }
   ]
 }

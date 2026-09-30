@@ -133,6 +133,14 @@ export const contactsTable = pgTable(
     index("contacts_phone_last10_idx").on(
       sql`(right(regexp_replace(coalesce(${t.phone}, ''), '[^0-9]', '', 'g'), 10))`,
     ),
+    // Contact de-duplication lookups (migration 0061, contactImport loadMatcher).
+    index("contacts_org_lower_email_idx")
+      .on(t.orgId, sql`lower(${t.email})`)
+      .where(sql`${t.email} IS NOT NULL`),
+    index("contacts_org_lower_last_name_idx").on(t.orgId, sql`lower(${t.lastName})`),
+    index("contacts_org_medicare_id_hash_idx")
+      .on(t.orgId, t.medicareIdHash)
+      .where(sql`${t.medicareIdHash} IS NOT NULL`),
   ],
 );
 

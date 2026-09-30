@@ -766,6 +766,19 @@ describe("GHL client resilience", () => {
   });
 });
 
+describe("GHL run time budget", () => {
+  it("stops after the page in progress once the budget is spent, and reports more to do", async () => {
+    const orgB = await seedOrg(tdb, { id: "ghl-org-budget" });
+    const cfgB = { orgId: orgB.id, token: TOKEN, locationId: `loc-${orgB.id}` };
+    const all = Array.from({ length: 250 }, (_, k) => ghlContact(30000 + k, { dateUpdated: new Date(Date.UTC(2026, 10, 1, 0, 0, k)).toISOString() }));
+    const ghl = fakeGhl(all);
+    const r = await sync.runGhlSync(cfgB, { fetchImpl: ghl.impl, budgetMs: 0 });
+    expect(r).toMatchObject({ status: "more_pending", pages: 1, created: 100 });
+    const rest = await sync.runGhlSync(cfgB, { fetchImpl: ghl.impl });
+    expect(rest).toMatchObject({ status: "ok", created: 150 });
+  });
+});
+
 describe("GHL custom field definitions", () => {
   const defs = {
     customFields: [
