@@ -448,11 +448,11 @@ export async function resolveDncFinding(args: {
       message: "Confirm the single phone number that asked for no contact (or type it) before adding the opt-out.",
     };
   }
-  let contact: { id: string; phone: string | null } | null = null;
+  let contact: { id: string; phone: string | null; email: string | null } | null = null;
   const wantedContactId = args.contactId ?? transcript.contactId ?? null;
   if (wantedContactId) {
     const [c] = await db
-      .select({ id: contactsTable.id, phone: contactsTable.phone })
+      .select({ id: contactsTable.id, phone: contactsTable.phone, email: contactsTable.email })
       .from(contactsTable)
       .where(and(eq(contactsTable.id, wantedContactId), eq(contactsTable.orgId, orgId), sql`${contactsTable.deletedAt} IS NULL`))
       .limit(1);
@@ -514,6 +514,15 @@ export async function resolveDncFinding(args: {
       .limit(1);
     const alreadyOnList = existing ? 1 : 0;
     await recordPhoneOptOut(tx, { orgId, contactId: linked?.id ?? null, phone, source: "call_review" });
+    // A confirmed stop request must not leave email flowing: when the client who
+    // owns the confirmed number has an email address, it goes on the email
+    // opt-out list in the same transaction.
+    const linkedEmail = linked?.email?.trim() || null;
+    let emailRecorded = false;
+    if (linked && linkedEmail) {
+      await recordEmailOptOut(tx, { orgId, contactId: linked.id, email: linkedEmail, source: "call_review" });
+      emailRecorded = true;
+    }
     if (linked && linked.id !== transcript.contactId) {
       // The reviewer identified the client: keep that on the record.
       await tx
@@ -523,7 +532,12 @@ export async function resolveDncFinding(args: {
     }
     await tx
       .insert(auditLogTable)
-      .values(audit("call_dnc_opt_out", { via: "call_review", phoneSource: args.phoneSource, contactId: linked?.id ?? null, phonesRecorded: 1, alreadyOnList }));
-    return { ok: true, status: "resolved", action: "add_opt_out", optOut: { phonesRecorded: 1, alreadyOnList, contactId: linked?.id ?? null } };
+      .values(audit("call_dnc_opt_out", { via: "call_review", phoneSource: args.phoneSource, contactId: linked?.id ?? null, phonesRecorded: 1, emailAlsoRecorded: emailRecorded, alreadyOnList }));
+    return {
+      ok: true,
+      status: "resolved",
+      action: "add_opt_out",
+      optOut: { phonesRecorded: 1, ...(emailRecorded ? { emailsRecorded: 1 } : {}), alreadyOnList, contactId: linked?.id ?? null },
+    };
   });
 }

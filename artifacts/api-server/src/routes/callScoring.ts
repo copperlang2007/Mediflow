@@ -712,11 +712,13 @@ router.post(
       }
 
       try {
+        // Decoded once and reused by the retry below.
+        const content = decodeText(f.buffer);
         let out = await ingestTranscript({
           orgId: authReq.orgId,
           userId: authReq.userId,
           userRole: authReq.userRole,
-          content: decodeText(f.buffer),
+          content,
           filename,
           format: formatFor(filename),
           rubric,
@@ -736,7 +738,7 @@ router.post(
             orgId: authReq.orgId,
             userId: authReq.userId,
             userRole: authReq.userRole,
-            content: decodeText(f.buffer),
+            content,
             filename,
             format: formatFor(filename),
             rubric,

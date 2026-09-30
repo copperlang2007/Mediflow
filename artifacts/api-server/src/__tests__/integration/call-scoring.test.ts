@@ -1105,6 +1105,66 @@ describe("review fixes: email-only requests use the email opt-out", () => {
   });
 });
 
+describe("review fixes: a confirmed stop request blocks email too", () => {
+  const resolve = (userId: string, findingId: string, body: Record<string, unknown>) =>
+    request(app).post(`/api/call-scoring/dnc-review/${findingId}/resolve`).set(withAuth(userId)).send(body);
+  const findingFor = async (transcriptId: string) => {
+    const [f] = await handle.db
+      .select()
+      .from(schema.callScoreFindingsTable)
+      .where(and(eq(schema.callScoreFindingsTable.transcriptId, transcriptId), eq(schema.callScoreFindingsTable.kind, "dnc")));
+    return f!.id;
+  };
+
+  it("a phone request confirmed for a client with an email also puts that email on the opt-out list; the gates then block both", async () => {
+    const gate = await import("../../lib/compliance/consumerOutreach");
+    const email = `both-${randomUUID().slice(0, 8)}@example.test`;
+    const c = await seedContact(handle.db, { orgId: org.id, firstName: "Both", lastName: "Channels", email });
+    await setPhone(c.id, "(310) 555-0701");
+    const ctx = { orgId: org.id, contactId: c.id, automated: false };
+    expect((await gate.evaluateConsumerEmail(ctx)).action).toBe("send");
+
+    const t = await createScored(transcriptText(["Customer: Stop calling me."]), { contactId: c.id, phone: "+13105550701" });
+    const res = await resolve(admin.id, await findingFor(t.transcriptId), { action: "add_opt_out", phoneSource: "transcript" });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.optOut).toMatchObject({ phonesRecorded: 1, emailsRecorded: 1, contactId: c.id });
+
+    expect(await gate.evaluateConsumerEmail(ctx)).toEqual({ action: "block", reason: "opted_out" });
+    expect(await gate.evaluateConsumerSms(ctx)).toEqual({ action: "block", reason: "opted_out" });
+    const rows = (await handle.db.select().from(schema.optOutsTable).where(eq(schema.optOutsTable.orgId, org.id))).filter(
+      (o) => o.source === "call_review" && (o.email?.toLowerCase() === email.toLowerCase() || o.phone === "+13105550701"),
+    );
+    expect(rows.map((r) => r.channel).sort()).toEqual(["email", "sms"]);
+    const [row] = await handle.db.select().from(schema.contactsTable).where(eq(schema.contactsTable.id, c.id));
+    expect(row!.optOutEmail).toBe(true);
+    expect(row!.optOutSms).toBe(true);
+  });
+
+  it("an email-only request blocks email through the gate and leaves the phone alone", async () => {
+    const gate = await import("../../lib/compliance/consumerOutreach");
+    const email = `only-${randomUUID().slice(0, 8)}@example.test`;
+    const c = await seedContact(handle.db, { orgId: org.id, firstName: "Email", lastName: "Only", email });
+    await setPhone(c.id, "(310) 555-0702");
+    const ctx = { orgId: org.id, contactId: c.id, automated: false };
+    const t = await createScored(transcriptText(["Customer: Please stop emailing me."]), { contactId: c.id });
+    const res = await resolve(admin.id, await findingFor(t.transcriptId), { action: "add_opt_out" });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(await gate.evaluateConsumerEmail(ctx)).toEqual({ action: "block", reason: "opted_out" });
+    expect((await gate.evaluateConsumerSms(ctx)).action).toBe("send");
+  });
+
+  it("a phone request for a client with no email records the phone only", async () => {
+    const c = await seedContact(handle.db, { orgId: org.id, firstName: "Phone", lastName: "Only" });
+    await setPhone(c.id, "(310) 555-0703");
+    const t = await createScored(transcriptText(["Customer: Stop calling me."]), { contactId: c.id });
+    const res = await resolve(admin.id, await findingFor(t.transcriptId), { action: "add_opt_out", phoneSource: "contact" });
+    expect(res.status).toBe(200);
+    expect(res.body.optOut.emailsRecorded).toBeUndefined();
+    const [row] = await handle.db.select().from(schema.contactsTable).where(eq(schema.contactsTable.id, c.id));
+    expect(row!.optOutEmail).toBe(false);
+  });
+});
+
 describe("review fixes: history survives a hard delete of the contact it references", () => {
   it("allows the ON DELETE SET NULL update but nothing else", async () => {
     const c = await seedContact(handle.db, { orgId: org.id, firstName: "Gone", lastName: "Soon" });

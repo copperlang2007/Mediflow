@@ -6,8 +6,10 @@
  * `opt_outs` row per (org, phone, channel) — the unique index makes it
  * idempotent — and the contact's `opt_out_sms` flag. The `opt_outs.channel`
  * enum has no voice value, so a phone opt-out is stored on `sms`: the number
- * list is channel-agnostic in practice (preclearance matches any channel, and
- * the SMS gate matches by number), so it stops both calls and texts.
+ * list is matched by number (preclearance matches any channel, and the SMS gate
+ * matches by number), so it stops calls and texts to that NUMBER. It does NOT
+ * stop email: email has its own opt-out (`recordEmailOptOut`, channel 'email',
+ * plus contacts.opt_out_email), which the email gate reads.
  */
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
