@@ -64,8 +64,12 @@ You will find it in the sidebar under **Compliance > Call scoring**.
 | AI clears a phrase the rules flagged on a critical item | **Needs review** |
 | AI says "not applicable" on a critical required item | **Needs review** |
 | AI is not set up, errors, or times out | Judgment items are **Needs review** |
-| The file has no agent label, so a hit can't be pinned on the agent | **Needs review**, not a failure |
+| The file has no agent label, so a hit (or a disclosure) can't be pinned on the agent | **Needs review**, never a failure and never a pass |
+| AI quotes words from a speaker who is not identified as the agent | **Needs review** |
+| The only flagged words look negated, and the AI cites no verifiable words | **Needs review** |
+| The scope of appointment is mentioned only after plans were discussed | **Needs review**, never a pass |
 | Time-based check would fail, but the file has no timestamps | **Needs review** |
+| Words found only after a stated deadline (for example the first minute) | Not credited. **Fail** with real timestamps, **Needs review** with estimated ones; the late quote is shown |
 | A possible do-not-contact request is waiting for a decision | The call cannot read "Passed" |
 
 Compliance is a gate, not an average. The quality score (0 to 100) is separate
@@ -79,6 +83,10 @@ identified". If there are no labels, every turn is treated as unknown and the
 score tells you so. If there are no timestamps, times are estimated from word
 counts and the score tells you that too.
 
+A speaker's role comes only from that turn's own explicit role or label. A
+generic label such as "Speaker 1" never inherits a role from another turn, and a
+caption cue with no speaker tag is "unknown", not the previous speaker.
+
 ## Possible do-not-contact requests
 
 The detector looks only at what the **client** said (or at all speech when the
@@ -91,13 +99,17 @@ A reviewer chooses:
 
 - **Add to do-not-contact list**: records the opt-out the same way a STOP text or
   a "Do not call" disposition does (source "call review"), and writes an audit
-  entry. It needs a client or a phone number. If more than one client shares the
-  number, the reviewer picks the right one. Clicking twice, or two people
-  clicking at once, still records exactly one opt-out.
+  entry. The reviewer first **confirms the one number** that asked to stop (the
+  number given with the call, the client's number on file, or one they type).
+  Only that number is added, and a client is attached only if the client owns
+  that number. If more than one client shares the number, the reviewer picks the
+  right one, or searches when more share it than can be listed. Clicking twice,
+  or two people clicking at once, still records exactly one opt-out.
 - **Not a request**: needs a short note saying why. Nothing is added.
 
 A transcript is linked to a client by phone number only when exactly one client
-in your agency has that number. Otherwise it stays unlinked and a reviewer picks.
+in your agency has that number. Otherwise it stays unlinked and a reviewer picks
+(up to 50 matching clients are listed, and the screen says when there are more).
 
 ## The look-back, step by step
 
@@ -142,8 +154,12 @@ code. When you have chosen one, phase 2b can add:
 ## Retention and privacy
 
 - Transcript text, quotes, reviewer notes and the upload's file name are stored
-  **encrypted** (the same field encryption as Medicare IDs). Only a keyed hash
-  of the redacted text is kept for recognising duplicates.
+  **encrypted** (the same field encryption as Medicare IDs). The phone number
+  given with an upload is kept only inside that encrypted text. Only a keyed
+  digest of the original speech is kept for recognising a re-upload of the same
+  call; two calls that differ only in a masked value (a phone number or a date
+  of birth) are treated as different calls, and two people uploading the same
+  call at once still produce one transcript.
 - Each transcript carries a "retain until" date **no sooner than 10 years** after
   it was created, matching the CMS record-retention floor. Nothing is deleted
   automatically, and there is no delete button. A purge job would need an
@@ -161,15 +177,17 @@ code. When you have chosen one, phase 2b can add:
 | Role | Read | Upload / rescore / import | Override grades / resolve do-not-contact |
 | --- | --- | --- | --- |
 | Super admin, Agency admin, Compliance manager | All calls | Yes | Yes |
-| Agent | Only calls linked to a call they placed in the softphone | No | No |
+| Agent | Only calls linked to a softphone call **they** placed (matched by user, not by a shared agent profile) | No | No |
 | Everyone else | No | No | No |
 
 ## Limits
 
 - One file up to 1 MB; up to 50 files per import; pasted text up to 500,000
   characters.
-- The list and summary cover the newest 5,000 transcripts matching a filter and
-  say so when they are cut off.
+- The list and summary look at up to 5,000 transcripts that match your filters
+  (newest first; filters are applied while scanning, so an old match is not
+  hidden behind newer ones) and say so when they are cut off. The list and the
+  do-not-contact queue are paged 50 at a time.
 - The checklist is a starting point. Its rule citations point at the section that
   governs each check; where an exact paragraph was uncertain, only the section is
   cited.

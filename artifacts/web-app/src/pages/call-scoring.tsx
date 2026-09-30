@@ -13,6 +13,8 @@ import { CallDetail } from "@/components/call-scoring/CallDetail";
 import { DncQueue } from "@/components/call-scoring/DncQueue";
 import {
   COMPLIANCE_TONE,
+  PAGE_SIZE,
+  Pager,
   QK,
   callLabel,
   fmtDate,
@@ -71,6 +73,12 @@ export default function CallScoringPage() {
   const [compliance, setCompliance] = useState<"all" | "pass" | "fail" | "review">("all");
   const [rubricId, setRubricId] = useState("all");
   const [dncOnly, setDncOnly] = useState(false);
+  const [offset, setOffset] = useState(0);
+  // Any filter change starts again from the first page.
+  const changeFilter = <T,>(set: (v: T) => void) => (v: T) => {
+    setOffset(0);
+    set(v);
+  };
 
   const { data: config, isLoading: configLoading } = useQuery({
     queryKey: [...QK, "config"],
@@ -87,9 +95,9 @@ export default function CallScoringPage() {
   });
 
   const { data: list, isLoading: listLoading, isError: listError } = useQuery({
-    queryKey: [...QK, "list", compliance, rubricId, dncOnly],
+    queryKey: [...QK, "list", compliance, rubricId, dncOnly, offset],
     queryFn: () => {
-      const p = new URLSearchParams({ limit: "50" });
+      const p = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
       if (compliance !== "all") p.set("compliance", compliance);
       if (rubricId !== "all") p.set("rubricId", rubricId);
       if (dncOnly) p.set("dnc", "open");
@@ -122,7 +130,10 @@ export default function CallScoringPage() {
           loading={summaryLoading}
           hint={totals && totals.total === 0 ? "Nothing scored yet" : totals?.avgScore !== null && totals ? `Average quality score ${totals.avgScore}` : undefined}
         />
-        <button type="button" className="text-left" onClick={() => setCompliance((c) => (c === "review" ? "all" : "review"))} aria-pressed={compliance === "review"}>
+        <button type="button" className="text-left" onClick={() => {
+          setOffset(0);
+          setCompliance((c) => (c === "review" ? "all" : "review"));
+        }} aria-pressed={compliance === "review"}>
           <KpiCard
             label="Needs review"
             value={totals?.review ?? 0}
@@ -132,7 +143,10 @@ export default function CallScoringPage() {
             hint={totals && totals.review === 0 ? "Nothing waiting on a person" : "Click to show only these"}
           />
         </button>
-        <button type="button" className="text-left" onClick={() => setCompliance((c) => (c === "fail" ? "all" : "fail"))} aria-pressed={compliance === "fail"}>
+        <button type="button" className="text-left" onClick={() => {
+          setOffset(0);
+          setCompliance((c) => (c === "fail" ? "all" : "fail"));
+        }} aria-pressed={compliance === "fail"}>
           <KpiCard
             label="Failed compliance"
             value={totals?.fail ?? 0}
@@ -174,7 +188,7 @@ export default function CallScoringPage() {
         <TabsContent value="calls" className="mt-4">
           <SectionCard title="Scored calls" description="Newest first. Open a call to see each finding with the exact words, who said them and where.">
             <FilterBar>
-              <Select value={compliance} onValueChange={(v) => setCompliance(v as typeof compliance)}>
+              <Select value={compliance} onValueChange={(v) => changeFilter(setCompliance)(v as typeof compliance)}>
                 <SelectTrigger className="h-9 w-[170px]" aria-label="Result">
                   <SelectValue placeholder="Result" />
                 </SelectTrigger>
@@ -185,7 +199,7 @@ export default function CallScoringPage() {
                   <SelectItem value="fail">Failed</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={rubricId} onValueChange={setRubricId}>
+              <Select value={rubricId} onValueChange={changeFilter(setRubricId)}>
                 <SelectTrigger className="h-9 w-[230px]" aria-label="Checklist">
                   <SelectValue placeholder="Checklist" />
                 </SelectTrigger>
@@ -198,7 +212,10 @@ export default function CallScoringPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <Button variant={dncOnly ? "default" : "outline"} size="sm" onClick={() => setDncOnly((v) => !v)} aria-pressed={dncOnly}>
+              <Button variant={dncOnly ? "default" : "outline"} size="sm" onClick={() => {
+                  setOffset(0);
+                  setDncOnly((v) => !v);
+                }} aria-pressed={dncOnly}>
                 <PhoneOff className="mr-1.5 h-3.5 w-3.5" />
                 Possible do-not-contact only
               </Button>
@@ -255,8 +272,9 @@ export default function CallScoringPage() {
                     </li>
                   ))}
                 </ul>
-                {list.total > list.items.length && (
-                  <p className="mt-2 text-xs text-muted-foreground">Showing the newest {list.items.length} of {list.total}. Use the filters to narrow down.</p>
+                <Pager offset={offset} total={list.total} shown={list.items.length} onChange={setOffset} label="Scored calls" />
+                {list.truncated && (
+                  <p className="mt-2 text-xs text-muted-foreground">There are more matching calls than can be listed here. Use the filters to narrow down.</p>
                 )}
               </>
             )}

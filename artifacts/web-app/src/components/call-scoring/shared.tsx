@@ -3,6 +3,46 @@
  * routes/callScoring.ts (api-server); nothing here invents data.
  */
 import type { StatusTone } from "@/components/shared";
+import { Button } from "@/components/ui/button";
+
+/** Rows per page for the scored-calls list and the do-not-contact queue. */
+export const PAGE_SIZE = 50;
+
+/** Previous / Next controls tied to the API's `total`. Renders nothing when everything fits on one page. */
+export function Pager({
+  offset,
+  limit = PAGE_SIZE,
+  total,
+  shown,
+  onChange,
+  label,
+}: {
+  offset: number;
+  limit?: number;
+  total: number;
+  shown: number;
+  onChange: (offset: number) => void;
+  label: string;
+}) {
+  if (total <= limit && offset === 0) return null;
+  const from = shown === 0 ? 0 : offset + 1;
+  const to = offset + shown;
+  return (
+    <nav className="mt-3 flex flex-wrap items-center justify-between gap-2" aria-label={`${label} pages`}>
+      <p className="text-xs text-muted-foreground">
+        Showing {from}-{to} of {total}
+      </p>
+      <div className="flex gap-2">
+        <Button size="sm" variant="outline" onClick={() => onChange(Math.max(0, offset - limit))} disabled={offset === 0}>
+          Previous
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => onChange(offset + limit)} disabled={offset + limit >= total}>
+          Next
+        </Button>
+      </div>
+    </nav>
+  );
+}
 
 export type Compliance = "pass" | "fail" | "review";
 export type CriterionStatus = "pass" | "partial" | "fail" | "na" | "needs_review";
@@ -155,6 +195,8 @@ export interface CsDncItem {
   contact: { id: string; name: string; phoneLast4: string | null } | null;
   contactMatch: string;
   candidates: Array<{ id: string; name: string; phoneLast4: string | null }>;
+  moreCandidates?: boolean;
+  numbers?: Array<{ source: "transcript" | "contact"; last4: string | null }>;
   agent: { id: string; name: string } | null;
   resolution: { action: string; note: string | null; reviewerName: string | null; at: string } | null;
 }

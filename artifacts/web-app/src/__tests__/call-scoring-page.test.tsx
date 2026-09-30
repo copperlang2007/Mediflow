@@ -183,6 +183,8 @@ const dncItem = (over: Record<string, unknown> = {}) => ({
   contact: { id: "c1", name: "Uma Unique", phoneLast4: "0111" },
   contactMatch: "explicit",
   candidates: [],
+  moreCandidates: false,
+  numbers: [{ source: "transcript", last4: "0111" }],
   agent: { id: "a1", name: "Dana Brooks" },
   resolution: null,
   ...over,
@@ -235,6 +237,35 @@ describe("Call scoring page", () => {
     expect(screen.getByText("2 to review")).toBeInTheDocument();
     // By-agent table is real data.
     expect(screen.getByRole("cell", { name: "Dana Brooks" })).toBeInTheDocument();
+  });
+
+  it("pages the scored calls list using the API total and puts the offset in the request", async () => {
+    const urls: string[] = [];
+    setup({
+      "GET /api/call-scoring/transcripts": (c) => {
+        urls.push(c.url);
+        const offset = Number(new URL(c.url, "http://x").searchParams.get("offset") ?? "0");
+        return {
+          total: 120,
+          truncated: false,
+          items: Array.from({ length: Math.min(50, 120 - offset) }, (_, i) => item({ id: `t${offset + i}`, externalRef: `REC-${offset + i}` })),
+        };
+      },
+    });
+    renderPage();
+    expect(await screen.findByText("REC-0")).toBeInTheDocument();
+    expect(urls[0]).toContain("limit=50");
+    expect(urls[0]).toContain("offset=0");
+    const nav = screen.getByRole("navigation", { name: "Scored calls pages" });
+    expect(within(nav).getByText("Showing 1-50 of 120")).toBeInTheDocument();
+    await userEvent.click(within(nav).getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("REC-50")).toBeInTheDocument();
+    expect(urls.some((u) => u.includes("offset=50"))).toBe(true);
+    expect(screen.getByText("Showing 51-100 of 120")).toBeInTheDocument();
+    // Changing a filter goes back to the first page.
+    await userEvent.click(screen.getByRole("button", { name: /Possible do-not-contact only/ }));
+    await waitFor(() => expect(urls.at(-1)).toMatch(/offset=0.*dnc=open|dnc=open.*offset=0/));
+    expect(await screen.findByText("REC-0")).toBeInTheDocument();
   });
 
   it("shows 'AI review set up' only when the API says so", async () => {
@@ -387,9 +418,15 @@ describe("Possible do-not-contact requests tab", () => {
     // Nothing has been sent yet.
     expect(posted).toBeNull();
     expect(state.calls.some((c) => c.method === "POST")).toBe(false);
-    await userEvent.click(within(row).getByRole("button", { name: "Add to do-not-contact list" }));
+    // The reviewer must confirm which number asked to stop before anything can be sent.
+    const confirmBtn = within(row).getByRole("button", { name: "Add to do-not-contact list" });
+    expect(confirmBtn).toBeDisabled();
+    expect(within(row).getByText(/Only this number is added/)).toBeInTheDocument();
+    await userEvent.click(within(row).getByLabelText(/Number ending 0111 \(given with this call\)/));
+    expect(confirmBtn).toBeEnabled();
+    await userEvent.click(confirmBtn);
     await waitFor(() => expect(posted).not.toBeNull());
-    expect(posted!.body).toEqual({ action: "add_opt_out" });
+    expect(posted!.body).toEqual({ action: "add_opt_out", phoneSource: "transcript" });
   });
 
   it("dismissing needs a note", async () => {
@@ -436,31 +473,96 @@ describe("Possible do-not-contact requests tab", () => {
     const confirm = within(row).getByRole("button", { name: "Add to do-not-contact list" });
     expect(confirm).toBeDisabled();
     await userEvent.click(within(row).getByLabelText(/Dot Dup/));
+    expect(confirm).toBeDisabled(); // a client is picked, but the number is not confirmed yet
+    await userEvent.click(within(row).getByLabelText(/Number ending 0111/));
     expect(confirm).toBeEnabled();
     await userEvent.click(confirm);
     await waitFor(() => expect(posted).not.toBeNull());
-    expect(posted!.body).toEqual({ action: "add_opt_out", contactId: "cB" });
+    expect(posted!.body).toEqual({ action: "add_opt_out", phoneSource: "transcript", contactId: "cB" });
   });
 
   it("asks for a phone number when the server says none is on file", async () => {
     const calls: Call[] = [];
     setup({
-      "GET /api/call-scoring/dnc-review": () => ({ items: [dncItem({ contact: null, contactMatch: "none" })], total: 1, note: "n" }),
+      "GET /api/call-scoring/dnc-review": () => ({ items: [dncItem({ contact: null, contactMatch: "none", numbers: [] })], total: 1, note: "n" }),
       "POST /api/call-scoring/dnc-review/d1/resolve": (c) => {
         calls.push(c);
-        if (calls.length === 1) return Object.assign(new Error("x"), { status: 400, data: { error: "An opt-out needs a client with a phone number, or a phone number typed in.", code: "phone_required" } });
         return { status: "resolved", action: "add_opt_out", optOut: { phonesRecorded: 1, alreadyOnList: 0, contactId: null } };
       },
     });
     renderPage();
     await openTab();
     const row = await screen.findByTestId("dnc-item");
-    await userEvent.click(within(row).getByRole("button", { name: "Add to do-not-contact list" }));
-    expect(await within(row).findByRole("alert")).toHaveTextContent(/no phone number on file/i);
+    // No number on file: the only choice is to type one.
+    const confirm = within(row).getByRole("button", { name: "Add to do-not-contact list" });
+    expect(confirm).toBeDisabled();
+    expect(within(row).queryByLabelText(/Number ending/)).not.toBeInTheDocument();
+    await userEvent.click(within(row).getByLabelText("A different number (type it)"));
+    expect(confirm).toBeDisabled(); // still needs the number itself
     await userEvent.type(within(row).getByLabelText("Phone number to add"), "(310) 555-0155");
+    await userEvent.click(confirm);
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toEqual({ action: "add_opt_out", phoneSource: "typed", phone: "(310) 555-0155" });
+  });
+
+  it("lets the reviewer search for the client when more share the number than can be listed", async () => {
+    let posted: Call | null = null;
+    setup({
+      "GET /api/call-scoring/dnc-review": () => ({
+        items: [
+          dncItem({
+            contact: null,
+            contactMatch: "phone_ambiguous",
+            moreCandidates: true,
+            candidates: [{ id: "cA", name: "Dee Dup", phoneLast4: "0122" }],
+          }),
+        ],
+        total: 1,
+        note: "n",
+      }),
+      "GET /api/contacts": () => ({ data: [{ id: "cZ", firstName: "Zed", lastName: "Late", phone: "(310) 555-0122" }] }),
+      "POST /api/call-scoring/dnc-review/d1/resolve": (c) => ((posted = c), { status: "resolved", action: "add_opt_out", optOut: { phonesRecorded: 1, alreadyOnList: 0, contactId: "cZ" } }),
+    });
+    renderPage();
+    await openTab();
+    const row = await screen.findByTestId("dnc-item");
+    expect(within(row).getByText(/More clients share this number than are listed/)).toBeInTheDocument();
+    await userEvent.type(within(row).getByLabelText("Search for the client"), "Zed");
+    await userEvent.click(await within(row).findByLabelText(/Zed Late/));
+    await userEvent.click(within(row).getByLabelText(/Number ending 0111/));
     await userEvent.click(within(row).getByRole("button", { name: "Add to do-not-contact list" }));
-    await waitFor(() => expect(calls).toHaveLength(2));
-    expect(calls[1]!.body).toEqual({ action: "add_opt_out", phone: "(310) 555-0155" });
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted!.body).toEqual({ action: "add_opt_out", phoneSource: "transcript", contactId: "cZ" });
+  });
+
+  it("pages through the queue with offset in the request", async () => {
+    const offsets: string[] = [];
+    setup({
+      "GET /api/call-scoring/dnc-review": (c) => {
+        const offset = new URL(c.url, "http://x").searchParams.get("offset") ?? "0";
+        offsets.push(offset);
+        const start = Number(offset);
+        return {
+          items: Array.from({ length: Math.min(50, 120 - start) }, (_, i) => dncItem({ findingId: `d${start + i}`, fingerprint: `f${start + i}` })),
+          total: 120,
+          note: "n",
+        };
+      },
+    });
+    renderPage();
+    await openTab();
+    await screen.findAllByTestId("dnc-item");
+    const nav = screen.getByRole("navigation", { name: "Requests pages" });
+    expect(within(nav).getByText("Showing 1-50 of 120")).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "Previous" })).toBeDisabled();
+    await userEvent.click(within(nav).getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(offsets).toContain("50"));
+    expect(await screen.findByText("Showing 51-100 of 120")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Showing 101-120 of 120")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Previous" }));
+    expect(await screen.findByText("Showing 51-100 of 120")).toBeInTheDocument();
   });
 
   it("shows an honest empty state", async () => {
