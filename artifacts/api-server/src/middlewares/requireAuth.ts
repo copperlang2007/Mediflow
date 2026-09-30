@@ -140,7 +140,7 @@ async function applyViewAsContext(
     return false;
   }
   if (mfaEnforced() && !authReq.mfaEnrolled) {
-    res.status(403).json({ error: "mfa_required", message: "Multi-factor authentication is required to view another agency." });
+    res.status(403).json({ error: "mfa_required", code: "MFA_REQUIRED", message: "Multi-factor authentication is required to view another agency." });
     return false;
   }
   const [organization] = await db
@@ -269,6 +269,17 @@ export const requireAuth = async (
     return;
   }
 
+  // HIPAA technical safeguard: every user, whatever their role, must have MFA
+  // enrolled before any authenticated route answers. Checked before the
+  // session-activity write and the view-as lookup, so a locked-out request
+  // costs nothing further. The web app reads /auth/status (not behind this
+  // middleware) and shows the enrollment screen.
+  const mfaEnrolled = mfaEnforced() ? await resolveMfaEnrolled(auth) : mfaEnrolledFromAuth(auth);
+  if (mfaEnforced() && !mfaEnrolled) {
+    res.status(403).json({ error: "mfa_required", code: "MFA_REQUIRED", message: MFA_REQUIRED_MESSAGE });
+    return;
+  }
+
   // Session inactivity enforcement — true idle timeout backed by durable DB store
   const sessionId = auth.sessionId;
   if (sessionId) {
@@ -281,8 +292,6 @@ export const requireAuth = async (
     }
   }
 
-  const mfaEnrolled = mfaEnforced() ? await resolveMfaEnrolled(auth) : mfaEnrolledFromAuth(auth);
-
   const authReq = req as AuthenticatedRequest;
   authReq.userId = user.id;
   authReq.orgId = user.orgId;
@@ -290,14 +299,6 @@ export const requireAuth = async (
   authReq.mfaEnrolled = mfaEnrolled;
   if (!(await applyViewAsContext(req, res, authReq, user.orgId))) return;
   authReq.log = req.log.child({ userId: user.id, orgId: authReq.orgId, realOrgId: user.orgId, role: user.role, viewOnly: authReq.viewOnly, supportEdit: authReq.supportEdit });
-
-  // HIPAA technical safeguard: every user, whatever their role, must have MFA
-  // enrolled before any authenticated route answers. The web app reads
-  // /auth/status (not behind this middleware) and shows the enrollment screen.
-  if (mfaEnforced() && !mfaEnrolled) {
-    res.status(403).json({ error: "mfa_required", code: "MFA_REQUIRED", message: MFA_REQUIRED_MESSAGE });
-    return;
-  }
 
   next();
 };

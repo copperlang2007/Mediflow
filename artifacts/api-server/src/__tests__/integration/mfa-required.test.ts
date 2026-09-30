@@ -206,6 +206,23 @@ describe("MFA required for every user (HIPAA technical safeguard)", () => {
     expect(denied.body).toMatchObject({ error: "mfa_required" });
   });
 
+  it("re-asks Clerk a few seconds after a 'not enrolled' answer, so a fresh enrollment is seen", async () => {
+    const { db } = await bootTestDb();
+    const u = await seedUser(db, { orgId: org.id, role: "agent" });
+    clerkTwoFactorByUser.set(u.id, false);
+    const absent = { ...withMfaAuth(u.id, false), "x-test-mfa-enrolled": "absent" };
+    expect((await request(app).get("/api/auth/status").set(absent)).body).toMatchObject({ mfaEnrolled: false });
+
+    clerkTwoFactorByUser.set(u.id, true);
+    const realNow = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(realNow + 6_000);
+    try {
+      expect((await request(app).get("/api/auth/status").set(absent)).body).toMatchObject({ mfaEnrolled: true });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it("does not consult Clerk when the claim is present and false", async () => {
     const { db } = await bootTestDb();
     const u = await seedUser(db, { orgId: org.id, role: "agent" });

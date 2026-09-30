@@ -42,7 +42,11 @@ export function mfaEnrolledFromAuth(auth: unknown): boolean {
 }
 
 const MFA_CLAIMS = ["two_factor", "two_factor_authentication", "mfa"] as const;
-const LOOKUP_TTL_MS = 60_000;
+// Positives are kept a minute; negatives only a few seconds, so a user who
+// just enrolled isn't told "not on yet" by a stale entry. Capped, oldest out.
+const ENROLLED_TTL_MS = 60_000;
+const NOT_ENROLLED_TTL_MS = 5_000;
+const LOOKUP_MAX = 5_000;
 const lookupCache = new Map<string, { enrolled: boolean; at: number }>();
 let lastMissingClaimWarning = 0;
 
@@ -51,7 +55,8 @@ let lastMissingClaimWarning = 0;
  * carries no MFA claim at all (the Clerk session-token template is missing),
  * asks Clerk's backend API instead, cached for a minute per user, and logs a
  * distinct warning so a missing template is diagnosable rather than a
- * lockout of every user. A failed lookup counts as not enrolled.
+ * lockout of every user. A failed lookup counts as not enrolled (fail
+ * closed); the session-token template is the real fix, see above.
  */
 export async function resolveMfaEnrolled(auth: unknown): Promise<boolean> {
   if (mfaEnrolledFromAuth(auth)) return true;
@@ -68,10 +73,16 @@ export async function resolveMfaEnrolled(auth: unknown): Promise<boolean> {
     );
   }
   const cached = lookupCache.get(a.userId);
-  if (cached && Date.now() - cached.at < LOOKUP_TTL_MS) return cached.enrolled;
+  const ttl = cached?.enrolled ? ENROLLED_TTL_MS : NOT_ENROLLED_TTL_MS;
+  if (cached && Date.now() - cached.at < ttl) return cached.enrolled;
   try {
     const user = await clerkClient.users.getUser(a.userId);
     const enrolled = user.twoFactorEnabled === true;
+    lookupCache.delete(a.userId);
+    if (lookupCache.size >= LOOKUP_MAX) {
+      const oldest = lookupCache.keys().next().value;
+      if (oldest !== undefined) lookupCache.delete(oldest);
+    }
     lookupCache.set(a.userId, { enrolled, at: Date.now() });
     return enrolled;
   } catch (err) {
