@@ -119,10 +119,29 @@ export const dbMockFactory = async (): Promise<Record<string, unknown>> => {
   };
 };
 
+/**
+ * Clerk users' two-factor state as the backend API reports it, keyed by user
+ * id. Used when a synthetic session token carries no MFA claim
+ * (`x-test-mfa-enrolled: absent`), the fallback path in resolveMfaEnrolled.
+ */
+export const clerkTwoFactorByUser = new Map<string, boolean>();
+
 export const clerkMockFactory = async (): Promise<Record<string, unknown>> => {
   const actual = await import("@clerk/express");
   return {
     ...actual,
+    // Only users.getUser is faked; everything else stays the real client.
+    clerkClient: new Proxy(actual.clerkClient, {
+      get: (target, prop, receiver) =>
+        prop === "users"
+          ? {
+              getUser: async (id: string) => {
+                if (!clerkTwoFactorByUser.has(id)) throw new Error(`No Clerk user ${id}`);
+                return { id, twoFactorEnabled: clerkTwoFactorByUser.get(id) };
+              },
+            }
+          : Reflect.get(target, prop, receiver),
+    }),
     clerkMiddleware:
       () =>
       (
@@ -146,11 +165,14 @@ export const clerkMockFactory = async (): Promise<Record<string, unknown>> => {
         userId: typeof userId === "string" ? userId : null,
         sessionId: typeof sessionId === "string" ? sessionId : null,
         // Always treat the synthetic JWT as freshly minted so requireRecentAuth passes.
-        sessionClaims: {
-          iat: Math.floor(Date.now() / 1000),
-          // "as-string" mimics a Clerk template shortcode rendered as text.
-          two_factor: mfa === "as-string" ? "true" : mfa === "true",
-        },
+        sessionClaims: mfa === "absent"
+          // No session-token template: the token carries no MFA claim at all.
+          ? { iat: Math.floor(Date.now() / 1000) }
+          : {
+              iat: Math.floor(Date.now() / 1000),
+              // "as-string" mimics a Clerk template shortcode rendered as text.
+              two_factor: mfa === "as-string" ? "true" : mfa === "true",
+            },
       };
     },
   };

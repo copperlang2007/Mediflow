@@ -78,10 +78,10 @@ band and passed via `API_TOKEN`. Options:
 3. **Staging service user:** provision a dedicated load-test user in the
    staging Clerk instance and script token minting with the Clerk backend API.
 
-The token's user determines org scoping and permissions. For the commission
-upload scenario the user must be **MFA-enrolled** with `commission:create`
-/`commission:update` (admin/super_admin) — those routes are behind
-`requireMfa`.
+The token's user determines org scoping and permissions, and must be
+**MFA-enrolled**: every authenticated route answers 403 `mfa_required`
+otherwise. The commission upload scenario also needs `commission:create`
+/`commission:update` (admin/super_admin).
 
 Some sensitive routes also need step-up (recent-auth) headers; the load
 scenarios here avoid those, but `lib/auth.js` exposes `exportHeaders()` if you

@@ -17,9 +17,9 @@ const userProfileAppearance = {
 /**
  * Account security: where a user enrolls MFA.
  *
- * Privileged roles (admins, compliance managers, developers) must have MFA
- * enrolled in agencyBRIDGE's sign-in provider (Clerk) before the server lets
- * them reach PHI-bearing admin routes (middlewares/requireMfa.ts). A second
+ * Every user must have MFA enrolled in agencyBRIDGE's sign-in provider (Clerk)
+ * before the server answers any authenticated route (middlewares/requireAuth.ts);
+ * until then the app shows MfaEnrollmentGate instead of this page. A second
  * factor on the Google account used to sign in does not count: the server
  * reads Clerk's own two-factor flag, so the factor has to be added here.
  */
@@ -52,7 +52,7 @@ export default function AccountSecurityPage() {
           <div>
             <p className="font-medium">Two-step verification is not set up for your agencyBRIDGE account.</p>
             <p className="mt-1">
-              Admin and compliance pages require it. The code Google sends when you sign in with Google
+              agencyBRIDGE requires it for every account. The code Google sends when you sign in with Google
               protects your Google account only; it does not count here. Open <strong>Security</strong> below,
               add an authenticator app under <strong>Two-step verification</strong>, then sign out and back in.
             </p>

@@ -26,7 +26,7 @@ const sqlJobNameList = (jobNames: JobName[]) =>
   sql.join(jobNames.map((name) => sql`${name}`), sql`, `);
 
 // All dev endpoints require an authenticated user with dev_console read.
-// MFA is also required (HIPAA technical safeguard for privileged roles).
+// MFA is also required (HIPAA technical safeguard; every user must have it).
 router.use(requireAuth, requireMfa, requirePermission("dev_console", "read"));
 
 // GET /dev/ops/build — process build metadata.

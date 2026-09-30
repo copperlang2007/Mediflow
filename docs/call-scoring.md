@@ -189,7 +189,7 @@ code. When you have chosen one, phase 2b can add:
   reviews stay as history (reviews are not carried onto the new result).
 - Reading a transcript is audited. Audit entries hold counts and states, never
   the text, a quote, a phone number, a file name or a note.
-- Every route requires sign-in, MFA for owner and compliance roles, and stays
+- Every route requires sign-in and MFA (mandatory for every user), and stays
   inside your agency.
 
 ## Who can do what

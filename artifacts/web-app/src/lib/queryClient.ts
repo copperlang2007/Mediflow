@@ -41,6 +41,21 @@ function toMessage(error: unknown): string {
   return "An unexpected error occurred";
 }
 
+/**
+ * Every API route answers 403 mfa_required until the user enrolls MFA. The
+ * provisioning gate (App.tsx) owns that screen, so refresh its status query
+ * instead of toasting a permission error.
+ */
+function isMfaRequired(error: unknown): boolean {
+  if (statusOf(error) !== 403 || typeof error !== "object" || error === null || !("data" in error)) return false;
+  const data = (error as { data: unknown }).data;
+  return typeof data === "object" && data !== null && (data as { error?: unknown }).error === "mfa_required";
+}
+
+function showMfaGate(): void {
+  void queryClient.invalidateQueries({ queryKey: ["auth", "status"] });
+}
+
 function statusOf(error: unknown): number | undefined {
   if (typeof error === "object" && error !== null && "status" in error) {
     const s = (error as { status: unknown }).status;
@@ -82,6 +97,7 @@ export function notifyQueryError(error: unknown): void {
 export const queryClient = new QueryClient({
   queryCache: new QueryCache({
     onError: (error, query) => {
+      if (isMfaRequired(error)) { showMfaGate(); return; }
       if (isSilent(query)) return;
       // 401 / 403 / 5xx / 404 get the plain-language handling (one fixed id
       // per kind). Anything else: one toast per query, so a polling query
@@ -96,6 +112,7 @@ export const queryClient = new QueryClient({
   }),
   mutationCache: new MutationCache({
     onError: (error, _variables, _context, mutation) => {
+      if (isMfaRequired(error)) { showMfaGate(); return; }
       // Opt-in: nearly every mutation call site already reports its own
       // failure (a friendly toast in onError/catch, or inline form state),
       // so a global raw-error toast would double up on each of them.

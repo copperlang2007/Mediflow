@@ -5,7 +5,7 @@ import { db, usersTable, organizationsTable, orgSettingsTable, sessionActivityTa
 import { eq, lt } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
 import { isDemoMode, demoUserId } from "../lib/demoMode";
-import { mfaEnforced } from "./requireMfa";
+import { mfaEnforced, mfaEnrolledFromAuth, resolveMfaEnrolled, MFA_REQUIRED_MESSAGE } from "./requireMfa";
 
 // TTL cache for org session timeout settings (refresh every 60 s)
 const orgTimeoutCache = new Map<string, { timeoutMinutes: number; fetchedAt: number }>();
@@ -140,7 +140,7 @@ async function applyViewAsContext(
     return false;
   }
   if (mfaEnforced() && !authReq.mfaEnrolled) {
-    res.status(403).json({ error: "mfa_required", message: "Multi-factor authentication is required to view another agency." });
+    res.status(403).json({ error: "mfa_required", code: "MFA_REQUIRED", message: "Multi-factor authentication is required to view another agency." });
     return false;
   }
   const [organization] = await db
@@ -269,6 +269,17 @@ export const requireAuth = async (
     return;
   }
 
+  // HIPAA technical safeguard: every user, whatever their role, must have MFA
+  // enrolled before any authenticated route answers. Checked before the
+  // session-activity write and the view-as lookup, so a locked-out request
+  // costs nothing further. The web app reads /auth/status (not behind this
+  // middleware) and shows the enrollment screen.
+  const mfaEnrolled = mfaEnforced() ? await resolveMfaEnrolled(auth) : mfaEnrolledFromAuth(auth);
+  if (mfaEnforced() && !mfaEnrolled) {
+    res.status(403).json({ error: "mfa_required", code: "MFA_REQUIRED", message: MFA_REQUIRED_MESSAGE });
+    return;
+  }
+
   // Session inactivity enforcement — true idle timeout backed by durable DB store
   const sessionId = auth.sessionId;
   if (sessionId) {
@@ -280,25 +291,6 @@ export const requireAuth = async (
       return;
     }
   }
-
-  // HIPAA technical safeguard: surface MFA enrollment state from the Clerk
-  // session so downstream middleware (requireMfa) can gate privileged routes.
-  // Clerk exposes the user's MFA factor count as `two_factor` or
-  // `two_factor_authentication` in the JWT session claims; older SDKs put
-  // it on `auth.user.twoFactorEnabled`. We check all three so a deployment
-  // configured either way still flows through.
-  // Set up in Clerk (Sessions > Customize session token):
-  //   { "two_factor": "{{user.two_factor_enabled}}" }
-  // A template shortcode may arrive as the string "true", so both forms count.
-  const claims = (auth.sessionClaims ?? {}) as Record<string, unknown>;
-  const isOn = (v: unknown) => v === true || v === "true";
-  const mfaFromClaims =
-    isOn(claims.two_factor) ||
-    isOn(claims.two_factor_authentication) ||
-    isOn(claims.mfa);
-  const mfaFromUser =
-    (auth as { user?: { twoFactorEnabled?: boolean } }).user?.twoFactorEnabled === true;
-  const mfaEnrolled = Boolean(mfaFromClaims || mfaFromUser);
 
   const authReq = req as AuthenticatedRequest;
   authReq.userId = user.id;
