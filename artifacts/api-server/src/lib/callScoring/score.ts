@@ -147,11 +147,16 @@ function result(
   };
 }
 
-/** AI evidence must come from the speaker the criterion is about (or an unlabelled one). */
+/**
+ * AI evidence must come from the IDENTIFIED speaker the criterion is about
+ * (unless the rubric says "any"). Words from an unlabelled speaker could be the
+ * client's, so they never count for an agent criterion: the item goes to a
+ * person instead.
+ */
 function fromExpectedSpeaker(c: Criterion, evidence: Evidence[]): Evidence[] {
   const want = c.speaker ?? "agent";
   if (want === "any") return evidence;
-  return evidence.filter((e) => e.role === want || e.role === "unknown");
+  return evidence.filter((e) => e.role === want);
 }
 
 export interface MergeInput {
@@ -203,14 +208,18 @@ function judgeByAi(
     );
   }
   if (ai.status === "na") return result(c, "na", 0, [], ai.rationale, "llm");
-  const evidence = fromExpectedSpeaker(c, verifyEvidence(ai, byUtt));
+  const verified = verifyEvidence(ai, byUtt);
+  const evidence = fromExpectedSpeaker(c, verified);
   if (!evidence.length) {
+    const wrongSpeaker = verified.length > 0;
     return result(
       c,
       "needs_review",
       0,
-      [],
-      `The AI reviewer judged "${ai.status}" but did not quote words that can be found in the transcript, so a person needs to check. ${ai.rationale}`,
+      wrongSpeaker ? verified : [],
+      wrongSpeaker
+        ? `The AI reviewer's quotes are in the transcript, but not from a speaker identified as the ${c.speaker ?? "agent"} (the labels are missing or say otherwise), so a person needs to confirm who said it. ${ai.rationale}`
+        : `The AI reviewer judged "${ai.status}" but did not quote words that can be found in the transcript, so a person needs to check. ${ai.rationale}`,
       "llm",
     );
   }
@@ -231,8 +240,20 @@ function judgeRequired(
 
   if (f.satisfied) {
     const at = f.evidence[0] ? ` at ${formatClock(f.evidence[0].startSec)}` : "";
-    const unverified = f.speakerUnverified ? " The file has no agent label, so the speaker is not confirmed." : "";
-    return result(c, "pass", 1, f.evidence, `Found by phrase rules${at}.${unverified}`, "rules", extra);
+    if (f.speakerUnverified) {
+      // Found only in unlabelled speech: it may have been the client, so it is
+      // not credit until a person confirms who said it.
+      return result(
+        c,
+        "needs_review",
+        0,
+        f.evidence,
+        `The words were found${at}, but the file has no agent label, so it is not confirmed the agent said them. A person needs to confirm who spoke.`,
+        "rules",
+        extra,
+      );
+    }
+    return result(c, "pass", 1, f.evidence, `Found by phrase rules${at}.`, "rules", extra);
   }
 
   // Said, but only after the window closed. With estimated timing that is not
@@ -278,17 +299,20 @@ function judgeRequired(
     return result(c, "na", 0, [], ai.rationale, "rules+llm", extra);
   }
 
-  const aiEvidence = fromExpectedSpeaker(c, verifyEvidence(ai, byUtt)).filter(
-    (e) => c.withinSeconds === undefined || f.timingEstimated || e.startSec <= c.withinSeconds + 5,
-  );
+  const aiSpoken = fromExpectedSpeaker(c, verifyEvidence(ai, byUtt));
+  // The stated deadline applies in both timing modes; no slack is added.
+  const aiEvidence = aiSpoken.filter((e) => c.withinSeconds === undefined || e.startSec <= c.withinSeconds);
   if (ai.status === "pass" || ai.status === "partial") {
     if (!aiEvidence.length) {
+      const late = aiSpoken.length > 0;
       return result(
         c,
         "needs_review",
         0,
-        f.evidence,
-        `AI reviewer judged "${ai.status}" but its quoted words could not be verified in the transcript${window}. ${ai.rationale}`,
+        late ? dedupe([...f.evidence, ...aiSpoken]) : f.evidence,
+        late
+          ? `AI reviewer's quoted words come after the ${c.withinSeconds}s limit${f.timingEstimated ? " (timing is estimated from word counts)" : ""}, so a person needs to check. ${ai.rationale}`
+          : `AI reviewer judged "${ai.status}" but its quoted words could not be verified in the transcript${window}. ${ai.rationale}`,
         "rules+llm",
         extra,
       );
@@ -353,8 +377,20 @@ function judgeProhibited(
         "llm",
       );
     }
-    if (f.speakerUnverified && !f.violated) {
-      return result(c, "needs_review", 0, evidence, `${ai.rationale} (Speaker labels are missing, so a person must confirm who said it.)`, "llm");
+    if (f.speakerUnverified) {
+      return result(c, "needs_review", 0, evidence, `${ai.rationale} (No agent label in the file, so a person must confirm who said it.)`, "rules+llm");
+    }
+    // Flagged words the rules read as negated are not a violation by themselves:
+    // a fail then needs words the AI quoted that were verified in the transcript.
+    if (!f.violated && !aiEvidence.length) {
+      return result(
+        c,
+        "needs_review",
+        0,
+        evidence,
+        `AI reviewer reported a violation, but the only flagged words look negated and it cited no verifiable words of its own. A person needs to check. ${ai.rationale}`,
+        "rules+llm",
+      );
     }
     return result(c, "fail", 0, evidence, ai.rationale, flagged ? "rules+llm" : "llm", {
       ...(ai.coaching ? { coaching: ai.coaching } : c.hint ? { coaching: c.hint } : {}),

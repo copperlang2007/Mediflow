@@ -6,7 +6,6 @@
  */
 import { decryptPii, encryptPii, hashPii } from "@workspace/db";
 import type { ParsedTranscript, Utterance } from "./types";
-import { redactPHI } from "./redact";
 
 export function seal(value: unknown): Buffer {
   return encryptPii(JSON.stringify(value)).encrypted;
@@ -40,8 +39,16 @@ export function sealTranscript(parsed: ParsedTranscript, extra: { filename?: str
   return seal(payload);
 }
 
-/** HMAC of the PHI-redacted canonical text: recognises a re-import without keeping plaintext. */
-export function redactedTextHash(parsed: ParsedTranscript): Buffer {
-  const canonical = parsed.utterances.map((u) => `${u.role}:${redactPHI(u.text)}`).join("\n");
+/**
+ * Keyed digest (HMAC with the app's PHI_HMAC_KEY) of the ORIGINAL canonical
+ * speech. It is deliberately not computed from redacted text: two different
+ * calls that differ only in masked values (a phone number, a date of birth)
+ * must not collapse into one. Recognises a true re-import without keeping
+ * plaintext.
+ */
+export function contentDigest(parsed: ParsedTranscript): Buffer {
+  const canonical = parsed.utterances
+    .map((u) => `${u.role}:${u.text.replace(/\s+/g, " ").trim()}`)
+    .join("\n");
   return hashPii(canonical);
 }

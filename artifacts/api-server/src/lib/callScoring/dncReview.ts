@@ -6,9 +6,11 @@
  *
  *  - "add_opt_out": records the opt-out through lib/compliance/optOut
  *    (`recordPhoneOptOut`, source "call_review"), which is idempotent, and
- *    writes an audit row in the same transaction. It needs a contact or a
- *    phone number. If the number matches several contacts and the transcript
- *    was not linked to one, the reviewer must pick.
+ *    writes an audit row in the same transaction. The reviewer must CONFIRM the
+ *    single number that asked for no contact (`phoneSource`); only that number
+ *    is recorded, and a contact is attached only if it owns that number. If the
+ *    number matches several contacts and the transcript was not linked to one,
+ *    the reviewer must pick.
  *  - "dismiss": records why it is not a request (a note is required).
  *
  * A resolution is unique per (org, transcript, position) in the database, so
@@ -16,7 +18,7 @@
  * and a rescore cannot re-open a resolved request.
  */
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   auditLogTable,
   callScoreFindingsTable,
@@ -31,16 +33,24 @@ import {
 import { recordPhoneOptOut } from "../compliance/optOut";
 import { phoneMatchKey, phoneMatchKeySql } from "../compliance/phone";
 import { normalizePhone } from "../csvImport";
-import { matchContactByPhone, openTranscript, type AnyDb } from "./store";
+import { MAX_PHONE_CANDIDATES, matchContactByPhone, matchContactsByPhoneKeys, openTranscript, type AnyDb } from "./store";
 import { open, seal } from "./seal";
 
 export type DncAction = "add_opt_out" | "dismiss";
 export type DncStatus = "open" | "opt_out_added" | "dismissed";
+/** Where the confirmed number comes from: the transcript's, the contact's, or typed by the reviewer. */
+export type PhoneSource = "transcript" | "contact" | "typed";
 
 export interface DncCandidate {
   id: string;
   name: string;
   phoneLast4: string | null;
+}
+
+/** A number the reviewer may confirm. Only the last four digits are ever sent to the browser. */
+export interface DncNumberOption {
+  source: "transcript" | "contact";
+  last4: string | null;
 }
 
 export interface DncQueueItem {
@@ -60,8 +70,12 @@ export interface DncQueueItem {
   speakerMode: string;
   contact: { id: string; name: string; phoneLast4: string | null } | null;
   contactMatch: string;
-  /** Contacts sharing the transcript's phone number, when it was ambiguous. */
+  /** Contacts sharing the transcript's phone number, when it was ambiguous (bounded). */
   candidates: DncCandidate[];
+  /** True when more contacts share the number than `candidates` lists. */
+  moreCandidates: boolean;
+  /** The numbers on file for this request; the reviewer confirms one (or types another). */
+  numbers: DncNumberOption[];
   agent: { id: string; name: string } | null;
   resolution: { action: DncAction; note: string | null; reviewerName: string | null; at: string } | null;
 }
@@ -74,7 +88,9 @@ const fullName = (f: string | null, l: string | null) => `${f ?? ""} ${l ?? ""}`
 
 /**
  * Possible do-not-contact requests from the CURRENT score of each transcript
- * (a superseded score's flags are not double counted).
+ * (a superseded score's flags are not double counted). Everything the page
+ * needs (resolutions, contacts, agents, ambiguous matches) is fetched in
+ * batches keyed by the page's ids, never per row.
  */
 export async function listDncQueue(
   handle: AnyDb,
@@ -108,64 +124,89 @@ export async function listDncQueue(
     .orderBy(desc(f.createdAt), desc(f.id))
     .limit(args.limit)
     .offset(args.offset);
+  if (!rows.length) return { items: [], total: n };
 
-  const items: DncQueueItem[] = [];
+  const transcriptIds = [...new Set(rows.map((r) => r.finding.transcriptId))];
+  const payloadPhone = new Map<string, string | null>();
   for (const r of rows) {
-    const payload = open<{ quote: string | null }>(r.finding.evidenceEncrypted);
-    const [resolution] = await handle
-      .select({
-        verdict: callScoreReviewsTable.verdict,
-        note: callScoreReviewsTable.noteEncrypted,
-        at: callScoreReviewsTable.createdAt,
-        reviewerName: usersTable.fullName,
-      })
-      .from(callScoreReviewsTable)
-      .leftJoin(usersTable, eq(usersTable.id, callScoreReviewsTable.reviewerUserId))
-      .where(
-        and(
-          eq(callScoreReviewsTable.orgId, args.orgId),
-          eq(callScoreReviewsTable.transcriptId, r.finding.transcriptId),
-          eq(callScoreReviewsTable.kind, "dnc_resolution"),
-          eq(callScoreReviewsTable.fingerprint, r.finding.fingerprint),
-        ),
-      )
-      .limit(1);
+    if (!payloadPhone.has(r.finding.transcriptId)) {
+      payloadPhone.set(r.finding.transcriptId, open<{ phone: string | null }>(r.transcriptEncrypted)?.phone ?? null);
+    }
+  }
 
-    let contact: DncQueueItem["contact"] = null;
-    if (r.contactId) {
-      const [c] = await handle
+  // One query for every resolution on the page (with the reviewer's name).
+  const resolutionRows = await handle
+    .select({
+      transcriptId: callScoreReviewsTable.transcriptId,
+      fingerprint: callScoreReviewsTable.fingerprint,
+      verdict: callScoreReviewsTable.verdict,
+      note: callScoreReviewsTable.noteEncrypted,
+      at: callScoreReviewsTable.createdAt,
+      reviewerName: usersTable.fullName,
+    })
+    .from(callScoreReviewsTable)
+    .leftJoin(usersTable, eq(usersTable.id, callScoreReviewsTable.reviewerUserId))
+    .where(
+      and(
+        eq(callScoreReviewsTable.orgId, args.orgId),
+        eq(callScoreReviewsTable.kind, "dnc_resolution"),
+        inArray(callScoreReviewsTable.transcriptId, transcriptIds),
+      ),
+    );
+  const resolutions = new Map(resolutionRows.map((x) => [`${x.transcriptId}|${x.fingerprint}`, x]));
+
+  // One query for the linked contacts, one for the agents.
+  const contactIds = [...new Set(rows.map((r) => r.contactId).filter((x): x is string => Boolean(x)))];
+  const contactRows = contactIds.length
+    ? await handle
         .select({ id: contactsTable.id, first: contactsTable.firstName, last: contactsTable.lastName, phone: contactsTable.phone })
         .from(contactsTable)
-        .where(and(eq(contactsTable.id, r.contactId), eq(contactsTable.orgId, args.orgId)))
-        .limit(1);
-      if (c) contact = { id: c.id, name: fullName(c.first, c.last), phoneLast4: last4(c.phone) };
-    }
-    let candidates: DncCandidate[] = [];
-    if (!contact && r.contactMatch === "phone_ambiguous") {
-      const phone = open<{ phone: string | null }>(r.transcriptEncrypted)?.phone ?? null;
-      if (phone) {
-        const m = await matchContactByPhone(handle, args.orgId, phone);
-        for (const id of m.candidateIds) {
-          const [c] = await handle
-            .select({ id: contactsTable.id, first: contactsTable.firstName, last: contactsTable.lastName, phone: contactsTable.phone })
-            .from(contactsTable)
-            .where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, args.orgId)))
-            .limit(1);
-          if (c) candidates.push({ id: c.id, name: fullName(c.first, c.last), phoneLast4: last4(c.phone) });
-        }
-      }
-    }
-    let agent: DncQueueItem["agent"] = null;
-    if (r.agentId) {
-      const [a] = await handle
+        .where(and(eq(contactsTable.orgId, args.orgId), inArray(contactsTable.id, contactIds)))
+    : [];
+  const contacts = new Map(contactRows.map((c) => [c.id, c]));
+  const agentIds = [...new Set(rows.map((r) => r.agentId).filter((x): x is string => Boolean(x)))];
+  const agentRows = agentIds.length
+    ? await handle
         .select({ id: agentsTable.id, first: agentsTable.firstName, last: agentsTable.lastName })
         .from(agentsTable)
-        .where(and(eq(agentsTable.id, r.agentId), eq(agentsTable.orgId, args.orgId)))
-        .limit(1);
-      if (a) agent = { id: a.id, name: fullName(a.first, a.last) };
+        .where(and(eq(agentsTable.orgId, args.orgId), inArray(agentsTable.id, agentIds)))
+    : [];
+  const agents = new Map(agentRows.map((a) => [a.id, a]));
+
+  // Ambiguous phone matches: one query for every distinct number on the page.
+  const ambiguousKeys = new Set<string>();
+  for (const r of rows) {
+    if (r.contactId || r.contactMatch !== "phone_ambiguous") continue;
+    const key = phoneMatchKey(payloadPhone.get(r.finding.transcriptId) ?? null);
+    if (key && key.length >= 10) ambiguousKeys.add(key);
+  }
+  const matches = await matchContactsByPhoneKeys(handle, args.orgId, [...ambiguousKeys]);
+
+  const items: DncQueueItem[] = rows.map((r) => {
+    const payload = open<{ quote: string | null }>(r.finding.evidenceEncrypted);
+    const resolution = resolutions.get(`${r.finding.transcriptId}|${r.finding.fingerprint}`);
+    const c = r.contactId ? contacts.get(r.contactId) : undefined;
+    const contact: DncQueueItem["contact"] = c ? { id: c.id, name: fullName(c.first, c.last), phoneLast4: last4(c.phone) } : null;
+    const tPhone = payloadPhone.get(r.finding.transcriptId) ?? null;
+
+    let candidates: DncCandidate[] = [];
+    let moreCandidates = false;
+    if (!contact && r.contactMatch === "phone_ambiguous") {
+      const key = phoneMatchKey(tPhone);
+      const m = key ? matches.get(key) : undefined;
+      candidates = (m?.candidates ?? []).map((x) => ({ id: x.id, name: fullName(x.first, x.last), phoneLast4: last4(x.phone) }));
+      moreCandidates = m?.more ?? false;
     }
+
+    const numbers: DncNumberOption[] = [];
+    const tKey = phoneMatchKey(tPhone);
+    if (tKey && tKey.length >= 10) numbers.push({ source: "transcript", last4: last4(tPhone) });
+    const cKey = phoneMatchKey(c?.phone ?? null);
+    if (cKey && cKey.length >= 10 && cKey !== tKey) numbers.push({ source: "contact", last4: last4(c?.phone) });
+
+    const a = r.agentId ? agents.get(r.agentId) : undefined;
     const note = resolution ? open<{ note: string }>(resolution.note)?.note ?? null : null;
-    items.push({
+    return {
       findingId: r.finding.id,
       transcriptId: r.finding.transcriptId,
       fingerprint: r.finding.fingerprint,
@@ -183,7 +224,9 @@ export async function listDncQueue(
       contact,
       contactMatch: r.contactMatch,
       candidates,
-      agent,
+      moreCandidates,
+      numbers,
+      agent: a ? { id: a.id, name: fullName(a.first, a.last) } : null,
       resolution: resolution
         ? {
             action: resolution.verdict === "opt_out_added" ? "add_opt_out" : "dismiss",
@@ -192,8 +235,8 @@ export async function listDncQueue(
             at: resolution.at.toISOString(),
           }
         : null,
-    });
-  }
+    };
+  });
   return { items, total: n };
 }
 
@@ -224,6 +267,9 @@ export async function resolveDncFinding(args: {
   action: DncAction;
   note?: string | undefined;
   contactId?: string | undefined;
+  /** Which number the reviewer confirms asked for no contact (required for add_opt_out). */
+  phoneSource?: PhoneSource | undefined;
+  /** The number itself, when phoneSource is "typed". */
   phone?: string | undefined;
 }): Promise<ResolveResult> {
   const { orgId } = args;
@@ -316,6 +362,15 @@ export async function resolveDncFinding(args: {
   }
 
   // ---- add_opt_out: never automatic, always a person's click ----------------
+  // The reviewer confirms ONE number. Nothing else is recorded.
+  if (!args.phoneSource) {
+    return {
+      ok: false,
+      httpStatus: 400,
+      code: "phone_required",
+      message: "Confirm the single phone number that asked for no contact (or type it) before adding the opt-out.",
+    };
+  }
   let contact: { id: string; phone: string | null } | null = null;
   const wantedContactId = args.contactId ?? transcript.contactId ?? null;
   if (wantedContactId) {
@@ -328,77 +383,70 @@ export async function resolveDncFinding(args: {
     contact = c ?? null;
   }
   const payload = openTranscript(transcript);
-  if (!contact && transcript.contactMatch === "phone_ambiguous") {
-    const candidates: DncCandidate[] = [];
+  if (!contact && transcript.contactMatch === "phone_ambiguous" && args.phoneSource !== "typed") {
     const m = payload?.phone ? await matchContactByPhone(db, orgId, payload.phone) : null;
-    for (const id of m?.candidateIds ?? []) {
-      const [c] = await db
+    const candidates: DncCandidate[] = [];
+    if (m?.candidateIds.length) {
+      const rows = await db
         .select({ id: contactsTable.id, first: contactsTable.firstName, last: contactsTable.lastName, phone: contactsTable.phone })
         .from(contactsTable)
-        .where(and(eq(contactsTable.id, id), eq(contactsTable.orgId, orgId)))
-        .limit(1);
-      if (c) candidates.push({ id: c.id, name: fullName(c.first, c.last), phoneLast4: last4(c.phone) });
+        .where(and(eq(contactsTable.orgId, orgId), inArray(contactsTable.id, m.candidateIds)));
+      for (const c of rows) candidates.push({ id: c.id, name: fullName(c.first, c.last), phoneLast4: last4(c.phone) });
     }
     return {
       ok: false,
       httpStatus: 409,
       code: "pick_contact",
-      message: "More than one client uses this phone number. Pick the right one (or enter a number) before adding the opt-out.",
+      message: "More than one client uses this phone number. Pick the right one (or type the number) before adding the opt-out.",
       candidates,
     };
   }
 
-  const phones: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of [contact?.phone, payload?.phone, args.phone]) {
-    const p = dialable(raw);
-    const key = p ? phoneMatchKey(p) : null;
-    if (p && key && !seen.has(key)) {
-      seen.add(key);
-      phones.push(p);
-    }
-  }
-  if (!phones.length) {
+  const chosenRaw = args.phoneSource === "transcript" ? payload?.phone : args.phoneSource === "contact" ? contact?.phone : args.phone;
+  const phone = dialable(chosenRaw);
+  const key = phone ? phoneMatchKey(phone) : null;
+  if (!phone || !key) {
     return {
       ok: false,
       httpStatus: 400,
       code: "phone_required",
-      message: "An opt-out needs a client with a phone number, or a phone number typed in.",
+      message:
+        args.phoneSource === "typed"
+          ? "Type the full phone number that asked for no contact."
+          : "There is no usable phone number from that source. Choose another or type the number.",
     };
   }
+  // A contact is attached only when it owns THE confirmed number.
+  const linked = contact && phoneMatchKey(contact.phone) === key ? contact : null;
 
   return db.transaction(async (tx): Promise<ResolveResult> => {
     // The unique index makes this the single winner if two people click at once.
     const [inserted] = await tx
       .insert(callScoreReviewsTable)
-      .values({ id: randomUUID(), ...reviewBase, verdict: "opt_out_added", contactId: contact?.id ?? null, optOutRecorded: true })
+      .values({ id: randomUUID(), ...reviewBase, verdict: "opt_out_added", contactId: linked?.id ?? null, optOutRecorded: true })
       .onConflictDoNothing()
       .returning({ id: callScoreReviewsTable.id });
     if (!inserted) {
       const again = await existingFor(tx);
       return again ? alreadyResult(again.verdict, again.contactId) : { ok: false, httpStatus: 409, code: "conflict", message: "Try again." };
     }
-    let alreadyOnList = 0;
-    for (const phone of phones) {
-      const key = phoneMatchKey(phone)!;
-      const [existing] = await tx
-        .select({ id: optOutsTable.id })
-        .from(optOutsTable)
-        .where(and(eq(optOutsTable.orgId, orgId), sql`${phoneMatchKeySql(optOutsTable.phone)} = ${key}`))
-        .limit(1);
-      if (existing) alreadyOnList++;
-      await recordPhoneOptOut(tx, { orgId, contactId: contact?.id ?? null, phone, source: "call_review" });
-    }
-    if (contact && contact.id !== transcript.contactId) {
+    const [existing] = await tx
+      .select({ id: optOutsTable.id })
+      .from(optOutsTable)
+      .where(and(eq(optOutsTable.orgId, orgId), sql`${phoneMatchKeySql(optOutsTable.phone)} = ${key}`))
+      .limit(1);
+    const alreadyOnList = existing ? 1 : 0;
+    await recordPhoneOptOut(tx, { orgId, contactId: linked?.id ?? null, phone, source: "call_review" });
+    if (linked && linked.id !== transcript.contactId) {
       // The reviewer identified the client: keep that on the record.
       await tx
         .update(callTranscriptsTable)
-        .set({ contactId: contact.id, contactMatch: "explicit" })
+        .set({ contactId: linked.id, contactMatch: "explicit" })
         .where(and(eq(callTranscriptsTable.id, transcript.id), eq(callTranscriptsTable.orgId, orgId)));
     }
     await tx
       .insert(auditLogTable)
-      .values(audit("call_dnc_opt_out", { via: "call_review", contactId: contact?.id ?? null, phonesRecorded: phones.length, alreadyOnList }));
-    return { ok: true, status: "resolved", action: "add_opt_out", optOut: { phonesRecorded: phones.length, alreadyOnList, contactId: contact?.id ?? null } };
+      .values(audit("call_dnc_opt_out", { via: "call_review", phoneSource: args.phoneSource, contactId: linked?.id ?? null, phonesRecorded: 1, alreadyOnList }));
+    return { ok: true, status: "resolved", action: "add_opt_out", optOut: { phonesRecorded: 1, alreadyOnList, contactId: linked?.id ?? null } };
   });
 }

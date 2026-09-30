@@ -36,7 +36,7 @@ import {
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { requireMfa } from "../middlewares/requireMfa";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
-import { callerAgentId, isSelfScopedAgent } from "../middlewares/agentSelfScope";
+import { isSelfScopedAgent } from "../middlewares/agentSelfScope";
 import { parseCsvTolerant, parseFlexibleDate, CsvFileError } from "../lib/csvImport";
 import { logger } from "../lib/logger";
 import { seal } from "../lib/callScoring/seal";
@@ -79,7 +79,7 @@ router.use(
 async function scopeOf(req: Request): Promise<ScopeFilter | undefined> {
   if (!isSelfScopedAgent(req)) return undefined;
   const a = req as AuthenticatedRequest;
-  return { agentUserId: a.userId, agentProfileId: await callerAgentId(req) };
+  return { agentUserId: a.userId };
 }
 
 const param = (v: string | string[] | undefined): string => (Array.isArray(v) ? (v[0] ?? "") : (v ?? ""));
@@ -404,6 +404,7 @@ const ResolveBody = z.object({
   action: z.enum(["add_opt_out", "dismiss"]),
   note: optional(z.string().trim().max(2000)),
   contactId: optional(z.string().trim().max(100)),
+  phoneSource: optional(z.enum(["transcript", "contact", "typed"])),
   phone: phoneField,
 });
 

@@ -2,9 +2,14 @@
  * Native call scoring (phase 2a: text transcripts only, no speech-to-text).
  *
  * - `call_transcripts`     the transcript itself, stored ONLY as AES-256-GCM
- *                          ciphertext (`encryptPii`), plus an HMAC of the
- *                          PHI-redacted text so a re-import can be recognised
- *                          without keeping plaintext. Optionally linked to a
+ *                          ciphertext (`encryptPii`), plus a keyed digest (HMAC)
+ *                          of the ORIGINAL canonical speech so a re-import can
+ *                          be recognised without keeping plaintext. It is not
+ *                          computed from redacted text, so two calls that differ
+ *                          only in masked values stay distinct. A unique index
+ *                          on (org_id, content_digest) makes the check atomic.
+ *                          The transcript's phone number lives only inside the
+ *                          ciphertext (no plaintext phone column). Optionally linked to a
  *                          contact and/or a native `call_sessions` row.
  * - `call_scores`          one IMMUTABLE automatic result per scoring run.
  *                          A rescore inserts a new row; nothing edits one
@@ -79,13 +84,11 @@ export const callTranscriptsTable = pgTable(
     /** Caller-supplied reference such as a recording id. Never put a client name here. */
     externalRef: text("external_ref"),
     callDate: timestamp("call_date", { withTimezone: true }),
-    /** Last 10 digits, for matching to contacts. Same sensitivity as contacts.phone. */
-    phoneLast10: text("phone_last10"),
     contactMatch: text("contact_match").notNull().default("none"),
     /** AES-256-GCM JSON payload (utterances + labels + filename). Null once purged. */
     transcriptEncrypted: bytea("transcript_encrypted"),
-    /** HMAC-SHA256 of the redacted canonical text (duplicate detection). */
-    redactedTextHash: bytea("redacted_text_hash").notNull(),
+    /** Keyed HMAC of the original canonical speech (duplicate detection). Unique per org. */
+    contentDigest: bytea("content_digest").notNull(),
     speakerMode: text("speaker_mode").notNull(),
     timing: text("timing").notNull(),
     utteranceCount: integer("utterance_count").notNull().default(0),
@@ -98,8 +101,7 @@ export const callTranscriptsTable = pgTable(
   },
   (t) => [
     index("call_transcripts_org_id_created_at_idx").on(t.orgId, t.createdAt),
-    index("call_transcripts_org_hash_idx").on(t.orgId, t.redactedTextHash),
-    index("call_transcripts_org_phone_idx").on(t.orgId, t.phoneLast10),
+    uniqueIndex("call_transcripts_org_digest_uidx").on(t.orgId, t.contentDigest),
     index("call_transcripts_contact_id_idx").on(t.contactId),
     index("call_transcripts_call_session_id_idx").on(t.callSessionId),
   ],

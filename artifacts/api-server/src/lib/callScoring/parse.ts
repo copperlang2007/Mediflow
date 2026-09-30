@@ -97,14 +97,10 @@ function finalize(raw: RawUtterance[], format: TranscriptFormat): ParsedTranscri
   // Stable sort by start when the file gave every start time; otherwise keep file order.
   const ordered = allTimed ? [...kept].sort((a, b) => (a.start as number) - (b.start as number)) : kept;
 
-  const roleByLabel = new Map<string, Role>();
-  for (const r of ordered) {
-    const key = r.speaker.toLowerCase();
-    const explicit = r.role && r.role !== "unknown" ? r.role : roleFromLabel(r.speaker);
-    if (!roleByLabel.has(key) || (roleByLabel.get(key) === "unknown" && explicit !== "unknown")) {
-      roleByLabel.set(key, explicit);
-    }
-  }
+  // A turn's own explicit role always wins. Otherwise the role comes from that
+  // turn's own label. Nothing is carried from one turn to another, so a generic
+  // label ("Speaker 1") can never turn a client's turn into agent speech.
+  const roleOf = (r: RawUtterance): Role => (r.role && r.role !== "unknown" ? r.role : roleFromLabel(r.speaker));
 
   let clock = 0;
   const utterances: Utterance[] = ordered.map((r, id) => {
@@ -116,7 +112,7 @@ function finalize(raw: RawUtterance[], format: TranscriptFormat): ParsedTranscri
       startSec: round(start),
       endSec: round(end),
       speaker: r.speaker,
-      role: roleByLabel.get(r.speaker.toLowerCase()) ?? "unknown",
+      role: roleOf(r),
       text: r.text.trim(),
     };
   });
@@ -188,7 +184,6 @@ function parsePlainText(text: string): RawUtterance[] {
 function parseCaptions(text: string): RawUtterance[] {
   const out: RawUtterance[] = [];
   const blocks = text.replace(/\r/g, "").split(/\n{2,}/);
-  let lastSpeaker = "Speaker";
   for (const block of blocks) {
     const lines = block.split("\n").filter(Boolean);
     const timeIdx = lines.findIndex((l) => l.includes("-->"));
@@ -197,7 +192,9 @@ function parseCaptions(text: string): RawUtterance[] {
     const start = parseClock(a!.trim().split(/\s+/)[0]!);
     const end = parseClock(b!.trim().split(/\s+/)[0]!);
     let body = lines.slice(timeIdx + 1).join(" ").trim();
-    let speaker = lastSpeaker;
+    // A cue with no speaker tag stays unknown: it is NOT assumed to be the same
+    // speaker as the previous cue.
+    let speaker = "Speaker";
     const voice = /^<v(?:\.[^ >]*)? ([^>]+)>/.exec(body);
     if (voice) {
       speaker = voice[1]!.trim();
@@ -209,7 +206,6 @@ function parseCaptions(text: string): RawUtterance[] {
       }
     }
     body = body.replace(/<[^>]+>/g, "").trim();
-    lastSpeaker = speaker;
     if (body) out.push({ start, end, speaker, text: body });
   }
   return mergeRuns(out);

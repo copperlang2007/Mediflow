@@ -27,7 +27,7 @@ import { CMS_RECORD_RETENTION_DAYS } from "../compliance/retention";
 import { phoneMatchKey, phoneMatchKeySql } from "../compliance/phone";
 import type { ScoreRun } from "./engine";
 import { getRubric } from "./rubrics";
-import { open, redactedTextHash, seal, sealTranscript, type TranscriptPayload } from "./seal";
+import { open, contentDigest, seal, sealTranscript, type TranscriptPayload } from "./seal";
 import { effectiveOverrides, applyOverrides, type OverrideRecord } from "./review";
 import { summarizeWith } from "./score";
 import type {
@@ -58,11 +58,16 @@ export function retainUntil(from: Date = new Date()): Date {
 // Contact matching by phone
 // ---------------------------------------------------------------------------
 
+/** Most contacts listed when a number is shared. More than this is reported, not silently dropped. */
+export const MAX_PHONE_CANDIDATES = 50;
+
 export interface ContactMatch {
   contactId: string | null;
   match: CallContactMatch;
-  /** Every contact sharing the number when it is ambiguous (so a reviewer can pick). */
+  /** Contacts sharing the number when it is ambiguous (up to MAX_PHONE_CANDIDATES) so a reviewer can pick. */
   candidateIds: string[];
+  /** True when more contacts share the number than candidateIds holds (search to narrow). */
+  moreCandidates: boolean;
 }
 
 /**
@@ -72,7 +77,7 @@ export interface ContactMatch {
  */
 export async function matchContactByPhone(handle: AnyDb, orgId: string, phone: string): Promise<ContactMatch> {
   const key = phoneMatchKey(phone);
-  if (!key || key.length < 10) return { contactId: null, match: "none", candidateIds: [] };
+  if (!key || key.length < 10) return { contactId: null, match: "none", candidateIds: [], moreCandidates: false };
   const rows = await handle
     .select({ id: contactsTable.id })
     .from(contactsTable)
@@ -83,10 +88,59 @@ export async function matchContactByPhone(handle: AnyDb, orgId: string, phone: s
         sql`${phoneMatchKeySql(contactsTable.phone)} = ${key}`,
       ),
     )
-    .limit(6);
-  if (rows.length === 1) return { contactId: rows[0]!.id, match: "phone_unique", candidateIds: [rows[0]!.id] };
-  if (rows.length > 1) return { contactId: null, match: "phone_ambiguous", candidateIds: rows.map((r) => r.id) };
-  return { contactId: null, match: "none", candidateIds: [] };
+    .orderBy(contactsTable.id)
+    .limit(MAX_PHONE_CANDIDATES + 1);
+  if (rows.length === 1) return { contactId: rows[0]!.id, match: "phone_unique", candidateIds: [rows[0]!.id], moreCandidates: false };
+  if (rows.length > 1) {
+    return {
+      contactId: null,
+      match: "phone_ambiguous",
+      candidateIds: rows.slice(0, MAX_PHONE_CANDIDATES).map((r) => r.id),
+      moreCandidates: rows.length > MAX_PHONE_CANDIDATES,
+    };
+  }
+  return { contactId: null, match: "none", candidateIds: [], moreCandidates: false };
+}
+
+export interface PhoneCandidateRow {
+  id: string;
+  first: string | null;
+  last: string | null;
+  phone: string | null;
+}
+
+/**
+ * Contacts for MANY phone keys in one query (used to fill a review page
+ * without a lookup per row). Each key keeps up to MAX_PHONE_CANDIDATES.
+ */
+export async function matchContactsByPhoneKeys(
+  handle: AnyDb,
+  orgId: string,
+  keys: string[],
+): Promise<Map<string, { candidates: PhoneCandidateRow[]; more: boolean }>> {
+  const out = new Map<string, { candidates: PhoneCandidateRow[]; more: boolean }>();
+  const usable = [...new Set(keys.filter((k) => k.length >= 10))];
+  if (!usable.length) return out;
+  const rows = await handle
+    .select({ id: contactsTable.id, first: contactsTable.firstName, last: contactsTable.lastName, phone: contactsTable.phone })
+    .from(contactsTable)
+    .where(
+      and(
+        eq(contactsTable.orgId, orgId),
+        sql`${contactsTable.deletedAt} IS NULL`,
+        inArray(phoneMatchKeySql(contactsTable.phone), usable),
+      ),
+    )
+    .orderBy(contactsTable.id);
+  for (const r of rows) {
+    const k = phoneMatchKey(r.phone);
+    if (!k) continue;
+    const e = out.get(k) ?? { candidates: [], more: false };
+    if (e.candidates.length < MAX_PHONE_CANDIDATES) e.candidates.push(r);
+    else e.more = true;
+    out.set(k, e);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,10 +166,15 @@ export interface PersistTranscriptArgs {
 export async function persistScoredTranscript(
   handle: AnyDb,
   a: PersistTranscriptArgs,
-): Promise<{ transcriptId: string; scoreId: string }> {
+): Promise<{ transcriptId: string; scoreId: string } | { duplicateOf: string }> {
   const transcriptId = randomUUID();
   const now = new Date();
-  await handle.insert(callTranscriptsTable).values({
+  const digest = contentDigest(a.parsed);
+  // The unique (org_id, content_digest) index makes duplicate detection atomic:
+  // of two concurrent inserts of the same call exactly one row wins.
+  const [inserted] = await handle
+    .insert(callTranscriptsTable)
+    .values({
     id: transcriptId,
     orgId: a.orgId,
     contactId: a.contactId,
@@ -125,10 +184,9 @@ export async function persistScoredTranscript(
     format: a.parsed.format,
     externalRef: a.externalRef,
     callDate: a.callDate,
-    phoneLast10: a.phone ? (phoneMatchKey(a.phone) ?? null) : null,
     contactMatch: a.contactMatch,
     transcriptEncrypted: sealTranscript(a.parsed, { filename: a.filename, phone: a.phone }),
-    redactedTextHash: redactedTextHash(a.parsed),
+    contentDigest: digest,
     speakerMode: a.parsed.speakerMode,
     timing: a.parsed.timing,
     utteranceCount: a.parsed.utterances.length,
@@ -136,7 +194,18 @@ export async function persistScoredTranscript(
     createdBy: a.userId,
     retainUntil: retainUntil(now),
     createdAt: now,
-  });
+    })
+    .onConflictDoNothing()
+    .returning({ id: callTranscriptsTable.id });
+  if (!inserted) {
+    const [existing] = await handle
+      .select({ id: callTranscriptsTable.id })
+      .from(callTranscriptsTable)
+      .where(and(eq(callTranscriptsTable.orgId, a.orgId), eq(callTranscriptsTable.contentDigest, digest)))
+      .limit(1);
+    if (existing) return { duplicateOf: existing.id };
+    throw new Error("call transcript insert conflicted but no existing row was found");
+  }
   const scoreId = await persistScore(handle, {
     orgId: a.orgId,
     transcriptId,
@@ -257,17 +326,17 @@ export async function persistScore(
 // ---------------------------------------------------------------------------
 
 export interface ScopeFilter {
-  /** Set for the `agent` role: only transcripts linked to a call session this user made. */
+  /** Set for the `agent` role: only transcripts linked to a call session this USER placed. */
   agentUserId?: string;
-  agentProfileId?: string | null;
 }
 
 /** SQL condition limiting transcripts to a self-scoped agent's own calls (via call_sessions). */
 export function agentScopeCondition(scope: ScopeFilter | undefined): SQL | undefined {
   if (!scope?.agentUserId) return undefined;
-  const own = scope.agentProfileId
-    ? sql`(cs.user_id = ${scope.agentUserId} OR cs.agent_id = ${scope.agentProfileId})`
-    : sql`cs.user_id = ${scope.agentUserId}`;
+  // Only sessions this user placed. The licensed-agent PROFILE id is deliberately
+  // not used: a profile can be shared by other users, and one agent must never
+  // read another user's transcript.
+  const own = sql`cs.user_id = ${scope.agentUserId}`;
   return sql`${callTranscriptsTable.callSessionId} IS NOT NULL AND EXISTS (
     SELECT 1 FROM call_sessions cs
     WHERE cs.id = ${callTranscriptsTable.callSessionId} AND cs.org_id = ${callTranscriptsTable.orgId} AND ${own}
@@ -456,7 +525,7 @@ export interface TranscriptFilters {
 }
 
 /** Transcripts (newest first) matching the SQL-level filters, capped. */
-export async function listTranscriptRows(handle: AnyDb, f: TranscriptFilters, cap: number) {
+export async function listTranscriptRows(handle: AnyDb, f: TranscriptFilters, cap: number, offset = 0) {
   const t = callTranscriptsTable;
   const conds: SQL[] = [eq(t.orgId, f.orgId)];
   const s = agentScopeCondition(f.scope);
@@ -486,7 +555,8 @@ export async function listTranscriptRows(handle: AnyDb, f: TranscriptFilters, ca
     .from(t)
     .where(and(...conds))
     .orderBy(desc(t.createdAt), desc(t.id))
-    .limit(cap);
+    .limit(cap)
+    .offset(offset);
 }
 
 export function roleLabel(r: string | null): Role {

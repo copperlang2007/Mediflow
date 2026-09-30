@@ -2,7 +2,8 @@
 --
 --   call_transcripts       one row per transcript. The text lives ONLY as
 --                          AES-256-GCM ciphertext (PHI field encryption), plus
---                          an HMAC of the redacted text for duplicate detection.
+--                          a keyed digest (HMAC) of the original canonical speech for
+--                          duplicate detection (unique per org). No plaintext phone column.
 --   call_scores            one immutable automatic result per scoring run. A
 --                          rescore inserts a new row; nothing ever edits one.
 --   call_score_findings    one row per criterion result / piece of evidence,
@@ -26,10 +27,9 @@ CREATE TABLE IF NOT EXISTS "call_transcripts" (
 	"format" text NOT NULL,
 	"external_ref" text,
 	"call_date" timestamp with time zone,
-	"phone_last10" text,
 	"contact_match" text DEFAULT 'none' NOT NULL,
 	"transcript_encrypted" bytea,
-	"redacted_text_hash" bytea NOT NULL,
+	"content_digest" bytea NOT NULL,
 	"speaker_mode" text NOT NULL,
 	"timing" text NOT NULL,
 	"utterance_count" integer DEFAULT 0 NOT NULL,
@@ -45,8 +45,7 @@ CREATE TABLE IF NOT EXISTS "call_transcripts" (
 	CONSTRAINT "call_transcripts_timing_check" CHECK ("timing" IN ('recorded','estimated'))
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "call_transcripts_org_id_created_at_idx" ON "call_transcripts" ("org_id","created_at");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "call_transcripts_org_hash_idx" ON "call_transcripts" ("org_id","redacted_text_hash");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "call_transcripts_org_phone_idx" ON "call_transcripts" ("org_id","phone_last10");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "call_transcripts_org_digest_uidx" ON "call_transcripts" ("org_id","content_digest");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "call_transcripts_contact_id_idx" ON "call_transcripts" ("contact_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "call_transcripts_call_session_id_idx" ON "call_transcripts" ("call_session_id");--> statement-breakpoint
 

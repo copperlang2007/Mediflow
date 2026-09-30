@@ -18,7 +18,7 @@ import {
 import { runScoring, type RunScoringOptions, type ScoreRun } from "./engine";
 import { TranscriptParseError, parseTranscript } from "./parse";
 import { persistScore, persistScoredTranscript, matchContactByPhone, loadTranscriptRow, openTranscript } from "./store";
-import { redactedTextHash } from "./seal";
+import { contentDigest } from "./seal";
 import { getRubric } from "./rubrics";
 import type { ParsedTranscript, Rubric, TranscriptFormat } from "./types";
 
@@ -166,17 +166,18 @@ export async function ingestTranscript(input: IngestInput): Promise<IngestResult
     agentId = sessionAgentId;
   }
 
-  // Same redacted text already scored in this org? Do not create a second copy.
+  // Same original speech already scored in this org? Do not create a second copy.
+  // (Cheap early exit; the unique index in persistScoredTranscript is the atomic guard.)
   const [dup] = await db
     .select({ id: callTranscriptsTable.id })
     .from(callTranscriptsTable)
-    .where(and(eq(callTranscriptsTable.orgId, orgId), eq(callTranscriptsTable.redactedTextHash, redactedTextHash(parsed))))
+    .where(and(eq(callTranscriptsTable.orgId, orgId), eq(callTranscriptsTable.contentDigest, contentDigest(parsed))))
     .limit(1);
   if (dup) return { kind: "duplicate", transcriptId: dup.id };
 
   const run = await runScoring({ rubric: input.rubric, transcript: parsed, ai: input.aiMode, reviewer: input.reviewer });
 
-  const ids = await db.transaction(async (tx) => {
+  const outcome = await db.transaction(async (tx) => {
     const created = await persistScoredTranscript(tx, {
       orgId,
       userId: input.userId,
@@ -192,6 +193,7 @@ export async function ingestTranscript(input: IngestInput): Promise<IngestResult
       callSessionId: input.callSessionId,
       agentId,
     });
+    if ("duplicateOf" in created) return created;
     await tx.insert(auditLogTable).values({
       id: randomUUID(),
       orgId,
@@ -214,6 +216,8 @@ export async function ingestTranscript(input: IngestInput): Promise<IngestResult
     });
     return created;
   });
+  if ("duplicateOf" in outcome) return { kind: "duplicate", transcriptId: outcome.duplicateOf };
+  const ids = outcome;
 
   return {
     kind: "ok",

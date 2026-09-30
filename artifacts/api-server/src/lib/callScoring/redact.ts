@@ -31,6 +31,9 @@ const RULES: Array<[RegExp, string]> = [
   [/\b\d{3}[- ]?\d{2}[- ]?\d{4}\b/g, "[SSN]"],
   [/\b(?:\d[ -]?){13,16}\b/g, "[CARD]"],
   [/\b(?:\+?1[ .-]?)?\(?\d{3}\)?[ .-]?\d{3}[ .-]?\d{4}\b/g, "[PHONE]"],
+  // Seven-digit local numbers ("555-0123"). A separator is required so bare
+  // 7-digit ids are not over-matched.
+  [/\b\d{3}[ .-]\d{4}\b/g, "[PHONE]"],
   [/\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g, "[EMAIL]"],
   // 04/12/1951, 4-12-51
   [/\b(?:0?[1-9]|1[0-2])[/-](?:0?[1-9]|[12]\d|3[01])[/-](?:19|20)?\d{2}\b/g, "[DATE]"],

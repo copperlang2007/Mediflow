@@ -36,7 +36,18 @@ import type { CriterionStatus, Role, Utterance } from "./types";
 export const DISCLAIMER =
   "Call scoring assists review. It is not legal advice and not a compliance certification. A person should confirm anything that matters.";
 
-const LIST_CAP = 5000;
+/** Most matching transcripts a list or summary will hold in memory. */
+export const LIST_CAP = 5000;
+/** Transcripts examined per database round trip while filtering. */
+export const SCAN_BATCH = 500;
+/** Most transcripts examined for one request (bounds the work when few rows match). */
+export const SCAN_CEILING = 50_000;
+
+export interface ScanOptions {
+  /** Cap on MATCHING rows (default LIST_CAP). Small values are used by tests. */
+  cap?: number | undefined;
+  batch?: number | undefined;
+}
 
 const fullName = (f: string | null, l: string | null) => `${f ?? ""} ${l ?? ""}`.trim() || "Unnamed";
 
@@ -74,34 +85,72 @@ interface Scored {
   eff: EffectiveScore;
 }
 
-async function loadScored(args: TranscriptFilters, rubricId?: string): Promise<{ scored: Scored[]; truncated: boolean }> {
-  const rows = await listTranscriptRows(db, args, LIST_CAP);
-  const scores = await latestScores(
-    db,
-    args.orgId,
-    rows.map((r) => r.id),
-  );
-  const byTranscript = new Map(scores.map((s) => [s.transcriptId, s]));
-  const eff = await computeEffective(
-    db,
-    args.orgId,
-    scores.map((s) => ({ id: s.id, transcriptId: s.transcriptId })),
-  );
-  const scored: Scored[] = [];
-  for (const row of rows) {
-    const score = byTranscript.get(row.id);
-    const e = score ? eff.get(score.id) : undefined;
-    if (!score || !e) continue;
-    if (rubricId && score.rubricId !== rubricId) continue;
-    scored.push({ row, score, eff: e });
-  }
-  return { scored, truncated: rows.length >= LIST_CAP };
+interface ScoredFilter {
+  rubricId?: string | undefined;
+  compliance?: "pass" | "fail" | "review" | undefined;
+  dnc?: "open" | undefined;
 }
 
-export async function buildList(args: ListArgs & { rubricId?: string | undefined }) {
-  const { scored, truncated } = await loadScored(args, args.rubricId);
-  const filtered = scored.filter(
-    (s) => (!args.compliance || s.eff.effective.compliance === args.compliance) && (!args.dnc || s.eff.openDnc > 0),
+/**
+ * Newest-first transcripts that match ALL the filters, with their current and
+ * effective scores. The SQL-level filters run in the query; the rubric,
+ * effective-compliance and open-DNC filters depend on the latest score and on
+ * human reviews, so they are applied per batch WHILE scanning. The cap counts
+ * MATCHING rows, so an old match is never hidden behind thousands of newer
+ * non-matches.
+ */
+async function loadScored(
+  args: TranscriptFilters,
+  filter: ScoredFilter = {},
+  opts: ScanOptions = {},
+): Promise<{ scored: Scored[]; truncated: boolean }> {
+  const cap = Math.max(1, opts.cap ?? LIST_CAP);
+  const batch = Math.max(1, opts.batch ?? SCAN_BATCH);
+  const scored: Scored[] = [];
+  let scanned = 0;
+  let truncated = false;
+  for (;;) {
+    const rows = await listTranscriptRows(db, args, batch, scanned);
+    if (!rows.length) break;
+    scanned += rows.length;
+    const scores = await latestScores(
+      db,
+      args.orgId,
+      rows.map((r) => r.id),
+    );
+    const byTranscript = new Map(scores.map((s) => [s.transcriptId, s]));
+    const eff = await computeEffective(
+      db,
+      args.orgId,
+      scores.map((s) => ({ id: s.id, transcriptId: s.transcriptId })),
+    );
+    for (const row of rows) {
+      const score = byTranscript.get(row.id);
+      const e = score ? eff.get(score.id) : undefined;
+      if (!score || !e) continue;
+      if (filter.rubricId && score.rubricId !== filter.rubricId) continue;
+      if (filter.compliance && e.effective.compliance !== filter.compliance) continue;
+      if (filter.dnc && e.openDnc <= 0) continue;
+      if (scored.length >= cap) {
+        truncated = true;
+        break;
+      }
+      scored.push({ row, score, eff: e });
+    }
+    if (truncated || rows.length < batch) break;
+    if (scanned >= SCAN_CEILING) {
+      truncated = true;
+      break;
+    }
+  }
+  return { scored, truncated };
+}
+
+export async function buildList(args: ListArgs & ScanOptions & { rubricId?: string | undefined }) {
+  const { scored: filtered, truncated } = await loadScored(
+    args,
+    { rubricId: args.rubricId, compliance: args.compliance, dnc: args.dnc },
+    { cap: args.cap, batch: args.batch },
   );
   const page = filtered.slice(args.offset, args.offset + args.limit);
   const names = await namesFor(
@@ -167,8 +216,8 @@ const finish = (b: Bucket) => ({
 });
 
 /** Counts by human-reviewed compliance status, by agent and by rubric. Real rows only. */
-export async function buildSummary(args: TranscriptFilters) {
-  const { scored, truncated } = await loadScored(args);
+export async function buildSummary(args: TranscriptFilters & ScanOptions) {
+  const { scored, truncated } = await loadScored(args, {}, { cap: args.cap, batch: args.batch });
   const all = bucket();
   const byAgent = new Map<string, Bucket>();
   const byRubric = new Map<string, Bucket>();
