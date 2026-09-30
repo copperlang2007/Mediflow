@@ -34,6 +34,7 @@ import type {
 } from "./types";
 import type { RuleFinding } from "./rules";
 import { redactPHI } from "./redact";
+import { isBefore } from "./rules";
 import { formatClock, normalize } from "./text";
 
 /** One criterion as graded by the AI reviewer (already schema-validated). */
@@ -238,6 +239,20 @@ function judgeRequired(
   const extra = { componentsFound: f.componentsFound };
   const window = c.withinSeconds !== undefined ? ` within ${c.withinSeconds}s` : "";
 
+  if (f.outOfOrder) {
+    // Mentioned, but only after plan-specific discussion began: it cannot count
+    // as "before", and a keyword alone must not clear a critical item.
+    return result(
+      c,
+      "needs_review",
+      0,
+      f.evidence,
+      `This was mentioned only after the agent had started discussing specific plans, so it is not shown to have come first. A person needs to check the order.`,
+      "rules",
+      extra,
+    );
+  }
+
   if (f.satisfied) {
     const at = f.evidence[0] ? ` at ${formatClock(f.evidence[0].startSec)}` : "";
     if (f.speakerUnverified) {
@@ -301,7 +316,9 @@ function judgeRequired(
 
   const aiSpoken = fromExpectedSpeaker(c, verifyEvidence(ai, byUtt));
   // The stated deadline applies in both timing modes; no slack is added.
-  const aiEvidence = aiSpoken.filter((e) => c.withinSeconds === undefined || e.startSec <= c.withinSeconds);
+  const aiEvidence = aiSpoken.filter(
+    (e) => (c.withinSeconds === undefined || e.startSec <= c.withinSeconds) && (!f.precedeLimit || isBefore(e, f.precedeLimit)),
+  );
   if (ai.status === "pass" || ai.status === "partial") {
     if (!aiEvidence.length) {
       const late = aiSpoken.length > 0;
@@ -311,7 +328,7 @@ function judgeRequired(
         0,
         late ? dedupe([...f.evidence, ...aiSpoken]) : f.evidence,
         late
-          ? `AI reviewer's quoted words come after the ${c.withinSeconds}s limit${f.timingEstimated ? " (timing is estimated from word counts)" : ""}, so a person needs to check. ${ai.rationale}`
+          ? `AI reviewer's quoted words come ${f.precedeLimit ? "after plan-specific discussion began" : `after the ${c.withinSeconds}s limit${f.timingEstimated ? " (timing is estimated from word counts)" : ""}`}, so a person needs to check. ${ai.rationale}`
           : `AI reviewer judged "${ai.status}" but its quoted words could not be verified in the transcript${window}. ${ai.rationale}`,
         "rules+llm",
         extra,

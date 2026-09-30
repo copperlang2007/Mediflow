@@ -31,6 +31,13 @@ export interface RuleFinding {
   satisfied: boolean;
   /** Required: found, but only after the time window closed. */
   late: boolean;
+  /**
+   * Required with `mustPrecede`: the words were found, but only AFTER the first
+   * plan-specific statement. Never a pass; a person decides.
+   */
+  outOfOrder: boolean;
+  /** Required with `mustPrecede`: where the first plan-specific statement sits (evidence must come before it). */
+  precedeLimit: { utteranceId: number; startOffset: number } | null;
   /** Prohibited: at least one hit that does not look negated. */
   violated: boolean;
   /** Prohibited: hits exist but every one looks negated ("I can't promise..."). */
@@ -123,11 +130,14 @@ function scanRequired(
 
   if (c.components?.length) {
     const lateComponents = new Set<string>();
+    // Representative late evidence per component, so a reviewer can jump to it.
+    const lateEvidence: Evidence[] = [];
     for (const comp of c.components) {
       for (const m of stream.findAll(compilePatterns(comp.patterns))) {
         const ev = toEvidence(m, stream, comp.id);
         if (!ev) continue;
         if (!inWindow(ev)) {
+          if (!lateComponents.has(comp.id)) lateEvidence.push(ev);
           lateComponents.add(comp.id);
           continue;
         }
@@ -138,10 +148,16 @@ function scanRequired(
     }
     const need = c.minComponents ?? c.components.length;
     if (f.componentsFound.length >= need) f.satisfied = true;
-    else f.late = new Set([...f.componentsFound, ...lateComponents]).size >= need;
+    else {
+      f.late = new Set([...f.componentsFound, ...lateComponents]).size >= need;
+      // Not satisfied in time: keep the late quotes next to the timely ones.
+      f.evidence.push(...lateEvidence.filter((l) => !f.componentsFound.includes(l.componentId ?? "")));
+    }
     return f;
   }
 
+  const limit = c.mustPrecede?.length ? firstPosition(stream, c.mustPrecede) : null;
+  f.precedeLimit = limit;
   for (const m of stream.findAll(compilePatterns(c.patterns ?? []))) {
     const ev = toEvidence(m, stream);
     if (!ev) continue;
@@ -150,12 +166,35 @@ function scanRequired(
       if (!f.evidence.length) f.evidence.push(ev);
       continue;
     }
+    if (limit && !isBefore(ev, limit)) {
+      // Said, but only after plan-specific discussion began. Matches are in
+      // order, so every later one is also too late.
+      f.outOfOrder = true;
+      f.evidence = [ev];
+      break;
+    }
     f.evidence = [ev];
     f.satisfied = true;
     f.late = false;
     break;
   }
   return f;
+}
+
+/** Where the earliest match of any of these patterns sits in the stream. */
+function firstPosition(stream: SpeechStream, patterns: string[]): { utteranceId: number; startOffset: number } | null {
+  let best: { utteranceId: number; startOffset: number } | null = null;
+  for (const m of stream.findAll(compilePatterns(patterns))) {
+    if (!best || m.utteranceId < best.utteranceId || (m.utteranceId === best.utteranceId && m.startOffset < best.startOffset)) {
+      best = { utteranceId: m.utteranceId, startOffset: m.startOffset };
+    }
+  }
+  return best;
+}
+
+/** True when the evidence starts strictly before the position. */
+export function isBefore(ev: { utteranceId: number; startOffset: number }, at: { utteranceId: number; startOffset: number }): boolean {
+  return ev.utteranceId < at.utteranceId || (ev.utteranceId === at.utteranceId && ev.startOffset < at.startOffset);
 }
 
 function emptyFinding(c: Criterion, unverified: boolean, timingEstimated: boolean): RuleFinding {
@@ -166,6 +205,8 @@ function emptyFinding(c: Criterion, unverified: boolean, timingEstimated: boolea
     componentsTotal: c.components?.length ?? 0,
     satisfied: false,
     late: false,
+    outOfOrder: false,
+    precedeLimit: null,
     violated: false,
     negatedOnly: false,
     speakerUnverified: unverified,

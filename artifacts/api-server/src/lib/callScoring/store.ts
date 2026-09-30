@@ -482,13 +482,53 @@ export async function computeEffective(
       ),
     );
   const resolved = new Set(resolutions.map((r) => `${r.transcriptId}|${r.fingerprint}`));
+  return assembleEffective({ scores, lite, reviews, dncRows, resolved });
+}
+
+type ReviewRow = typeof callScoreReviewsTable.$inferSelect;
+export interface DncFlagRow {
+  scoreId: string | null;
+  transcriptId: string;
+  fingerprint: string;
+}
+
+/**
+ * Pure assembly of the effective results from already-loaded rows. Each row set
+ * is grouped by score once (Map), so the work is linear in the number of rows
+ * (a page of thousands of scores does not rescan every row for every score).
+ */
+export function assembleEffective(args: {
+  scores: Array<{ id: string; transcriptId: string }>;
+  lite: LiteCriterion[];
+  reviews: Array<Pick<ReviewRow, "scoreId" | "kind" | "criterionId" | "verdict" | "fraction" | "reviewerUserId" | "createdAt">>;
+  dncRows: DncFlagRow[];
+  resolved: Set<string>;
+}): Map<string, EffectiveScore> {
+  const { scores, lite, reviews, dncRows, resolved } = args;
+  const out = new Map<string, EffectiveScore>();
+
+  // Group each result set by score ONCE, so the loop below is linear in the
+  // number of rows rather than rescanning every row for every score.
+  const groupBy = <T extends { scoreId: string | null }>(rows: T[]): Map<string, T[]> => {
+    const m = new Map<string, T[]>();
+    for (const r of rows) {
+      if (!r.scoreId) continue;
+      const list = m.get(r.scoreId);
+      if (list) list.push(r);
+      else m.set(r.scoreId, [r]);
+    }
+    return m;
+  };
+  const liteByScore = groupBy(lite);
+  const reviewsByScore = groupBy(reviews);
+  const dncByScore = groupBy(dncRows);
 
   for (const s of scores) {
-    const crit = lite.filter((c) => c.scoreId === s.id);
+    const crit = liteByScore.get(s.id) ?? [];
     const critical = new Set(crit.filter((c) => c.severity === "critical").map((c) => c.criterionId));
     const auto = crit.map(toResult);
-    const history: OverrideRecord[] = reviews
-      .filter((r) => r.scoreId === s.id && r.kind === "override" && r.criterionId)
+    const history: OverrideRecord[] = (reviewsByScore.get(s.id) ?? [])
+      .filter((r) => r.kind === "override" && r.criterionId)
       .map((r) => ({
         criterionId: r.criterionId!,
         verdict: r.verdict as ReviewedStatus | "revert",
@@ -498,7 +538,7 @@ export async function computeEffective(
         at: r.createdAt.toISOString(),
       }));
     const overrides = effectiveOverrides(history);
-    const flags = dncRows.filter((d) => d.scoreId === s.id);
+    const flags = dncByScore.get(s.id) ?? [];
     const openDnc = flags.filter((d) => !resolved.has(`${d.transcriptId}|${d.fingerprint}`)).length;
     out.set(s.id, {
       scoreId: s.id,

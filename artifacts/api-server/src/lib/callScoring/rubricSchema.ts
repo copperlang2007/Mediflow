@@ -34,6 +34,7 @@ const CriterionSchema = z
       .optional(),
     minComponents: z.number().int().positive().optional(),
     withinSeconds: z.number().positive().max(7200).optional(),
+    mustPrecede: z.array(Pattern).min(1).max(50).optional(),
     guidance: z.string().max(2000).optional(),
     hint: z.string().max(300).optional(),
   })

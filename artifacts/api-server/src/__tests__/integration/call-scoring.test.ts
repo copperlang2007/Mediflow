@@ -42,6 +42,12 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import * as schema from "@workspace/db/schema";
 import { bootTestDb, shutdownTestDb, withAuth } from "../helpers/testApp";
+import type { LiteCriterion } from "../../lib/callScoring/store";
+
+// Loaded after the test database boots (they import @workspace/db).
+let detailLib: typeof import("../../lib/callScoring/detail");
+let dncLib: typeof import("../../lib/callScoring/dncReview");
+let storeLib: typeof import("../../lib/callScoring/store");
 import { seedAgent, seedContact, seedOrg, seedUser } from "../helpers/testDb";
 import type { Express } from "express";
 
@@ -110,6 +116,9 @@ async function setPhone(contactId: string, phone: string) {
 beforeAll(async () => {
   handle = await bootTestDb();
   app = (await import("../../app")).default;
+  detailLib = await import("../../lib/callScoring/detail");
+  dncLib = await import("../../lib/callScoring/dncReview");
+  storeLib = await import("../../lib/callScoring/store");
   request = ((await import("supertest")) as any).default;
   const db = handle.db;
 
@@ -215,7 +224,7 @@ describe("creating and scoring a transcript", () => {
     const raw = sealed.toString("utf8") + sealed.toString("latin1");
     expect(raw).not.toContain("Sunrise Benefits");
     expect(raw).not.toContain("marigold");
-    expect(row!.redactedTextHash.length).toBe(32);
+    expect(row!.contentDigest.length).toBe(32);
     expect(row!.retainUntil.getTime() - row!.createdAt.getTime()).toBeGreaterThanOrEqual(3650 * 86_400_000 - 1000);
     expect(row!.orgId).toBe(org.id);
     expect(row!.speakerMode).toBe("labelled");
@@ -269,7 +278,7 @@ Customer: Hi Dana.`;
     expect(t.compliance).toBe("fail");
   });
 
-  it("recognises the same redacted text as a duplicate", async () => {
+  it("recognises the same speech as a duplicate", async () => {
     const text = transcriptText();
     const first = await createScored(text);
     const again = await post(admin.id, { text });
@@ -591,7 +600,7 @@ describe("do-not-contact review", () => {
 
   it("add_opt_out records exactly one opt-out and one audit row, and is idempotent", async () => {
     const t = await dncTranscript({ contactId: contactUnique.id, phone: PHONE_UNIQUE });
-    const first = await resolve(admin.id, t.findingId, { action: "add_opt_out", note: "Confirmed on the recording." });
+    const first = await resolve(admin.id, t.findingId, { action: "add_opt_out", phoneSource: "transcript", note: "Confirmed on the recording." });
     expect(first.status, JSON.stringify(first.body)).toBe(200);
     expect(first.body).toMatchObject({ status: "resolved", action: "add_opt_out" });
 
@@ -610,7 +619,7 @@ describe("do-not-contact review", () => {
     expect(dump).not.toContain("recording");
 
     // Second click: same answer, no second opt-out, no second audit row.
-    const second = await resolve(admin.id, t.findingId, { action: "add_opt_out" });
+    const second = await resolve(admin.id, t.findingId, { action: "add_opt_out", phoneSource: "transcript" });
     expect(second.status).toBe(200);
     expect(second.body.status).toBe("already_resolved");
     expect(await optOutsFor(PHONE_UNIQUE)).toHaveLength(1);
@@ -638,8 +647,8 @@ describe("do-not-contact review", () => {
     await setPhone(c.id, phone);
     const t = await dncTranscript({ contactId: c.id });
     const [a, b] = await Promise.all([
-      resolve(admin.id, t.findingId, { action: "add_opt_out" }),
-      resolve(compliance.id, t.findingId, { action: "add_opt_out" }),
+      resolve(admin.id, t.findingId, { action: "add_opt_out", phoneSource: "contact" }),
+      resolve(compliance.id, t.findingId, { action: "add_opt_out", phoneSource: "contact" }),
     ]);
     expect([a.status, b.status]).toEqual([200, 200]);
     expect([a.body.status, b.body.status].sort()).toEqual(["already_resolved", "resolved"]);
@@ -649,7 +658,7 @@ describe("do-not-contact review", () => {
 
   it("works by phone number alone when no client is linked", async () => {
     const t = await dncTranscript({ phone: "+13105550144" });
-    const res = await resolve(admin.id, t.findingId, { action: "add_opt_out" });
+    const res = await resolve(admin.id, t.findingId, { action: "add_opt_out", phoneSource: "transcript" });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.optOut).toMatchObject({ phonesRecorded: 1, contactId: null });
     expect(await optOutsFor("+13105550144")).toHaveLength(1);
@@ -661,7 +670,7 @@ describe("do-not-contact review", () => {
     expect(res.status).toBe(400);
     expect(res.body.code).toBe("phone_required");
     // A typed number works.
-    const ok = await resolve(admin.id, t.findingId, { action: "add_opt_out", phone: "(310) 555-0155" });
+    const ok = await resolve(admin.id, t.findingId, { action: "add_opt_out", phoneSource: "typed", phone: "(310) 555-0155" });
     expect(ok.status).toBe(200);
     expect(await optOutsFor("+13105550155")).toHaveLength(1);
   });
@@ -674,16 +683,16 @@ describe("do-not-contact review", () => {
     expect(item.candidates.map((c: { id: string }) => c.id).sort()).toEqual([contactDupA.id, contactDupB.id].sort());
     expect(item.contact).toBeNull();
 
-    const refused = await resolve(admin.id, t.findingId, { action: "add_opt_out" });
+    const refused = await resolve(admin.id, t.findingId, { action: "add_opt_out", phoneSource: "transcript" });
     expect(refused.status).toBe(409);
     expect(refused.body.code).toBe("pick_contact");
     expect(refused.body.candidates).toHaveLength(2);
     expect(await optOutsFor(PHONE_DUP)).toHaveLength(0);
 
-    const bad = await resolve(admin.id, t.findingId, { action: "add_opt_out", contactId: otherOrgContact.id });
+    const bad = await resolve(admin.id, t.findingId, { action: "add_opt_out", phoneSource: "transcript", contactId: otherOrgContact.id });
     expect(bad.status).toBe(404);
 
-    const picked = await resolve(admin.id, t.findingId, { action: "add_opt_out", contactId: contactDupA.id });
+    const picked = await resolve(admin.id, t.findingId, { action: "add_opt_out", phoneSource: "transcript", contactId: contactDupA.id });
     expect(picked.status, JSON.stringify(picked.body)).toBe(200);
     expect(await optOutsFor(PHONE_DUP)).toHaveLength(1);
     const [row] = await handle.db.select().from(schema.callTranscriptsTable).where(eq(schema.callTranscriptsTable.id, t.transcriptId));
@@ -731,6 +740,282 @@ describe("do-not-contact review", () => {
     await resolve(admin.id, other!.id, { action: "dismiss", note: "whatever" }).expect(404);
   });
 });
+
+describe("review fixes: confirming exactly one number", () => {
+  async function dnc(extra: Record<string, unknown>) {
+    const t = await createScored(transcriptText(["Customer: Do not call me again."]), extra);
+    const [finding] = await handle.db
+      .select()
+      .from(schema.callScoreFindingsTable)
+      .where(and(eq(schema.callScoreFindingsTable.transcriptId, t.transcriptId), eq(schema.callScoreFindingsTable.kind, "dnc")));
+    return { ...t, findingId: finding!.id };
+  }
+  const resolve = (userId: string, findingId: string, body: Record<string, unknown>) =>
+    request(app).post(`/api/call-scoring/dnc-review/${findingId}/resolve`).set(withAuth(userId)).send(body);
+  const optOuts = async (phone: string) =>
+    (await handle.db.select().from(schema.optOutsTable).where(eq(schema.optOutsTable.orgId, org.id))).filter((o) => o.phone === phone);
+  const reviewRows = (transcriptId: string) =>
+    handle.db.select().from(schema.callScoreReviewsTable).where(eq(schema.callScoreReviewsTable.transcriptId, transcriptId));
+
+  it("refuses to add an opt-out until the reviewer says which number", async () => {
+    const t = await dnc({ phone: "+13105550210" });
+    const res = await resolve(admin.id, t.findingId, { action: "add_opt_out" });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("phone_required");
+    expect(await optOuts("+13105550210")).toHaveLength(0);
+    // "contact" with no contact on the call, and "typed" with no number, are refused too.
+    expect((await resolve(admin.id, t.findingId, { action: "add_opt_out", phoneSource: "contact" })).status).toBe(400);
+    expect((await resolve(admin.id, t.findingId, { action: "add_opt_out", phoneSource: "typed" })).status).toBe(400);
+  });
+
+  it("records only the confirmed number, and attaches the contact only if it owns that number", async () => {
+    const c = await seedContact(handle.db, { orgId: org.id, firstName: "Two", lastName: "Numbers" });
+    await setPhone(c.id, "(310) 555-0201");
+    const t = await dnc({ contactId: c.id, phone: "+13105550202" }); // the call's number is NOT the contact's number
+
+    const q = await request(app).get("/api/call-scoring/dnc-review?limit=200").set(withAuth(admin.id)).expect(200);
+    const item = q.body.items.find((i: { findingId: string }) => i.findingId === t.findingId);
+    expect(item.numbers).toEqual([
+      { source: "transcript", last4: "0202" },
+      { source: "contact", last4: "0201" },
+    ]);
+    expect(JSON.stringify(item)).not.toContain("3105550202");
+    expect(JSON.stringify(item)).not.toContain("3105550201");
+
+    const res = await resolve(admin.id, t.findingId, { action: "add_opt_out", phoneSource: "transcript" });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.optOut).toMatchObject({ phonesRecorded: 1, contactId: null });
+    expect(await optOuts("+13105550202")).toHaveLength(1);
+    expect(await optOuts("+13105550201")).toHaveLength(0);
+    const [contactRow] = await handle.db.select().from(schema.contactsTable).where(eq(schema.contactsTable.id, c.id));
+    expect(contactRow!.optOutSms).toBe(false);
+    const [review] = await reviewRows(t.transcriptId);
+    expect(review!.contactId).toBeNull();
+    const [tr] = await handle.db.select().from(schema.callTranscriptsTable).where(eq(schema.callTranscriptsTable.id, t.transcriptId));
+    expect(tr!.contactId).toBe(c.id); // the link the uploader made is left alone
+  });
+
+  it("choosing the contact's own number records that number and attaches the contact", async () => {
+    const c = await seedContact(handle.db, { orgId: org.id, firstName: "Own", lastName: "Number" });
+    await setPhone(c.id, "(310) 555-0203");
+    const t = await dnc({ contactId: c.id, phone: "+13105550204" });
+    const res = await resolve(admin.id, t.findingId, { action: "add_opt_out", phoneSource: "contact" });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.optOut).toMatchObject({ phonesRecorded: 1, contactId: c.id });
+    expect(await optOuts("+13105550203")).toHaveLength(1);
+    expect(await optOuts("+13105550204")).toHaveLength(0);
+    const [contactRow] = await handle.db.select().from(schema.contactsTable).where(eq(schema.contactsTable.id, c.id));
+    expect(contactRow!.optOutSms).toBe(true);
+  });
+
+  it("a typed number is the only one recorded", async () => {
+    const t = await dnc({ phone: "+13105550205" });
+    const res = await resolve(admin.id, t.findingId, { action: "add_opt_out", phoneSource: "typed", phone: "(310) 555-0206" });
+    expect(res.status).toBe(200);
+    expect(await optOuts("+13105550206")).toHaveLength(1);
+    expect(await optOuts("+13105550205")).toHaveLength(0);
+  });
+});
+
+describe("review fixes: agent access is by user, not by shared licensed profile", () => {
+  it("an agent cannot read a transcript from a call another USER placed under the same agent profile", async () => {
+    const id = `cs-shared-${randomUUID()}`;
+    await handle.db
+      .insert(schema.callSessionsTable)
+      .values({ id, orgId: org.id, userId: otherAgentUser.id, agentId: agentProfile.id, toNumber: PHONE_UNIQUE, status: "completed" });
+    const t = await createScored(transcriptText(), { callSessionId: id });
+    await request(app).get(`/api/call-scoring/transcripts/${t.transcriptId}`).set(withAuth(agentUser.id)).expect(404);
+    const list = await request(app).get("/api/call-scoring/transcripts?limit=100").set(withAuth(agentUser.id)).expect(200);
+    expect(list.body.items.map((i: { id: string }) => i.id)).not.toContain(t.transcriptId);
+    // The user who did place it can read it.
+    await request(app).get(`/api/call-scoring/transcripts/${t.transcriptId}`).set(withAuth(otherAgentUser.id)).expect(200);
+  });
+});
+
+describe("review fixes: keyed digest dedup", () => {
+  it("does not collapse two calls that differ only in a masked value", async () => {
+    const shared = randomUUID();
+    const one = await post(admin.id, { text: `Agent: Please confirm your number.\nCustomer: It is 310-555-0101 ${shared}` });
+    const two = await post(admin.id, { text: `Agent: Please confirm your number.\nCustomer: It is 310-555-0102 ${shared}` });
+    expect(one.status, JSON.stringify(one.body)).toBe(201);
+    expect(two.status, JSON.stringify(two.body)).toBe(201);
+    expect(two.body.transcriptId).not.toBe(one.body.transcriptId);
+  });
+
+  it("two concurrent uploads of the same call produce exactly one transcript and one duplicate answer", async () => {
+    const ref = `dup-${randomUUID()}`;
+    const text = transcriptText();
+    const [a, b, c] = await Promise.all([
+      post(admin.id, { text, externalRef: ref }),
+      post(admin.id, { text, externalRef: ref }),
+      post(admin.id, { text, externalRef: ref }),
+    ]);
+    const statuses = [a.status, b.status, c.status].sort();
+    expect(statuses, JSON.stringify([a.body, b.body, c.body])).toEqual([201, 409, 409]);
+    const rows = (await handle.db.select().from(schema.callTranscriptsTable).where(eq(schema.callTranscriptsTable.orgId, org.id))).filter((r) => r.externalRef === ref);
+    expect(rows).toHaveLength(1);
+    const winner = [a, b, c].find((r) => r.status === 201)!;
+    for (const loser of [a, b, c].filter((r) => r.status === 409)) {
+      expect(loser.body.code).toBe("duplicate");
+      expect(loser.body.transcriptId).toBe(winner.body.transcriptId);
+    }
+    // One score, one audit "create" row.
+    const scores = await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, rows[0]!.id));
+    expect(scores).toHaveLength(1);
+  });
+
+  it("the same speech is a duplicate in one org but not across orgs", async () => {
+    const text = transcriptText();
+    await createScored(text);
+    const otherOrgAdmin = otherAdmin;
+    const res = await post(otherOrgAdmin.id, { text });
+    expect(res.status).toBe(201);
+  });
+
+  it("stores no plaintext phone column", async () => {
+    const [row] = await handle.db.select().from(schema.callTranscriptsTable).limit(1);
+    expect(Object.keys(row!)).not.toContain("phoneLast10");
+  });
+});
+
+describe("review fixes: filters apply before the cap", () => {
+  it("finds an old match hidden behind many newer non-matches, with a correct total", async () => {
+    const capOrg = await seedOrg(handle.db, { id: `cs-cap-${randomUUID().slice(0, 8)}` });
+    const capAdmin = await seedUser(handle.db, { orgId: capOrg.id, role: "agency_admin" });
+    // Oldest: one general-sales call with a possible do-not-contact request.
+    await createScored(`Agent: Hi this is Sam from Acme.\nCustomer: Stop calling me. ${randomUUID()}`, { rubricId: "general-sales" }, capAdmin.id);
+    for (let i = 0; i < 5; i++) await createScored(transcriptText(), {}, capAdmin.id);
+
+    const base = { orgId: capOrg.id, limit: 50, offset: 0, cap: 2, batch: 2 };
+    const byRubric = await detailLib.buildList({ ...base, rubricId: "general-sales" });
+    expect(byRubric.total).toBe(1);
+    expect(byRubric.items).toHaveLength(1);
+    expect(byRubric.truncated).toBe(false);
+
+    const byDnc = await detailLib.buildList({ ...base, dnc: "open" });
+    expect(byDnc.total).toBe(1);
+    expect(byDnc.items[0]!.openDnc).toBe(1);
+
+    // Unfiltered, the cap applies to matching rows and says so.
+    const all = await detailLib.buildList(base);
+    expect(all.total).toBe(2);
+    expect(all.items).toHaveLength(2);
+    expect(all.truncated).toBe(true);
+
+    // With room, everything is there and nothing is marked truncated.
+    const roomy = await detailLib.buildList({ ...base, cap: 100, batch: 2 });
+    expect(roomy.total).toBe(6);
+    expect(roomy.truncated).toBe(false);
+    // Paging over the filtered set.
+    const page2 = await detailLib.buildList({ ...base, cap: 100, limit: 4, offset: 4 });
+    expect(page2.items).toHaveLength(2);
+    expect(page2.total).toBe(6);
+  });
+});
+
+describe("review fixes: many contacts sharing a number", () => {
+  it("returns up to the bound, says there are more, and lets the reviewer pick one beyond the list", async () => {
+    const phone = "(310) 555-0300";
+    const ids: string[] = [];
+    for (let i = 0; i < storeLib.MAX_PHONE_CANDIDATES + 2; i++) {
+      const c = await seedContact(handle.db, { orgId: org.id, firstName: `Shared${i}`, lastName: "Number" });
+      await setPhone(c.id, phone);
+      ids.push(c.id);
+    }
+    const m = await storeLib.matchContactByPhone(handle.db as never, org.id, phone);
+    expect(m.match).toBe("phone_ambiguous");
+    expect(m.candidateIds).toHaveLength(storeLib.MAX_PHONE_CANDIDATES);
+    expect(m.moreCandidates).toBe(true);
+
+    const t = await createScored(transcriptText(["Customer: Please remove my number."]), { phone: "+13105550300" });
+    const q = await request(app).get("/api/call-scoring/dnc-review?limit=200").set(withAuth(admin.id)).expect(200);
+    const [finding] = await handle.db
+      .select()
+      .from(schema.callScoreFindingsTable)
+      .where(and(eq(schema.callScoreFindingsTable.transcriptId, t.transcriptId), eq(schema.callScoreFindingsTable.kind, "dnc")));
+    const item = q.body.items.find((i: { findingId: string }) => i.findingId === finding!.id);
+    expect(item.candidates).toHaveLength(storeLib.MAX_PHONE_CANDIDATES);
+    expect(item.moreCandidates).toBe(true);
+
+    const listed = new Set(item.candidates.map((c: { id: string }) => c.id));
+    const beyond = ids.find((id) => !listed.has(id))!;
+    const res = await request(app)
+      .post(`/api/call-scoring/dnc-review/${finding!.id}/resolve`)
+      .set(withAuth(admin.id))
+      .send({ action: "add_opt_out", phoneSource: "transcript", contactId: beyond });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.optOut.contactId).toBe(beyond);
+  });
+});
+
+describe("review fixes: the do-not-contact queue is batched", () => {
+  it("runs a fixed number of queries however many items are on the page", async () => {
+    for (let i = 0; i < 4; i++) await createScored(transcriptText(["Customer: Stop calling me."]), { contactId: contactUnique.id, agentId: agentProfile.id });
+    let selects = 0;
+    const counting = new Proxy(handle.db as object, {
+      get(target, prop, receiver) {
+        const v = Reflect.get(target, prop, receiver);
+        if (prop === "select" || prop === "selectDistinct") selects++;
+        return typeof v === "function" ? v.bind(target) : v;
+      },
+    });
+    const page = await dncLib.listDncQueue(counting as never, { orgId: org.id, status: "open", limit: 50, offset: 0 });
+    expect(page.items.length).toBeGreaterThanOrEqual(5);
+    // count + page + resolutions + contacts + agents + ambiguous matches: never per item.
+    expect(selects).toBeLessThanOrEqual(7);
+    const one = await dncLib.listDncQueue(counting as never, { orgId: org.id, status: "open", limit: 1, offset: 0 });
+    expect(one.items).toHaveLength(1);
+  });
+});
+
+describe("review fixes: assembleEffective is linear", () => {
+  it("handles thousands of scores with their criteria, reviews and flags quickly and correctly", () => {
+    const N = 3000;
+    const scores: Array<{ id: string; transcriptId: string }> = [];
+    const lite: LiteCriterion[] = [];
+    const reviews: Parameters<typeof storeLib.assembleEffective>[0]["reviews"] = [];
+    const dncRows: Parameters<typeof storeLib.assembleEffective>[0]["dncRows"] = [];
+    const resolved = new Set<string>();
+    for (let i = 0; i < N; i++) {
+      const id = `s${i}`;
+      scores.push({ id, transcriptId: `t${i}` });
+      for (let k = 0; k < 20; k++) {
+        lite.push({
+          scoreId: id,
+          criterionId: `c${k}`,
+          name: `C${k}`,
+          kind: "required",
+          severity: k === 0 ? "critical" : "major",
+          verdict: k === 0 ? "needs_review" : "pass",
+          fraction: 1,
+          maxPoints: 5,
+        });
+      }
+      // Every third call has a human pass on the critical item; every fifth has a flag, half resolved.
+      if (i % 3 === 0) {
+        reviews.push({ scoreId: id, kind: "override", criterionId: "c0", verdict: "pass", fraction: null, reviewerUserId: "u", createdAt: new Date() });
+      }
+      if (i % 5 === 0) {
+        dncRows.push({ scoreId: id, transcriptId: `t${i}`, fingerprint: "f" });
+        if (i % 10 === 0) resolved.add(`t${i}|f`);
+      }
+    }
+    const started = Date.now();
+    const out = storeLib.assembleEffective({ scores, lite, reviews, dncRows, resolved });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(out.size).toBe(N);
+    // i=0: overridden to pass and its flag resolved -> pass.
+    expect(out.get("s0")!.effective.compliance).toBe("pass");
+    // i=1: critical item still unreviewed -> review.
+    expect(out.get("s1")!.effective.compliance).toBe("review");
+    // i=3: overridden, no flag -> pass. i=5: overridden? no; flag open -> review.
+    expect(out.get("s3")!.effective.compliance).toBe("pass");
+    expect(out.get("s5")!.openDnc).toBe(1);
+    expect(out.get("s10")!.openDnc).toBe(0);
+    expect(out.get("s10")!.resolvedDnc).toBe(1);
+  });
+});
+
 
 describe("bulk import (look-back)", () => {
   const file = (name: string, body: string) => ({ name, body: Buffer.from(body) });

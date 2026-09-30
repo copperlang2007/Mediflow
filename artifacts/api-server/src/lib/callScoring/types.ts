@@ -90,6 +90,13 @@ export interface Criterion {
   minComponents?: number;
   /** Required: must be completed within N seconds of call start. */
   withinSeconds?: number;
+  /**
+   * Required: the evidence must come BEFORE the first statement (by the same
+   * speaker) matching any of these patterns - e.g. a scope-of-appointment
+   * confirmation must precede the first plan-specific discussion. A mention
+   * that only comes after that point never passes; a person decides.
+   */
+  mustPrecede?: string[];
   /** Extra instructions for the AI reviewer. */
   guidance?: string;
   /** Short coaching line shown when the item is missing or violated. */

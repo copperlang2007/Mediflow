@@ -129,6 +129,14 @@ export const medicareRubric: Rubric = {
       severity: "critical",
       kind: "required",
       evaluator: "hybrid",
+      // The confirmation must come before the agent starts on specific plans.
+      mustPrecede: [
+        "(humana|aetna|united ?healthcare|uhc|wellcare|cigna|anthem|blue cross|kaiser|devoted|clover|bcbs)",
+        "(this|that|the|our|your) (plan|policy) (has|comes with|includes|offers|covers|is|would|will)",
+        "(premium|copay|co pay|deductible|out of pocket maximum|maximum out of pocket|formulary|in network|part d deductible)s? (is|are|of|would be|will be|starts|start|comes|come)",
+        "(zero|no|\\d+) (dollar )?(premium|copay|co pay)",
+        "(plan|plans) (that|which) (has|have|includes|include|covers|cover)",
+      ],
       patterns: [
         "scope of (the )?appointment",
         "s o a",
@@ -262,7 +270,9 @@ export const medicareRubric: Rubric = {
       severity: "major",
       kind: "required",
       evaluator: "rules",
-      speaker: "any",
+      // The AGENT asking counts. What the client volunteers is not the agent's work.
+      // With no agent label the words are found in unknown speech and go to a person.
+      speaker: "agent",
       minComponents: 5,
       components: [
         { id: "doctors", label: "Doctors / providers", patterns: ["doctors?", "physicians?", "specialists?", "providers?", "primary care", "pcp"] },
