@@ -238,7 +238,12 @@ export async function storeApplication(
   orgId: string,
   p: ParsedPolicyEvent,
   links: { contactId: string | null; enrollmentId: string | null },
-  opts: { source?: string; fallbackKey?: string | null } = {},
+  opts: {
+    source?: string;
+    fallbackKey?: string | null;
+    /** The agent profile that wrote it (resolved unambiguously by the caller). */
+    writingAgentId?: string | null;
+  } = {},
 ): Promise<StoredApplication | null> {
   const source = opts.source ?? APPLICATION_SOURCE;
   let applicationKey = p.confirmationCode ?? (p.policyId ? `policy:${p.policyId}` : null) ?? opts.fallbackKey ?? null;
@@ -326,6 +331,7 @@ export async function storeApplication(
     medicareIdEncrypted: mbi?.encrypted ?? null,
     medicareIdHash: mbi?.hash ?? null,
     medicaidNumberEncrypted: medicaid,
+    writingAgentId: opts.writingAgentId ?? null,
   };
   const t = enrollmentApplicationsTable;
   const keep = (col: typeof t.carrierName | typeof t.planId | typeof t.planName | typeof t.planType | typeof t.snpType
@@ -338,6 +344,8 @@ export async function storeApplication(
     confirmationCode: keep(t.confirmationCode),
     // A record keeps the policy id it was created for.
     externalPolicyId: sql`coalesce(${t.externalPolicyId}, excluded.external_policy_id)`,
+    // The writer is fixed once known; a later delivery only fills a blank.
+    writingAgentId: sql`coalesce(${t.writingAgentId}, excluded.writing_agent_id)`,
     carrierName: keep(t.carrierName),
     planId: keep(t.planId),
     planName: keep(t.planName),

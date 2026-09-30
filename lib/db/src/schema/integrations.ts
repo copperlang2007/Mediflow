@@ -5,6 +5,7 @@ import { pgTable, text, timestamp, boolean, integer, jsonb, index, unique, date,
 import { organizationsTable } from "./core";
 import { contactsTable, activitiesTable } from "./crm";
 import { enrollmentsTable } from "./enrollments";
+import { agentsTable } from "./agents";
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => "bytea",
@@ -146,6 +147,12 @@ export const enrollmentApplicationsTable = pgTable(
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
     agentEmail: text("agent_email"),
     agentNpn: text("agent_npn"),
+    /**
+     * The agent profile that wrote this application, resolved when it was
+     * stored (NPN, else email, only when exactly one profile matches). The
+     * stable key PHI access checks use; the NPN / email above stay as received.
+     */
+    writingAgentId: text("writing_agent_id").references(() => agentsTable.id, { onDelete: "set null" }),
     medicareIdEncrypted: bytea("medicare_id_encrypted"),
     medicareIdHash: bytea("medicare_id_hash"),
     medicaidNumberEncrypted: bytea("medicaid_number_encrypted"),

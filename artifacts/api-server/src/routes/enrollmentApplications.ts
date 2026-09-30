@@ -4,11 +4,12 @@
  *   GET /contacts/:id/applications      — summary list (no PHI beyond plan info)
  *   GET /applications/:id/full          — the decrypted application
  *
- * The full view is limited to PHI_PRIVILEGED_ROLES and writes an audit_log
- * entry on EVERY view, before any data is returned: if the audit write fails,
- * nothing is shown. Health answers and race/ethnicity are only ever returned
- * here, to a privileged person looking at them, never to routing, scoring or
- * AI features.
+ * The full view is limited to PHI_PRIVILEGED_ROLES and to the agent who
+ * services the client (the contact's assigned agent, or the application's
+ * writing agent; see lib/phiAccess.ts). It writes an audit_log entry on EVERY
+ * view, before any data is returned: if the audit write fails, nothing is
+ * shown. Health answers and race/ethnicity are only ever returned here, to a
+ * person allowed to look at them, never to routing, scoring or AI features.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "crypto";
@@ -17,6 +18,7 @@ import {
   db,
   auditLogTable,
   contactsTable,
+  enrollmentsTable,
   enrollmentApplicationsTable,
   enrollmentApplicationVersionsTable,
   decryptPii,
@@ -24,9 +26,44 @@ import {
 import { requireMfa } from "../middlewares/requireMfa";
 import { requireAuth, requirePermission, type AuthenticatedRequest } from "../middlewares/requireAuth";
 import { PHI_PRIVILEGED_ROLES } from "../lib/permissions";
+import { applicationAccessColumns, mayViewFullApplication, phiViewerAgent } from "../lib/phiAccess";
 import { isPolicyEvent, parsePolicyEvent } from "../lib/integrations/enrollhere/policyEvent";
 
 const router: IRouter = Router();
+
+/**
+ * Medicare / Medicaid numbers from a Sunfire application read from GHL custom
+ * fields (lib/integrations/ghl/sunfire.ts stores them as "Label (merge_key)").
+ */
+function sunfireFieldIds(payload: Record<string, unknown>): { medicareNumber: string | null; medicaidNumber: string | null } | null {
+  if (payload.source !== "gohighlevel" || typeof payload.fields !== "object" || payload.fields === null) return null;
+  const fields = payload.fields as Record<string, unknown>;
+  // Per key, a number is shown only when every field carrying that key agrees;
+  // a key with conflicting fields (a duplicated or spouse field) shows nothing
+  // rather than risk another person's number, and does not fall through. The
+  // legacy HICN is only a fallback for an application with no MBI field at
+  // all (the MBI and HICN are different identifiers, so they never "agree").
+  // The full field list below still shows each one with its label.
+  const valuesFor = (key: string): Set<string> => {
+    const values = new Set<string>();
+    for (const [label, v] of Object.entries(fields)) {
+      if (typeof v === "string" && v.trim() && label.endsWith(`(${key})`)) values.add(v.trim().toUpperCase().replace(/[\s-]/g, ""));
+    }
+    return values;
+  };
+  const pick = (...keys: string[]): string | null => {
+    for (const key of keys) {
+      const values = valuesFor(key);
+      if (values.size === 0) continue;
+      return values.size === 1 ? [...values][0]! : null;
+    }
+    return null;
+  };
+  return { medicareNumber: pick("medicare_number", "applicanthicn"), medicaidNumber: pick("medicaid_number") };
+}
+
+const FULL_VIEW_REFUSED = "Only admins, compliance and the client's own agent can view full applications.";
+
 
 const param = (v: string | string[] | undefined): string => (Array.isArray(v) ? v[0] ?? "" : v ?? "");
 
@@ -59,10 +96,17 @@ router.get(
     const [contact] = await db.select({ id: contactsTable.id }).from(contactsTable)
       .where(and(eq(contactsTable.id, contactId), eq(contactsTable.orgId, authReq.orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!contact) { res.status(404).json({ error: "Contact not found" }); return; }
-    const rows = await db.select(summaryColumns).from(enrollmentApplicationsTable)
+    const rows = await db.select({ row: summaryColumns, access: applicationAccessColumns }).from(enrollmentApplicationsTable)
+      .innerJoin(contactsTable, eq(contactsTable.id, enrollmentApplicationsTable.contactId))
+      .leftJoin(enrollmentsTable, eq(enrollmentsTable.id, enrollmentApplicationsTable.enrollmentId))
       .where(and(eq(enrollmentApplicationsTable.orgId, authReq.orgId), eq(enrollmentApplicationsTable.contactId, contactId)))
       .orderBy(desc(enrollmentApplicationsTable.updatedAt));
-    res.json({ applications: rows, canViewFull: PHI_PRIVILEGED_ROLES.has(authReq.userRole) });
+    const viewer = await phiViewerAgent(authReq);
+    const applications = rows.map(({ row, access }) => ({
+      ...row,
+      canViewFull: mayViewFullApplication(authReq.userRole, viewer, access),
+    }));
+    res.json({ applications, canViewFull: applications.some((a) => a.canViewFull) });
   },
 );
 
@@ -73,22 +117,34 @@ router.get(
   requireMfa,
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    if (!PHI_PRIVILEGED_ROLES.has(authReq.userRole)) {
-      res.status(403).json({ error: "Only admins and compliance can view full applications." });
+    const viewer = await phiViewerAgent(authReq);
+    if (!PHI_PRIVILEGED_ROLES.has(authReq.userRole) && !viewer) {
+      res.status(403).json({ error: FULL_VIEW_REFUSED });
       return;
     }
     const id = param(req.params.id);
     // Only for a live contact in this org: a deleted contact's application is
     // not viewable (hard deletes cascade the application away entirely).
-    const [found] = await db.select({ app: enrollmentApplicationsTable }).from(enrollmentApplicationsTable)
+    const [found] = await db.select({
+      app: enrollmentApplicationsTable,
+      access: applicationAccessColumns,
+    }).from(enrollmentApplicationsTable)
       .innerJoin(contactsTable, and(
         eq(contactsTable.id, enrollmentApplicationsTable.contactId),
         eq(contactsTable.orgId, authReq.orgId),
         isNull(contactsTable.deletedAt),
       ))
+      .leftJoin(enrollmentsTable, eq(enrollmentsTable.id, enrollmentApplicationsTable.enrollmentId))
       .where(and(eq(enrollmentApplicationsTable.id, id), eq(enrollmentApplicationsTable.orgId, authReq.orgId))).limit(1);
     const app = found?.app;
-    if (!app) { res.status(404).json({ error: "Application not found" }); return; }
+    const privileged = PHI_PRIVILEGED_ROLES.has(authReq.userRole);
+    // An agent gets the same 403 for "not yours" and "no such application",
+    // so application ids can't be probed.
+    if (!app || !mayViewFullApplication(authReq.userRole, viewer, found.access)) {
+      if (!privileged) { res.status(403).json({ error: FULL_VIEW_REFUSED }); return; }
+      res.status(404).json({ error: "Application not found" });
+      return;
+    }
 
     const requested = Number(req.query.version);
     const version = Number.isInteger(requested) && requested > 0 ? requested : app.currentVersion;
@@ -124,7 +180,7 @@ router.get(
 
     // Identifiers come from the selected version's own payload, so an older
     // version shows the numbers it was received with, not today's.
-    const ids = isPolicyEvent(payload) ? parsePolicyEvent(payload) : null;
+    const ids = isPolicyEvent(payload) ? parsePolicyEvent(payload) : sunfireFieldIds(payload);
 
     res.set("Cache-Control", "no-store");
     res.json({
