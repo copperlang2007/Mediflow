@@ -7,6 +7,7 @@ import { randomUUID } from "crypto";
 import { logger } from "../lib/logger";
 import { seedDefaultCarriers } from "../lib/carrierSeed";
 import { isDemoMode, demoUserId } from "../lib/demoMode";
+import { mfaEnforced, mfaEnrolledFromAuth } from "../middlewares/requireMfa";
 
 const ProvisionSchema = z.object({
   email: z.string().email(),
@@ -30,7 +31,8 @@ router.get("/auth/status", async (req: Request, res: Response): Promise<void> =>
   // Demo mode (a hard no-op under NODE_ENV=production, see lib/demoMode):
   // Clerk's middleware is not mounted, so getAuth() would throw. Every demo
   // request is the seeded demo user, exactly as requireAuth resolves it.
-  const userId = isDemoMode() ? demoUserId() : getAuth(req)?.userId;
+  const auth = isDemoMode() ? null : getAuth(req);
+  const userId = isDemoMode() ? demoUserId() : auth?.userId;
   if (!userId) {
     res.status(401).json({ error: "Unauthorized" });
     return;
@@ -57,6 +59,10 @@ router.get("/auth/status", async (req: Request, res: Response): Promise<void> =>
     active: user.isActive,
     orgId: user.orgId,
     role: user.role,
+    // Every authenticated route answers 403 mfa_required until the user has
+    // a second factor; the web app shows the enrollment screen instead.
+    mfaRequired: mfaEnforced(),
+    mfaEnrolled: isDemoMode() || mfaEnrolledFromAuth(auth),
   });
 });
 

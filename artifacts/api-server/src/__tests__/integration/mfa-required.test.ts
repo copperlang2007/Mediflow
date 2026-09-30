@@ -1,9 +1,9 @@
 /**
- * MFA enforcement for privileged roles — HIPAA technical safeguard.
+ * Mandatory MFA for every user — HIPAA technical safeguard.
  *
- * requireMfa() returns 403 with body { error: "mfa_required" } when a
- * caller whose role is in MFA_REQUIRED_ROLES does not have an MFA factor
- * enrolled on their Clerk account. The middleware defaults to a NOP in
+ * requireAuth (and requireMfa on the most sensitive routes) returns 403 with
+ * body { error: "mfa_required" } when the caller, whatever their role, has no
+ * MFA factor enrolled on their Clerk account. The middleware defaults to a NOP in
  * NODE_ENV=test so the rest of the suite doesn't have to know about MFA;
  * this test flips NODE_ENV for the duration of the file to exercise the
  * production code path end-to-end.
@@ -88,7 +88,7 @@ afterAll(async () => {
   await shutdownTestDb();
 });
 
-describe("MFA required for admin roles (HIPAA technical safeguard)", () => {
+describe("MFA required for every user (HIPAA technical safeguard)", () => {
   it("403s POST /automations/rules for an agency_admin without MFA enrolled", async () => {
     const res = await request(app)
       .post("/api/automations/rules")
@@ -165,15 +165,35 @@ describe("MFA required for admin roles (HIPAA technical safeguard)", () => {
     }
   });
 
-  it("allows GET /automations/rules for an agency_admin without MFA (reads not gated)", async () => {
+  it("403s reads too: GET /automations/rules for an agency_admin without MFA", async () => {
     const res = await request(app)
       .get("/api/automations/rules")
       .set(withMfaAuth(adminNoMfa.id, false));
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ error: "mfa_required", code: "MFA_REQUIRED" });
+  });
 
-    // Read endpoints are intentionally not gated by MFA — verify we are
-    // not 403'd. (200 OK with the empty list is the happy path.)
-    expect(res.status).not.toBe(403);
-    expect(res.status).toBe(200);
+  it("403s an agent without MFA on their own routes", async () => {
+    const res = await request(app)
+      .get("/api/agents/me/clients")
+      .set(withMfaAuth(agent.id, false));
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ error: "mfa_required" });
+  });
+
+  it("lets an agent with MFA through to the route", async () => {
+    const res = await request(app)
+      .get("/api/automations/rules")
+      .set(withMfaAuth(agent.id, true));
+    expect(res.body.error).not.toBe("mfa_required");
+  });
+
+  it("reports MFA state on /auth/status, which stays reachable without MFA", async () => {
+    const without = await request(app).get("/api/auth/status").set(withMfaAuth(agent.id, false));
+    expect(without.status).toBe(200);
+    expect(without.body).toMatchObject({ provisioned: true, mfaRequired: true, mfaEnrolled: false });
+    const withMfa = await request(app).get("/api/auth/status").set(withMfaAuth(agent.id, true));
+    expect(withMfa.body).toMatchObject({ mfaRequired: true, mfaEnrolled: true });
   });
 
   it("allows POST /automations/rules for an agency_admin WITH MFA enrolled", async () => {
@@ -191,14 +211,13 @@ describe("MFA required for admin roles (HIPAA technical safeguard)", () => {
     expect([200, 201]).toContain(res.status);
   });
 
-  it("403s POST /automations/rules for an agent due to RBAC, not MFA (no masking)", async () => {
-    // The pure 'agent' role is NOT in MFA_REQUIRED_ROLES, so requireMfa
-    // is a no-op. The 403 must therefore come from the downstream RBAC
-    // check (automation:create requires super_admin or agency_admin).
+  it("403s POST /automations/rules for an agent with MFA due to RBAC, not MFA (no masking)", async () => {
+    // With MFA enrolled the gate passes, so the 403 must come from the
+    // downstream RBAC check (automation:create requires an admin role).
     // We assert the body shape distinguishes it from the MFA failure.
     const res = await request(app)
       .post("/api/automations/rules")
-      .set(withMfaAuth(agent.id, false))
+      .set(withMfaAuth(agent.id, true))
       .send({
         name: "Should be RBAC-blocked",
         triggerType: "lead_created",
@@ -215,13 +234,6 @@ describe("MFA required for admin roles (HIPAA technical safeguard)", () => {
       .set(withMfaAuth(adminNoMfa.id, false));
     expect(res.status).toBe(403);
     expect(res.body).toMatchObject({ error: "mfa_required" });
-  });
-
-  it("does not block GET /commission-schedules for an admin without MFA (read-only is ungated)", async () => {
-    const res = await request(app)
-      .get("/api/commission-schedules")
-      .set(withMfaAuth(adminNoMfa.id, false));
-    expect(res.status).not.toBe(403);
   });
 
   it("respects MFA_REQUIRED=false override outside production (local dev escape hatch)", async () => {

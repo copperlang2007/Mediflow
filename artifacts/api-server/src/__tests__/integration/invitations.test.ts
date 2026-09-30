@@ -42,7 +42,7 @@ import {
   usersTable,
   subscriptionsTable,
 } from "@workspace/db/schema";
-import { bootTestDb, shutdownTestDb, withAuth } from "../helpers/testApp";
+import { bootTestDb, shutdownTestDb, withAuth, withMfaAuth } from "../helpers/testApp";
 import { seedOrg, seedUser, type TestDb } from "../helpers/testDb";
 
 import type { Express } from "express";
@@ -138,7 +138,8 @@ function invite(
   as: { id: string },
   body: Record<string, unknown>,
 ): ReturnType<ReturnType<typeof request>["post"]> {
-  return request(app).post("/api/invitations").set(withAuth(as.id)).send(body);
+  // MFA-enrolled: the production-mode test below runs with MFA enforced.
+  return request(app).post("/api/invitations").set(withMfaAuth(as.id, true)).send(body);
 }
 
 describe("invitation lifecycle", () => {

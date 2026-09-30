@@ -83,7 +83,7 @@ vi.mock("@anthropic-ai/sdk", () => {
   return { default: FakeAnthropic, Anthropic: FakeAnthropic };
 });
 
-import { bootTestDb, shutdownTestDb, withAuth } from "../helpers/testApp";
+import { bootTestDb, shutdownTestDb, withAuth, withMfaAuth } from "../helpers/testApp";
 import { seedOrg, seedUser } from "../helpers/testDb";
 
 import type { Express } from "express";
@@ -419,7 +419,7 @@ describe("GET /admin/health/ai — defense in depth", () => {
     const envUser = await freshAdmin();
     const res = await request(app)
       .get("/api/admin/health/ai")
-      .set(withAuth(envUser.id));
+      .set(withMfaAuth(envUser.id, true));
 
     process.env.NODE_ENV = priorEnv;
     delete process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;

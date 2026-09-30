@@ -1,17 +1,14 @@
 import type { Request, Response, NextFunction } from "express";
 import { type AuthenticatedRequest } from "./requireAuth";
 
-// HIPAA technical safeguard: privileged roles must have MFA enrolled.
-// Reads the MFA-enrolled flag from the Clerk session (already present
-// in the JWT claims for any user with a 2FA factor configured).
-//
-// Roles that must have MFA enrolled to access:
-const MFA_REQUIRED_ROLES = new Set([
-  "super_admin",
-  "agency_admin",
-  "compliance_manager",
-  "developer",
-]);
+// HIPAA technical safeguard: every user must have MFA enrolled. requireAuth
+// enforces it on every authenticated request; requireMfa repeats the check on
+// the most sensitive routes (admin, commissions, call scoring, full
+// applications) so they stay gated even if a router is ever mounted without
+// requireAuth's check. Both read the MFA-enrolled flag from the Clerk session.
+
+export const MFA_REQUIRED_MESSAGE =
+  "Multi-factor authentication is required. Turn on two-step verification in Account security, then sign in again.";
 
 /**
  * Whether the MFA gate is enforced. Only the test suite (synthetic auth
@@ -25,28 +22,32 @@ export function mfaEnforced(): boolean {
   return true;
 }
 
+/**
+ * MFA enrollment from a Clerk auth object. Clerk exposes the user's second
+ * factor as `two_factor` (or `two_factor_authentication` / `mfa`) in the
+ * session claims; older SDKs put it on `auth.user.twoFactorEnabled`. All are
+ * checked so a deployment configured either way still flows through.
+ * Set up in Clerk (Sessions > Customize session token):
+ *   { "two_factor": "{{user.two_factor_enabled}}" }
+ * A template shortcode may arrive as the string "true", so both forms count.
+ */
+export function mfaEnrolledFromAuth(auth: unknown): boolean {
+  const a = (auth ?? {}) as { sessionClaims?: unknown; user?: { twoFactorEnabled?: boolean } };
+  const claims = (a.sessionClaims ?? {}) as Record<string, unknown>;
+  const isOn = (v: unknown) => v === true || v === "true";
+  return isOn(claims.two_factor) || isOn(claims.two_factor_authentication) || isOn(claims.mfa)
+    || a.user?.twoFactorEnabled === true;
+}
+
 export function requireMfa(
   req: Request,
   res: Response,
   next: NextFunction,
 ): void {
   const authReq = req as AuthenticatedRequest;
-  if (!MFA_REQUIRED_ROLES.has(authReq.userRole)) {
+  if (!mfaEnforced() || authReq.mfaEnrolled === true) {
     next();
     return;
   }
-  if (!mfaEnforced()) {
-    next();
-    return;
-  }
-  const hasMfa = authReq.mfaEnrolled === true;
-  if (!hasMfa) {
-    res.status(403).json({
-      error: "mfa_required",
-      message:
-        "Multi-factor authentication is required for this role. Enroll an MFA factor in your account settings.",
-    });
-    return;
-  }
-  next();
+  res.status(403).json({ error: "mfa_required", code: "MFA_REQUIRED", message: MFA_REQUIRED_MESSAGE });
 }

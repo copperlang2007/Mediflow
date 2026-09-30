@@ -5,7 +5,7 @@ import { db, usersTable, organizationsTable, orgSettingsTable, sessionActivityTa
 import { eq, lt } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
 import { isDemoMode, demoUserId } from "../lib/demoMode";
-import { mfaEnforced } from "./requireMfa";
+import { mfaEnforced, mfaEnrolledFromAuth, MFA_REQUIRED_MESSAGE } from "./requireMfa";
 
 // TTL cache for org session timeout settings (refresh every 60 s)
 const orgTimeoutCache = new Map<string, { timeoutMinutes: number; fetchedAt: number }>();
@@ -281,24 +281,7 @@ export const requireAuth = async (
     }
   }
 
-  // HIPAA technical safeguard: surface MFA enrollment state from the Clerk
-  // session so downstream middleware (requireMfa) can gate privileged routes.
-  // Clerk exposes the user's MFA factor count as `two_factor` or
-  // `two_factor_authentication` in the JWT session claims; older SDKs put
-  // it on `auth.user.twoFactorEnabled`. We check all three so a deployment
-  // configured either way still flows through.
-  // Set up in Clerk (Sessions > Customize session token):
-  //   { "two_factor": "{{user.two_factor_enabled}}" }
-  // A template shortcode may arrive as the string "true", so both forms count.
-  const claims = (auth.sessionClaims ?? {}) as Record<string, unknown>;
-  const isOn = (v: unknown) => v === true || v === "true";
-  const mfaFromClaims =
-    isOn(claims.two_factor) ||
-    isOn(claims.two_factor_authentication) ||
-    isOn(claims.mfa);
-  const mfaFromUser =
-    (auth as { user?: { twoFactorEnabled?: boolean } }).user?.twoFactorEnabled === true;
-  const mfaEnrolled = Boolean(mfaFromClaims || mfaFromUser);
+  const mfaEnrolled = mfaEnrolledFromAuth(auth);
 
   const authReq = req as AuthenticatedRequest;
   authReq.userId = user.id;
@@ -307,6 +290,14 @@ export const requireAuth = async (
   authReq.mfaEnrolled = mfaEnrolled;
   if (!(await applyViewAsContext(req, res, authReq, user.orgId))) return;
   authReq.log = req.log.child({ userId: user.id, orgId: authReq.orgId, realOrgId: user.orgId, role: user.role, viewOnly: authReq.viewOnly, supportEdit: authReq.supportEdit });
+
+  // HIPAA technical safeguard: every user, whatever their role, must have MFA
+  // enrolled before any authenticated route answers. The web app reads
+  // /auth/status (not behind this middleware) and shows the enrollment screen.
+  if (mfaEnforced() && !mfaEnrolled) {
+    res.status(403).json({ error: "mfa_required", code: "MFA_REQUIRED", message: MFA_REQUIRED_MESSAGE });
+    return;
+  }
 
   next();
 };

@@ -17,6 +17,7 @@ import { ThemeProvider } from "@/components/theme/ThemeToggle";
 import { BrandMark } from "@/components/brand/BrandMark";
 import Landing from "@/pages/landing";
 import { BrandingProvider } from "@/lib/branding/BrandingProvider";
+import { MfaEnrollmentGate } from "@/components/auth/MfaEnrollmentGate";
 
 // Route-level lazy loading
 const Dashboard = lazy(() => import("@/pages/dashboard"));
@@ -300,7 +301,7 @@ function ProvisioningGate({ children }: { children: React.ReactNode }) {
   const { isSignedIn, isLoaded } = useUser();
   const { getToken } = useAuth();
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["auth", "status"],
     enabled: isLoaded && Boolean(isSignedIn),
     // The answer changes exactly once per account (at provisioning) and the
@@ -316,7 +317,7 @@ function ProvisioningGate({ children }: { children: React.ReactNode }) {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!res.ok) throw new Error("Could not load account status");
-      return res.json() as Promise<{ provisioned: boolean; active: boolean }>;
+      return res.json() as Promise<{ provisioned: boolean; active: boolean; mfaRequired?: boolean; mfaEnrolled?: boolean }>;
     },
   });
 
@@ -333,6 +334,19 @@ function ProvisioningGate({ children }: { children: React.ReactNode }) {
       <Suspense fallback={<PageLoadingFallback />}>
         <CreateOrganizationPage />
       </Suspense>
+    );
+  }
+
+  // Mandatory MFA: the API refuses every authenticated route until the user
+  // has a second factor, so show enrollment instead of an app full of 403s.
+  if (data?.mfaRequired && !data.mfaEnrolled) {
+    return (
+      <MfaEnrollmentGate
+        onEnrolled={async () => {
+          const next = await refetch();
+          return Boolean(next.data?.mfaEnrolled);
+        }}
+      />
     );
   }
 
