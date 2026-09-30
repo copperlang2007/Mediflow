@@ -147,6 +147,7 @@ function prepareAuditEntry(
       statusCode: res.statusCode,
       ...(authReq.viewOnly ? { viewOnly: true, realOrgId: authReq.realOrgId, viewingOrgId: authReq.viewingOrgId } : {}),
       ...(authReq.supportEdit ? { supportEdit: true, supportReason: authReq.supportReason, realOrgId: authReq.realOrgId, viewingOrgId: authReq.viewingOrgId } : {}),
+      ...(authReq.crossAgency ? { crossAgency: true, realOrgId: authReq.realOrgId, viewingOrgId: authReq.viewingOrgId } : {}),
     };
 
     db.insert(auditLogTable)

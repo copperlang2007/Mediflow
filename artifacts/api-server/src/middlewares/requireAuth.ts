@@ -122,6 +122,8 @@ export type AuthenticatedRequest = Request & {
   viewOnly?: boolean;
   supportEdit?: boolean;
   supportReason?: string;
+  /** A super admin's invitation write in an agency they are viewing. */
+  crossAgency?: boolean;
 };
 
 /**
@@ -156,6 +158,9 @@ async function applyViewAsContext(
     res.status(403).json({ error: "mfa_required", code: "MFA_REQUIRED", message: "Multi-factor authentication is required to view another agency." });
     return false;
   }
+  // Viewing your own agency is just using it: no view-only mode, and nothing
+  // is recorded as cross-agency.
+  if (requestedOrgId === realOrgId) return true;
   const [organization] = await db
     .select({ id: organizationsTable.id })
     .from(organizationsTable)
@@ -195,6 +200,7 @@ async function applyViewAsContext(
       return false;
     }
     authReq.viewOnly = false;
+    authReq.crossAgency = true;
     return true;
   }
   if (!["GET", "HEAD", "OPTIONS"].includes(method)) {

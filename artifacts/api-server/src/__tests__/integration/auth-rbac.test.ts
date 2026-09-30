@@ -238,11 +238,37 @@ describe("Auth & RBAC integration", () => {
     const audits = (await handle.db.select().from(auditLogTable)
       .where(and(eq(auditLogTable.orgId, orgB.id), eq(auditLogTable.resourceType, "invitation"))))
       .filter((a) => (a.changes as { crossAgency?: boolean } | null)?.crossAgency === true);
-    expect(audits.map((a) => a.action).sort()).toEqual(["create", "delete", "update"]);
-    for (const a of audits) {
+    // Each write leaves an attempt row (before it runs) and a completion row
+    // with the status code, both marked cross-agency.
+    const attempts = audits.filter((a) => (a.changes as { phase?: string }).phase === "attempt");
+    expect(attempts.map((a) => a.action).sort()).toEqual(["create", "delete", "update"]);
+    await vi.waitFor(async () => {
+      const done = (await handle.db.select().from(auditLogTable)
+        .where(and(eq(auditLogTable.orgId, orgB.id), eq(auditLogTable.resourceType, "invitation"))))
+        .filter((a) => {
+          const c = a.changes as { crossAgency?: boolean; statusCode?: number };
+          return c?.crossAgency === true && typeof c.statusCode === "number";
+        });
+      expect(done.length).toBeGreaterThanOrEqual(3);
+      for (const a of done) expect(a.changes).toMatchObject({ realOrgId: orgA.id, viewingOrgId: orgB.id });
+    });
+    for (const a of attempts) {
       expect(a.userId).toBe(superAdmin.id);
       expect(a.changes).toMatchObject({ crossAgency: true, realOrgId: orgA.id, viewingOrgId: orgB.id });
     }
+  });
+
+  it("treats a super admin 'viewing' their own agency as ordinary use", async () => {
+    const handle = await bootTestDb();
+    const res = await request(app).post("/api/invitations")
+      .set(withMfaAuth(superAdmin.id, true))
+      .set("X-MediFlow-View-Org", orgA.id)
+      .send({ email: "self.org@orga.test", role: "agent" });
+    expect(res.status).toBe(201);
+    const { auditLogTable } = await import("@workspace/db");
+    const { eq } = await import("drizzle-orm");
+    const rows = await handle.db.select().from(auditLogTable).where(eq(auditLogTable.orgId, orgA.id));
+    expect(rows.some((r) => (r.changes as { crossAgency?: boolean } | null)?.crossAgency)).toBe(false);
   });
 
   it("keeps other cross-agency writes blocked next to the invitation routes", async () => {
