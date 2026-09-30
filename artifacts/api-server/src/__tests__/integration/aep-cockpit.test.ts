@@ -39,6 +39,11 @@ import type { TestDb } from "../helpers/testDb";
 import type { Express } from "express";
 
 const YEAR = 2026;
+// Pin "now" inside the season (before the Sep 30 review deadline). The route
+// derives "overdue" from the real clock, so without this the test flips the
+// moment the calendar reaches the deadline. Only Date is faked so pglite's
+// async timers keep working.
+const PINNED_NOW = new Date(Date.UTC(YEAR, 8, 15, 12, 0, 0));
 
 let app: Express;
 let request: typeof import("supertest");
@@ -80,6 +85,8 @@ async function seedRenewalTask(opts: {
 }
 
 beforeAll(async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(PINNED_NOW);
   const handle = await bootTestDb();
   testDb = handle.db;
   app = (await import("../../app")).default;
@@ -104,6 +111,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  vi.useRealTimers();
   await shutdownTestDb();
 });
 
