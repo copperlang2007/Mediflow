@@ -515,11 +515,19 @@ export async function resolveDncFinding(args: {
   // A contact is attached only when it owns THE confirmed number.
   const linked = contact && phoneMatchKey(contact.phone) === key ? contact : null;
 
+  // The email coupling follows the reviewer's intent (what the screen promised):
+  // if the call is linked to a client with an email and the reviewer did not untick
+  // the box, that email is added even when the confirmed number is not the
+  // client's own. The PHONE is recorded against the client only when it matches.
+  const wantsEmail = args.alsoOptOutEmail !== false;
+  const emailAddress = contact?.email?.trim() || null;
+  const emailTarget = wantsEmail && contact && emailAddress ? { id: contact.id, email: emailAddress } : null;
+
   return db.transaction(async (tx): Promise<ResolveResult> => {
     // The unique index makes this the single winner if two people click at once.
     const [inserted] = await tx
       .insert(callScoreReviewsTable)
-      .values({ id: randomUUID(), ...reviewBase, verdict: "opt_out_added", contactId: linked?.id ?? null, optOutRecorded: true })
+      .values({ id: randomUUID(), ...reviewBase, verdict: "opt_out_added", contactId: linked?.id ?? emailTarget?.id ?? null, optOutRecorded: true })
       .onConflictDoNothing()
       .returning({ id: callScoreReviewsTable.id });
     if (!inserted) {
@@ -533,31 +541,30 @@ export async function resolveDncFinding(args: {
       .limit(1);
     const alreadyOnList = existing ? 1 : 0;
     await recordPhoneOptOut(tx, { orgId, contactId: linked?.id ?? null, phone, source: "call_review" });
-    // A confirmed stop request must not leave email flowing: when the client who
-    // owns the confirmed number has an email address, it goes on the email
-    // opt-out list in the same transaction.
-    const linkedEmail = linked?.email?.trim() || null;
+    // A confirmed stop request must not leave email flowing: the linked client's
+    // email goes on the email opt-out list in the same transaction (unless the
+    // reviewer unticked it).
     let emailRecorded = false;
-    const wantsEmail = args.alsoOptOutEmail !== false;
-    if (linked && linkedEmail && wantsEmail) {
-      await recordEmailOptOut(tx, { orgId, contactId: linked.id, email: linkedEmail, source: "call_review" });
+    if (emailTarget) {
+      await recordEmailOptOut(tx, { orgId, contactId: emailTarget.id, email: emailTarget.email, source: "call_review" });
       emailRecorded = true;
     }
-    if (linked && linked.id !== transcript.contactId) {
+    const attach = linked ?? (args.contactId ? emailTarget : null);
+    if (attach && attach.id !== transcript.contactId) {
       // The reviewer identified the client: keep that on the record.
       await tx
         .update(callTranscriptsTable)
-        .set({ contactId: linked.id, contactMatch: "explicit" })
+        .set({ contactId: attach.id, contactMatch: "explicit" })
         .where(and(eq(callTranscriptsTable.id, transcript.id), eq(callTranscriptsTable.orgId, orgId)));
     }
     await tx
       .insert(auditLogTable)
-      .values(audit("call_dnc_opt_out", { via: "call_review", phoneSource: args.phoneSource, contactId: linked?.id ?? null, phonesRecorded: 1, alsoOptOutEmailChoice: wantsEmail, emailAlsoRecorded: emailRecorded, channelChosenByReviewer: Boolean(args.channel), alreadyOnList }));
+      .values(audit("call_dnc_opt_out", { via: "call_review", phoneSource: args.phoneSource, contactId: linked?.id ?? null, phonesRecorded: 1, phoneLinkedToContact: Boolean(linked), alsoOptOutEmailChoice: wantsEmail, emailAlsoRecorded: emailRecorded, channelChosenByReviewer: Boolean(args.channel), alreadyOnList }));
     return {
       ok: true,
       status: "resolved",
       action: "add_opt_out",
-      optOut: { phonesRecorded: 1, ...(emailRecorded ? { emailsRecorded: 1 } : {}), alreadyOnList, contactId: linked?.id ?? null },
+      optOut: { phonesRecorded: 1, ...(emailRecorded ? { emailsRecorded: 1 } : {}), alreadyOnList, contactId: linked?.id ?? emailTarget?.id ?? null },
     };
   });
 }

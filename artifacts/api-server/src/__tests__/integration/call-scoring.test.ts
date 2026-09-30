@@ -1267,6 +1267,115 @@ describe("review fixes: the email coupling is visible and optional; ambiguous ch
   });
 });
 
+describe("review fixes: the email opt-out dedup archives before it deletes", () => {
+  it("keeps the earliest row, and preserves every loser (with its source and time) in the archive", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const sql = readFileSync(fileURLToPath(new URL("../../../../../lib/db/migrations/0063_call_scoring.sql", import.meta.url)), "utf8");
+    const parts = sql.split("--> statement-breakpoint");
+    const stmt = (needle: string) => parts.find((x) => x.includes(needle))!;
+    const archiveInsert = stmt('INSERT INTO "opt_outs_dedup_archive"');
+    const deleteBlock = stmt('DELETE FROM "opt_outs" WHERE "id" IN');
+    const uniqueIndex = stmt('CREATE UNIQUE INDEX IF NOT EXISTS "opt_outs_org_email_channel_unique"');
+    expect(archiveInsert).toBeTruthy();
+    expect(deleteBlock).toBeTruthy();
+    // Copy first, delete after.
+    expect(sql.indexOf('INSERT INTO "opt_outs_dedup_archive"')).toBeLessThan(sql.indexOf('DELETE FROM "opt_outs" WHERE'));
+    expect(sql).not.toMatch(/nothing is lost/i);
+
+    const dedupOrg = await seedOrg(handle.db, { id: `cs-dedup-${randomUUID().slice(0, 8)}` });
+    const email = `dupe-${randomUUID().slice(0, 8)}@example.test`;
+    const early = new Date("2025-01-01T00:00:00Z");
+    const late = new Date("2025-06-01T00:00:00Z");
+    // The unique index would refuse these rows, so drop it, seed the legacy state, then run the migration statements.
+    await handle.pg.exec('DROP INDEX IF EXISTS "opt_outs_org_email_channel_unique"');
+    try {
+      await handle.db.insert(schema.optOutsTable).values([
+        { id: "dedup-late", orgId: dedupOrg.id, email: email.toUpperCase(), channel: "email", source: "complaint", optedOutAt: late },
+        { id: "dedup-early", orgId: dedupOrg.id, email, channel: "email", source: "unsubscribe_link", optedOutAt: early },
+      ]);
+      await handle.pg.exec(archiveInsert);
+      await handle.pg.exec(deleteBlock);
+      const kept = (await handle.db.select().from(schema.optOutsTable).where(eq(schema.optOutsTable.orgId, dedupOrg.id))).filter((o) => o.channel === "email");
+      expect(kept.map((k) => k.id)).toEqual(["dedup-early"]);
+      const archived = await handle.pg.query<{ id: string; kept_id: string; source: string; email: string; opted_out_at: Date; archived_at: Date }>(
+        `SELECT id, kept_id, source, email, opted_out_at, archived_at FROM opt_outs_dedup_archive WHERE org_id = '${dedupOrg.id}'`,
+      );
+      expect(archived.rows).toHaveLength(1);
+      expect(archived.rows[0]).toMatchObject({ id: "dedup-late", kept_id: "dedup-early", source: "complaint", email: email.toUpperCase() });
+      expect(new Date(archived.rows[0]!.opted_out_at).toISOString()).toBe(late.toISOString());
+      expect(archived.rows[0]!.archived_at).toBeTruthy();
+      // Running it again changes nothing.
+      await handle.pg.exec(archiveInsert);
+      await handle.pg.exec(deleteBlock);
+      const again = await handle.pg.query(`SELECT id FROM opt_outs_dedup_archive WHERE org_id = '${dedupOrg.id}'`);
+      expect(again.rows).toHaveLength(1);
+    } finally {
+      await handle.pg.exec(uniqueIndex);
+    }
+    // With the index back, a duplicate is refused again.
+    await expect(
+      handle.db.insert(schema.optOutsTable).values({ id: "dedup-third", orgId: dedupOrg.id, email: email.toUpperCase(), channel: "email", source: "complaint" }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("review fixes: the email coupling follows the reviewer even when the number is not the client's", () => {
+  const resolve = (userId: string, findingId: string, body: Record<string, unknown>) =>
+    request(app).post(`/api/call-scoring/dnc-review/${findingId}/resolve`).set(withAuth(userId)).send(body);
+  async function mismatch(callPhone: string, contactPhone: string) {
+    const email = `mismatch-${randomUUID().slice(0, 8)}@example.test`;
+    const c = await seedContact(handle.db, { orgId: org.id, firstName: "Mis", lastName: "Match", email });
+    await setPhone(c.id, contactPhone);
+    const t = await createScored(transcriptText(["Customer: Stop calling me."]), { contactId: c.id, phone: callPhone });
+    const [f] = await handle.db
+      .select()
+      .from(schema.callScoreFindingsTable)
+      .where(and(eq(schema.callScoreFindingsTable.transcriptId, t.transcriptId), eq(schema.callScoreFindingsTable.kind, "dnc")));
+    return { c, email, t, findingId: f!.id };
+  }
+  const audit = async (transcriptId: string) => {
+    await settle();
+    return (await handle.db.select().from(schema.auditLogTable).where(eq(schema.auditLogTable.resourceId, transcriptId))).filter((a) => a.action === "call_dnc_opt_out").map((a) => a.changes as Record<string, unknown>);
+  };
+
+  it("blocks the linked client's email even though the confirmed number belongs to someone else, and does not mark the phone as this client's", async () => {
+    const gate = await import("../../lib/compliance/consumerOutreach");
+    const { c, t, findingId } = await mismatch("+13105550901", "(310) 555-0902");
+    const ctx = { orgId: org.id, contactId: c.id, automated: false };
+    const res = await resolve(admin.id, findingId, { action: "add_opt_out", phoneSource: "transcript" });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.optOut).toMatchObject({ phonesRecorded: 1, emailsRecorded: 1 });
+    expect(await gate.evaluateConsumerEmail(ctx)).toEqual({ action: "block", reason: "opted_out" });
+    const [row] = await handle.db.select().from(schema.contactsTable).where(eq(schema.contactsTable.id, c.id));
+    expect(row!.optOutEmail).toBe(true);
+    expect(row!.optOutSms).toBe(false); // the phone was not this client's number
+    const phoneRows = (await handle.db.select().from(schema.optOutsTable).where(eq(schema.optOutsTable.orgId, org.id))).filter((o) => o.phone === "+13105550901");
+    expect(phoneRows).toHaveLength(1);
+    const [changes] = await audit(t.transcriptId);
+    expect(changes).toMatchObject({ phoneLinkedToContact: false, emailAlsoRecorded: true, alsoOptOutEmailChoice: true });
+  });
+
+  it("unticking still skips the email in the mismatch case", async () => {
+    const gate = await import("../../lib/compliance/consumerOutreach");
+    const { c, findingId } = await mismatch("+13105550903", "(310) 555-0904");
+    const res = await resolve(admin.id, findingId, { action: "add_opt_out", phoneSource: "transcript", alsoOptOutEmail: false });
+    expect(res.status).toBe(200);
+    expect((await gate.evaluateConsumerEmail({ orgId: org.id, contactId: c.id, automated: false })).action).toBe("send");
+  });
+
+  it("control: when the number IS the client's, the phone is linked to the client and the email is added", async () => {
+    const gate = await import("../../lib/compliance/consumerOutreach");
+    const { c, t, findingId } = await mismatch("+13105550905", "(310) 555-0905");
+    const res = await resolve(admin.id, findingId, { action: "add_opt_out", phoneSource: "transcript" });
+    expect(res.body.optOut).toMatchObject({ phonesRecorded: 1, emailsRecorded: 1, contactId: c.id });
+    expect(await gate.evaluateConsumerEmail({ orgId: org.id, contactId: c.id, automated: false })).toEqual({ action: "block", reason: "opted_out" });
+    const [row] = await handle.db.select().from(schema.contactsTable).where(eq(schema.contactsTable.id, c.id));
+    expect(row!.optOutSms).toBe(true);
+    expect((await audit(t.transcriptId))[0]).toMatchObject({ phoneLinkedToContact: true, emailAlsoRecorded: true });
+  });
+});
+
 describe("review fixes: history survives a hard delete of the contact it references", () => {
   it("allows the ON DELETE SET NULL update but nothing else", async () => {
     const c = await seedContact(handle.db, { orgId: org.id, firstName: "Gone", lastName: "Soon" });

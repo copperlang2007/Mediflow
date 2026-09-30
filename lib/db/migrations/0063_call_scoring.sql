@@ -19,16 +19,39 @@
 
 -- Email opt-outs need a uniqueness guarantee of their own: the (org, phone,
 -- channel) index ignores them because phone is NULL. Two concurrent email
--- opt-outs for one address could each insert a row. First collapse any existing
--- duplicates (case-insensitive), keeping the EARLIEST row of each; the rows are
--- equivalent, so nothing is lost. Then add the partial unique index.
-DELETE FROM "opt_outs" a
-USING "opt_outs" b
-WHERE a."channel" = 'email' AND b."channel" = 'email'
-  AND a."email" IS NOT NULL AND b."email" IS NOT NULL
-  AND a."org_id" = b."org_id"
-  AND lower(a."email") = lower(b."email")
-  AND (a."opted_out_at", a."id") > (b."opted_out_at", b."id");--> statement-breakpoint
+-- opt-outs for one address could each insert a row.
+--
+-- Existing duplicates (same org and address ignoring case) may differ in source
+-- and opted_out_at, which is compliance provenance, so nothing is discarded:
+-- every duplicate is first COPIED, in full, into opt_outs_dedup_archive (with
+-- the id of the row that was kept and when it was archived), and only then
+-- removed from opt_outs. The EARLIEST row of each address stays in opt_outs.
+-- The count is reported with a NOTICE. The archive table is an audit copy and is
+-- not read by the application.
+CREATE TABLE IF NOT EXISTS "opt_outs_dedup_archive" (
+	LIKE "opt_outs" INCLUDING DEFAULTS,
+	"archived_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"kept_id" text NOT NULL
+);--> statement-breakpoint
+INSERT INTO "opt_outs_dedup_archive"
+SELECT a.*, now(), k."id"
+FROM "opt_outs" a
+JOIN LATERAL (
+  SELECT b."id" FROM "opt_outs" b
+  WHERE b."channel" = 'email' AND b."email" IS NOT NULL
+    AND b."org_id" = a."org_id" AND lower(b."email") = lower(a."email")
+  ORDER BY b."opted_out_at", b."id"
+  LIMIT 1
+) k ON k."id" <> a."id"
+WHERE a."channel" = 'email' AND a."email" IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM "opt_outs_dedup_archive" x WHERE x."id" = a."id");--> statement-breakpoint
+DO $$
+DECLARE removed integer;
+BEGIN
+  DELETE FROM "opt_outs" WHERE "id" IN (SELECT "id" FROM "opt_outs_dedup_archive");
+  GET DIAGNOSTICS removed = ROW_COUNT;
+  RAISE NOTICE 'opt_outs: % duplicate email opt-out row(s) moved to opt_outs_dedup_archive (earliest row of each address kept)', removed;
+END $$;--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "opt_outs_org_email_channel_unique" ON "opt_outs" ("org_id", lower("email"), "channel") WHERE "channel" = 'email' AND "email" IS NOT NULL;--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS "call_transcripts" (

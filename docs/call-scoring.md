@@ -113,8 +113,8 @@ A reviewer chooses:
   that number. If more than one client shares the number, the reviewer picks the
   right one, or searches when more share it than can be listed. Clicking twice,
   or two people clicking at once, still records exactly one opt-out.
-  If the client who owns that number also has an email address on file, the
-  screen says so (with the address masked) and a box, ticked by default, adds it
+  If the client linked to the call has an email address on file (even if the
+  number confirmed is not that client's own), the screen says so (with the address masked) and a box, ticked by default, adds it
   to the email opt-out list in the same step, so a confirmed stop request does
   not leave email flowing. Unticking it adds the phone number only, and the audit
   entry records the choice. Leaving it out of the request counts as ticked.
