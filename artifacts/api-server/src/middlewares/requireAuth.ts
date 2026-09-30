@@ -122,7 +122,22 @@ export type AuthenticatedRequest = Request & {
   viewOnly?: boolean;
   supportEdit?: boolean;
   supportReason?: string;
+  /** A super admin's invitation write in an agency they are viewing. */
+  crossAgency?: boolean;
 };
+
+/**
+ * The invitation writes a super admin may make in an agency they are viewing:
+ * create, resend and revoke. Returns the audit action, or null for anything
+ * else. Accepting and looking up invitations are the invitee's, not the
+ * admin's, and stay out.
+ */
+function crossAgencyInvitationWrite(method: string, path: string): "create" | "update" | "delete" | null {
+  if (method === "POST" && path === "/api/invitations") return "create";
+  if (method === "POST" && /^\/api\/invitations\/[^/]+\/resend$/.test(path)) return "update";
+  if (method === "DELETE" && /^\/api\/invitations\/[^/]+$/.test(path) && !/\/(accept|lookup|seats)$/.test(path)) return "delete";
+  return null;
+}
 
 async function applyViewAsContext(
   req: Request,
@@ -143,6 +158,9 @@ async function applyViewAsContext(
     res.status(403).json({ error: "mfa_required", code: "MFA_REQUIRED", message: "Multi-factor authentication is required to view another agency." });
     return false;
   }
+  // Viewing your own agency is just using it: no view-only mode, and nothing
+  // is recorded as cross-agency.
+  if (requestedOrgId === realOrgId) return true;
   const [organization] = await db
     .select({ id: organizationsTable.id })
     .from(organizationsTable)
@@ -155,9 +173,40 @@ async function applyViewAsContext(
   authReq.orgId = organization.id;
   authReq.viewingOrgId = organization.id;
   authReq.viewOnly = true;
-  if (!["GET", "HEAD", "OPTIONS"].includes(req.method.toUpperCase())) {
-    // Cross-agency writes are opt-in and limited to profile edits. Other
-    // operations (messages, billing, exports, deletion, invitations) stay blocked.
+  const method = req.method.toUpperCase();
+  const invitationWrite = crossAgencyInvitationWrite(method, req.originalUrl.split("?")[0]);
+  if (invitationWrite) {
+    // A super admin may invite people into, resend or revoke invitations for
+    // the agency they are viewing, e.g. to seat a new agency's first admin.
+    // Recorded against the agency before the write, like a support edit; a
+    // failed audit insert leaves the agency unchanged.
+    const path = req.originalUrl.split("?")[0];
+    try {
+      await db.insert(auditLogTable).values({
+        id: randomUUID(),
+        orgId: organization.id,
+        userId: authReq.userId,
+        userRole: authReq.userRole,
+        action: invitationWrite,
+        resourceType: "invitation",
+        resourceId: path.match(/^\/api\/invitations\/([^/]+)/)?.[1] ?? null,
+        ipAddress: req.ip ?? null,
+        userAgent: req.headers["user-agent"] ?? null,
+        changes: { crossAgency: true, phase: "attempt", realOrgId, viewingOrgId: organization.id, path },
+      }).execute();
+    } catch (err) {
+      req.log.error({ err, realOrgId, viewingOrgId: organization.id }, "Cross-agency invitation audit unavailable");
+      res.status(503).json({ error: "Invitation audit unavailable", code: "SUPPORT_AUDIT_UNAVAILABLE" });
+      return false;
+    }
+    authReq.viewOnly = false;
+    authReq.crossAgency = true;
+    return true;
+  }
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    // Cross-agency writes are opt-in and limited to profile edits and
+    // invitations (above). Other operations (messages, billing, exports,
+    // deletion) stay blocked.
     const supportEdit = req.get("X-MediFlow-Support-Edit") === "true";
     const reason = req.get("X-MediFlow-Support-Reason")?.trim() ?? "";
     const path = req.originalUrl.split("?")[0];

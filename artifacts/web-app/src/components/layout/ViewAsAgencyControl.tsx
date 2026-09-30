@@ -104,7 +104,8 @@ function AgencySelect({
 }
 
 /**
- * Top-bar control for super admins to view another agency read-only.
+ * Top-bar control for super admins to view another agency read-only. The one
+ * write allowed while viewing is invitations (Team page), audited server-side.
  *
  * The "Select agency" dropdown only sits in the bar on wide screens (xl+);
  * below that the account menu offers the same picker (<ViewAsAgencyDialog>).
@@ -122,7 +123,7 @@ export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
     return (
       <div
         className="flex min-w-0 items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
-        title={supportReason ? `Helping ${name} — contact and agent profile edits enabled` : `Viewing ${name} — read-only`}
+        title={supportReason ? `Helping ${name} — contact and agent profile edits enabled` : `Viewing ${name} — read-only, except inviting people from Team`}
       >
         <Eye className="h-3.5 w-3.5 shrink-0" />
         <span className="hidden font-medium sm:inline truncate max-w-48">{supportReason ? `Helping ${name} - profile edits` : `Viewing ${name} - read-only`}</span>
@@ -140,7 +141,7 @@ export function ViewAsAgencyControl({ enabled }: { enabled: boolean }) {
   }
 
   return (
-    <label className="hidden xl:flex items-center gap-2 text-xs text-muted-foreground" title="View an agency without permission to create, edit, or delete data">
+    <label className="hidden xl:flex items-center gap-2 text-xs text-muted-foreground" title="View an agency read-only; you can still invite people from its Team page">
       <Eye className="h-4 w-4" />
       <span className="hidden 2xl:inline">View agency</span>
       <AgencySelect agencies={agencies} onPick={setView} className="max-w-44" />
@@ -165,7 +166,7 @@ export function ViewAsAgencyDialog({
         <DialogHeader>
           <DialogTitle>View an agency</DialogTitle>
           <DialogDescription>
-            See another agency exactly as they do, without permission to create, edit or delete anything.
+            See another agency exactly as they do. Nothing can be changed, except inviting people from its Team page.
           </DialogDescription>
         </DialogHeader>
         <AgencySelect agencies={agencies} onPick={setView} className="h-10 w-full text-sm" />
