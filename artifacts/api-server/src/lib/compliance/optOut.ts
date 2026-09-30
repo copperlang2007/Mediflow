@@ -6,8 +6,10 @@
  * `opt_outs` row per (org, phone, channel) — the unique index makes it
  * idempotent — and the contact's `opt_out_sms` flag. The `opt_outs.channel`
  * enum has no voice value, so a phone opt-out is stored on `sms`: the number
- * list is channel-agnostic in practice (preclearance matches any channel, and
- * the SMS gate matches by number), so it stops both calls and texts.
+ * list is matched by number (preclearance matches any channel, and the SMS gate
+ * matches by number), so it stops calls and texts to that NUMBER. It does NOT
+ * stop email: email has its own opt-out (`recordEmailOptOut`, channel 'email',
+ * plus contacts.opt_out_email), which the email gate reads.
  */
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
@@ -35,6 +37,31 @@ export async function isNumberOptedOutAnyOrg(
     .where(sql`${phoneMatchKeySql(optOutsTable.phone)} = ${key}`)
     .limit(1);
   return Boolean(row);
+}
+
+/**
+ * Record an EMAIL do-not-contact request for a contact. Idempotent: one
+ * `opt_outs` row per (org, email) on the email channel, and the contact's
+ * `opt_out_email` flag. Returns whether the email was already on the list.
+ * (A phone opt-out does not stop email; this is the email path.)
+ */
+export async function recordEmailOptOut(
+  handle: AnyDb,
+  opts: { orgId: string; contactId: string; email: string; source: string },
+): Promise<{ alreadyOnList: boolean }> {
+  // Atomic: the partial unique index on (org, lower(email)) for the email
+  // channel makes concurrent calls insert exactly one row; whoever gets a row
+  // back is the one that added it.
+  const inserted = await handle
+    .insert(optOutsTable)
+    .values({ id: randomUUID(), orgId: opts.orgId, email: opts.email, channel: "email", source: opts.source })
+    .onConflictDoNothing()
+    .returning({ id: optOutsTable.id });
+  await handle
+    .update(contactsTable)
+    .set({ optOutEmail: true })
+    .where(and(eq(contactsTable.id, opts.contactId), eq(contactsTable.orgId, opts.orgId)));
+  return { alreadyOnList: inserted.length === 0 };
 }
 
 /** Record a do-not-contact request for `phone` in `orgId`. Idempotent. */

@@ -46,9 +46,10 @@ export type Resource =
   | "dev_console"
   | "kb_article"
   | "appointment"
-  | "call";
+  | "call"
+  | "call_scoring";
 
-export type Action = "read" | "create" | "update" | "delete" | "admin";
+export type Action = "read" | "create" | "update" | "delete" | "admin" | "review";
 
 type PermissionMatrix = Record<Resource, Partial<Record<Action, Role[]>>>;
 
@@ -274,6 +275,19 @@ const MATRIX: PermissionMatrix = {
     read: ["super_admin", "agency_admin", "compliance_manager", "agent_support", "agent"],
     create: ["super_admin", "agency_admin", "agent_support", "agent"],
     update: ["super_admin", "agency_admin", "agent_support", "agent"],
+  },
+  // Call scoring on TEXT transcripts (routes/callScoring.ts). Transcripts and
+  // their quotes are PHI, so this is the compliance audience: `create` uploads
+  // and scores, `review` overrides a grade and resolves possible
+  // do-not-contact requests (the only path that can add an opt-out).
+  // `agent` may READ only scores of their own calls (a transcript linked to a
+  // call session they placed); routes/callScoring.ts applies that narrowing -
+  // this matrix only admits the role. Scores assist review; they are not legal
+  // advice or a compliance certification.
+  call_scoring: {
+    read: ["super_admin", "agency_admin", "compliance_manager", "agent"],
+    create: ["super_admin", "agency_admin", "compliance_manager"],
+    review: ["super_admin", "agency_admin", "compliance_manager"],
   },
 };
 

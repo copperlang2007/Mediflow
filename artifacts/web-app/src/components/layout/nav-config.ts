@@ -39,6 +39,7 @@ import {
   Lock,
   Mail,
   Megaphone,
+  Mic,
   MonitorPlay,
   Palette,
   Phone,
@@ -162,6 +163,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/renewals", label: "License Renewals", icon: RefreshCcw, roles: ADMIN_COMPLIANCE },
       { href: "/compliance", label: "Audit & Compliance", icon: ShieldCheck, roles: ADMIN_COMPLIANCE },
       { href: "/complaints", label: "Complaints", icon: ShieldAlert, roles: ADMIN_COMPLIANCE },
+      // Server gate: call_scoring:read. Agents see only the calls they placed.
+      { href: "/call-scoring", label: "Call scoring", icon: Mic, roles: [...ADMIN_COMPLIANCE, "agent"] },
       { href: "/marketing", label: "Marketing Approval", icon: Megaphone, roles: ADMIN_COMPLIANCE },
     ],
   },
