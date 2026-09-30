@@ -133,7 +133,7 @@ export function GhlConnectionCard() {
           )}
           {!!status.data?.lastRun && status.data.lastRun.skipped - status.data.lastRun.failed > 0 && (
             <p className="text-xs text-muted-foreground">
-              Skipped contacts have no first and last name in GoHighLevel (for example phone-only leads), so there is no one to create yet.
+              Skipped contacts are usually ones with no first and last name in GoHighLevel (for example phone-only leads), so there is no one to create yet. Contacts deleted here, or duplicates of a GoHighLevel contact already linked, are skipped too.
             </p>
           )}
           {status.data?.lastError && <p className="text-xs text-destructive">{status.data.lastError}</p>}
