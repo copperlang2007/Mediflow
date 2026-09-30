@@ -198,7 +198,7 @@ Code lives in `artifacts/api-server/src/lib/callScoring/` (rules, DNC detector,
 rubrics as data, redaction, fail-closed merge, parsing, storage) and
 `routes/callScoring.ts`. The web page is `pages/call-scoring.tsx`. Tables are
 `call_transcripts`, `call_scores`, `call_score_findings`, `call_score_reviews`
-(migration 0062). Endpoints are under `/api/call-scoring/`: `config`,
+(migration 0063). Endpoints are under `/api/call-scoring/`: `config`,
 `transcripts` (POST, GET), `transcripts/:id` (GET), `transcripts/:id/rescore`,
 `transcripts/:id/criteria/:criterionId` (PATCH), `summary`, `dnc-review` (GET),
 `dnc-review/:findingId/resolve` (POST), `import` (POST).

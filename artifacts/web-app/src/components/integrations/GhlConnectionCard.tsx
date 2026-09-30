@@ -12,6 +12,8 @@ type GhlStatus = {
   configured: boolean;
   running?: boolean;
   locationId: string | null;
+  cursorUpdatedAt?: string | null;
+  backfillCompletedAt?: string | null;
   lastRunAt: string | null;
   lastStatus: string | null;
   lastError: string | null;
@@ -19,6 +21,17 @@ type GhlStatus = {
 };
 
 type GhlCustomField = { id: string; name: string; fieldKey: string | null; dataType: string | null };
+
+/** "12 added · 30 updated · 5 skipped · 1 failed" for the last run. `skipped` includes failures. */
+function runSummary(r: { created: number; updated: number; skipped: number; failed: number }): string {
+  const skipped = r.skipped - r.failed;
+  return [
+    `${r.created} added`,
+    `${r.updated} updated`,
+    skipped > 0 ? `${skipped} skipped` : null,
+    r.failed > 0 ? `${r.failed} failed` : null,
+  ].filter(Boolean).join(" · ");
+}
 
 function errorText(err: unknown): string {
   // customFetch throws an ApiError carrying the parsed body on `data`.
@@ -106,12 +119,23 @@ export function GhlConnectionCard() {
             {status.data?.lastRunAt && (
               <span className="text-xs text-muted-foreground">
                 Last sync {formatDistanceToNow(new Date(status.data.lastRunAt), { addSuffix: true })}
-                {status.data.lastRun
-                  ? ` · ${status.data.lastRun.created} added · ${status.data.lastRun.updated} updated${status.data.lastRun.failed ? ` · ${status.data.lastRun.failed} failed` : ""}`
-                  : ""}
+                {status.data.lastRun ? ` · ${runSummary(status.data.lastRun)}` : ""}
               </span>
             )}
           </div>
+          {status.data && !status.data.backfillCompletedAt && (
+            <p className="text-xs text-muted-foreground">
+              {status.data.running ? "First full import running" : "First full import in progress"}
+              {status.data.cursorUpdatedAt
+                ? `: caught up to contacts last changed ${new Date(status.data.cursorUpdatedAt).toLocaleDateString()}. It continues in batches until every contact has been read.`
+                : ". It continues in batches until every contact has been read."}
+            </p>
+          )}
+          {!!status.data?.lastRun && status.data.lastRun.skipped - status.data.lastRun.failed > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Skipped contacts have no first and last name in GoHighLevel (for example phone-only leads), so there is no one to create yet.
+            </p>
+          )}
           {status.data?.lastError && <p className="text-xs text-destructive">{status.data.lastError}</p>}
 
           <div className="flex flex-wrap items-center gap-2">

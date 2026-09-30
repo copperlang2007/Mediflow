@@ -7,7 +7,9 @@
  *   - privileged roles: decrypt the ciphertext back to plaintext.
  *   - everyone else: a fixed masked sentinel when an MBI is on file.
  *
- * `dob` and `healthConditions` are masked for non-privileged roles.
+ * `dob` and `healthConditions` are masked for non-privileged roles, unless
+ * the caller has established the viewer services this client (`phiAllowed`,
+ * see lib/phiAccess.ts: an agent's own clients).
  *
  * This lives in its own module (rather than inside `routes/contacts.ts`) so
  * that every route returning contact rows — contacts, leads, retention CRM,
@@ -28,12 +30,14 @@ export function serializeContact<
 >(
   contact: T,
   userRole: Role,
+  /** The viewer is this client's own agent (the caller checked it). */
+  phiAllowed = false,
 ): Omit<T, "medicareIdEncrypted" | "medicareIdHash"> & {
   medicareId: string | null;
 } {
   const { medicareIdEncrypted, medicareIdHash: _hash, ...rest } = contact;
   const hasMbi = medicareIdEncrypted != null;
-  const privileged = PHI_PRIVILEGED_ROLES.has(userRole);
+  const privileged = phiAllowed || PHI_PRIVILEGED_ROLES.has(userRole);
 
   let medicareId: string | null = null;
   if (hasMbi) {

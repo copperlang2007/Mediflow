@@ -99,7 +99,8 @@ beforeAll(async () => {
 
   // Tasks: m1 completed, m2 open (future due), m3 open + overdue. m4 has none.
   await seedRenewalTask({ contactId: m1, status: "completed", dueDate: new Date(Date.UTC(YEAR, 8, 30)) });
-  await seedRenewalTask({ contactId: m2, status: "open", dueDate: new Date(Date.UTC(YEAR, 8, 30)) });
+  // Due far in the future, so it never turns overdue as the calendar moves on.
+  await seedRenewalTask({ contactId: m2, status: "open", dueDate: new Date("2999-01-01T00:00:00Z") });
   await seedRenewalTask({ contactId: m3, status: "open", dueDate: new Date("2000-01-01T00:00:00Z") });
 });
 

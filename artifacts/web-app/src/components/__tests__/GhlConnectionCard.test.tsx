@@ -74,4 +74,20 @@ describe("GhlConnectionCard", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Sync now" }));
     expect(await screen.findByText(/Sync queued/)).toBeInTheDocument();
   });
+
+  it("shows skipped contacts and backfill progress", async () => {
+    customFetch.mockImplementation(async (url: string) =>
+      url.endsWith("/status")
+        ? {
+            configured: true, locationId: "loc-1", running: true, lastStatus: "more_pending", lastError: null,
+            lastRunAt: new Date().toISOString(), cursorUpdatedAt: "2025-06-01T00:00:00.000Z", backfillCompletedAt: null,
+            lastRun: { created: 40, updated: 10, skipped: 52, failed: 2 },
+          }
+        : { locationId: "loc-1", fields: [] },
+    );
+    renderCard();
+    expect(await screen.findByText(/40 added · 10 updated · 50 skipped · 2 failed/)).toBeInTheDocument();
+    expect(screen.getByText(/First full import running: caught up to contacts last changed/)).toBeInTheDocument();
+    expect(screen.getByText(/no first and last name/)).toBeInTheDocument();
+  });
 });
