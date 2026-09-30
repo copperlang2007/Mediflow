@@ -21,7 +21,7 @@
 import { and, eq, exists, inArray, isNull, not, or, sql, type SQL } from "drizzle-orm";
 import { db, agentsTable, contactsTable, enrollmentApplicationsTable, enrollmentsTable } from "@workspace/db";
 import type { AuthenticatedRequest } from "../middlewares/requireAuth";
-import { isEndedStatus } from "./integrations/enrollhere/policyEvent";
+import { STATUS_PATTERNS, isEndedStatus } from "./integrations/enrollhere/policyEvent";
 import { PHI_PRIVILEGED_ROLES } from "./permissions";
 
 /** Agent profiles that no longer service anyone. */
@@ -50,18 +50,16 @@ export async function phiViewerAgent(authReq: AuthenticatedRequest): Promise<Phi
 /** Enrollment statuses under which the writing agent still services the policy. */
 export const SERVICED_ENROLLMENT_STATUSES = ["pending", "active"] as const;
 
-/**
- * Carrier-feed statuses that mean "not in force" (POL_INACTIVE,
- * POL_NOT_INFORCE, NON_EFFECTUATED). The enrollment keeps `pending` for these,
- * so the servicing checks read the application's own status too. Must match
- * NEGATIVE_INFORCE in lib/integrations/enrollhere/policyEvent.ts.
- */
-const NEGATIVE_INFORCE_SQL = "(^|_)(NOT|NON|IN)_?(ACTIVE|INFORCE|IN_FORCE|EFFECTUATED)";
-
 export interface ApplicationAccessFacts {
   assignedAgentId: string | null;
   /** The agent profile recorded as the application's writer when it was stored. */
   writingAgentId: string | null;
+  /**
+   * The application names no writer at all (no NPN, no email), e.g. a legacy
+   * import; its enrollment's agent is then the only attribution there is.
+   */
+  namesNoWriter: boolean;
+  enrollmentAgentId: string | null;
   policyStatus: string | null;
   /** The application's enrollment, when it has one. */
   enrollmentStatus: string | null;
@@ -94,23 +92,27 @@ export function mayViewFullApplication(
   if (PHI_PRIVILEGED_ROLES.has(userRole)) return true;
   if (!viewer) return false;
   if (f.assignedAgentId === viewer.id) return true;
-  return f.writingAgentId === viewer.id && applicationServiced(f);
+  const writer = f.writingAgentId ?? (f.namesNoWriter ? f.enrollmentAgentId : null);
+  return writer === viewer.id && applicationServiced(f);
 }
 
 /** Columns for ApplicationAccessFacts; join enrollmentsTable (left) and contactsTable. */
 export const applicationAccessColumns = {
   assignedAgentId: contactsTable.assignedAgentId,
   writingAgentId: enrollmentApplicationsTable.writingAgentId,
+  namesNoWriter: sql<boolean>`(coalesce(trim(${enrollmentApplicationsTable.agentNpn}), '') = '' and coalesce(trim(${enrollmentApplicationsTable.agentEmail}), '') = '')`,
+  enrollmentAgentId: enrollmentsTable.agentId,
   policyStatus: enrollmentApplicationsTable.policyStatus,
   enrollmentStatus: sql<string | null>`${enrollmentsTable.status}::text`,
   enrollmentDisenrolledDate: enrollmentsTable.disenrolledDate,
   hasEnrollment: sql<boolean>`${enrollmentsTable.id} is not null`,
 };
 
-/** SQL twin of isEndedStatus() (lib/integrations/enrollhere/policyEvent.ts) on a raw policy status. */
+/** SQL twin of isEndedStatus() (lib/integrations/enrollhere/policyEvent.ts), from the same patterns. */
 function endedStatusSql(col: SQL): SQL {
   const u = sql`upper(coalesce(${col}, ''))`;
-  return sql`(${u} ~ ${NEGATIVE_INFORCE_SQL} or (${u} !~ 'INFORCE|IN_FORCE|ACTIVE|EFFECTUATED' and ${u} ~ 'CANCEL|WITHDRAW|RESCIND|TERMINAT|DISENROLL|LAPSE|DECLIN|REJECT|DENIED|DENY'))`;
+  const ended = `${STATUS_PATTERNS.cancelled}|${STATUS_PATTERNS.terminated}|${STATUS_PATTERNS.declined}`;
+  return sql`(${u} ~ ${STATUS_PATTERNS.negativeInforce} or (${u} !~ ${STATUS_PATTERNS.inForce} and ${u} ~ ${ended}))`;
 }
 
 /**
@@ -119,6 +121,8 @@ function endedStatusSql(col: SQL): SQL {
  *   - assigned to them; or
  *   - holding an application recorded as theirs whose policy is still in
  *     play (not reported ended; enrollment pending/active, not disenrolled);
+ *     an application that names no writer at all counts for its
+ *     enrollment's agent;
  *   - holding a pending/active, not disenrolled enrollment recorded with them
  *     that carries no application (a manual or CSV entry). An enrollment with
  *     applications is judged by their recorded writers instead, since a shared
@@ -135,7 +139,16 @@ export function servicedByAgent(viewer: PhiViewerAgent): SQL {
         .innerJoin(e, eq(e.id, a.enrollmentId))
         .where(and(
           eq(a.contactId, contactsTable.id),
-          eq(a.writingAgentId, viewer.id),
+          // The recorded writer; an application naming no writer at all falls
+          // back to its enrollment's agent (as in mayViewFullApplication).
+          or(
+            eq(a.writingAgentId, viewer.id),
+            and(
+              isNull(a.writingAgentId),
+              sql`coalesce(trim(${a.agentNpn}), '') = '' and coalesce(trim(${a.agentEmail}), '') = ''`,
+              eq(e.agentId, viewer.id),
+            ),
+          ),
           not(endedStatusSql(sql`${a.policyStatus}`)),
           enrollmentLive,
         )),
