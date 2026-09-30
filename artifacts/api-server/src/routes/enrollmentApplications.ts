@@ -38,17 +38,26 @@ const router: IRouter = Router();
 function sunfireFieldIds(payload: Record<string, unknown>): { medicareNumber: string | null; medicaidNumber: string | null } | null {
   if (payload.source !== "gohighlevel" || typeof payload.fields !== "object" || payload.fields === null) return null;
   const fields = payload.fields as Record<string, unknown>;
-  // A number is shown only when every field carrying it (the key and its
-  // aliases) agrees: a renamed, duplicated or spouse field that differs means
-  // showing none rather than risk another person's number at the top. The
-  // full field list below still shows each one with its label.
-  const pick = (...keys: string[]): string | null => {
+  // Per key, a number is shown only when every field carrying that key agrees;
+  // a key with conflicting fields (a duplicated or spouse field) shows nothing
+  // rather than risk another person's number, and does not fall through. The
+  // legacy HICN is only a fallback for an application with no MBI field at
+  // all (the MBI and HICN are different identifiers, so they never "agree").
+  // The full field list below still shows each one with its label.
+  const valuesFor = (key: string): Set<string> => {
     const values = new Set<string>();
     for (const [label, v] of Object.entries(fields)) {
-      if (typeof v !== "string" || !v.trim()) continue;
-      if (keys.some((key) => label.endsWith(`(${key})`))) values.add(v.trim().toUpperCase().replace(/[\s-]/g, ""));
+      if (typeof v === "string" && v.trim() && label.endsWith(`(${key})`)) values.add(v.trim().toUpperCase().replace(/[\s-]/g, ""));
     }
-    return values.size === 1 ? [...values][0]! : null;
+    return values;
+  };
+  const pick = (...keys: string[]): string | null => {
+    for (const key of keys) {
+      const values = valuesFor(key);
+      if (values.size === 0) continue;
+      return values.size === 1 ? [...values][0]! : null;
+    }
+    return null;
   };
   return { medicareNumber: pick("medicare_number", "applicanthicn"), medicaidNumber: pick("medicaid_number") };
 }

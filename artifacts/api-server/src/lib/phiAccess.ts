@@ -8,9 +8,10 @@
  *       - clients holding a policy they wrote that is still in play: pending
  *         or active, not disenrolled, and not reported ended by the carrier
  *         feed (cancelled, terminated, declined, or a "not in force" status).
- *     A full application opens for its own writing agent (matched on the NPN
- *     or email recorded on the application), not for whoever else sits on a
- *     shared enrollment row.
+ *     A full application opens for its own writing agent: the agent profile
+ *     recorded on the application when it was stored (resolved from its NPN,
+ *     else email, only when exactly one profile matched), never re-matched
+ *     at read time and never whoever else sits on a shared enrollment row.
  *     The writing agent needs the health answers to find the plans a client
  *     qualifies for; the access ends when that policy ends, unless the client
  *     is (also) assigned to them.
@@ -28,8 +29,6 @@ const INACTIVE_AGENT_STATUSES = new Set(["suspended", "offboarding", "offboarded
 
 export interface PhiViewerAgent {
   id: string;
-  npn: string | null;
-  email: string | null;
 }
 
 /**
@@ -40,12 +39,12 @@ export interface PhiViewerAgent {
  */
 export async function phiViewerAgent(authReq: AuthenticatedRequest): Promise<PhiViewerAgent | null> {
   if (authReq.userRole !== "agent") return null;
-  const [row] = await db.select({ id: agentsTable.id, npn: agentsTable.npn, email: agentsTable.email, status: agentsTable.status })
+  const [row] = await db.select({ id: agentsTable.id, status: agentsTable.status })
     .from(agentsTable)
     .where(and(eq(agentsTable.orgId, authReq.orgId), eq(agentsTable.userId, authReq.userId)))
     .limit(1);
   if (!row || INACTIVE_AGENT_STATUSES.has(row.status)) return null;
-  return { id: row.id, npn: row.npn, email: row.email };
+  return { id: row.id };
 }
 
 /** Enrollment statuses under which the writing agent still services the policy. */
@@ -61,8 +60,8 @@ const NEGATIVE_INFORCE_SQL = "(^|_)(NOT|NON|IN)_?(ACTIVE|INFORCE|IN_FORCE|EFFECT
 
 export interface ApplicationAccessFacts {
   assignedAgentId: string | null;
-  agentNpn: string | null;
-  agentEmail: string | null;
+  /** The agent profile recorded as the application's writer when it was stored. */
+  writingAgentId: string | null;
   policyStatus: string | null;
   /** The application's enrollment, when it has one. */
   enrollmentStatus: string | null;
@@ -70,30 +69,22 @@ export interface ApplicationAccessFacts {
   hasEnrollment: boolean;
 }
 
-const digits = (v: string | null | undefined) => (v ?? "").replace(/\D/g, "");
-
 /**
- * The application records this agent as its writer: by NPN when it carries
- * one (a mismatched NPN never falls back to email), else by email.
+ * The application's policy is still in play: not reported ended, on an
+ * enrollment that is pending/active and not disenrolled. An application with
+ * no enrollment (stored before its plan or effective date were known) has no
+ * policy lifetime to bound access, so it grants the writer nothing; the
+ * assigned agent still sees it.
  */
-function wroteApplication(viewer: PhiViewerAgent, f: ApplicationAccessFacts): boolean {
-  const npn = digits(f.agentNpn);
-  if (npn) return digits(viewer.npn) === npn;
-  const email = f.agentEmail?.trim().toLowerCase();
-  return !!email && viewer.email?.trim().toLowerCase() === email;
-}
-
-/** The application's policy is still in play. */
 function applicationServiced(f: ApplicationAccessFacts): boolean {
-  if (isEndedStatus(f.policyStatus)) return false;
-  if (!f.hasEnrollment) return true;
+  if (isEndedStatus(f.policyStatus) || !f.hasEnrollment) return false;
   return (SERVICED_ENROLLMENT_STATUSES as readonly string[]).includes(f.enrollmentStatus ?? "") && !f.enrollmentDisenrolledDate;
 }
 
 /**
  * May this viewer open a client's full enrollment application? Privileged
  * roles always; otherwise the viewer must be the client's assigned agent, or
- * the application's own writing agent while its policy is still in play.
+ * the application's recorded writer while its policy is still in play.
  */
 export function mayViewFullApplication(
   userRole: AuthenticatedRequest["userRole"],
@@ -103,14 +94,13 @@ export function mayViewFullApplication(
   if (PHI_PRIVILEGED_ROLES.has(userRole)) return true;
   if (!viewer) return false;
   if (f.assignedAgentId === viewer.id) return true;
-  return wroteApplication(viewer, f) && applicationServiced(f);
+  return f.writingAgentId === viewer.id && applicationServiced(f);
 }
 
 /** Columns for ApplicationAccessFacts; join enrollmentsTable (left) and contactsTable. */
 export const applicationAccessColumns = {
   assignedAgentId: contactsTable.assignedAgentId,
-  agentNpn: enrollmentApplicationsTable.agentNpn,
-  agentEmail: enrollmentApplicationsTable.agentEmail,
+  writingAgentId: enrollmentApplicationsTable.writingAgentId,
   policyStatus: enrollmentApplicationsTable.policyStatus,
   enrollmentStatus: sql<string | null>`${enrollmentsTable.status}::text`,
   enrollmentDisenrolledDate: enrollmentsTable.disenrolledDate,
@@ -124,34 +114,30 @@ function endedStatusSql(col: SQL): SQL {
 }
 
 /**
- * Contacts this agent services:
+ * Contacts this agent services (the same rules as mayViewFullApplication, so
+ * the list, the client detail and the full view agree):
  *   - assigned to them; or
- *   - holding an application this agent wrote (its NPN, else its email, as in
- *     wroteApplication) whose policy is still in play: not reported ended,
- *     and its enrollment (if any) pending/active and not disenrolled; or
- *   - holding a pending/active, not disenrolled enrollment recorded with this
- *     agent that carries no application (a manual or CSV entry). An
- *     enrollment with applications is judged by their writers instead, since
- *     a shared enrollment row keeps only its first writer.
+ *   - holding an application recorded as theirs whose policy is still in
+ *     play (not reported ended; enrollment pending/active, not disenrolled);
+ *   - holding a pending/active, not disenrolled enrollment recorded with them
+ *     that carries no application (a manual or CSV entry). An enrollment with
+ *     applications is judged by their recorded writers instead, since a shared
+ *     enrollment row keeps only its first writer.
  */
 export function servicedByAgent(viewer: PhiViewerAgent): SQL {
   const a = enrollmentApplicationsTable;
   const e = enrollmentsTable;
-  const npn = digits(viewer.npn);
-  const email = viewer.email?.trim().toLowerCase() ?? "";
-  const appNpn = sql`regexp_replace(coalesce(${a.agentNpn}, ''), '[^0-9]', '', 'g')`;
-  const wroteIt = sql`(case when ${appNpn} <> '' then ${appNpn} = ${npn} else ${email} <> '' and lower(trim(coalesce(${a.agentEmail}, ''))) = ${email} end)`;
   const enrollmentLive = and(inArray(e.status, [...SERVICED_ENROLLMENT_STATUSES]), isNull(e.disenrolledDate));
   return or(
     eq(contactsTable.assignedAgentId, viewer.id),
     exists(
       db.select({ one: sql`1` }).from(a)
-        .leftJoin(e, eq(e.id, a.enrollmentId))
+        .innerJoin(e, eq(e.id, a.enrollmentId))
         .where(and(
           eq(a.contactId, contactsTable.id),
-          wroteIt,
+          eq(a.writingAgentId, viewer.id),
           not(endedStatusSql(sql`${a.policyStatus}`)),
-          or(isNull(a.enrollmentId), enrollmentLive),
+          enrollmentLive,
         )),
     ),
     exists(
