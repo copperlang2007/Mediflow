@@ -382,7 +382,10 @@ function judgeProhibited(
     return result(c, "pass", 1, [], `No prohibited phrasing found${note}.`, "rules");
   }
 
-  if (ai.status === "fail" || ai.status === "partial") {
+if (ai.status === "fail" || ai.status === "partial") {
+    if (f.negatedOnly && !aiEvidence.length) {
+      return result(c, "needs_review", 0, f.evidence, "The phrase appears only negated, and the AI cited no verifiable words for a violation. A person needs to check.", "rules+llm");
+    }
     const evidence = dedupe([...f.evidence, ...aiEvidence]);
     if (!evidence.length) {
       return result(
