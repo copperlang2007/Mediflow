@@ -58,6 +58,7 @@ import quotingRouter from "./quoting";
 import knowledgeBaseRouter from "./knowledgeBase";
 import reconciliationRouter from "./reconciliation";
 import agentBackofficeRouter from "./agentBackoffice";
+import agentClientsRouter from "./agentClients";
 import dataExportsRouter from "./dataExports";
 // --- stage2/calendar-branding ---
 import appointmentsRouter from "./appointments";
@@ -129,6 +130,7 @@ router.use(quotingRouter);
 router.use(knowledgeBaseRouter);
 router.use(reconciliationRouter);
 router.use(agentBackofficeRouter);
+router.use(agentClientsRouter);
 router.use(dataExportsRouter);
 // --- stage2/calendar-branding ---
 router.use(appointmentsRouter);

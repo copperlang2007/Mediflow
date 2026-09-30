@@ -984,7 +984,7 @@ describe("Sunfire applications in GHL custom fields", () => {
 
     const [app] = await appsFor(c.id);
     expect(app).toMatchObject({
-      source: "gohighlevel", applicationKey: "SF-CONF-001", enrollmentId: enr!.id,
+      source: "gohighlevel", applicationKey: "SF-CONF-001", enrollmentId: enr!.id, writingAgentId: agentId,
       carrierName: "Humana", agentNpn: "17654321", policyStatus: "SUBMITTED", currentVersion: 1,
     });
     expect(app!.medicareIdEncrypted).not.toBeNull();
@@ -1081,6 +1081,23 @@ describe("Sunfire applications in GHL custom fields", () => {
     const defs = new Map([["cf-x", { name: "Confirmation Code", key: "custom.confirmation_code" }], ["cf-p", { name: "Plan Name", key: "contact.plan_name" }]]);
     const app = readSunfireApplication(ghlContact(1, { customFields: [{ id: "cf-x", value: "SF-X" }, { id: "cf-p", value: "Some Plan" }] }), defs);
     expect(app?.parsed.confirmationCode).toBe("SF-X");
+  });
+
+  it("leaves an application unattributed when several agent profiles share its NPN", async () => {
+    const { agentsTable } = await import("@workspace/db/schema");
+    const { seedAgent } = await import("../helpers/testDb");
+    const dup = await seedAgent(tdb, { orgId: sorg.id, email: "dup@agency.example" });
+    await tdb.update(agentsTable).set({ npn: "17654321" }).where(eq(agentsTable.id, dup.id));
+    try {
+      const gc = ghlContact(20009, { customFields: values({ ...base, confirmation_code: "SF-CONF-009", medicare_number: "6FG7HJ8KL90" }), dateUpdated: "2026-12-09T12:00:00.000Z" });
+      await sync.runGhlSync(scfg(), { fetchImpl: ghlWithFields([gc]) });
+      const c = await contactByGhlId(gc.id);
+      const [a] = await appsFor(c.id);
+      expect(a!.writingAgentId).toBeNull();
+      expect(c.assignedAgentId).toBeNull();
+    } finally {
+      await tdb.update(agentsTable).set({ npn: null }).where(eq(agentsTable.id, dup.id));
+    }
   });
 
   it("syncs contacts only when the token can't read custom fields", async () => {

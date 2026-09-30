@@ -193,9 +193,9 @@ describe("GET /client-portal/preview — legacy plan fields", () => {
 });
 
 describe("GET /softphone/lookup", () => {
-  it("requires contact:read", async () => {
+  it("an unlinked agent fails closed (self-scoped softphone; see softphone-agent-scope.test.ts)", async () => {
     const res = await request(app).get("/api/softphone/lookup?phone=5035551234").set(withAuth(agentUser.id));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("validates the number", async () => {
@@ -212,9 +212,9 @@ describe("GET /softphone/lookup", () => {
 });
 
 describe("GET /softphone/precheck", () => {
-  it("requires contact:read", async () => {
+  it("an unlinked agent fails closed", async () => {
     const res = await request(app).get(`/api/softphone/precheck?contactId=${contact.id}`).set(withAuth(agentUser.id));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("404s across orgs", async () => {
@@ -265,7 +265,7 @@ describe("GET /softphone/recent-calls + /softphone/dispositions", () => {
     expect(res.status).toBe(200);
     expect(res.body.data.map((d: { code: string }) => d.code)).toContain("FOLLOW_UP");
     const denied = await request(app).get("/api/softphone/dispositions").set(withAuth(agentUser.id));
-    expect(denied.status).toBe(403);
+    expect(denied.status).toBe(404);
   });
 });
 

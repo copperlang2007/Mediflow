@@ -67,7 +67,24 @@ export function isEndedStatus(raw: string | null): boolean {
   return status === "cancelled" || status === "terminated" || status === "declined";
 }
 
-const NEGATIVE_INFORCE = /(^|_)(NOT|NON|IN)_?(ACTIVE|INFORCE|IN_FORCE|EFFECTUATED)/;
+/**
+ * Status patterns, as source strings shared with the SQL twin of
+ * isEndedStatus (lib/phiAccess.ts) so the two can never drift. POSIX regex
+ * (Postgres `~`) and JS RegExp read them identically.
+ */
+export const STATUS_PATTERNS = {
+  negativeInforce: "(^|_)(NOT|NON|IN)_?(ACTIVE|INFORCE|IN_FORCE|EFFECTUATED)",
+  inForce: "INFORCE|IN_FORCE|ACTIVE|EFFECTUATED",
+  cancelled: "CANCEL|WITHDRAW|RESCIND",
+  terminated: "TERMINAT|DISENROLL|LAPSE",
+  declined: "DECLIN|REJECT|DENIED|DENY",
+} as const;
+
+const NEGATIVE_INFORCE = new RegExp(STATUS_PATTERNS.negativeInforce);
+const IN_FORCE = new RegExp(STATUS_PATTERNS.inForce);
+const CANCELLED = new RegExp(STATUS_PATTERNS.cancelled);
+const TERMINATED = new RegExp(STATUS_PATTERNS.terminated);
+const DECLINED = new RegExp(STATUS_PATTERNS.declined);
 
 export type EnrollmentStatus = "pending" | "active" | "terminated" | "cancelled" | "declined";
 
@@ -77,10 +94,10 @@ export function mapPolicyStatus(raw: string | null): { status: EnrollmentStatus;
   // Negative forms (POL_INACTIVE, POL_NOT_INFORCE, NON_EFFECTUATED) contain the
   // positive words; never let them count as active coverage.
   if (NEGATIVE_INFORCE.test(s)) return { status: "pending", effectuated: false };
-  if (/INFORCE|IN_FORCE|ACTIVE|EFFECTUATED/.test(s)) return { status: "active", effectuated: true };
-  if (/CANCEL|WITHDRAW|RESCIND/.test(s)) return { status: "cancelled", effectuated: false };
-  if (/TERMINAT|DISENROLL|LAPSE/.test(s)) return { status: "terminated", effectuated: false };
-  if (/DECLIN|REJECT|DENIED|DENY/.test(s)) return { status: "declined", effectuated: false };
+  if (IN_FORCE.test(s)) return { status: "active", effectuated: true };
+  if (CANCELLED.test(s)) return { status: "cancelled", effectuated: false };
+  if (TERMINATED.test(s)) return { status: "terminated", effectuated: false };
+  if (DECLINED.test(s)) return { status: "declined", effectuated: false };
   return { status: "pending", effectuated: false };
 }
 

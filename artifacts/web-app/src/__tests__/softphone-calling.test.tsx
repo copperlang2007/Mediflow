@@ -99,7 +99,7 @@ beforeEach(() => {
   routes = {
     "/api/softphone/recent-calls": () => json({ data: [], total: 0 }),
     "/api/softphone/dispositions": () => json({ data: [{ code: "FOLLOW_UP", label: "Call back / follow up" }, { code: "DO_NOT_CALL", label: "Do not call again" }] }),
-    "/api/contacts/c-1": () => json(CONTACT),
+    "/api/softphone/contacts/c-1": () => json(CONTACT),
     "/api/softphone/precheck": () => json({
       okToCall: true, checks: { consent: true, dncClear: true, withinCallingHours: true, agentEligible: true },
       failures: [], agent: null, productLine: "supp", planYear: 2026,

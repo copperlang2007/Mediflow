@@ -108,12 +108,15 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ALL_ROLES },
       { href: "/crm", label: "Clients & Leads", icon: Users, roles: BACK_OFFICE },
+      // An agent's own clients, with the PHI they need to service them.
+      { href: "/my-clients", label: "My Clients", icon: Users, roles: ["agent"] },
       // Book of business (enrollments). Server gate: contact:read.
       { href: "/policies", label: "Policies", icon: FileStack, roles: BACK_OFFICE },
       { href: "/tasks", label: "Tasks", icon: CheckSquare, roles: ALL_ROLES, badge: "overdueTasks" },
       { href: "/onboarding", label: "My Onboarding", icon: ClipboardCheck, roles: ["agent"] },
       { href: "/calendar", label: "Calendar", icon: CalendarDays, roles: ALL_ROLES },
-      { href: "/dialer", label: "Softphone", icon: Phone, roles: BACK_OFFICE },
+      // Agents get the self-scoped softphone (own assigned contacts only; server-enforced).
+      { href: "/dialer", label: "Softphone", icon: Phone, roles: [...BACK_OFFICE, "agent"] },
       { href: "/supervisor", label: "Supervisor", icon: Headphones, roles: ADMINS },
     ],
   },
