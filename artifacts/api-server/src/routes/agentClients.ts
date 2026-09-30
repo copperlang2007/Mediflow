@@ -115,7 +115,12 @@ router.get(
         effectiveDate: enrollmentsTable.effectiveDate,
         status: enrollmentsTable.status,
         effectuated: enrollmentsTable.effectuated,
-        writtenByMe: sql<boolean>`${enrollmentsTable.agentId} = ${agentId}`,
+        // The applications' recorded writers when the enrollment has any (a
+        // shared row keeps only its first writer), else the enrollment's agent.
+        writtenByMe: sql<boolean>`case
+          when exists (select 1 from ${enrollmentApplicationsTable} where ${enrollmentApplicationsTable.enrollmentId} = ${enrollmentsTable.id})
+          then exists (select 1 from ${enrollmentApplicationsTable} where ${enrollmentApplicationsTable.enrollmentId} = ${enrollmentsTable.id} and ${enrollmentApplicationsTable.writingAgentId} = ${agentId})
+          else coalesce(${enrollmentsTable.agentId} = ${agentId}, false) end`,
       }).from(enrollmentsTable)
         .leftJoin(carriersTable, eq(carriersTable.id, enrollmentsTable.carrierId))
         .where(and(eq(enrollmentsTable.orgId, authReq.orgId), eq(enrollmentsTable.contactId, contact.id)))

@@ -447,7 +447,15 @@ async function handlePolicyEvent(req: RawBodyRequest, res: Response, orgId: stri
 
       const enrollmentId = await upsertPolicyEnrollment(tx, orgId, contactId, agentId, parsed);
       await applyCoverageLifecycle(tx, contactId, enrollmentId, parsed.policyStatus);
-      const stored = await storeApplication(tx, orgId, parsed, { contactId, enrollmentId });
+      // The application's writer only when exactly one agent profile carries
+      // that email: PHI access keys on it, so a shared address counts as nobody.
+      const writers = contact.assignedAgentEmail
+        ? await tx.select({ id: agentsTable.id }).from(agentsTable)
+          .where(and(eq(agentsTable.orgId, orgId), sql`lower(trim(${agentsTable.email})) = ${contact.assignedAgentEmail.trim().toLowerCase()}`)).limit(2)
+        : [];
+      const stored = await storeApplication(tx, orgId, parsed, { contactId, enrollmentId }, {
+        writingAgentId: writers.length === 1 ? writers[0]!.id : null,
+      });
 
       const label = parsed.eventType.replace(/^PE_/, "").replace(/_/g, " ").toLowerCase();
       const summary = [

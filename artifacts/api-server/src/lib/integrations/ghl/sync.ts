@@ -33,7 +33,7 @@
 import { and, eq, isNull, lt, or, sql, TransactionRollbackError } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db, activitiesTable, agentsTable, contactsTable, externalContactLinksTable, ghlSyncStateTable } from "@workspace/db";
-import { fillBlanks, loadAgentsByEmail, loadMatcher, mbiHashesFor, upsertContact, type Tx, isStrongMatch } from "../../contactImport";
+import { fillBlanks, loadMatcher, mbiHashesFor, upsertContact, type Tx, isStrongMatch } from "../../contactImport";
 import { interpretPayloadContact } from "../payload";
 import { applyCoverageLifecycle, storeApplication, upsertPolicyEnrollment } from "../enrollhere/applicationStore";
 import { searchContacts, listContactCustomFields, GhlApiError, GHL_PAGE_LIMIT, type GhlContact } from "./client";
@@ -573,9 +573,11 @@ async function mbiConflicts(tx: Tx, orgId: string, contactId: string, mbi: strin
 }
 
 /**
- * The writing agent: by NPN (the reliable identifier across Sunfire and
- * agencyBRIDGE), else by email. An offboarded agent is used only when no
- * current agent carries the NPN.
+ * The writing agent: the one agent profile whose NPN matches (the reliable
+ * identifier across Sunfire and agencyBRIDGE); with no NPN on the
+ * application, the one profile whose email matches. Two or more matches is
+ * ambiguous and resolves to nobody: the application is still stored, but
+ * grants no agent access until an admin assigns the client.
  */
 async function findWritingAgent(
   tx: Tx,
@@ -584,21 +586,19 @@ async function findWritingAgent(
   email: string | null,
 ): Promise<{ id: string; userId: string | null } | null> {
   const digits = npn?.replace(/\D/g, "");
-  if (digits) {
-    const rows = await tx.select({ id: agentsTable.id, userId: agentsTable.userId, status: agentsTable.status })
-      .from(agentsTable)
-      .where(and(eq(agentsTable.orgId, orgId), sql`regexp_replace(coalesce(${agentsTable.npn}, ''), '[^0-9]', '', 'g') = ${digits}`));
-    const pick = rows.find((r) => r.status !== "offboarded") ?? rows[0];
-    if (pick) return { id: pick.id, userId: pick.userId };
+  const match = digits
+    ? sql`regexp_replace(coalesce(${agentsTable.npn}, ''), '[^0-9]', '', 'g') = ${digits}`
+    : email?.trim()
+      ? sql`lower(trim(${agentsTable.email})) = ${email.trim().toLowerCase()}`
+      : null;
+  if (!match) return null;
+  const rows = await tx.select({ id: agentsTable.id, userId: agentsTable.userId })
+    .from(agentsTable).where(and(eq(agentsTable.orgId, orgId), match)).limit(2);
+  if (rows.length !== 1) {
+    if (rows.length > 1) logger.warn({ orgId, by: digits ? "npn" : "email" }, "GHL sync: several agent profiles match an application's writer; left unattributed");
+    return null;
   }
-  if (email) {
-    const id = (await loadAgentsByEmail(orgId, tx, email)).get(email) ?? null;
-    if (id) {
-      const [row] = await tx.select({ userId: agentsTable.userId }).from(agentsTable).where(eq(agentsTable.id, id)).limit(1);
-      return { id, userId: row?.userId ?? null };
-    }
-  }
-  return null;
+  return rows[0]!;
 }
 
 /**
@@ -633,7 +633,7 @@ async function importSunfireApplication(
   const agentId = agent?.id ?? null;
   const enrollmentId = await upsertPolicyEnrollment(tx, orgId, contactId, agentId, p, "From Odyssey (Sunfire)");
   await applyCoverageLifecycle(tx, contactId, enrollmentId, p.policyStatus);
-  const stored = await storeApplication(tx, orgId, p, { contactId, enrollmentId }, { source: GHL_SOURCE, fallbackKey: app.fallbackKey });
+  const stored = await storeApplication(tx, orgId, p, { contactId, enrollmentId }, { source: GHL_SOURCE, fallbackKey: app.fallbackKey, writingAgentId: agentId });
 
   const conditions = [...new Set([...(cur.healthConditions ?? []), ...app.healthConditions])];
   const patch: Partial<typeof contactsTable.$inferInsert> = {};
