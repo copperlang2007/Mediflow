@@ -1,5 +1,6 @@
 import { QueryClient, QueryCache, MutationCache, type Query } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { announceSessionExpired } from "@/lib/auth/sessionGuard";
 
 // Typed `meta` for every query/mutation in the app.
 //   Queries — silent: true: never toast this failure globally. Use for
@@ -52,6 +53,13 @@ function isMfaRequired(error: unknown): boolean {
   return typeof data === "object" && data !== null && (data as { error?: unknown }).error === "mfa_required";
 }
 
+/** The API ends a session after the agency's idle limit with 401 SESSION_TIMEOUT. */
+function isSessionTimeout(error: unknown): boolean {
+  if (statusOf(error) !== 401 || typeof error !== "object" || error === null || !("data" in error)) return false;
+  const data = (error as { data: unknown }).data;
+  return typeof data === "object" && data !== null && (data as { code?: unknown }).code === "SESSION_TIMEOUT";
+}
+
 function showMfaGate(): void {
   void queryClient.invalidateQueries({ queryKey: ["auth", "status"] });
 }
@@ -97,6 +105,7 @@ export function notifyQueryError(error: unknown): void {
 export const queryClient = new QueryClient({
   queryCache: new QueryCache({
     onError: (error, query) => {
+      if (isSessionTimeout(error)) { announceSessionExpired(); return; }
       if (isMfaRequired(error)) { showMfaGate(); return; }
       if (isSilent(query)) return;
       // 401 / 403 / 5xx / 404 get the plain-language handling (one fixed id
@@ -112,6 +121,7 @@ export const queryClient = new QueryClient({
   }),
   mutationCache: new MutationCache({
     onError: (error, _variables, _context, mutation) => {
+      if (isSessionTimeout(error)) { announceSessionExpired(); return; }
       if (isMfaRequired(error)) { showMfaGate(); return; }
       // Opt-in: nearly every mutation call site already reports its own
       // failure (a friendly toast in onError/catch, or inline form state),

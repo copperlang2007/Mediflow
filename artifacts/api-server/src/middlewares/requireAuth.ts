@@ -1,16 +1,17 @@
 import { type Request, type Response, type NextFunction } from "express";
-import { getAuth } from "@clerk/express";
+import { getAuth, clerkClient } from "@clerk/express";
 import { randomUUID } from "node:crypto";
 import { db, usersTable, organizationsTable, orgSettingsTable, sessionActivityTable, auditLogTable } from "@workspace/db";
 import { eq, lt } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
 import { isDemoMode, demoUserId } from "../lib/demoMode";
+import { logger } from "../lib/logger";
 import { mfaEnforced, mfaEnrolledFromAuth, resolveMfaEnrolled, MFA_REQUIRED_MESSAGE } from "./requireMfa";
 
 // TTL cache for org session timeout settings (refresh every 60 s)
 const orgTimeoutCache = new Map<string, { timeoutMinutes: number; fetchedAt: number }>();
 
-async function getOrgSessionTimeout(orgId: string): Promise<number> {
+export async function getOrgSessionTimeout(orgId: string): Promise<number> {
   const cached = orgTimeoutCache.get(orgId);
   if (cached && Date.now() - cached.fetchedAt < 60_000) return cached.timeoutMinutes;
   const [settings] = await db
@@ -36,8 +37,30 @@ async function getOrgSessionTimeout(orgId: string): Promise<number> {
  *   request while still flushing updated timestamps promptly.
  * - On startup the DB provides authoritative last-active timestamps.
  */
-const sessionLocalCache = new Map<string, { lastActiveAt: number; syncedAt: number }>();
+const sessionLocalCache = new Map<string, { lastActiveAt: number; syncedAt: number; expired?: boolean }>();
 const SESSION_CACHE_SYNC_MS = 60_000; // re-read from DB after 60 s
+
+/**
+ * Mark a session dead for good: remember it in the cache (so a later, longer
+ * agency timeout cannot revive it) and end it at Clerk, so it cannot sign in
+ * again even after the expired row is eventually cleaned up. Clerk failures
+ * are non-fatal: the expired row still refuses the session.
+ */
+function markExpired(sessionId: string, lastActiveAt: number, firstTime: boolean): "expired" {
+  sessionLocalCache.set(sessionId, { lastActiveAt, syncedAt: Date.now(), expired: true });
+  if (firstTime) {
+    void (async () => {
+      try {
+        await clerkClient.sessions.revokeSession(sessionId);
+      } catch (err) {
+        // Non-fatal: the expired row still refuses this session. Logged so
+        // persistent Clerk failures are visible to operators.
+        logger.warn({ err, sessionId }, "Clerk revokeSession failed; relying on the session_activity row");
+      }
+    })();
+  }
+  return "expired";
+}
 
 async function checkAndUpdateSessionActivity(
   sessionId: string,
@@ -46,6 +69,7 @@ async function checkAndUpdateSessionActivity(
 ): Promise<"ok" | "expired"> {
   const now = Date.now();
   const cached = sessionLocalCache.get(sessionId);
+  if (cached?.expired) return "expired";
   const needsDbRead = !cached || now - cached.syncedAt > SESSION_CACHE_SYNC_MS;
 
   let lastActiveAt: number;
@@ -60,10 +84,9 @@ async function checkAndUpdateSessionActivity(
     if (row) {
       lastActiveAt = row.lastActiveAt.getTime();
       if (now > row.expiresAt.getTime()) {
-        // Already expired in DB — clean up and reject
-        await db.delete(sessionActivityTable).where(eq(sessionActivityTable.sessionId, sessionId));
-        sessionLocalCache.delete(sessionId);
-        return "expired";
+        // Already expired. Keep the row: deleting it would make the very next
+        // request look like a brand-new session and let it straight back in.
+        return markExpired(sessionId, lastActiveAt, true);
       }
     } else {
       // First time seeing this session — treat as fresh
@@ -75,10 +98,10 @@ async function checkAndUpdateSessionActivity(
   }
 
   if (now - lastActiveAt > timeoutMs) {
-    // Timed out — remove from both stores
-    await db.delete(sessionActivityTable).where(eq(sessionActivityTable.sessionId, sessionId));
-    sessionLocalCache.delete(sessionId);
-    return "expired";
+    // Timed out. The row stays (with its old last-active time) so this
+    // session keeps being refused until the user signs in again, which
+    // creates a new session id. The cleanup job below removes old rows.
+    return markExpired(sessionId, lastActiveAt, true);
   }
 
   // Active — upsert new last-active timestamp into DB
@@ -95,12 +118,14 @@ async function checkAndUpdateSessionActivity(
   return "ok";
 }
 
-// Periodic cleanup of expired session rows and stale local cache entries.
+// Periodic cleanup of long-dead session rows and stale local cache entries.
+// Expired rows are kept for 30 days, and the Clerk session is revoked when it
+// expires, so an expired session can never be mistaken for a new one.
 // Runs every 15 minutes; won't block process exit.
 setInterval(
   async () => {
     try {
-      await db.delete(sessionActivityTable).where(lt(sessionActivityTable.expiresAt, new Date()));
+      await db.delete(sessionActivityTable).where(lt(sessionActivityTable.expiresAt, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)));
     } catch {
       // non-fatal
     }
