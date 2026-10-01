@@ -110,3 +110,12 @@ export function staleReason(idleMinutes: number, now = Date.now()): StaleReason 
 export function announceSessionExpired(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
 }
+
+// A live phone call counts as activity: nobody touches the mouse for a whole
+// call, and signing them out mid-call would drop it. The dialer keeps this
+// flag in step with its call state.
+let callInProgress = false;
+export const setCallInProgress = (live: boolean): void => {
+  callInProgress = live;
+};
+export const isCallInProgress = (): boolean => callInProgress;

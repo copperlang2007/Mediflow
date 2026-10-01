@@ -6,6 +6,7 @@ import {
   DEFAULT_IDLE_MINUTES,
   SESSION_EXPIRED_EVENT,
   clearSessionMarkers,
+  isCallInProgress,
   markActivity,
   markSeen,
   saveIdleMinutes,
@@ -109,6 +110,10 @@ export function SessionGuard({
       const now = Date.now();
       if (now - lastWrite < ACTIVITY_WRITE_EVERY_MS) return;
       lastWrite = now;
+      if (isCallInProgress()) {
+        markActivity(now);
+        return;
+      }
       // Activity after the deadline must not erase the idle period.
       if (staleReason(minutesNow())) {
         void endSession();
@@ -117,6 +122,10 @@ export function SessionGuard({
       markActivity(now);
     };
     const tick = () => {
+      if (isCallInProgress()) {
+        markActivity();
+        return;
+      }
       if (staleReason(minutesNow())) {
         void endSession();
         return;
