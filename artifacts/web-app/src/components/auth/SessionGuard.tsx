@@ -16,6 +16,7 @@ import {
 
 const CHECK_EVERY_MS = 15_000;
 const FRESH_LOGIN_MS = 30 * 1000;
+const FRESH_LOGIN_SKEW_MS = 10 * 1000;
 const RETRY_SIGN_OUT_MS = 3_000;
 const MAX_RETRY_WAIT_MS = 30_000;
 const REFRESH_STATUS_EVERY_MS = 5 * 60 * 1000;
@@ -109,10 +110,10 @@ export function SessionGuard({
     // back from social/SSO login, which has no stored markers yet) is fresh,
     // not an old cookie.
     const createdAt = session?.createdAt ? new Date(session.createdAt).getTime() : 0;
-    // Age must be non-negative: a browser clock set behind Clerk's must not
-    // make an old session look new.
+    // A few seconds of leeway for a clock slightly behind Clerk's; more than
+    // that (a session "from the future") must not make an old session look new.
     const age = Date.now() - createdAt;
-    const justSignedIn = createdAt > 0 && age >= 0 && age < FRESH_LOGIN_MS;
+    const justSignedIn = createdAt > 0 && age > -FRESH_LOGIN_SKEW_MS && age < FRESH_LOGIN_MS;
     // The agency's limit isn't known yet (status loads after first render),
     // so use what the previous visit saved; "reopened" doesn't need it at all.
     if (isSignedIn && !justSignedIn && staleReason(storedIdleMinutes() ?? idleMinutes)) {
