@@ -144,4 +144,17 @@ describe("isUsingEmbeddedDocument", () => {
   it("is false without a window/document (node)", () => {
     expect(isUsingEmbeddedDocument()).toBe(false);
   });
+
+  it("keeps recording activity in memory if storage stops working mid-session", () => {
+    const m = fakeStorage();
+    markActivity(1_000_000);
+    const store = (globalThis as any).localStorage;
+    store.setItem = () => {
+      throw new Error("QuotaExceededError");
+    };
+    markActivity(5_000_000);
+    expect(m.get(LAST_ACTIVITY_KEY)).toBe("1000000"); // the write was refused...
+    expect(staleReason(30, 5_000_000 + MIN)).toBeNull(); // ...but the activity wasn't lost
+    clearSessionMarkers();
+  });
 });

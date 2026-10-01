@@ -99,7 +99,11 @@ function write(key: string, value: number): void {
   try {
     globalThis.localStorage.setItem(key, String(value));
   } catch {
-    // ignore
+    // Storage stopped working mid-session (quota, eviction): forget the cached
+    // probe and keep the value in memory so writes are never silently lost.
+    probedStore = undefined;
+    probedResult = false;
+    memory.set(key, value);
   }
 }
 

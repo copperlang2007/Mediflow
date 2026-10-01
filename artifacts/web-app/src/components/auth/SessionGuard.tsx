@@ -24,7 +24,14 @@ const RETRY_SIGN_OUT_MS = 3_000;
 const MAX_RETRY_WAIT_MS = 30_000;
 const REFRESH_STATUS_EVERY_MS = 5 * 60 * 1000;
 const ACTIVITY_WRITE_EVERY_MS = 5_000;
-const ACTIVITY_EVENTS = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart", "scroll"] as const;
+// Events that can start an action. When the session turns out to be expired,
+// these are stopped (and their default action cancelled) so the very click or
+// keypress that discovers it cannot submit or delete anything. They are checked
+// every time, not throttled.
+const BLOCKING_EVENTS = ["pointerdown", "keydown", "click"] as const;
+// Movement-type events only keep the activity clock fresh (throttled, passive).
+const PASSIVE_EVENTS = ["pointermove", "wheel", "touchstart", "scroll"] as const;
+const isBlockingEvent = (type: string): boolean => (BLOCKING_EVENTS as readonly string[]).includes(type);
 const CALL_HEARTBEAT_EVERY_MS = 60_000;
 
 /**
@@ -148,20 +155,28 @@ export function SessionGuard({
     let lastCallPing = 0;
     const onActivity = (event: Event) => {
       const now = Date.now();
-      if (now - lastWrite < ACTIVITY_WRITE_EVERY_MS) return;
-      lastWrite = now;
+      const blocking = isBlockingEvent(event.type);
+      const throttled = now - lastWrite < ACTIVITY_WRITE_EVERY_MS;
+      if (!blocking && throttled) return;
       if (isCallInProgress()) {
-        markActivity(now);
+        if (!throttled) {
+          lastWrite = now;
+          markActivity(now);
+        }
         return;
       }
       // Activity after the deadline must not erase the idle period, and the
-      // very click or keypress that finds the session expired must not reach
-      // the page (it could be a submit or delete).
+      // click or keypress that finds the session expired must not reach the page.
       if (staleReason(minutesNow())) {
-        event.stopPropagation();
+        if (blocking) {
+          event.stopPropagation();
+          if (event.cancelable) event.preventDefault();
+        }
         void signOutUntilDone();
         return;
       }
+      if (throttled) return;
+      lastWrite = now;
       markActivity(now);
     };
     const tick = () => {
@@ -227,12 +242,13 @@ export function SessionGuard({
     };
     window.fetch = guardedFetch;
 
-    for (const e of ACTIVITY_EVENTS) window.addEventListener(e, onActivity, { passive: true, capture: true });
+    for (const e of BLOCKING_EVENTS) window.addEventListener(e, onActivity, { capture: true });
+    for (const e of PASSIVE_EVENTS) window.addEventListener(e, onActivity, { passive: true, capture: true });
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
     const timer = window.setInterval(tick, CHECK_EVERY_MS);
     return () => {
-      for (const e of ACTIVITY_EVENTS) window.removeEventListener(e, onActivity, { capture: true });
+      for (const e of [...BLOCKING_EVENTS, ...PASSIVE_EVENTS]) window.removeEventListener(e, onActivity, { capture: true });
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
       window.clearInterval(timer);

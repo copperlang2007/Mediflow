@@ -282,6 +282,58 @@ describe("SessionGuard", () => {
     await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
   });
 
+  it("still blocks when the expiry is found right after other recent activity (no throttle gap)", async () => {
+    const onKey = vi.fn();
+    markActivity();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <SessionGuard>
+          <input aria-label="note" onKeyDown={onKey} />
+        </SessionGuard>
+      </QueryClientProvider>,
+    );
+    const input = await screen.findByLabelText("note");
+    fireEvent.keyDown(input, { key: "a" }); // fresh: passes, starts the throttle window
+    expect(onKey).toHaveBeenCalledTimes(1);
+    localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now() - 31 * 60 * 1000));
+    fireEvent.keyDown(input, { key: "b" }); // within 5s of the last one
+    expect(onKey).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+  });
+
+  it("blocks a click (including keyboard-activated buttons) on an expired session", async () => {
+    const onClick = vi.fn();
+    markActivity();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <SessionGuard>
+          <button onClick={onClick}>delete</button>
+        </SessionGuard>
+      </QueryClientProvider>,
+    );
+    const btn = await screen.findByText("delete");
+    localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now() - 31 * 60 * 1000));
+    fireEvent.click(btn);
+    expect(onClick).not.toHaveBeenCalled();
+    await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not interfere with pointer movement or scrolling, even when expired", async () => {
+    const onMove = vi.fn();
+    markActivity();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <SessionGuard>
+          <div data-testid="area" onPointerMove={onMove} />
+        </SessionGuard>
+      </QueryClientProvider>,
+    );
+    const area = await screen.findByTestId("area");
+    localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now() - 31 * 60 * 1000));
+    fireEvent.pointerMove(area);
+    expect(onMove).toHaveBeenCalledTimes(1);
+  });
+
   it("lets keypresses through while the session is current", async () => {
     const onKey = vi.fn();
     markActivity();
