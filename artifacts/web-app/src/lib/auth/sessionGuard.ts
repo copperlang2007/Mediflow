@@ -28,6 +28,8 @@ export const DEFAULT_IDLE_MINUTES = 30;
  */
 export const REOPEN_GRACE_MS = 3 * 60 * 1000;
 
+const CLOCK_SKEW_MS = 5 * 1000;
+
 export type StaleReason = "reopened" | "idle";
 
 /**
@@ -55,9 +57,15 @@ export function storedIdleMinutes(): number | null {
 
 export const saveIdleMinutes = (minutes: number): void => write(IDLE_MINUTES_KEY, minutes);
 
+// When the browser blocks storage, the idle clock lives in memory for this
+// page only. Idle logout still works; the "came back later" rule can't (there
+// is nothing to remember across page loads), so it stands down.
+const memory = new Map<string, number>();
+
 function read(key: string): number | null {
+  if (!storageAvailable()) return memory.get(key) ?? null;
   try {
-    const raw = globalThis.localStorage?.getItem(key);
+    const raw = globalThis.localStorage.getItem(key);
     if (raw === null || raw === undefined) return null;
     const n = Number(raw);
     return Number.isFinite(n) ? n : null;
@@ -67,10 +75,14 @@ function read(key: string): number | null {
 }
 
 function write(key: string, value: number): void {
+  if (!storageAvailable()) {
+    memory.set(key, value);
+    return;
+  }
   try {
-    globalThis.localStorage?.setItem(key, String(value));
+    globalThis.localStorage.setItem(key, String(value));
   } catch {
-    // Blocked storage is handled by storageAvailable(); the server-side timeout still applies.
+    // ignore
   }
 }
 
@@ -82,6 +94,7 @@ export const markActivity = (now = Date.now()): void => {
 export const markSeen = (now = Date.now()): void => write(LAST_SEEN_KEY, now);
 
 export function clearSessionMarkers(): void {
+  memory.clear();
   try {
     globalThis.localStorage?.removeItem(LAST_ACTIVITY_KEY);
     globalThis.localStorage?.removeItem(LAST_SEEN_KEY);
@@ -97,11 +110,17 @@ export function clearSessionMarkers(): void {
  * count as stale: when in doubt, ask for the password.
  */
 export function staleReason(idleMinutes: number, now = Date.now()): StaleReason | null {
-  if (!storageAvailable()) return null;
+  const available = storageAvailable();
   const lastSeen = read(LAST_SEEN_KEY);
   const lastActivity = read(LAST_ACTIVITY_KEY);
-  if (lastSeen === null || lastActivity === null) return "reopened";
-  if (now - lastSeen > REOPEN_GRACE_MS) return "reopened";
+  if (lastSeen === null || lastActivity === null) {
+    // Nothing recorded: an old cookie, unless storage is blocked (then nothing
+    // can ever be recorded before the first activity, so don't loop on it).
+    return available ? "reopened" : null;
+  }
+  // A clock that moved backwards must not make old activity look current.
+  if (now < lastSeen - CLOCK_SKEW_MS || now < lastActivity - CLOCK_SKEW_MS) return "reopened";
+  if (available && now - lastSeen > REOPEN_GRACE_MS) return "reopened";
   if (now - lastActivity > idleMinutes * 60 * 1000) return "idle";
   return null;
 }

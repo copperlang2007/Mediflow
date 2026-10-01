@@ -178,7 +178,8 @@ export function useSoftphoneCall(opts: { deviceFactory?: DeviceFactory } = {}) {
 
   // Tell the session guard a call is live so it never counts as idle time.
   useEffect(() => {
-    setCallInProgress(state.phase === "connecting" || state.phase === "ringing" || state.phase === "in_call");
+    // Not "connecting": that can sit on a microphone prompt indefinitely.
+    setCallInProgress(state.phase === "ringing" || state.phase === "in_call");
     return () => setCallInProgress(false);
   }, [state.phase]);
 

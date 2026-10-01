@@ -95,6 +95,9 @@ export function SessionGuard({
   const decidedRef = useRef(false);
   useEffect(() => {
     if (IS_DEMO_BUILD || !isLoaded) return;
+    // After a social/SSO redirect Clerk can report "signed in" a moment before
+    // the session object arrives; wait for it rather than guess.
+    if (isSignedIn && !session) return;
     if (decidedRef.current) {
       if (isSignedIn) markActivity();
       return;
@@ -118,7 +121,7 @@ export function SessionGuard({
       setChecked(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoaded, isSignedIn]);
+  }, [isLoaded, isSignedIn, session]);
 
   // 2. While signed in: record activity, watch for idleness, obey the API.
   useEffect(() => {

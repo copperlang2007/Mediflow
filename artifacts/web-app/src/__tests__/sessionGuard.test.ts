@@ -91,4 +91,20 @@ describe("staleReason", () => {
     clearSessionMarkers();
     expect(storedIdleMinutes()).toBeNull();
   });
+
+  it("still enforces idle time from memory when storage is blocked", () => {
+    const blocked = () => {
+      throw new Error("blocked");
+    };
+    (globalThis as any).localStorage = { getItem: blocked, setItem: blocked, removeItem: blocked };
+    markActivity(0);
+    expect(staleReason(30, 29 * MIN)).toBeNull();
+    expect(staleReason(30, 31 * MIN)).toBe("idle");
+    clearSessionMarkers();
+  });
+
+  it("treats activity timestamps from the future (clock moved back) as stale", () => {
+    markActivity(10 * MIN);
+    expect(staleReason(30, 1 * MIN)).toBe("reopened");
+  });
 });

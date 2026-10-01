@@ -9,9 +9,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const signOut = vi.fn();
 let signedIn = true;
+let sessionPending = false;
 vi.mock("@clerk/react", () => ({
   useAuth: () => ({ isLoaded: true, isSignedIn: signedIn }),
-  useClerk: () => ({ signOut, session: null }),
+  useClerk: () => ({ signOut, session: signedIn && !sessionPending ? { createdAt: new Date(0) } : null }),
 }));
 
 import { SessionGuard } from "@/components/auth/SessionGuard";
@@ -38,6 +39,7 @@ beforeEach(() => {
   localStorage.clear();
   signOut.mockReset().mockResolvedValue(undefined);
   signedIn = true;
+  sessionPending = false;
 });
 afterEach(() => {
   setCallInProgress(false);
@@ -127,6 +129,14 @@ describe("SessionGuard", () => {
     });
     await new Promise((r) => setTimeout(r, 50));
     expect(signOut).not.toHaveBeenCalled();
+  });
+
+  it("waits for the session object after a redirect sign-in instead of signing out", async () => {
+    sessionPending = true;
+    renderGuard();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(signOut).not.toHaveBeenCalled();
+    expect(screen.queryByText("dashboard")).toBeNull();
   });
 
   it("does nothing for signed-out visitors (public pages)", async () => {
