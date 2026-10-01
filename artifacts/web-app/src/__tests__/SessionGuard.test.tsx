@@ -360,10 +360,29 @@ describe("SessionGuard", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(signOut).not.toHaveBeenCalled();
     expect(screen.getByText("dashboard")).toBeTruthy();
-    setCallInProgress(false);
+    // the held notice is acted on the moment the call ends (no waiting for a timer)
     act(() => {
-      document.dispatchEvent(new Event("visibilitychange"));
+      setCallInProgress(false);
     });
+    await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+  });
+
+  it("blocks a form submission on an expired session", async () => {
+    const onSubmit = vi.fn((e: React.FormEvent) => e.preventDefault());
+    markActivity();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <SessionGuard>
+          <form data-testid="f" onSubmit={onSubmit}>
+            <button type="submit">go</button>
+          </form>
+        </SessionGuard>
+      </QueryClientProvider>,
+    );
+    const form = await screen.findByTestId("f");
+    localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now() - 31 * 60 * 1000));
+    fireEvent.submit(form);
+    expect(onSubmit).not.toHaveBeenCalled();
     await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
   });
 

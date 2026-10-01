@@ -18,6 +18,7 @@ export const LAST_ACTIVITY_KEY = "mediflow:lastActivityAt";
 export const LAST_SEEN_KEY = "mediflow:lastSeenAt";
 export const IDLE_MINUTES_KEY = "mediflow:idleMinutes";
 export const SESSION_EXPIRED_EVENT = "mediflow:session-expired";
+export const CALL_ENDED_EVENT = "mediflow:call-ended";
 
 /** Used until the agency's own setting (Admin > Compliance) is known. */
 export const DEFAULT_IDLE_MINUTES = 30;
@@ -160,8 +161,11 @@ export const MAX_CALL_EXEMPTION_MS = 4 * 60 * 60 * 1000;
 let callInProgress = false;
 let callStartedAt = 0;
 export const setCallInProgress = (live: boolean, now = Date.now()): void => {
+  const wasLive = callInProgress;
   if (live && !callInProgress) callStartedAt = now;
   callInProgress = live;
+  // Lets the session guard act at once on an expiry it held back during the call.
+  if (wasLive && !live && typeof window !== "undefined") window.dispatchEvent(new Event(CALL_ENDED_EVENT));
 };
 export const isCallInProgress = (now = Date.now()): boolean =>
   callInProgress && now - callStartedAt < MAX_CALL_EXEMPTION_MS;

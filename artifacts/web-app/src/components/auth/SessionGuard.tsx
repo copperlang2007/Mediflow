@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api";
 import {
   DEFAULT_IDLE_MINUTES,
   SESSION_EXPIRED_EVENT,
+  CALL_ENDED_EVENT,
   clearSessionMarkers,
   isCallInProgress,
   isUsingEmbeddedDocument,
@@ -28,7 +29,7 @@ const ACTIVITY_WRITE_EVERY_MS = 5_000;
 // these are stopped (and their default action cancelled) so the very click or
 // keypress that discovers it cannot submit or delete anything. They are checked
 // every time, not throttled.
-const BLOCKING_EVENTS = ["pointerdown", "keydown", "click"] as const;
+const BLOCKING_EVENTS = ["pointerdown", "keydown", "click", "submit"] as const;
 // Movement-type events only keep the activity clock fresh (throttled, passive).
 const PASSIVE_EVENTS = ["pointermove", "wheel", "touchstart", "scroll"] as const;
 const isBlockingEvent = (type: string): boolean => (BLOCKING_EVENTS as readonly string[]).includes(type);
@@ -246,11 +247,19 @@ export function SessionGuard({
     for (const e of PASSIVE_EVENTS) window.addEventListener(e, onActivity, { passive: true, capture: true });
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    const onCallEnded = () => {
+      if (expiredDuringCallRef.current) {
+        expiredDuringCallRef.current = false;
+        void signOutUntilDone();
+      }
+    };
+    window.addEventListener(CALL_ENDED_EVENT, onCallEnded);
     const timer = window.setInterval(tick, CHECK_EVERY_MS);
     return () => {
       for (const e of [...BLOCKING_EVENTS, ...PASSIVE_EVENTS]) window.removeEventListener(e, onActivity, { capture: true });
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+      window.removeEventListener(CALL_ENDED_EVENT, onCallEnded);
       window.clearInterval(timer);
       if (window.fetch === guardedFetch) window.fetch = originalFetch;
     };
