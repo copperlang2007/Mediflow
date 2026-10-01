@@ -188,6 +188,18 @@ describe("Session timeout enforcement (HIPAA technical safeguard)", () => {
       .set(withAuth(user.id, probeSessionId));
     expect(retry.status).toBe(401);
     expect(retry.body).toMatchObject({ code: "SESSION_TIMEOUT" });
+
+    // Even if the stored times look fresh again (e.g. the agency raised its
+    // timeout inside the 60-second cache window), a dead session stays dead.
+    await handle.db
+      .update(sessionActivityTable)
+      .set({ lastActiveAt: new Date(), expiresAt: new Date(Date.now() + 60 * 60 * 1000) })
+      .where(eq(sessionActivityTable.sessionId, probeSessionId));
+    const revived = await request(app)
+      .get("/api/dashboard/stats")
+      .set(withAuth(user.id, probeSessionId));
+    expect(revived.status).toBe(401);
+    expect(revived.body).toMatchObject({ code: "SESSION_TIMEOUT" });
   });
 
   it("a fresh sign-in (new sessionId) works normally after a timeout", async () => {
