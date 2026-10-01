@@ -67,7 +67,10 @@ Twilio (for example the microphone was blocked) does not count.
 
 ## How to check it worked
 
-1. Restart Mediflow after saving the settings.
+1. Restart Mediflow after saving the settings. A super admin can open
+   **System Health**: the "Texting & calling (Twilio)" card lists every setting
+   with a check or a reason (never its value) and shows the exact addresses to
+   paste into Twilio, with a copy button.
 2. Open the Softphone page. The badge should say **Browser calling: ready**.
 3. Pick a contact who has documented consent and is inside calling hours, press
    **Call**, and allow the microphone when your browser asks.

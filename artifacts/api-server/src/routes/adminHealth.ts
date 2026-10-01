@@ -28,6 +28,7 @@ import {
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { getOpenAI } from "./ai";
 import { logger } from "../lib/logger";
+import { twilioSetupStatus } from "../lib/twilioSetup";
 import {
   resolveAiApiKey,
   aiApiKeyVarName,
@@ -432,6 +433,23 @@ router.get(
     } finally {
       clearTimeout(timeout);
     }
+  },
+);
+
+/**
+ * GET /admin/health/twilio — which Twilio settings texting and browser
+ * calling need are in place, plus the webhook addresses to give Twilio.
+ * Names and pass/fail only; no value is ever returned. Super admins only:
+ * these are platform settings, set by whoever runs the deployment.
+ */
+router.get(
+  "/admin/health/twilio",
+  requireAuth,
+  requireRole("super_admin"),
+  auditMiddleware("audit_log", "read", { includeReads: true }),
+  (_req: Request, res: Response): void => {
+    res.set("Cache-Control", "no-store");
+    res.json(twilioSetupStatus());
   },
 );
 

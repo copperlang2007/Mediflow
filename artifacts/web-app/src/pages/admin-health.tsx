@@ -31,7 +31,7 @@ import { apiFetch } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { PageHeader, SectionCard, StatusPill, EmptyState } from "@/components/shared";
 import { PageShell } from "@/components/ops";
-import { Database, Cog, Server, Sparkles, Lock } from "lucide-react";
+import { Database, Cog, Server, Sparkles, Lock, Phone } from "lucide-react";
 import { useProductName } from "@/lib/branding/BrandingProvider";
 
 // ---------- Response shape -------------------------------------------------
@@ -168,7 +168,8 @@ const ERROR_LABEL: Record<PingErrorCategory, string> = {
 };
 
 export default function AdminHealthPage() {
-  const { isAdmin, isLoading: meLoading } = useIsAdmin(ADMIN_OR_COMPLIANCE_ROLES);
+  const { isAdmin, isLoading: meLoading, role } = useIsAdmin(ADMIN_OR_COMPLIANCE_ROLES);
+  const isSuperAdmin = role === "super_admin";
 
   if (!meLoading && !isAdmin) {
     return (
@@ -190,13 +191,120 @@ export default function AdminHealthPage() {
     <PageShell>
       <PageHeader
         title="System Health"
-        subtitle="Is everything running? Check the core services and the AI assistant's connection."
+        subtitle="Is everything running? Check the core services, the AI assistant's connection and, for super admins, Twilio setup."
       />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         <CoreServicesCard />
         <AiProviderCard />
+        {isSuperAdmin && <TwilioSetupCard />}
       </div>
     </PageShell>
+  );
+}
+
+// ---------- Twilio setup card (super admin) ---------------------------------
+// GET /api/admin/health/twilio: which settings texting and browser calling
+// need are present and well-formed. Names and pass/fail only; never values.
+
+export interface TwilioSetupCheck { name: string; ok: boolean; problem?: string }
+export interface TwilioSetupStatus {
+  sms: { ready: boolean; checks: TwilioSetupCheck[] };
+  voice: { ready: boolean; checks: TwilioSetupCheck[] };
+  webhooks: { smsInbound: string; voiceRequest: string; voiceStatus: string } | null;
+}
+
+export function TwilioSetupCard() {
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
+    queryKey: ["system-health", "twilio"],
+    queryFn: () => apiFetch<TwilioSetupStatus>("/api/admin/health/twilio"),
+    retry: false,
+    staleTime: 0,
+  });
+
+  return (
+    <SectionCard
+      title="Texting & calling (Twilio)"
+      description="The settings Twilio needs, set where the server's environment is configured. Values are never shown."
+      icon={Phone}
+      actions={
+        <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isFetching}>
+          <RefreshCcw className={`h-4 w-4 mr-1.5 ${isFetching ? "animate-spin" : ""}`} />
+          Check again
+        </Button>
+      }
+    >
+      {isLoading ? (
+        <div className="h-20 animate-pulse rounded-lg bg-muted" />
+      ) : isError || !data ? (
+        <EmptyState compact icon={AlertCircle} title="Couldn't load the Twilio checklist" description="Try again in a moment." />
+      ) : (
+        <div className="space-y-5" data-testid="twilio-setup">
+          <SetupGroup title="Texting" ready={data.sms.ready} checks={data.sms.checks} />
+          <SetupGroup title="Browser calling" ready={data.voice.ready} checks={data.voice.checks} />
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium">Addresses to enter in Twilio</p>
+            {data.webhooks ? (
+              <ul className="space-y-1 text-xs">
+                <WebhookRow label="Phone number → Messaging → A message comes in (POST)" url={data.webhooks.smsInbound} />
+                <WebhookRow label="TwiML App → Voice Request URL (POST)" url={data.webhooks.voiceRequest} />
+                <WebhookRow label="TwiML App → Status Callback URL (POST)" url={data.webhooks.voiceStatus} />
+              </ul>
+            ) : (
+              <p className="text-xs text-muted-foreground">Set TWILIO_WEBHOOK_PUBLIC_HOST first; the addresses appear here.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+function SetupGroup({ title, ready, checks }: { title: string; ready: boolean; checks: TwilioSetupCheck[] }) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <p className="text-sm font-medium">{title}</p>
+        <StatusPill tone={ready ? "success" : "warning"}>{ready ? "Ready" : "Needs setup"}</StatusPill>
+      </div>
+      <ul className="space-y-1">
+        {checks.map((c) => (
+          <li key={c.name} className="flex items-start gap-2 text-xs">
+            {c.ok ? (
+              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" aria-label="set" />
+            ) : (
+              <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" aria-label="needs attention" />
+            )}
+            <span className="font-mono break-all">{c.name}</span>
+            {!c.ok && c.problem && <span className="text-muted-foreground">— {c.problem}</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function WebhookRow({ label, url }: { label: string; url: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <li className="rounded-md border border-border p-2">
+      <p className="text-muted-foreground">{label}</p>
+      <div className="mt-1 flex items-center gap-2">
+        <code className="min-w-0 flex-1 break-all">{url}</code>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-xs"
+          onClick={() => {
+            void navigator.clipboard?.writeText(url).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            });
+          }}
+        >
+          {copied ? "Copied" : "Copy"}
+        </Button>
+      </div>
+    </li>
   );
 }
 
