@@ -51,6 +51,8 @@ export function SessionGuard({
   // failing sign-out never leaves an expired user looking at their data.
   const [blocked, setBlocked] = useState(false);
   const loopRef = useRef(false);
+  // An expiry notice that arrived during a live call; acted on once it ends.
+  const expiredDuringCallRef = useRef(false);
   const endingRef = useRef(false);
 
   // Returns true once Clerk has confirmed the sign-out.
@@ -163,6 +165,11 @@ export function SessionGuard({
       markActivity(now);
     };
     const tick = () => {
+      if (expiredDuringCallRef.current && !isCallInProgress()) {
+        expiredDuringCallRef.current = false;
+        void signOutUntilDone();
+        return;
+      }
       if (isCallInProgress()) {
         markActivity();
         // Calls never touch the API, and a hidden tab pauses the dashboard
@@ -192,7 +199,14 @@ export function SessionGuard({
     const onVisible = () => {
       if (document.visibilityState === "visible") tick();
     };
-    const onExpired = () => void signOutUntilDone();
+    const onExpired = () => {
+      // Dropping a live call helps nobody; end the session as soon as it's over.
+      if (isCallInProgress()) {
+        expiredDuringCallRef.current = true;
+        return;
+      }
+      void signOutUntilDone();
+    };
 
     // Any request that gets the API's "session expired" answer ends the
     // session, including the few that call fetch directly (AI chat, drafts).

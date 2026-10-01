@@ -297,6 +297,24 @@ describe("SessionGuard", () => {
     expect(signOut).not.toHaveBeenCalled();
   });
 
+  it("holds an expiry notice during a live call, then signs out when the call ends", async () => {
+    markActivity();
+    renderGuard();
+    await screen.findByText("dashboard");
+    setCallInProgress(true);
+    act(() => {
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(signOut).not.toHaveBeenCalled();
+    expect(screen.getByText("dashboard")).toBeTruthy();
+    setCallInProgress(false);
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+  });
+
   it("does nothing for signed-out visitors (public pages)", async () => {
     signedIn = false;
     renderGuard();
