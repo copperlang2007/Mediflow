@@ -15,8 +15,9 @@ import {
 } from "@/lib/auth/sessionGuard";
 
 const CHECK_EVERY_MS = 15_000;
-const FRESH_LOGIN_MS = 2 * 60 * 1000;
+const FRESH_LOGIN_MS = 30 * 1000;
 const RETRY_SIGN_OUT_MS = 3_000;
+const MAX_RETRY_WAIT_MS = 30_000;
 const REFRESH_STATUS_EVERY_MS = 5 * 60 * 1000;
 const ACTIVITY_WRITE_EVERY_MS = 5_000;
 const ACTIVITY_EVENTS = ["pointerdown", "keydown", "wheel", "touchstart", "scroll"] as const;
@@ -55,9 +56,10 @@ export function SessionGuard({
     } catch {
       // ignore
     }
+    // Purge cached data first so it is gone even if Clerk is unreachable.
+    qc.clear();
     try {
       await signOut({ redirectUrl: `${basePath}/sign-in` });
-      qc.clear();
       return true;
     } catch {
       return false;
@@ -71,7 +73,10 @@ export function SessionGuard({
     loopRef.current = true;
     setBlocked(true);
     try {
-      while (!(await endSession())) await new Promise((r) => setTimeout(r, RETRY_SIGN_OUT_MS));
+      for (let attempt = 0; !(await endSession()); attempt++) {
+        const wait = Math.min(RETRY_SIGN_OUT_MS * 2 ** attempt, MAX_RETRY_WAIT_MS);
+        await new Promise((r) => setTimeout(r, wait));
+      }
     } finally {
       loopRef.current = false;
       setBlocked(false);
@@ -162,7 +167,8 @@ export function SessionGuard({
     const originalFetch = window.fetch;
     const guardedFetch: typeof window.fetch = async (...args) => {
       const res = await originalFetch(...args);
-      if (res.status === 401) {
+      // Only this app's own server speaks for this session.
+      if (res.status === 401 && (!res.url || res.url.startsWith(window.location.origin))) {
         void res
           .clone()
           .json()
@@ -188,6 +194,18 @@ export function SessionGuard({
     };
   }, [isLoaded, isSignedIn, checked, signOutUntilDone, minutesNow, qc]);
 
-  if (!IS_DEMO_BUILD && (blocked || (isLoaded && isSignedIn && !checked))) return null;
+  if (!IS_DEMO_BUILD && blocked) {
+    // No app data is shown; the message avoids a blank page if Clerk is slow.
+    return (
+      <div role="status" className="flex min-h-screen flex-col items-center justify-center gap-3 p-6 text-center">
+        <p className="text-base font-medium">Signing you out to keep your information safe…</p>
+        <p className="text-sm text-muted-foreground">If this takes more than a few seconds, check your connection.</p>
+        <button type="button" className="text-sm underline" onClick={() => window.location.reload()}>
+          Reload
+        </button>
+      </div>
+    );
+  }
+  if (!IS_DEMO_BUILD && isLoaded && isSignedIn && !checked) return null;
   return <>{children}</>;
 }

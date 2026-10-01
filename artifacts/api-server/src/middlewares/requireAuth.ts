@@ -5,6 +5,7 @@ import { db, usersTable, organizationsTable, orgSettingsTable, sessionActivityTa
 import { eq, lt } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
 import { isDemoMode, demoUserId } from "../lib/demoMode";
+import { logger } from "../lib/logger";
 import { mfaEnforced, mfaEnrolledFromAuth, resolveMfaEnrolled, MFA_REQUIRED_MESSAGE } from "./requireMfa";
 
 // TTL cache for org session timeout settings (refresh every 60 s)
@@ -51,8 +52,10 @@ function markExpired(sessionId: string, lastActiveAt: number, firstTime: boolean
     void (async () => {
       try {
         await clerkClient.sessions.revokeSession(sessionId);
-      } catch {
-        // non-fatal
+      } catch (err) {
+        // Non-fatal: the expired row still refuses this session. Logged so
+        // persistent Clerk failures are visible to operators.
+        logger.warn({ err, sessionId }, "Clerk revokeSession failed; relying on the session_activity row");
       }
     })();
   }

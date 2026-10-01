@@ -95,6 +95,8 @@ describe("SessionGuard", () => {
       window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
     });
     await waitFor(() => expect(screen.queryByText("dashboard")).toBeNull());
+    // a message, not a blank page, while Clerk is slow
+    expect(screen.getByRole("status").textContent).toMatch(/signing you out/i);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3500);
     });
