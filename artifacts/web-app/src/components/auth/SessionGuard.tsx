@@ -100,15 +100,22 @@ export function SessionGuard({
   //    sign-in that happens later (after this decision) is a fresh login, so
   //    it just starts the activity clock.
   const decidedRef = useRef(false);
+  const wasSignedInRef = useRef(false);
   useEffect(() => {
     if (IS_DEMO_BUILD || !isLoaded) return;
     // After a social/SSO redirect Clerk can report "signed in" a moment before
     // the session object arrives; wait for it rather than guess.
     if (isSignedIn && !session) return;
     if (decidedRef.current) {
-      if (isSignedIn) markActivity();
+      // Only a genuine sign-in (signed out -> signed in) starts the activity
+      // clock. Clerk re-emits the session on every token refresh (about once a
+      // minute); treating those as activity would keep the idle timer fresh
+      // forever.
+      if (isSignedIn && !wasSignedInRef.current) markActivity();
+      wasSignedInRef.current = Boolean(isSignedIn);
       return;
     }
+    wasSignedInRef.current = Boolean(isSignedIn);
     decidedRef.current = true;
     // A sign-in that just happened in this page load (including a redirect
     // back from social/SSO login, which has no stored markers yet) is fresh,

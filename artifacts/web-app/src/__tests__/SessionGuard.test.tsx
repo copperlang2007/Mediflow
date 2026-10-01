@@ -207,6 +207,25 @@ describe("SessionGuard", () => {
     window.history.pushState({}, "", "/");
   });
 
+  it("does not treat Clerk session re-emissions as user activity", async () => {
+    markActivity();
+    const view = renderGuard();
+    await screen.findByText("dashboard");
+    const old = String(Date.now() - 10 * 60 * 1000);
+    localStorage.setItem(LAST_ACTIVITY_KEY, old);
+    // Clerk hands back a new session object on each token refresh.
+    const qc = new QueryClient();
+    view.rerender(
+      <QueryClientProvider client={qc}>
+        <SessionGuard>
+          <div>dashboard</div>
+        </SessionGuard>
+      </QueryClientProvider>,
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    expect(localStorage.getItem(LAST_ACTIVITY_KEY)).toBe(old);
+  });
+
   it("does nothing for signed-out visitors (public pages)", async () => {
     signedIn = false;
     renderGuard();
