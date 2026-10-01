@@ -138,3 +138,28 @@ export const setCallInProgress = (live: boolean): void => {
   callInProgress = live;
 };
 export const isCallInProgress = (): boolean => callInProgress;
+
+/**
+ * Where to send someone after a forced sign-out: the sign-in screen, which
+ * returns them to the page they were on (an invitation link's token, for
+ * example). The home and sign-in pages themselves need no return trip.
+ */
+export function signInUrlAfterSignOut(basePath: string, loc: { pathname: string; search: string }): string {
+  const signIn = `${basePath}/sign-in`;
+  const here = loc.pathname + loc.search;
+  const rel = loc.pathname.startsWith(basePath) ? loc.pathname.slice(basePath.length) : loc.pathname;
+  if (rel === "" || rel === "/" || rel.startsWith("/sign-in") || rel.startsWith("/sign-up")) return signIn;
+  return `${signIn}?redirect_url=${encodeURIComponent(here)}`;
+}
+
+/**
+ * True while the user is reading a document inside a cross-origin frame (the
+ * contract signing page, or focus sitting in any iframe). Their scrolling and
+ * clicks happen in the frame, where this page cannot see them.
+ */
+export function isUsingEmbeddedDocument(): boolean {
+  if (typeof document === "undefined") return false;
+  if (document.visibilityState !== "visible") return false;
+  if (document.activeElement?.tagName === "IFRAME") return true;
+  return /\/sign\/[^/]+/.test(window.location.pathname);
+}

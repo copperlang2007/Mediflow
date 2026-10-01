@@ -2,11 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth, useClerk, useSession } from "@clerk/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { IS_DEMO_BUILD } from "@/lib/demo/isDemo";
+import { apiFetch } from "@/lib/api";
 import {
   DEFAULT_IDLE_MINUTES,
   SESSION_EXPIRED_EVENT,
   clearSessionMarkers,
   isCallInProgress,
+  isUsingEmbeddedDocument,
+  signInUrlAfterSignOut,
   markActivity,
   markSeen,
   saveIdleMinutes,
@@ -21,7 +24,8 @@ const RETRY_SIGN_OUT_MS = 3_000;
 const MAX_RETRY_WAIT_MS = 30_000;
 const REFRESH_STATUS_EVERY_MS = 5 * 60 * 1000;
 const ACTIVITY_WRITE_EVERY_MS = 5_000;
-const ACTIVITY_EVENTS = ["pointerdown", "keydown", "wheel", "touchstart", "scroll"] as const;
+const ACTIVITY_EVENTS = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart", "scroll"] as const;
+const CALL_HEARTBEAT_EVERY_MS = 60_000;
 
 /**
  * Wraps the whole app. Signs the user out (and lands on the sign-in screen)
@@ -62,7 +66,7 @@ export function SessionGuard({
     // Purge cached data first so it is gone even if Clerk is unreachable.
     qc.clear();
     try {
-      await signOut({ redirectUrl: `${basePath}/sign-in` });
+      await signOut({ redirectUrl: signInUrlAfterSignOut(basePath, window.location) });
       return true;
     } catch {
       return false;
@@ -132,6 +136,7 @@ export function SessionGuard({
 
     let lastWrite = 0;
     let lastStatusRefresh = Date.now();
+    let lastCallPing = 0;
     const onActivity = () => {
       const now = Date.now();
       if (now - lastWrite < ACTIVITY_WRITE_EVERY_MS) return;
@@ -149,6 +154,17 @@ export function SessionGuard({
     };
     const tick = () => {
       if (isCallInProgress()) {
+        markActivity();
+        // Calls never touch the API, and a hidden tab pauses the dashboard
+        // poll, so keep the server's idle clock alive for the whole call.
+        if (Date.now() - lastCallPing > CALL_HEARTBEAT_EVERY_MS) {
+          lastCallPing = Date.now();
+          void apiFetch("/api/users/me").catch(() => {});
+        }
+        return;
+      }
+      // Reading a document in a frame (contract signing): input happens there.
+      if (isUsingEmbeddedDocument()) {
         markActivity();
         return;
       }

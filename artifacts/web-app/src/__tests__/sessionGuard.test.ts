@@ -12,6 +12,7 @@ import {
   staleReason,
   clearSessionMarkers,
   saveIdleMinutes,
+  signInUrlAfterSignOut,
   storedIdleMinutes,
 } from "@/lib/auth/sessionGuard";
 
@@ -112,5 +113,13 @@ describe("staleReason", () => {
     markActivity(10 * MIN);
     markSeen(10 * MIN);
     expect(staleReason(30, 10 * MIN - 20 * 1000)).toBeNull();
+  });
+
+  it("builds the post-sign-out destination", () => {
+    expect(signInUrlAfterSignOut("", { pathname: "/", search: "" })).toBe("/sign-in");
+    expect(signInUrlAfterSignOut("", { pathname: "/sign-in/factor-one", search: "" })).toBe("/sign-in");
+    expect(signInUrlAfterSignOut("", { pathname: "/dashboard", search: "?a=1" })).toBe(
+      "/sign-in?redirect_url=" + encodeURIComponent("/dashboard?a=1"),
+    );
   });
 });

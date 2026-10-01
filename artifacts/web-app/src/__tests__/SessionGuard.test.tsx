@@ -17,6 +17,8 @@ vi.mock("@clerk/react", () => ({
   useSession: () => ({ session: signedIn && !sessionPending ? { createdAt: new Date(sessionCreatedAt) } : null }),
 }));
 
+vi.mock("@/lib/api", () => ({ apiFetch: vi.fn().mockResolvedValue({}) }));
+
 import { SessionGuard } from "@/components/auth/SessionGuard";
 import {
   SESSION_EXPIRED_EVENT,
@@ -166,6 +168,43 @@ describe("SessionGuard", () => {
     sessionCreatedAt = Date.now() + 60_000;
     renderGuard();
     await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the server session alive with a heartbeat during a live call", async () => {
+    const { apiFetch } = await import("@/lib/api");
+    (apiFetch as any).mockClear();
+    markActivity();
+    renderGuard();
+    await screen.findByText("dashboard");
+    setCallInProgress(true);
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith("/api/users/me"));
+  });
+
+  it("counts the contract signing page as activity (input happens in a frame)", async () => {
+    window.history.pushState({}, "", "/sign/env-123");
+    markActivity();
+    renderGuard();
+    await screen.findByText("dashboard");
+    localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now() - 31 * 60 * 1000));
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(signOut).not.toHaveBeenCalled();
+    window.history.pushState({}, "", "/");
+  });
+
+  it("returns to the page the user was on after a forced sign-out (invite links)", async () => {
+    window.history.pushState({}, "", "/accept-invite?token=abc123");
+    renderGuard(); // no markers: old cookie
+    await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+    const arg = signOut.mock.calls[0][0] as { redirectUrl: string };
+    expect(arg.redirectUrl).toContain("/sign-in?redirect_url=");
+    expect(decodeURIComponent(arg.redirectUrl)).toContain("/accept-invite?token=abc123");
+    window.history.pushState({}, "", "/");
   });
 
   it("does nothing for signed-out visitors (public pages)", async () => {
