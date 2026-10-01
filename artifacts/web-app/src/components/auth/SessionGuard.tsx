@@ -174,7 +174,7 @@ export function SessionGuard({
         return;
       }
       // Reading a document in a frame (contract signing): input happens there.
-      if (isUsingEmbeddedDocument()) {
+      if (isUsingEmbeddedDocument(basePath)) {
         markActivity();
         return;
       }

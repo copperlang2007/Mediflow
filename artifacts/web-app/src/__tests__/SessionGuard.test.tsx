@@ -183,17 +183,56 @@ describe("SessionGuard", () => {
     await waitFor(() => expect(apiFetch).toHaveBeenCalledWith("/api/users/me"));
   });
 
-  it("counts the contract signing page as activity (input happens in a frame)", async () => {
+  function focusFrame(tag: string) {
+    Object.defineProperty(document, "activeElement", { configurable: true, get: () => ({ tagName: tag }) });
+  }
+  function releaseFocus() {
+    delete (document as any).activeElement;
+  }
+
+  it("counts working in the signing page's document frame as activity", async () => {
     window.history.pushState({}, "", "/sign/env-123");
     markActivity();
     renderGuard();
     await screen.findByText("dashboard");
     localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now() - 31 * 60 * 1000));
+    focusFrame("IFRAME");
     act(() => {
       document.dispatchEvent(new Event("visibilitychange"));
     });
     await new Promise((r) => setTimeout(r, 50));
     expect(signOut).not.toHaveBeenCalled();
+    releaseFocus();
+    window.history.pushState({}, "", "/");
+  });
+
+  it("does not exempt other pages just because a frame has focus", async () => {
+    window.history.pushState({}, "", "/dashboard");
+    markActivity();
+    renderGuard();
+    await screen.findByText("dashboard");
+    localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now() - 31 * 60 * 1000));
+    focusFrame("IFRAME");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+    releaseFocus();
+    window.history.pushState({}, "", "/");
+  });
+
+  it("does not exempt look-alike paths such as /documents/sign/x", async () => {
+    window.history.pushState({}, "", "/documents/sign/x");
+    markActivity();
+    renderGuard();
+    await screen.findByText("dashboard");
+    localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now() - 31 * 60 * 1000));
+    focusFrame("IFRAME");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+    releaseFocus();
     window.history.pushState({}, "", "/");
   });
 

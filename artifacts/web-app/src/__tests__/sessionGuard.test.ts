@@ -13,6 +13,10 @@ import {
   clearSessionMarkers,
   saveIdleMinutes,
   signInUrlAfterSignOut,
+  isCallInProgress,
+  setCallInProgress,
+  MAX_CALL_EXEMPTION_MS,
+  isUsingEmbeddedDocument,
   storedIdleMinutes,
 } from "@/lib/auth/sessionGuard";
 
@@ -118,8 +122,26 @@ describe("staleReason", () => {
   it("builds the post-sign-out destination", () => {
     expect(signInUrlAfterSignOut("", { pathname: "/", search: "" })).toBe("/sign-in");
     expect(signInUrlAfterSignOut("", { pathname: "/sign-in/factor-one", search: "" })).toBe("/sign-in");
-    expect(signInUrlAfterSignOut("", { pathname: "/dashboard", search: "?a=1" })).toBe(
-      "/sign-in?redirect_url=" + encodeURIComponent("/dashboard?a=1"),
+    // other query strings are never copied into the sign-in address
+    expect(signInUrlAfterSignOut("", { pathname: "/dashboard", search: "?patient=mrn-1&a=1" })).toBe(
+      "/sign-in?redirect_url=" + encodeURIComponent("/dashboard"),
     );
+    // an invitation keeps its token (and only that)
+    expect(signInUrlAfterSignOut("", { pathname: "/accept-invite", search: "?token=abc&x=1" })).toBe(
+      "/sign-in?redirect_url=" + encodeURIComponent("/accept-invite?token=abc"),
+    );
+  });
+
+  it("stops exempting a call after the cap (a stuck flag cannot extend a session forever)", () => {
+    setCallInProgress(true, 0);
+    expect(isCallInProgress(MAX_CALL_EXEMPTION_MS - 1000)).toBe(true);
+    expect(isCallInProgress(MAX_CALL_EXEMPTION_MS + 1000)).toBe(false);
+    setCallInProgress(false);
+  });
+});
+
+describe("isUsingEmbeddedDocument", () => {
+  it("is false without a window/document (node)", () => {
+    expect(isUsingEmbeddedDocument()).toBe(false);
   });
 });

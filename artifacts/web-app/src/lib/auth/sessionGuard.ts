@@ -150,33 +150,57 @@ export function announceSessionExpired(): void {
 // A live phone call counts as activity: nobody touches the mouse for a whole
 // call, and signing them out mid-call would drop it. The dialer keeps this
 // flag in step with its call state.
+// The exemption is capped so a flag that gets stuck (a dialer that never
+// reports the call ended) cannot keep a session alive indefinitely.
+export const MAX_CALL_EXEMPTION_MS = 4 * 60 * 60 * 1000;
 let callInProgress = false;
-export const setCallInProgress = (live: boolean): void => {
+let callStartedAt = 0;
+export const setCallInProgress = (live: boolean, now = Date.now()): void => {
+  if (live && !callInProgress) callStartedAt = now;
   callInProgress = live;
 };
-export const isCallInProgress = (): boolean => callInProgress;
+export const isCallInProgress = (now = Date.now()): boolean =>
+  callInProgress && now - callStartedAt < MAX_CALL_EXEMPTION_MS;
+
+/** Query parameters that may be carried through a forced sign-out, by page. */
+const RETURN_PARAMS: Record<string, readonly string[]> = {
+  "/accept-invite": ["token"],
+};
 
 /**
  * Where to send someone after a forced sign-out: the sign-in screen, which
- * returns them to the page they were on (an invitation link's token, for
- * example). The home and sign-in pages themselves need no return trip.
+ * returns them to the page they were on. Only the page path is kept, plus the
+ * few parameters in RETURN_PARAMS (an invitation's token); other query strings
+ * (identifiers, one-time codes) are never copied into the sign-in address.
  */
 export function signInUrlAfterSignOut(basePath: string, loc: { pathname: string; search: string }): string {
   const signIn = `${basePath}/sign-in`;
-  const here = loc.pathname + loc.search;
   const rel = loc.pathname.startsWith(basePath) ? loc.pathname.slice(basePath.length) : loc.pathname;
   if (rel === "" || rel === "/" || rel.startsWith("/sign-in") || rel.startsWith("/sign-up")) return signIn;
+  const allowed = RETURN_PARAMS[rel] ?? [];
+  const kept = new URLSearchParams();
+  const incoming = new URLSearchParams(loc.search);
+  for (const key of allowed) {
+    const v = incoming.get(key);
+    if (v !== null) kept.set(key, v);
+  }
+  const query = kept.toString();
+  const here = loc.pathname + (query ? `?${query}` : "");
   return `${signIn}?redirect_url=${encodeURIComponent(here)}`;
 }
 
 /**
- * True while the user is reading a document inside a cross-origin frame (the
- * contract signing page, or focus sitting in any iframe). Their scrolling and
- * clicks happen in the frame, where this page cannot see them.
+ * True while the user is working inside the document frame on the contract
+ * signing page. Their clicks happen in a cross-origin frame, where this page
+ * cannot see them. Deliberately narrow: only the signing route (exactly
+ * `/sign/<id>`), and only while focus is in a frame, so other embedded widgets
+ * (payment, chat, call widgets) never switch idle sign-out off.
  */
-export function isUsingEmbeddedDocument(): boolean {
-  if (typeof document === "undefined") return false;
+export function isUsingEmbeddedDocument(basePath = ""): boolean {
+  if (typeof document === "undefined" || typeof window === "undefined") return false;
   if (document.visibilityState !== "visible") return false;
-  if (document.activeElement?.tagName === "IFRAME") return true;
-  return /\/sign\/[^/]+/.test(window.location.pathname);
+  const path = window.location.pathname;
+  const rel = path.startsWith(basePath) ? path.slice(basePath.length) : path;
+  if (!/^\/sign\/[^/]+\/?$/.test(rel)) return false;
+  return document.activeElement?.tagName === "IFRAME";
 }
