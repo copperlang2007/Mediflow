@@ -201,7 +201,7 @@ export function signInUrlAfterSignOut(basePath: string, loc: { pathname: string;
     if (v !== null) kept.set(key, v);
   }
   const query = kept.toString();
-  const here = loc.pathname + (query ? `?${query}` : "");
+  const here = `${basePath}${rel}` + (query ? `?${query}` : "");
   return `${signIn}?redirect_url=${encodeURIComponent(here)}`;
 }
 

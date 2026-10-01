@@ -126,9 +126,9 @@ describe("staleReason", () => {
     expect(signInUrlAfterSignOut("", { pathname: "/dashboard", search: "?patient=mrn-1&a=1" })).toBe(
       "/sign-in?redirect_url=" + encodeURIComponent("/dashboard"),
     );
-    // a trailing slash is the same page
+    // a trailing slash is the same page, and comes back as the canonical path
     expect(signInUrlAfterSignOut("", { pathname: "/accept-invite/", search: "?token=abc" })).toBe(
-      "/sign-in?redirect_url=" + encodeURIComponent("/accept-invite/?token=abc"),
+      "/sign-in?redirect_url=" + encodeURIComponent("/accept-invite?token=abc"),
     );
     // an invitation keeps its token (and only that)
     expect(signInUrlAfterSignOut("", { pathname: "/accept-invite", search: "?token=abc&x=1" })).toBe(
