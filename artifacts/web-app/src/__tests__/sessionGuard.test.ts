@@ -12,6 +12,7 @@ import {
   staleReason,
   clearSessionMarkers,
   saveIdleMinutes,
+  IDLE_MINUTES_KEY,
   signInUrlAfterSignOut,
   isCallInProgress,
   setCallInProgress,
@@ -249,6 +250,23 @@ describe("isUsingEmbeddedDocument", () => {
       vi.advanceTimersByTime(31_000);
       storageAvailable();
       expect(m.get(LAST_ACTIVITY_KEY)).toBe(String(10 * MIN));
+    } finally {
+      vi.useRealTimers();
+      clearSessionMarkers();
+    }
+  });
+
+  it("does not overwrite a shortened agency timeout with an older, longer one held in memory", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(10 * MIN);
+      const { m, state } = stubStorage(true);
+      saveIdleMinutes(30); // held in memory while blocked
+      m.set(IDLE_MINUTES_KEY, "15"); // admin shortened it; another tab stored the new value
+      state.blocked = false;
+      vi.advanceTimersByTime(31_000);
+      storageAvailable();
+      expect(m.get(IDLE_MINUTES_KEY)).toBe("15");
     } finally {
       vi.useRealTimers();
       clearSessionMarkers();

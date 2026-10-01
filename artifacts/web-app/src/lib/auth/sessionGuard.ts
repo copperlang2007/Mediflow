@@ -76,10 +76,13 @@ export function storageAvailable(): boolean {
   if (ok && !wasAvailable && memory.size > 0) {
     for (const [key, value] of memory) {
       try {
-        // Timestamps only move forward: never overwrite a fresher value another tab wrote.
+        // Never overwrite what another tab already wrote. Timestamps only move
+        // forward, so the larger one wins; the agency's limit can go down, so any
+        // existing value is newer than what this tab was holding.
         const raw = store.getItem(key);
         const existing = raw === null ? NaN : Number(raw);
-        if (!(Number.isFinite(existing) && existing >= value)) store.setItem(key, String(value));
+        const keep = key === IDLE_MINUTES_KEY ? Number.isFinite(existing) : Number.isFinite(existing) && existing >= value;
+        if (!keep) store.setItem(key, String(value));
       } catch {
         // Storage failed again partway: treat it as still unavailable so reads
         // keep using memory (which still holds everything) until the next re-probe.
