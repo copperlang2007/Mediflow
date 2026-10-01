@@ -44,6 +44,11 @@ export type StaleReason = "reopened" | "idle";
 // same one (a different object, e.g. in tests, is probed afresh).
 let probedStore: Storage | undefined;
 let probedResult = false;
+let probedAt = 0;
+// A "yes" is remembered for good; a "no" only briefly, so a momentary storage
+// failure (e.g. quota hit during two back-to-back writes) cannot stick for the
+// rest of the page's life once storage recovers.
+const PROBE_NO_TTL_MS = 30 * 1000;
 
 export function storageAvailable(): boolean {
   let store: Storage | undefined;
@@ -53,7 +58,7 @@ export function storageAvailable(): boolean {
     return false;
   }
   if (store === undefined) return false;
-  if (store === probedStore) return probedResult;
+  if (store === probedStore && (probedResult || Date.now() - probedAt < PROBE_NO_TTL_MS)) return probedResult;
   let ok = false;
   try {
     store.setItem("mediflow:probe", "1");
@@ -64,6 +69,7 @@ export function storageAvailable(): boolean {
   }
   probedStore = store;
   probedResult = ok;
+  probedAt = Date.now();
   return ok;
 }
 

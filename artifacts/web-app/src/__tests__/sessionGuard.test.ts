@@ -2,7 +2,7 @@
  * The browser-side rules that make "type the URL" land on sign-in after the
  * user has been idle or has left the app.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   LAST_ACTIVITY_KEY,
   LAST_SEEN_KEY,
@@ -160,5 +160,26 @@ describe("isUsingEmbeddedDocument", () => {
     expect(m.get(LAST_ACTIVITY_KEY)).toBe("1000000"); // the write was refused...
     expect(staleReason(30, 5_000_000 + MIN)).toBeNull(); // ...but the activity wasn't lost
     clearSessionMarkers();
+  });
+
+  it("recovers when storage comes back after a brief failure (a 'no' is not permanent)", () => {
+    vi.useFakeTimers();
+    try {
+      fakeStorage();
+      markActivity(1_000_000);
+      const store = (globalThis as any).localStorage;
+      const realSet = store.setItem;
+      store.setItem = () => {
+        throw new Error("QuotaExceededError");
+      };
+      markActivity(2_000_000); // both writes fail; the "no" may get cached
+      store.setItem = realSet; // storage recovers
+      vi.advanceTimersByTime(31_000);
+      markActivity(3_000_000);
+      expect(store.getItem(LAST_ACTIVITY_KEY)).toBe("3000000"); // writing to storage again
+      clearSessionMarkers();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
