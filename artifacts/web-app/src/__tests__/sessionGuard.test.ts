@@ -17,6 +17,7 @@ import {
   setCallInProgress,
   MAX_CALL_EXEMPTION_MS,
   isUsingEmbeddedDocument,
+  storageAvailable,
   storedIdleMinutes,
 } from "@/lib/auth/sessionGuard";
 
@@ -180,6 +181,59 @@ describe("isUsingEmbeddedDocument", () => {
       clearSessionMarkers();
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  function stubStorage(initiallyBlocked: boolean) {
+    const m = new Map<string, string>();
+    const state = { blocked: initiallyBlocked };
+    const stub: Storage = {
+      getItem: (k) => (m.has(k) ? m.get(k)! : null),
+      setItem: (k, v) => {
+        if (state.blocked) throw new Error("blocked");
+        m.set(k, v);
+      },
+      removeItem: (k) => void m.delete(k),
+      clear: () => m.clear(),
+      get length() {
+        return m.size;
+      },
+      key: (i) => Array.from(m.keys())[i] ?? null,
+    };
+    (globalThis as any).localStorage = stub;
+    return { m, state };
+  }
+
+  it("re-checks storage after the 30s window when it was unavailable at first", () => {
+    vi.useFakeTimers();
+    try {
+      const { state } = stubStorage(true);
+      expect(storageAvailable()).toBe(false);
+      state.blocked = false;
+      expect(storageAvailable()).toBe(false); // still inside the window: cached "no"
+      vi.advanceTimersByTime(31_000);
+      expect(storageAvailable()).toBe(true); // recovered
+    } finally {
+      vi.useRealTimers();
+      clearSessionMarkers();
+    }
+  });
+
+  it("carries memory-held activity into storage when it becomes available (no false 'reopened')", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(10 * MIN);
+      const { m, state } = stubStorage(true);
+      markActivity(Date.now()); // held in memory while blocked
+      expect(staleReason(30, Date.now())).toBeNull();
+      state.blocked = false;
+      vi.advanceTimersByTime(31_000);
+      // storage is usable again; the recorded activity must come with it
+      expect(staleReason(30, Date.now())).toBeNull();
+      expect(m.get(LAST_ACTIVITY_KEY)).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+      clearSessionMarkers();
     }
   });
 });

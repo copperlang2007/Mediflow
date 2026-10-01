@@ -59,6 +59,7 @@ export function storageAvailable(): boolean {
   }
   if (store === undefined) return false;
   if (store === probedStore && (probedResult || Date.now() - probedAt < PROBE_NO_TTL_MS)) return probedResult;
+  const wasAvailable = store === probedStore && probedResult;
   let ok = false;
   try {
     store.setItem("mediflow:probe", "1");
@@ -70,6 +71,19 @@ export function storageAvailable(): boolean {
   probedStore = store;
   probedResult = ok;
   probedAt = Date.now();
+  // Storage just became usable: carry over what was held in memory, so the
+  // readers don't find empty records and read that as "left the app".
+  if (ok && !wasAvailable && memory.size > 0) {
+    for (const [key, value] of memory) {
+      try {
+        store.setItem(key, String(value));
+      } catch {
+        // give up; memory still holds it
+        return ok;
+      }
+    }
+    memory.clear();
+  }
   return ok;
 }
 
