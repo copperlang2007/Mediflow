@@ -11,6 +11,8 @@ import {
   markSeen,
   staleReason,
   clearSessionMarkers,
+  saveIdleMinutes,
+  storedIdleMinutes,
 } from "@/lib/auth/sessionGuard";
 
 const MIN = 60 * 1000;
@@ -72,5 +74,21 @@ describe("staleReason", () => {
     markActivity(42);
     expect(m.get(LAST_ACTIVITY_KEY)).toBe("42");
     expect(m.get(LAST_SEEN_KEY)).toBe("42");
+  });
+
+  it("stands down (no sign-out loop) when the browser blocks storage", () => {
+    const blocked = () => {
+      throw new Error("blocked");
+    };
+    (globalThis as any).localStorage = { getItem: blocked, setItem: blocked, removeItem: blocked };
+    expect(staleReason(30, 10 * 60 * MIN)).toBeNull();
+  });
+
+  it("remembers the agency's idle limit for the next page load", () => {
+    expect(storedIdleMinutes()).toBeNull();
+    saveIdleMinutes(15);
+    expect(storedIdleMinutes()).toBe(15);
+    clearSessionMarkers();
+    expect(storedIdleMinutes()).toBeNull();
   });
 });

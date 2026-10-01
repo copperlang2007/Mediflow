@@ -8,7 +8,9 @@ import {
   clearSessionMarkers,
   markActivity,
   markSeen,
+  saveIdleMinutes,
   staleReason,
+  storedIdleMinutes,
 } from "@/lib/auth/sessionGuard";
 
 const CHECK_EVERY_MS = 15_000;
@@ -63,7 +65,9 @@ export function SessionGuard({
       return;
     }
     decidedRef.current = true;
-    if (isSignedIn && staleReason(idleMinutes)) {
+    // The agency's limit isn't known yet (status loads after first render),
+    // so use what the previous visit saved; "reopened" doesn't need it at all.
+    if (isSignedIn && staleReason(storedIdleMinutes() ?? idleMinutes)) {
       void endSession().finally(() => setChecked(true));
     } else {
       if (isSignedIn) markActivity();
@@ -86,7 +90,8 @@ export function SessionGuard({
     const tick = () => {
       // The agency's own setting (Admin > Compliance) arrives with /auth/status.
       const status = qc.getQueryData<{ sessionTimeoutMinutes?: number }>(["auth", "status"]);
-      const minutes = status?.sessionTimeoutMinutes ?? idleMinutes;
+      if (status?.sessionTimeoutMinutes) saveIdleMinutes(status.sessionTimeoutMinutes);
+      const minutes = status?.sessionTimeoutMinutes ?? storedIdleMinutes() ?? idleMinutes;
       if (staleReason(minutes)) void endSession();
       else markSeen();
     };

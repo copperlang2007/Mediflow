@@ -537,7 +537,7 @@ function SecurityConfigTab() {
 
   const updateSessionMut = useMutation({
     mutationFn: (minutes: number) => apiFetch("/api/admin/session-config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionTimeoutMinutes: minutes }) }),
-    onSuccess: () => { toast({ title: "Session timeout updated" }); qc.invalidateQueries({ queryKey: ["admin", "session-config"] }); },
+    onSuccess: () => { toast({ title: "Session timeout updated" }); qc.invalidateQueries({ queryKey: ["admin", "session-config"] }); qc.invalidateQueries({ queryKey: ["auth", "status"] }); },
     onError: () => toast({ title: "Failed to update session config", variant: "destructive" }),
   });
 
