@@ -39,6 +39,10 @@ export function SessionGuard({
   const qc = useQueryClient();
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
   const [checked, setChecked] = useState(false);
+  // True from the moment a sign-out starts until Clerk confirms it, so a
+  // failing sign-out never leaves an expired user looking at their data.
+  const [blocked, setBlocked] = useState(false);
+  const loopRef = useRef(false);
   const endingRef = useRef(false);
 
   // Returns true once Clerk has confirmed the sign-out.
@@ -62,6 +66,18 @@ export function SessionGuard({
     }
   }, [signOut, qc, basePath]);
 
+  const signOutUntilDone = useCallback(async (): Promise<void> => {
+    if (loopRef.current) return;
+    loopRef.current = true;
+    setBlocked(true);
+    try {
+      while (!(await endSession())) await new Promise((r) => setTimeout(r, RETRY_SIGN_OUT_MS));
+    } finally {
+      loopRef.current = false;
+      setBlocked(false);
+    }
+  }, [endSession]);
+
   const minutesNow = useCallback((): number => {
     const status = qc.getQueryData<{ sessionTimeoutMinutes?: number }>(["auth", "status"]);
     if (status?.sessionTimeoutMinutes) saveIdleMinutes(status.sessionTimeoutMinutes);
@@ -83,16 +99,15 @@ export function SessionGuard({
     // back from social/SSO login, which has no stored markers yet) is fresh,
     // not an old cookie.
     const createdAt = session?.createdAt ? new Date(session.createdAt).getTime() : 0;
-    const justSignedIn = createdAt > 0 && Date.now() - createdAt < FRESH_LOGIN_MS;
+    // Age must be non-negative: a browser clock set behind Clerk's must not
+    // make an old session look new.
+    const age = Date.now() - createdAt;
+    const justSignedIn = createdAt > 0 && age >= 0 && age < FRESH_LOGIN_MS;
     // The agency's limit isn't known yet (status loads after first render),
     // so use what the previous visit saved; "reopened" doesn't need it at all.
     if (isSignedIn && !justSignedIn && staleReason(storedIdleMinutes() ?? idleMinutes)) {
-      // Stay blocked (nothing rendered) until Clerk confirms the sign-out; if
-      // it fails, keep retrying rather than showing a stale user's pages.
-      void (async () => {
-        while (!(await endSession())) await new Promise((r) => setTimeout(r, RETRY_SIGN_OUT_MS));
-        setChecked(true);
-      })();
+      // Nothing is rendered until Clerk confirms the sign-out (retrying if needed).
+      void signOutUntilDone().then(() => setChecked(true));
     } else {
       if (isSignedIn) markActivity();
       setChecked(true);
@@ -116,7 +131,7 @@ export function SessionGuard({
       }
       // Activity after the deadline must not erase the idle period.
       if (staleReason(minutesNow())) {
-        void endSession();
+        void signOutUntilDone();
         return;
       }
       markActivity(now);
@@ -127,7 +142,7 @@ export function SessionGuard({
         return;
       }
       if (staleReason(minutesNow())) {
-        void endSession();
+        void signOutUntilDone();
         return;
       }
       markSeen();
@@ -140,7 +155,7 @@ export function SessionGuard({
     const onVisible = () => {
       if (document.visibilityState === "visible") tick();
     };
-    const onExpired = () => void endSession();
+    const onExpired = () => void signOutUntilDone();
 
     // Any request that gets the API's "session expired" answer ends the
     // session, including the few that call fetch directly (AI chat, drafts).
@@ -171,8 +186,8 @@ export function SessionGuard({
       window.clearInterval(timer);
       if (window.fetch === guardedFetch) window.fetch = originalFetch;
     };
-  }, [isLoaded, isSignedIn, checked, endSession, minutesNow, qc]);
+  }, [isLoaded, isSignedIn, checked, signOutUntilDone, minutesNow, qc]);
 
-  if (!IS_DEMO_BUILD && isLoaded && isSignedIn && !checked) return null;
+  if (!IS_DEMO_BUILD && (blocked || (isLoaded && isSignedIn && !checked))) return null;
   return <>{children}</>;
 }

@@ -85,6 +85,22 @@ describe("SessionGuard", () => {
     await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
   });
 
+  it("hides the app while a runtime sign-out is failing, then recovers", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    markActivity();
+    renderGuard();
+    await screen.findByText("dashboard");
+    signOut.mockRejectedValueOnce(new Error("clerk down")).mockResolvedValue(undefined);
+    act(() => {
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    });
+    await waitFor(() => expect(screen.queryByText("dashboard")).toBeNull());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3500);
+    });
+    await waitFor(() => expect(signOut).toHaveBeenCalledTimes(2));
+  });
+
   it("signs out when the tab comes back after being idle too long", async () => {
     markActivity();
     renderGuard();
