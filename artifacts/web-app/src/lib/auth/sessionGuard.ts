@@ -179,7 +179,9 @@ const RETURN_PARAMS: Record<string, readonly string[]> = {
  */
 export function signInUrlAfterSignOut(basePath: string, loc: { pathname: string; search: string }): string {
   const signIn = `${basePath}/sign-in`;
-  const rel = loc.pathname.startsWith(basePath) ? loc.pathname.slice(basePath.length) : loc.pathname;
+  const rawRel = loc.pathname.startsWith(basePath) ? loc.pathname.slice(basePath.length) : loc.pathname;
+  // `/accept-invite/` and `/accept-invite` are the same page.
+  const rel = rawRel.length > 1 ? rawRel.replace(/\/+$/, "") : rawRel;
   if (rel === "" || rel === "/" || rel.startsWith("/sign-in") || rel.startsWith("/sign-up")) return signIn;
   const allowed = RETURN_PARAMS[rel] ?? [];
   const kept = new URLSearchParams();
