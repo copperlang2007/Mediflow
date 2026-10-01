@@ -38,15 +38,32 @@ export type StaleReason = "reopened" | "idle";
  * timeout is the only enforcement. Without this, "no record" would read as
  * "left the app" and sign the user out again every few seconds.
  */
+// The probe writes and removes a key, which also notifies other open tabs, so
+// the answer is remembered for as long as the browser's storage object is the
+// same one (a different object, e.g. in tests, is probed afresh).
+let probedStore: Storage | undefined;
+let probedResult = false;
+
 export function storageAvailable(): boolean {
+  let store: Storage | undefined;
   try {
-    const probe = "mediflow:probe";
-    globalThis.localStorage.setItem(probe, "1");
-    globalThis.localStorage.removeItem(probe);
-    return true;
+    store = globalThis.localStorage;
   } catch {
     return false;
   }
+  if (store === undefined) return false;
+  if (store === probedStore) return probedResult;
+  let ok = false;
+  try {
+    store.setItem("mediflow:probe", "1");
+    store.removeItem("mediflow:probe");
+    ok = true;
+  } catch {
+    ok = false;
+  }
+  probedStore = store;
+  probedResult = ok;
+  return ok;
 }
 
 /** The agency's idle limit as last reported by the API, for the next page load. */
