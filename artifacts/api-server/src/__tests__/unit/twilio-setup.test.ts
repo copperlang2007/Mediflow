@@ -19,7 +19,7 @@ describe("twilioSetupStatus", () => {
     expect(s.sms.ready).toBe(true);
     expect(s.voice.ready).toBe(true);
     expect(s.webhooks).toEqual({
-      smsInbound: "https://app.example.com/api/webhooks/twilio/sms",
+      smsInbound: "https://app.example.com/webhooks/twilio/sms",
       voiceRequest: "https://app.example.com/api/webhooks/twilio/voice",
       voiceStatus: "https://app.example.com/api/webhooks/twilio/voice-status",
     });

@@ -434,7 +434,7 @@ describe("TwilioSetupCard", () => {
       ] },
       voice: { ready: true, checks: [{ name: "TWILIO_TWIML_APP_SID", ok: true }] },
       webhooks: {
-        smsInbound: "https://app.example.com/api/webhooks/twilio/sms",
+        smsInbound: "https://app.example.com/webhooks/twilio/sms",
         voiceRequest: "https://app.example.com/api/webhooks/twilio/voice",
         voiceStatus: "https://app.example.com/api/webhooks/twilio/voice-status",
       },
@@ -446,6 +446,6 @@ describe("TwilioSetupCard", () => {
     expect(card.textContent).toMatch(/Browser calling\s*Ready/);
     expect(screen.getByText("TWILIO_FROM_NUMBER")).toBeInTheDocument();
     expect(screen.getByText(/not set/)).toBeInTheDocument();
-    expect(screen.getByText("https://app.example.com/api/webhooks/twilio/sms")).toBeInTheDocument();
+    expect(screen.getByText("https://app.example.com/webhooks/twilio/sms")).toBeInTheDocument();
   });
 });

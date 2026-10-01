@@ -595,3 +595,17 @@ describe("GET /admin/health/twilio", () => {
   });
 });
 
+describe("Twilio setup webhook addresses", () => {
+  it("each points at a route the server actually serves (not a 404)", async () => {
+    const { twilioSetupStatus } = await import("../../lib/twilioSetup");
+    const status = twilioSetupStatus({ TWILIO_WEBHOOK_PUBLIC_HOST: "https://app.example.com" });
+    expect(status.webhooks).not.toBeNull();
+    for (const url of Object.values(status.webhooks!)) {
+      const path = new URL(url).pathname;
+      const res = await request(app).post(path).type("form").send({ From: "+15125550100", Body: "test" });
+      // Unsigned requests are refused by the handler (403); a wrong path is 404.
+      expect({ path, status: res.status }).not.toMatchObject({ status: 404 });
+    }
+  });
+});
+

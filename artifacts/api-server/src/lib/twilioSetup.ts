@@ -67,7 +67,8 @@ export function twilioSetupStatus(env: NodeJS.ProcessEnv = process.env): TwilioS
     voice: { ready: voice.every((c) => c.ok), checks: voice },
     webhooks: origin
       ? {
-          smsInbound: `${origin}/api/webhooks/twilio/sms`,
+          // The SMS webhook router is mounted at the app root (app.ts), not under /api.
+          smsInbound: `${origin}/webhooks/twilio/sms`,
           voiceRequest: `${origin}/api/webhooks/twilio/voice`,
           voiceStatus: `${origin}/api/webhooks/twilio/voice-status`,
         }
