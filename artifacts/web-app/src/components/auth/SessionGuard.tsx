@@ -144,7 +144,7 @@ export function SessionGuard({
     let lastWrite = 0;
     let lastStatusRefresh = Date.now();
     let lastCallPing = 0;
-    const onActivity = () => {
+    const onActivity = (event: Event) => {
       const now = Date.now();
       if (now - lastWrite < ACTIVITY_WRITE_EVERY_MS) return;
       lastWrite = now;
@@ -152,8 +152,11 @@ export function SessionGuard({
         markActivity(now);
         return;
       }
-      // Activity after the deadline must not erase the idle period.
+      // Activity after the deadline must not erase the idle period, and the
+      // very click or keypress that finds the session expired must not reach
+      // the page (it could be a submit or delete).
       if (staleReason(minutesNow())) {
+        event.stopPropagation();
         void signOutUntilDone();
         return;
       }

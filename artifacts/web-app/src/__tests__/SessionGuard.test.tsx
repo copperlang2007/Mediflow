@@ -4,7 +4,7 @@
  * signs them out.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act, waitFor } from "@testing-library/react";
+import { render, screen, act, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const signOut = vi.fn();
@@ -224,6 +224,38 @@ describe("SessionGuard", () => {
     );
     await new Promise((r) => setTimeout(r, 30));
     expect(localStorage.getItem(LAST_ACTIVITY_KEY)).toBe(old);
+  });
+
+  it("blocks the keypress that discovers an expired session from reaching the page", async () => {
+    const onKey = vi.fn();
+    markActivity();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <SessionGuard>
+          <input aria-label="note" onKeyDown={onKey} />
+        </SessionGuard>
+      </QueryClientProvider>,
+    );
+    const input = await screen.findByLabelText("note");
+    localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now() - 31 * 60 * 1000));
+    fireEvent.keyDown(input, { key: "x" });
+    expect(onKey).not.toHaveBeenCalled();
+    await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+  });
+
+  it("lets keypresses through while the session is current", async () => {
+    const onKey = vi.fn();
+    markActivity();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <SessionGuard>
+          <input aria-label="note" onKeyDown={onKey} />
+        </SessionGuard>
+      </QueryClientProvider>,
+    );
+    fireEvent.keyDown(await screen.findByLabelText("note"), { key: "x" });
+    expect(onKey).toHaveBeenCalledTimes(1);
+    expect(signOut).not.toHaveBeenCalled();
   });
 
   it("does nothing for signed-out visitors (public pages)", async () => {
