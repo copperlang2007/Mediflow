@@ -256,17 +256,19 @@ describe("isUsingEmbeddedDocument", () => {
     }
   });
 
-  it("does not overwrite a shortened agency timeout with an older, longer one held in memory", () => {
+  it("leaves the agency timeout in storage alone on recovery (the status refresh rewrites it)", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(10 * MIN);
       const { m, state } = stubStorage(true);
       saveIdleMinutes(30); // held in memory while blocked
-      m.set(IDLE_MINUTES_KEY, "15"); // admin shortened it; another tab stored the new value
+      m.set(IDLE_MINUTES_KEY, "15"); // another tab stored a different value
       state.blocked = false;
       vi.advanceTimersByTime(31_000);
       storageAvailable();
       expect(m.get(IDLE_MINUTES_KEY)).toBe("15");
+      saveIdleMinutes(10); // a later status refresh still lands
+      expect(m.get(IDLE_MINUTES_KEY)).toBe("10");
     } finally {
       vi.useRealTimers();
       clearSessionMarkers();
