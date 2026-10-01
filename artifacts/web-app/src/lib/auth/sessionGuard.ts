@@ -77,8 +77,12 @@ export function storageAvailable(): boolean {
     for (const [key, value] of memory) {
       try {
         // The agency's limit is a setting, not a timestamp: neither copy is
-        // reliably newer, and the next status refresh (a few minutes) rewrites it.
-        if (key === IDLE_MINUTES_KEY) continue;
+        // reliably newer, so keep whatever is stored (the next status refresh
+        // rewrites it) and only fill it in when nothing is stored yet.
+        if (key === IDLE_MINUTES_KEY) {
+          if (store.getItem(key) === null) store.setItem(key, String(value));
+          continue;
+        }
         // Timestamps only move forward: never overwrite a fresher one another tab wrote.
         const raw = store.getItem(key);
         const existing = raw === null ? NaN : Number(raw);

@@ -256,6 +256,22 @@ describe("isUsingEmbeddedDocument", () => {
     }
   });
 
+  it("keeps the agency timeout learned while blocked when storage has none on recovery", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(10 * MIN);
+      const { m, state } = stubStorage(true);
+      saveIdleMinutes(5); // learned from the API while storage was blocked
+      state.blocked = false;
+      vi.advanceTimersByTime(31_000);
+      storageAvailable();
+      expect(m.get(IDLE_MINUTES_KEY)).toBe("5");
+    } finally {
+      vi.useRealTimers();
+      clearSessionMarkers();
+    }
+  });
+
   it("leaves the agency timeout in storage alone on recovery (the status refresh rewrites it)", () => {
     vi.useFakeTimers();
     try {
