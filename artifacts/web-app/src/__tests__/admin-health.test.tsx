@@ -404,3 +404,48 @@ describe("normalizeResult", () => {
     expect(r.ping.message).toBe("boom");
   });
 });
+
+describe("TwilioSetupCard", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  function mockFetch(twilio: unknown, me: unknown = { ...ADMIN_USER, role: "super_admin" }) {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/admin/health/twilio")) return jsonResponse(twilio);
+      if (url.includes("/api/users/me")) return jsonResponse(me);
+      return jsonResponse({ status: "ok", checks: {} });
+    }) as unknown as typeof fetch;
+  }
+
+  it("is shown to super admins only", () => {
+    mockFetch({ sms: { ready: true, checks: [] }, voice: { ready: true, checks: [] }, webhooks: null }, ADMIN_USER);
+    renderPage(makeClient(ADMIN_USER));
+    expect(screen.queryByText(/Texting & calling/)).not.toBeInTheDocument();
+  });
+
+  it("lists what each feature needs and the webhook addresses", async () => {
+    mockFetch({
+      sms: { ready: false, checks: [
+        { name: "TWILIO_ACCOUNT_SID", ok: true },
+        { name: "TWILIO_FROM_NUMBER", ok: false, problem: "not set" },
+      ] },
+      voice: { ready: true, checks: [{ name: "TWILIO_TWIML_APP_SID", ok: true }] },
+      webhooks: {
+        smsInbound: "https://app.example.com/api/webhooks/twilio/sms",
+        voiceRequest: "https://app.example.com/api/webhooks/twilio/voice",
+        voiceStatus: "https://app.example.com/api/webhooks/twilio/voice-status",
+      },
+    });
+    renderPage(makeClient({ ...ADMIN_USER, role: "super_admin" }));
+    await waitFor(() => expect(screen.getByTestId("twilio-setup")).toBeInTheDocument());
+    const card = screen.getByTestId("twilio-setup");
+    expect(card.textContent).toMatch(/Texting\s*Needs setup/);
+    expect(card.textContent).toMatch(/Browser calling\s*Ready/);
+    expect(screen.getByText("TWILIO_FROM_NUMBER")).toBeInTheDocument();
+    expect(screen.getByText(/not set/)).toBeInTheDocument();
+    expect(screen.getByText("https://app.example.com/api/webhooks/twilio/sms")).toBeInTheDocument();
+  });
+});

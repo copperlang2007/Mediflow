@@ -573,3 +573,25 @@ describe("GET /admin/health/ai — defense in depth", () => {
     expect(res.body.envIssues).toContain("AI_INTEGRATIONS_OPENAI_API_KEY missing");
   });
 });
+
+describe("GET /admin/health/twilio", () => {
+  it("is super-admin only and returns names and pass/fail, no values", async () => {
+    const { db } = await bootTestDb();
+    const org = await seedOrg(db, { id: "twilio-health-org" });
+    const superAdmin = await seedUser(db, { orgId: org.id, role: "super_admin" });
+    const agencyAdmin = await seedUser(db, { orgId: org.id, role: "agency_admin" });
+    const prev = process.env.TWILIO_AUTH_TOKEN;
+    process.env.TWILIO_AUTH_TOKEN = "secret-auth-token-for-test";
+    try {
+      const denied = await request(app).get("/api/admin/health/twilio").set(withAuth(agencyAdmin.id));
+      expect(denied.status).toBe(403);
+      const res = await request(app).get("/api/admin/health/twilio").set(withAuth(superAdmin.id));
+      expect(res.status).toBe(200);
+      expect(res.body.sms.checks).toEqual(expect.arrayContaining([{ name: "TWILIO_AUTH_TOKEN", ok: true }]));
+      expect(JSON.stringify(res.body)).not.toContain("secret-auth-token-for-test");
+    } finally {
+      if (prev === undefined) delete process.env.TWILIO_AUTH_TOKEN; else process.env.TWILIO_AUTH_TOKEN = prev;
+    }
+  });
+});
+
