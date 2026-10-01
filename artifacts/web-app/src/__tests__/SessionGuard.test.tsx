@@ -10,9 +10,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 const signOut = vi.fn();
 let signedIn = true;
 let sessionPending = false;
+let sessionCreatedAt = 0;
 vi.mock("@clerk/react", () => ({
   useAuth: () => ({ isLoaded: true, isSignedIn: signedIn }),
-  useClerk: () => ({ signOut, session: signedIn && !sessionPending ? { createdAt: new Date(0) } : null }),
+  useClerk: () => ({ signOut }),
+  useSession: () => ({ session: signedIn && !sessionPending ? { createdAt: new Date(sessionCreatedAt) } : null }),
 }));
 
 import { SessionGuard } from "@/components/auth/SessionGuard";
@@ -40,6 +42,7 @@ beforeEach(() => {
   signOut.mockReset().mockResolvedValue(undefined);
   signedIn = true;
   sessionPending = false;
+  sessionCreatedAt = 0;
 });
 afterEach(() => {
   setCallInProgress(false);
@@ -137,6 +140,25 @@ describe("SessionGuard", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(signOut).not.toHaveBeenCalled();
     expect(screen.queryByText("dashboard")).toBeNull();
+  });
+
+  it("treats a session created 10 seconds ago as a fresh login (no markers yet)", async () => {
+    sessionCreatedAt = Date.now() - 10_000;
+    renderGuard();
+    expect(await screen.findByText("dashboard")).toBeTruthy();
+    expect(signOut).not.toHaveBeenCalled();
+  });
+
+  it("signs out an old session found with no markers", async () => {
+    sessionCreatedAt = Date.now() - 10 * 60_000;
+    renderGuard();
+    await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not trust a session 'created' in the future (clock skew)", async () => {
+    sessionCreatedAt = Date.now() + 60_000;
+    renderGuard();
+    await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
   });
 
   it("does nothing for signed-out visitors (public pages)", async () => {

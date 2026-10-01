@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAuth, useClerk } from "@clerk/react";
+import { useAuth, useClerk, useSession } from "@clerk/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { IS_DEMO_BUILD } from "@/lib/demo/isDemo";
 import {
@@ -36,7 +36,9 @@ export function SessionGuard({
   children: React.ReactNode;
 }) {
   const { isLoaded, isSignedIn } = useAuth();
-  const { signOut, session } = useClerk();
+  const { signOut } = useClerk();
+  // useSession (not useClerk().session) so this re-renders when the session arrives.
+  const { session } = useSession();
   const qc = useQueryClient();
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
   const [checked, setChecked] = useState(false);

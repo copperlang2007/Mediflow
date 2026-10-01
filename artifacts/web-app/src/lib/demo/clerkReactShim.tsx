@@ -52,6 +52,10 @@ export function useAuth() {
   };
 }
 
+export function useSession() {
+  return { isLoaded: true, isSignedIn: true as const, session: null };
+}
+
 export function useClerk() {
   return {
     user: DEMO_USER,
