@@ -28,7 +28,7 @@ export const DEFAULT_IDLE_MINUTES = 30;
  */
 export const REOPEN_GRACE_MS = 3 * 60 * 1000;
 
-const CLOCK_SKEW_MS = 5 * 1000;
+const CLOCK_SKEW_MS = 60 * 1000; // routine clock corrections (wake from sleep, airplane mode)
 
 export type StaleReason = "reopened" | "idle";
 

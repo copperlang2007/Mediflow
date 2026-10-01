@@ -107,4 +107,10 @@ describe("staleReason", () => {
     markActivity(10 * MIN);
     expect(staleReason(30, 1 * MIN)).toBe("reopened");
   });
+
+  it("tolerates a routine clock correction of a few seconds", () => {
+    markActivity(10 * MIN);
+    markSeen(10 * MIN);
+    expect(staleReason(30, 10 * MIN - 20 * 1000)).toBeNull();
+  });
 });
