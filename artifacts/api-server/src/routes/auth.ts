@@ -8,6 +8,7 @@ import { logger } from "../lib/logger";
 import { seedDefaultCarriers } from "../lib/carrierSeed";
 import { isDemoMode, demoUserId } from "../lib/demoMode";
 import { mfaEnforced, mfaEnrolledFromAuth, resolveMfaEnrolled } from "../middlewares/requireMfa";
+import { getOrgSessionTimeout } from "../middlewares/requireAuth";
 
 const ProvisionSchema = z.object({
   email: z.string().email(),
@@ -62,6 +63,8 @@ router.get("/auth/status", async (req: Request, res: Response): Promise<void> =>
     // Every authenticated route answers 403 mfa_required until the user has
     // a second factor; the web app shows the enrollment screen instead.
     mfaRequired: mfaEnforced(),
+    // The browser signs the user out after this many idle minutes.
+    sessionTimeoutMinutes: await getOrgSessionTimeout(user.orgId),
     mfaEnrolled: isDemoMode() || (mfaEnforced() ? await resolveMfaEnrolled(auth) : mfaEnrolledFromAuth(auth)),
   });
 });

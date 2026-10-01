@@ -10,7 +10,7 @@ import { mfaEnforced, mfaEnrolledFromAuth, resolveMfaEnrolled, MFA_REQUIRED_MESS
 // TTL cache for org session timeout settings (refresh every 60 s)
 const orgTimeoutCache = new Map<string, { timeoutMinutes: number; fetchedAt: number }>();
 
-async function getOrgSessionTimeout(orgId: string): Promise<number> {
+export async function getOrgSessionTimeout(orgId: string): Promise<number> {
   const cached = orgTimeoutCache.get(orgId);
   if (cached && Date.now() - cached.fetchedAt < 60_000) return cached.timeoutMinutes;
   const [settings] = await db
@@ -60,9 +60,9 @@ async function checkAndUpdateSessionActivity(
     if (row) {
       lastActiveAt = row.lastActiveAt.getTime();
       if (now > row.expiresAt.getTime()) {
-        // Already expired in DB — clean up and reject
-        await db.delete(sessionActivityTable).where(eq(sessionActivityTable.sessionId, sessionId));
-        sessionLocalCache.delete(sessionId);
+        // Already expired. Keep the row: deleting it would make the very next
+        // request look like a brand-new session and let it straight back in.
+        sessionLocalCache.set(sessionId, { lastActiveAt, syncedAt: now });
         return "expired";
       }
     } else {
@@ -75,9 +75,9 @@ async function checkAndUpdateSessionActivity(
   }
 
   if (now - lastActiveAt > timeoutMs) {
-    // Timed out — remove from both stores
-    await db.delete(sessionActivityTable).where(eq(sessionActivityTable.sessionId, sessionId));
-    sessionLocalCache.delete(sessionId);
+    // Timed out. The row stays (with its old last-active time) so this
+    // session keeps being refused until the user signs in again, which
+    // creates a new session id. The cleanup job below removes old rows.
     return "expired";
   }
 
@@ -95,12 +95,14 @@ async function checkAndUpdateSessionActivity(
   return "ok";
 }
 
-// Periodic cleanup of expired session rows and stale local cache entries.
+// Periodic cleanup of long-dead session rows and stale local cache entries.
+// Expired rows are kept for a week (the longest a Clerk session can live) so
+// an expired session can never be mistaken for a new one.
 // Runs every 15 minutes; won't block process exit.
 setInterval(
   async () => {
     try {
-      await db.delete(sessionActivityTable).where(lt(sessionActivityTable.expiresAt, new Date()));
+      await db.delete(sessionActivityTable).where(lt(sessionActivityTable.expiresAt, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)));
     } catch {
       // non-fatal
     }
