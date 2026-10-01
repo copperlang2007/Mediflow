@@ -236,4 +236,44 @@ describe("isUsingEmbeddedDocument", () => {
       clearSessionMarkers();
     }
   });
+
+  it("does not overwrite a fresher timestamp another tab wrote while this one was blocked", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(10 * MIN);
+      const { m, state } = stubStorage(true);
+      markActivity(5 * MIN); // old value held in memory
+      m.set(LAST_ACTIVITY_KEY, String(10 * MIN)); // another tab's newer write
+      m.set(LAST_SEEN_KEY, String(10 * MIN));
+      state.blocked = false;
+      vi.advanceTimersByTime(31_000);
+      storageAvailable();
+      expect(m.get(LAST_ACTIVITY_KEY)).toBe(String(10 * MIN));
+    } finally {
+      vi.useRealTimers();
+      clearSessionMarkers();
+    }
+  });
+
+  it("keeps using memory when the carry-over fails partway (no false 'reopened')", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(10 * MIN);
+      const { m, state } = stubStorage(true);
+      markActivity(Date.now());
+      state.blocked = false;
+      const store = (globalThis as any).localStorage as Storage;
+      const realSet = store.setItem.bind(store);
+      store.setItem = (k: string, v: string) => {
+        if (k === LAST_ACTIVITY_KEY) throw new Error("QuotaExceededError");
+        realSet(k, v);
+      };
+      vi.advanceTimersByTime(31_000);
+      expect(staleReason(30, Date.now() + 1000)).toBeNull(); // memory still answers
+      expect(m.has(LAST_ACTIVITY_KEY)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      clearSessionMarkers();
+    }
+  });
 });
