@@ -263,7 +263,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const groups = visibleNavGroups(userRole, allGroups);
   const activeHref = activeNavHref(location, groups);
 
-  const canSearch = !userRole || CONTACT_READERS.includes(userRole);
+  // Client search is agency data; the platform view has none.
+  const canSearch = !platformView && (!userRole || CONTACT_READERS.includes(userRole));
   const isOwner = userRole === "super_admin" || userRole === "agency_admin";
   const isSuperAdmin = userRole === "super_admin";
   const roleLabel = userRole ? (ROLE_LABELS[userRole] ?? userRole) : null;
