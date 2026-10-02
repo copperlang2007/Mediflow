@@ -52,7 +52,7 @@ export interface CsConfig {
   rubrics: Array<{ id: string; name: string; version: string; description: string; passThreshold: number }>;
   defaultRubricId: string;
   ai: { status: "configured" | "needs_setup"; message: string };
-  audio: { supported: boolean; message: string };
+  audio: { supported: boolean; message: string; maxBytes?: number; acceptedFormats?: string[]; layouts?: string[] };
   limits: { maxFileBytes: number; maxImportFiles: number; maxPasteChars: number; acceptedFormats: string[] };
   canCreate: boolean;
   canReview: boolean;
