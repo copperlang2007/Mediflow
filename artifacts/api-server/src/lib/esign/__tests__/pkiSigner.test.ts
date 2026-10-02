@@ -109,6 +109,28 @@ describe("pkiSigner round-trip", () => {
     expect(verdict.reason).toMatch(/messageDigest|RSA|extractSignature/);
   });
 
+  it("rejects a corrupted RSA signature value even when the PDF bytes are intact", async () => {
+    const signed = await pkiSignPdf(await buildPdf());
+    // The RSA-2048 signatureValue is the only 256-byte OCTET STRING in the
+    // CMS (DER header 04 82 01 00); every other octet string is a digest.
+    // Flip one hex digit inside it. The PDF bytes (so the messageDigest
+    // check) stay valid, so only the RSA verification can catch this.
+    const text = signed.toString("latin1");
+    const header = text.toLowerCase().lastIndexOf("04820100");
+    expect(header, "signatureValue not found in /Contents").toBeGreaterThan(0);
+    const at = header + 8;
+    const flipped = at + 20;
+    const orig = text[flipped]!;
+    const swap = orig === "0" ? "1" : "0";
+    const tampered = Buffer.from(
+      text.slice(0, flipped) + swap + text.slice(flipped + 1),
+      "latin1",
+    );
+    const verdict = verifyPdfSignature(tampered);
+    expect(verdict.valid).toBe(false);
+    expect(verdict.reason).toMatch(/RSA/);
+  });
+
   it("returns a falsy verdict for a PDF with no embedded signature", async () => {
     const unsigned = await buildPdf();
     const verdict = verifyPdfSignature(unsigned);
