@@ -265,8 +265,20 @@ function DeploymentConfigRequired() {
  * any other role) gets that agency's dashboard.
  */
 function Dashboard() {
-  const { data: me, isLoading } = useGetMe();
+  const { data: me, isLoading, isError, refetch } = useGetMe();
   if (isLoading) return <PageLoadingFallback />;
+  // Without a known role we can't tell a super admin from anyone else, so
+  // don't guess an agency dashboard.
+  if (isError && !me) {
+    return (
+      <div role="alert" className="p-8 text-center text-sm text-muted-foreground">
+        Could not load your account.{" "}
+        <button type="button" className="underline underline-offset-2" onClick={() => void refetch()}>
+          Try again
+        </button>
+      </div>
+    );
+  }
   const viewingAgency = Boolean(localStorage.getItem("mediflow:view-as-org"));
   return isPlatformView((me?.role ?? null) as Role | null, viewingAgency) ? <SuperAdminDashboard /> : <AgencyDashboard />;
 }
