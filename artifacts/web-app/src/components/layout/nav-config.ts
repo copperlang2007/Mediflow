@@ -221,6 +221,14 @@ export const PLATFORM_NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+/**
+ * The agency a super admin is really viewing: a stored id that is their own
+ * (left by an older picker) is not a view at all, so it counts as none.
+ */
+export function effectiveViewAsOrg(stored: string | null, homeOrgId: string | null | undefined): string | null {
+  return stored && stored !== homeOrgId ? stored : null;
+}
+
 /** A super admin who is not viewing an agency gets the platform view. */
 export function isPlatformView(role: Role | null, viewingAgency: boolean): boolean {
   return role === "super_admin" && !viewingAgency;

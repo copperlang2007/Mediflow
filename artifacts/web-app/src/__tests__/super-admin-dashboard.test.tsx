@@ -17,7 +17,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import SuperAdminDashboard from "@/pages/super-admin-dashboard";
-import { PLATFORM_NAV_GROUPS, isPlatformPath, isPlatformView, visibleNavGroups } from "@/components/layout/nav-config";
+import { PLATFORM_NAV_GROUPS, effectiveViewAsOrg, isPlatformPath, isPlatformView, visibleNavGroups } from "@/components/layout/nav-config";
 
 describe("SuperAdminDashboard", () => {
   it("shows platform totals and every agency", async () => {
@@ -61,5 +61,11 @@ describe("SuperAdminDashboard", () => {
     for (const no of ["/crm", "/crm/contacts/1", "/commissions", "/settings", "/settings/team", "/admin/queue", "/agents"]) {
       expect(isPlatformPath(no)).toBe(false);
     }
+  });
+
+  it("ignores a stored view-as id that is the user's own agency", () => {
+    expect(effectiveViewAsOrg("o-home", "o-home")).toBeNull();
+    expect(effectiveViewAsOrg("o-other", "o-home")).toBe("o-other");
+    expect(effectiveViewAsOrg(null, "o-home")).toBeNull();
   });
 });
