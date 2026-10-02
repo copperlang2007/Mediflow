@@ -14,7 +14,12 @@
  * to run on an agency that already has imported articles unless you pass
  * `--allow-rerun` (which restores anything deleted).
  *
- * EVERY article is imported INACTIVE. The source is a snapshot written in
+ * Also imports 31 "how Mediflow works" guides (data/mediflow-guides.json),
+ * written from Mediflow's own pages and API code rather than copied from
+ * agencyBRIDGE. These import ACTIVE. They describe the app as it is today,
+ * including what is not finished yet, so update them when the app changes.
+ *
+ * The Medicare reference notes are imported INACTIVE. The source is a snapshot written in
  * 2025: it holds dated figures (commission caps, LIS limits) and rules that
  * have since changed (SOA wait period, moving-SEP window, carrier names and
  * channels). Active articles are fed straight to the AI assistant, so an
@@ -35,12 +40,19 @@ interface Entry {
   title: string;
   content: string;
   keywords: string[];
-  needsReview: boolean;
+  active?: boolean;
+  needsReview?: boolean;
 }
 
-const entries: Entry[] = JSON.parse(
-  readFileSync(new URL("./data/agencybridge-kb.json", import.meta.url), "utf8"),
-);
+function load(file: string): Omit<Entry, "needsReview">[] {
+  return JSON.parse(readFileSync(new URL(`./data/${file}`, import.meta.url), "utf8"));
+}
+
+// Medicare reference notes from agencyBRIDGE: imported INACTIVE (see above).
+const referenceNotes = load("agencybridge-kb.json").map((e) => ({ ...e, active: false }));
+// "How Mediflow works" guides, written from Mediflow's own code: imported ACTIVE.
+const productGuides = load("mediflow-guides.json").map((e) => ({ ...e, active: true }));
+const entries = [...referenceNotes, ...productGuides];
 
 /** Same rules as the app: lower-case, trim, de-duplicate, max 50 keywords. */
 function normalizeKeywords(keywords: string[]): string[] {
@@ -108,7 +120,7 @@ async function main(): Promise<void> {
         title: e.title,
         content: e.content,
         keywords: normalizeKeywords(e.keywords),
-        isActive: false,
+        isActive: e.active === true,
         createdBy: null,
       })
       .onConflictDoNothing()
@@ -118,7 +130,7 @@ async function main(): Promise<void> {
 
   console.log(
     `${dryRun ? "[dry run] would import" : "Imported"} ${inserted} of ${entries.length} articles` +
-      ` (${entries.length - inserted} already present). All are inactive until reviewed.`,
+      ` (${entries.length - inserted} already present). The Medicare reference notes stay inactive until reviewed.`,
   );
   process.exit(0);
 }
