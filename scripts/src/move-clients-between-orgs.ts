@@ -92,6 +92,7 @@ async function main() {
     return rows[0]!;
   }
 
+  let committed = false;
   await db.query("BEGIN");
   await db.query("SET LOCAL statement_timeout = 0");
   try {
@@ -304,7 +305,10 @@ async function main() {
           const stale = `exists (select 1 from ${f.parent} s where s.id = ${q(t)}.${q(f.col)} and s.org_id = $1)`;
           if (f.notNull) {
             const bad = await one<{ n: string }>(`select count(*) n from ${q(t)} where ${where} and ${stale} and not exists (${match})`, [from.id, to.id]);
-            if (Number(bad[0]!.n) > 0) blockers.push(`${t}.${f.col}: ${bad[0]!.n} rows need a ${f.parent} match in the target agency (none by ${f.parent === "agents" ? "email" : "name"}). Create or match it there first.`);
+            if (Number(bad[0]!.n) > 0) {
+              blockers.push(`${t}.${f.col}: ${bad[0]!.n} rows need a ${f.parent} match in the target agency (none by ${f.parent === "agents" ? "email" : "name"}). Create or match it there first.`);
+              continue; // the update below would null a required column and mask this message
+            }
           }
           const r = await db.query(`update ${q(t)} set ${q(f.col)} = (${match}) where ${where} and ${stale}`, [from.id, to.id]);
           if (r.rowCount) remapped[`${t}.${f.col} -> ${f.parent}`] = r.rowCount;
@@ -356,7 +360,7 @@ async function main() {
     console.log(`Carriers created in target:     ${carriersCreated}`);
     console.log(`References re-pointed/cleared:  ${JSON.stringify(remapped)}`);
     if (sharedParents.size) console.log(`Left pointing at shared (non-agency) tables: ${[...sharedParents].join(", ")}`);
-    if (hashOnly > 0) console.log(`WARNING: ${hashOnly} client(s) to move have a Medicare ID hash but no stored Medicare ID, so only the exact spelling could be checked for duplicates.`);
+    if (hashOnly > 0) console.log(`WARNING: ${hashOnly} client(s) to move have a Medicare ID hash but no stored Medicare ID, so only the exact spelling could be checked for duplicates. The duplicate-Medicare-ID check below compares the same raw hashes, so it will NOT catch a dashed-vs-undashed duplicate either. Check the target for same-name, same-birthdate pairs yourself, or backfill the stored IDs first.`);
     console.log(`Source contacts/enrollments:    ${before.src_contacts}/${before.src_enrollments}  ->  ${after.src_contacts}/${after.src_enrollments}`);
     console.log(`Target contacts/enrollments:    ${before.tgt_contacts}/${before.tgt_enrollments}  ->  ${after.tgt_contacts}/${after.tgt_enrollments}`);
     console.log(`Duplicate Medicare-ID groups in target: ${before.tgt_duplicate_mbi_groups} -> ${after.tgt_duplicate_mbi_groups}`);
@@ -373,18 +377,32 @@ async function main() {
       }
       await db.query("COMMIT");
       console.log("\nCOMMITTED.");
-      writeFileSync(csvName, csvBody);
-      console.log(`Clients left in place (already in target): ${csvName}`);
+      committed = true;
+      // The move is done and audited; a file problem must not read as a failed move.
+      try {
+        writeFileSync(csvName, csvBody);
+        console.log(`Clients left in place (already in target): ${csvName}`);
+      } catch (fsErr) {
+        console.error(`WARNING: the move committed (see audit_log) but ${csvName} could not be written: ${(fsErr as Error).message}`);
+      }
     } else {
       await db.query("ROLLBACK");
-      writeFileSync(csvName, csvBody);
       console.log("\nDRY RUN: rolled back, nothing changed. Re-run with --apply to commit.");
-      console.log(`Clients that would be left in place (already in target): ${csvName}`);
+      try {
+        writeFileSync(csvName, csvBody);
+        console.log(`Clients that would be left in place (already in target): ${csvName}`);
+      } catch (fsErr) {
+        console.error(`WARNING: could not write ${csvName}: ${(fsErr as Error).message}`);
+      }
     }
   } catch (err) {
-    await db.query("ROLLBACK").catch(() => undefined);
-    console.error("\nABORTED, nothing changed:", (err as Error).message);
-    process.exitCode = 1;
+    if (committed) {
+      console.error("\nWARNING (the move itself had already committed):", (err as Error).message);
+    } else {
+      await db.query("ROLLBACK").catch(() => undefined);
+      console.error("\nABORTED, nothing changed:", (err as Error).message);
+      process.exitCode = 1;
+    }
   } finally {
     await db.end();
   }
