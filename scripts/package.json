@@ -9,6 +9,7 @@
   "scripts": {
     "hello": "tsx ./src/hello.ts",
     "backfill:payout-contributions": "tsx ./src/backfill-payout-contributions.ts",
+    "smoke:bedrock": "tsx ./src/bedrock-smoke.ts",
     "seed:demo": "tsx ./src/seed-demo.ts",
     "check:migration-journal": "tsx ./src/check-migration-journal.ts",
     "lq:sign": "tsx ./src/sign-lead-queue-request.ts",
