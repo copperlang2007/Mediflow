@@ -218,9 +218,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   } catch {
     // storage unavailable — same as not viewing an agency
   }
-  const { unreadCount } = useSSENotifications(0, !viewingAgency);
   const { data: me } = useGetMe();
   const userRole = (me?.role ?? null) as Role | null;
+  const platformView = isPlatformView(userRole, viewingAgency);
+  // Notifications, stats and the AI assistant all describe one agency; the
+  // platform view has no agency of its own to show.
+  const { unreadCount } = useSSENotifications(0, !viewingAgency && !platformView);
 
   useEffect(() => {
     if (userRole && userRole !== "super_admin" && localStorage.getItem("mediflow:view-as-org")) {
@@ -250,6 +253,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       // keeps the page's stats live. Silence only applies while no other
       // (non-silent) component is watching — see isSilent in queryClient.
       queryKey: getGetDashboardStatsQueryKey(),
+      enabled: !platformView,
       refetchInterval: 60_000,
       staleTime: 30_000,
       // Nav badge only; a failed background poll shouldn't toast every minute.
@@ -262,7 +266,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // has a developer/super_admin role.
   const showDevNav =
     DEV_CONSOLE_ENABLED && (userRole === "developer" || userRole === "super_admin");
-  const platformView = isPlatformView(userRole, viewingAgency);
   const baseGroups = platformView ? PLATFORM_NAV_GROUPS : NAV_GROUPS;
   const allGroups: NavGroup[] = showDevNav ? [...baseGroups, DEV_NAV_GROUP] : baseGroups;
   const groups = visibleNavGroups(userRole, allGroups);
@@ -442,7 +445,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <ViewAsAgencyControl enabled={isSuperAdmin} />
 
             {/* Notifications */}
-            {!viewingAgency && (
+            {!viewingAgency && !platformView && (
               <div className="relative">
                 <Button
                   variant="ghost"
@@ -487,12 +490,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     Back to my dashboard
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/settings">
-                    <Settings className="h-4 w-4 mr-2" />
-                    Account settings
-                  </Link>
-                </DropdownMenuItem>
+                {!platformView && (
+                  <DropdownMenuItem asChild>
+                    <Link href="/settings">
+                      <Settings className="h-4 w-4 mr-2" />
+                      Account settings
+                    </Link>
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
 
@@ -539,12 +544,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     View an agency…
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem asChild>
-                  <Link href="/settings">
-                    <User className="h-4 w-4 mr-2" />
-                    Profile
-                  </Link>
-                </DropdownMenuItem>
+                {!platformView && (
+                  <DropdownMenuItem asChild>
+                    <Link href="/settings">
+                      <User className="h-4 w-4 mr-2" />
+                      Profile
+                    </Link>
+                  </DropdownMenuItem>
+                )}
                 {!platformView && (
                   <DropdownMenuItem asChild>
                     <Link href="/settings">
