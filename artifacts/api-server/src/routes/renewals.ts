@@ -1,6 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, and, sql, gt, lte, desc, inArray } from "drizzle-orm";
 import { randomUUID } from "crypto";
+import { sellingPlanYear } from "../lib/compliance/planYear";
 import {
   db,
   agentsTable,
@@ -293,7 +294,8 @@ router.get(
         .where(
           and(
             eq(agentsTable.orgId, authReq.orgId),
-            eq(ahipRecordsTable.certificationYear, currentYear),
+            // The plan year being sold, as on the dashboard (from Oct 1 that is next year's).
+            eq(ahipRecordsTable.certificationYear, sellingPlanYear(now)),
           ),
         ),
       // Licenses already past their expiry (shared definition), for agents
