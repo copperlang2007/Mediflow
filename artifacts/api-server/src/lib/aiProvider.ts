@@ -32,7 +32,7 @@
  * `resolveAiProvider()` so the guard cannot be bypassed.
  */
 
-import { normalizeBedrockModelId } from "./ai/bedrockAnthropicClient";
+import { bedrockHostKind, normalizeBedrockModelId } from "./ai/bedrockAnthropicClient";
 
 export type AiProvider = "azure" | "bedrock" | "openai";
 
@@ -281,6 +281,23 @@ export function bedrockRoutingIssues(): string[] {
         `recognises, so a prefix cannot be inferred. Set a fully-qualified id ` +
         `(e.g. global.anthropic.${model}, or us-gov.anthropic.${model} on ` +
         `GovCloud).`,
+    );
+  }
+
+  // The commercial inference-profile prefixes (`us.`, `global.`, ...) are not
+  // valid in the GovCloud and China partitions. The default model is one of
+  // them, so an operator on those hosts who never set AI_INTEGRATIONS_MODEL
+  // would otherwise get no hint at all -- this keeps the nudge the old bare
+  // default used to trigger.
+  if (
+    bedrockHostKind(baseUrl) === "non-commercial" &&
+    /^(us|global|eu|apac|jp|au)\.anthropic\./.test(model)
+  ) {
+    issues.push(
+      `AI_INTEGRATIONS_MODEL "${model}" uses a commercial-partition inference ` +
+        `profile prefix, but AI_INTEGRATIONS_BEDROCK_BASE_URL is a GovCloud or ` +
+        `China host. Set a partition-qualified id (e.g. us-gov.anthropic.` +
+        `claude-sonnet-5, or cn-north-1.anthropic.claude-sonnet-5).`,
     );
   }
 
