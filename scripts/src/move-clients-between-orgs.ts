@@ -369,7 +369,9 @@ async function main() {
       throw new Error(`${hashOnly} client(s) to move have a Medicare ID hash but no stored Medicare ID, so a dashed-vs-undashed duplicate cannot be ruled out. Run an encryption backfill, or re-run with --allow-hash-only to accept that.`);
     }
     if (APPLY) {
-      const changes = JSON.stringify({ operator, fromOrgId: from.id, toOrgId: to.id, movedRows: moved, leftInPlace: matches.length, carriersCreated, dedupCsv: csvName });
+      const changes = JSON.stringify({ operator, fromOrgId: from.id, toOrgId: to.id, movedRows: moved, leftInPlace: matches.length, carriersCreated, dedupCsv: csvName,
+        // Ids and reasons only (no PHI), so the record survives even if the CSV could not be written.
+        dedupPairs: matches.map((m) => ({ src: m.src, tgt: m.tgt, reason: m.reason })) });
       for (const orgId of [from.id, to.id]) {
         await db.query(
           `insert into audit_log (id, org_id, user_role, action, resource_type, changes) values ($1, $2, 'system', 'cross_org_client_move', 'contact', $3::jsonb)`,
