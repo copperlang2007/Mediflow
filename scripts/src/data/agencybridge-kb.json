@@ -1,0 +1,1066 @@
+[
+  {
+    "key": "comm-1",
+    "category": "Medicare Commissions",
+    "title": "How Medicare Advantage commissions work",
+    "content": "Medicare Advantage (Part C) commissions are paid per enrolled member per year (PEPM). Initial enrollment commissions are typically 3× the renewal rate for the first 12 months, then drop to renewal levels. Commissions are regulated by CMS — carriers cannot pay more than the FMV amounts set annually. Agents must be licensed and appointed with each carrier to receive commissions.",
+    "keywords": [
+      "commission",
+      "ma",
+      "advantage",
+      "pepm",
+      "initial",
+      "renewal",
+      "payment",
+      "comp"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "comm-2",
+    "category": "Medicare Commissions",
+    "title": "2025 FMV commission rates (approximate)",
+    "content": "For 2025, CMS-set FMV commission amounts are approximately $603 for initial Medicare Advantage enrollments and $201 for renewals. Medicare Supplement (Medigap) commissions vary by plan letter and carrier but are generally 20–25% of annual premium for 6–9 years. Part D standalone commissions are capped at ~$103 initial / $51 renewal. Actual amounts vary by carrier and state.",
+    "keywords": [
+      "fmv",
+      "rate",
+      "2025",
+      "amount",
+      "supplement",
+      "medigap",
+      "part d",
+      "dollar"
+    ],
+    "needsReview": true
+  },
+  {
+    "key": "comm-3",
+    "category": "Medicare Commissions",
+    "title": "Chargeback & clawback rules",
+    "content": "If a member disenrolls within the first 2–3 months (varies by carrier), the commission is fully clawed back. After the initial clawback window, a pro-rated chargeback may apply if the member leaves mid-year. Chargebacks appear on the agent's commission statement as negative line items. Carriers may also recover advances if the policy lapses.",
+    "keywords": [
+      "chargeback",
+      "clawback",
+      "disenroll",
+      "lapse",
+      "recover",
+      "negative",
+      "advance"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "comm-4",
+    "category": "Medicare Commissions",
+    "title": "Advance vs. as-earned commission",
+    "content": "Some carriers offer advanced commission (full year paid upfront within 30–60 days of enrollment) while others pay as-earned (monthly or quarterly). Advances are recouped if the member disenrolls early. New agents often start on as-earned and qualify for advances after a track record. Check each carrier's commission schedule for advance availability.",
+    "keywords": [
+      "advance",
+      "as-earned",
+      "upfront",
+      "monthly",
+      "quarterly",
+      "recoup",
+      "schedule"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "med-1",
+    "category": "Medicaid Rules by State",
+    "title": "Medicaid-Medicare dual eligibles overview",
+    "content": "Dual eligibles are individuals enrolled in both Medicare and Medicaid. There are two types: Full Benefit Dual Eligibles (FBDE) receive full Medicaid benefits plus Medicare cost-sharing; Qualified Medicare Beneficiaries (QMB) have Medicaid pay premiums and cost-sharing but do not get full Medicaid. States administer Medicaid programs, so eligibility and benefits vary significantly.",
+    "keywords": [
+      "dual",
+      "eligible",
+      "medicaid",
+      "fbde",
+      "qmb",
+      "full benefit",
+      "state"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "med-2",
+    "category": "Medicaid Rules by State",
+    "title": "Medicaid eligibility by income (state variations)",
+    "content": "Medicaid eligibility income limits vary widely by state. As of 2025, states that expanded Medicaid under ACA cover adults up to 138% FPL. Non-expansion states (e.g., Texas, Florida, Georgia) have much lower limits, often covering only parents, children, disabled, or elderly at very low income thresholds. Always check the specific state's Medicaid agency for current limits. Use the Medicaid.gov state plan finder for authoritative details.",
+    "keywords": [
+      "income",
+      "limit",
+      "fpl",
+      "expansion",
+      "non-expansion",
+      "eligible",
+      "poverty",
+      "state"
+    ],
+    "needsReview": true
+  },
+  {
+    "key": "med-3",
+    "category": "Medicaid Rules by State",
+    "title": "Medicare Savings Programs (MSP) by state",
+    "content": "Medicare Savings Programs help pay Medicare premiums and cost-sharing. QMB covers Part A & B premiums + cost-sharing (income ≤100% FPL). SLMB covers Part B premiums (120% FPL). QI covers Part B premiums (135% FPL, first-come first-served). Asset limits apply in most states (~$7,970 individual / $11,960 couple for 2025). A few states (e.g., New York, Connecticut) have eliminated asset tests. Income/resource limits vary by state.",
+    "keywords": [
+      "msp",
+      "qmb",
+      "slmb",
+      "qi",
+      "savings",
+      "premium",
+      "asset",
+      "resource",
+      "state"
+    ],
+    "needsReview": true
+  },
+  {
+    "key": "med-4",
+    "category": "Medicaid Rules by State",
+    "title": "State-specific dual plan (D-SNP) availability",
+    "content": "Dual-eligible Special Needs Plans (D-SNPs) are available in most states but coverage and benefits vary. Some states coordinate fully with Medicaid (Fully Integrated D-SNPs), others have limited integration. States like California, New York, Texas, and Florida have robust D-SNP markets. Check carrier availability by county — D-SNPs are county-specific. Always verify Medicaid status before enrolling in a D-SNP.",
+    "keywords": [
+      "d-snp",
+      "dual",
+      "integrated",
+      "county",
+      "state",
+      "availability",
+      "carrier"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "lis-1",
+    "category": "Low Income Subsidy (LIS)",
+    "title": "What is Low Income Subsidy (Extra Help)?",
+    "content": "The Low Income Subsidy (LIS), also called Extra Help, is a federal program that helps Medicare beneficiaries pay for Part D prescription drug costs — premiums, deductibles, and copays. Full LIS beneficiaries pay no premium (if enrolled in a benchmark plan), no deductible, and low copays ($1.05 generic / $4.15 brand in 2025). Partial LIS beneficiaries get reduced premiums, deductibles, and 15% coinsurance.",
+    "keywords": [
+      "lis",
+      "extra help",
+      "low income",
+      "subsidy",
+      "part d",
+      "premium",
+      "copay",
+      "deductible"
+    ],
+    "needsReview": true
+  },
+  {
+    "key": "lis-2",
+    "category": "Low Income Subsidy (LIS)",
+    "title": "LIS eligibility income & resource limits (2025)",
+    "content": "Full LIS: income ≤150% FPL and resources ≤$11,710 individual / $23,410 couple (2025). Partial LIS: income 150–180% FPL, resources ≤$11,710 / $23,410. Those with full Medicaid, SSI, or MSP (QMB/SLMB/QI) automatically qualify for full LIS without a separate application. Apply via SSA Form 1020 or apply online at SSA.gov.",
+    "keywords": [
+      "lis",
+      "eligible",
+      "income",
+      "resource",
+      "limit",
+      "fpl",
+      "automatic",
+      "qualify",
+      "ssa"
+    ],
+    "needsReview": true
+  },
+  {
+    "key": "lis-3",
+    "category": "Low Income Subsidy (LIS)",
+    "title": "LIS copay levels and benchmark plans",
+    "content": "Full LIS beneficiaries at or below 100% FPL pay $1.05 (generic) / $4.15 (brand) copays in 2025. Those between 100–150% FPL pay $4.15 / $10.40. Partial LIS pays 15% coinsurance after deductible. Benchmark plans (lowest-cost plans in a region) have $0 premium for full LIS beneficiaries. If a full LIS beneficiary enrolls in a non-benchmark plan, they may owe a premium.",
+    "keywords": [
+      "copay",
+      "benchmark",
+      "level",
+      "generic",
+      "brand",
+      "coinsurance",
+      "premium",
+      "lis"
+    ],
+    "needsReview": true
+  },
+  {
+    "key": "lis-4",
+    "category": "Low Income Subsidy (LIS)",
+    "title": "Deemed vs. applied LIS",
+    "content": "Deemed LIS beneficiaries automatically qualify because they receive Medicaid, SSI, or MSP benefits — no application needed, and they are re-evaluated annually. Applied LIS beneficiaries submitted SSA Form 1020 and may need to reapply if income changes. Deemed status can be verified through the SSA's LIS query or the plan's eligibility file. Always confirm deemed status before plan selection.",
+    "keywords": [
+      "deemed",
+      "applied",
+      "automatic",
+      "ssi",
+      "medicaid",
+      "msp",
+      "re-evaluate",
+      "status"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "ma-1",
+    "category": "Medicare Advantage Plan Types",
+    "title": "Types of Medicare Advantage plans",
+    "content": "Medicare Advantage (Part C) plans include: HMO (Health Maintenance Organization) — requires PCP referrals and in-network care; HMO-POS — HMO with out-of-network flexibility for certain services; PPO (Preferred Provider Organization) — in/out-of-network, no referral needed; PFFS (Private Fee-for-Service) — any provider who accepts terms; SNP (Special Needs Plan) — tailored for chronic conditions, institutional, or dual-eligibles; MSA (Medical Savings Account) — high deductible paired with savings account.",
+    "keywords": [
+      "hmo",
+      "ppo",
+      "pffs",
+      "snp",
+      "msa",
+      "type",
+      "plan",
+      "advantage",
+      "referral",
+      "network"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "ma-2",
+    "category": "Medicare Advantage Plan Types",
+    "title": "HMO vs PPO key differences",
+    "content": "HMO plans require members to use in-network providers and typically need PCP referrals for specialists — lower premiums but less flexibility. PPO plans allow in- and out-of-network providers without referrals — higher premiums but more freedom. HMO-POS offers limited out-of-network access for specific services. For beneficiaries who travel frequently or have out-of-area specialists, PPO is usually preferred.",
+    "keywords": [
+      "hmo",
+      "ppo",
+      "difference",
+      "referral",
+      "network",
+      "pcp",
+      "travel",
+      "premium"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "ma-3",
+    "category": "Medicare Advantage Plan Types",
+    "title": "Special Needs Plans (SNP) types",
+    "content": "There are three SNP types: C-SNP (Chronic Condition) — for diabetes, heart failure, ESRD, COPD, etc.; I-SNP (Institutional) — for nursing home or long-term care residents; D-SNP (Dual-Eligible) — for those with both Medicare and Medicaid. SNPs tailor benefits, provider networks, and drug formularies to the specific population. Enrollment requires documentation of the qualifying condition or status.",
+    "keywords": [
+      "snp",
+      "c-snp",
+      "i-snp",
+      "d-snp",
+      "chronic",
+      "institutional",
+      "dual",
+      "special needs"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "ma-4",
+    "category": "Medicare Advantage Plan Types",
+    "title": "MA-PD vs MA-only",
+    "content": "MA-PD (Medicare Advantage Prescription Drug) plans bundle Part A, B, and D coverage into one plan — most common type. MA-only plans cover Part A and B but exclude drug coverage; members must enroll in a standalone Part D (PDP) separately. When comparing plans, verify whether drug coverage is included to avoid gaps. MA-PD plans have one combined premium and one ID card.",
+    "keywords": [
+      "ma-pd",
+      "ma-only",
+      "prescription",
+      "part d",
+      "pdp",
+      "bundle",
+      "drug",
+      "coverage"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-1",
+    "category": "MA Plan Details by Carrier",
+    "title": "UnitedHealthcare (UHC) Medicare Advantage",
+    "content": "UHC offers HMO, PPO, and D-SNP plans nationwide. Known for the UHC Medicare Advantage portfolio with AARP branding. Key features: $0 primary care copays on many plans, nationwide PPO network, SilverSneakers fitness benefit, dental/vision/hearing allowances ($0–$2,500/yr depending on plan), OTC benefit cards, and transportation. UHC also offers the only fully integrated D-SNP in select markets. Commission: advance available, paid monthly.",
+    "keywords": [
+      "unitedhealthcare",
+      "uhc",
+      "aarp",
+      "silversneakers",
+      "ppo",
+      "d-snp",
+      "otc",
+      "dental"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-2",
+    "category": "MA Plan Details by Carrier",
+    "title": "Humana Medicare Advantage",
+    "content": "Humana offers HMO, PPO, and SNP plans with strong presence in the South and Midwest. Key features: Go365 wellness program, Healthy Foods card (select plans), OTC allowances, dental/vision/hearing, SilverSneakers or FitOn, transportation (up to 24 one-way trips). Humana's Honor plan targets veterans. Commission: advance and as-earned options, fast appointment process (3–5 business days).",
+    "keywords": [
+      "humana",
+      "go365",
+      "healthy foods",
+      "honor",
+      "veteran",
+      "otc",
+      "snp",
+      "appointment"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-3",
+    "category": "MA Plan Details by Carrier",
+    "title": "Aetna (CVS Health) Medicare Advantage",
+    "content": "Aetna offers HMO, PPO, and D-SNP plans. Key features: $0 PCP on most plans, Aetna Medicare Eagle for veterans, dental/vision/hearing allowances, OTC benefit, gym memberships (SilverSneakers or GymPac), and care management programs. Aetna's D-SNPs coordinate with state Medicaid in select states. Commission: advance available, competitive FMV rates. Appointment via Aetna broker portal.",
+    "keywords": [
+      "aetna",
+      "cvs",
+      "eagle",
+      "veteran",
+      "silver sneakers",
+      "d-snp",
+      "otc",
+      "broker"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-4",
+    "category": "MA Plan Details by Carrier",
+    "title": "Centene / WellCare Medicare Advantage",
+    "content": "WellCare (a Centene company) offers HMO, PPO, and SNP plans, often with competitive premiums ($0 or low). Key features: Flex Card for dental/vision/hearing/transportation, OTC allowance, grocery benefit on select D-SNPs, and robust chronic condition management. WellCare focuses heavily on SNP and dual-eligible markets. Commission: advance available. Appointment via Centene broker portal.",
+    "keywords": [
+      "wellcare",
+      "centene",
+      "flex card",
+      "grocery",
+      "d-snp",
+      "snp",
+      "otc",
+      "dual"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-5",
+    "category": "MA Plan Details by Carrier",
+    "title": "Blue Cross Blue Shield (BCBS) Medicare Advantage",
+    "content": "BCBS plans operate as independent local licensees (e.g., Anthem, HCSC, Florida Blue, Highmark) so plans, networks, and benefits vary by state/region. Key features: broad PPO networks (especially Anthem EPO/PPO), $0 PCP, dental/vision/hearing, fitness (SilverSneakers or RenActive), and OTC. Commission and appointment processes vary by licensee — confirm with the local BCBS Medicare broker team.",
+    "keywords": [
+      "bcbs",
+      "blue cross",
+      "anthem",
+      "highmark",
+      "florida blue",
+      "epo",
+      "ppo",
+      "state"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-6",
+    "category": "MA Plan Details by Carrier",
+    "title": "Cigna Medicare Advantage",
+    "content": "Cigna offers HMO and PPO plans in select markets. Key features: $0 preventive dental, vision and hearing allowances, Cigna Healthy Today app, OTC benefit, gym membership, and care management. Cigna's Health Improvement Program targets chronic conditions. Commission: advance available, appointment via Cigna broker portal. Cigna has a smaller geographic footprint — verify county availability.",
+    "keywords": [
+      "cigna",
+      "healthy today",
+      "otc",
+      "gym",
+      "ppo",
+      "hmo",
+      "county",
+      "broker"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-7",
+    "category": "MA Plan Details by Carrier",
+    "title": "Kaiser Permanente Medicare Advantage",
+    "content": "Kaiser operates HMO plans in limited regions (CA, CO, GA, HI, MD, OR, VA, WA, DC). Known for integrated care model — plan and provider are the same system. Key features: $0 PCP, integrated EHR, pharmacy on-site, dental/vision on select plans, fitness benefit. Kaiser consistently earns high Star Ratings (often 4.5–5). Limited geographic footprint — only available in Kaiser service areas. Commission: as-earned, advance limited. Appointment via Kaiser broker portal.",
+    "keywords": [
+      "kaiser",
+      "permanente",
+      "hmo",
+      "integrated",
+      "star rating",
+      "5-star",
+      "california",
+      "colorado",
+      "georgia"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-8",
+    "category": "MA Plan Details by Carrier",
+    "title": "Devoted Health Medicare Advantage",
+    "content": "Devoted Health is a newer MA carrier focused on seniors, available in select markets (FL, TX, IL, OH, LA, MS, AL, GA, SC, NC, PA, NY, NJ, CT, MA). Key features: $0 premium plans common, $0 PCP, Devoted Medical (virtual primary care), dental/vision/hearing, OTC card, transportation, and SilverSneakers. Devoted offers D-SNP and C-SNP plans in some markets. Commission: advance available, fast appointment. Smaller network — verify providers carefully.",
+    "keywords": [
+      "devoted",
+      "devoted health",
+      "virtual care",
+      "otc",
+      "d-snp",
+      "c-snp",
+      "florida",
+      "texas",
+      "new carrier"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-9",
+    "category": "MA Plan Details by Carrier",
+    "title": "Clover Health Medicare Advantage",
+    "content": "Clover Health is a tech-forward MA carrier available in select counties (NJ, PA, GA, TX, MS, SC, FL, IL, AL, TN, AR, OH). Key features: $0 premium plans, $0 PCP, Clover Assistant (AI clinical decision support for providers), dental/vision/hearing, OTC, transportation, and in-home visits. Clover focuses on HMO and PPO plans. Commission: advance available. Appointment via Clover broker portal. Verify county availability — Clover is rapidly expanding.",
+    "keywords": [
+      "clover",
+      "clover health",
+      "ai",
+      "in-home",
+      "otc",
+      "transportation",
+      "ppo",
+      "hmo",
+      "new jersey"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-10",
+    "category": "MA Plan Details by Carrier",
+    "title": "Molina Healthcare Medicare Advantage",
+    "content": "Molina focuses on Medicaid and dual-eligible populations, offering D-SNP and C-SNP plans in CA, TX, FL, IL, MI, OH, WA, NM, UT, WI, ID, NV, SC, and Puerto Rico. Key features: $0 premium, $0 PCP, integrated Medicaid-Medicare coordination, dental/vision/hearing, OTC, transportation, and care management for chronic conditions. Molina is ideal for dual-eligible clients. Commission: as-earned. Appointment via Molina broker portal.",
+    "keywords": [
+      "molina",
+      "d-snp",
+      "c-snp",
+      "dual",
+      "medicaid",
+      "integrated",
+      "otc",
+      "california",
+      "texas"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-11",
+    "category": "MA Plan Details by Carrier",
+    "title": "Alignment Healthcare Medicare Advantage",
+    "content": "Alignment Healthcare offers HMO and PPO plans in CA, FL, NC, SC, TX, NV, AZ, and IL. Key features: $0 premium plans, $0 PCP, Alignment's AVA (AI-powered care model), dental/vision/hearing, OTC, transportation, and chronic care programs. Alignment focuses on seniors with complex needs and offers C-SNP plans. Commission: advance available. Appointment via Alignment broker portal.",
+    "keywords": [
+      "alignment",
+      "alignment healthcare",
+      "ava",
+      "ai",
+      "c-snp",
+      "chronic",
+      "otc",
+      "california",
+      "florida"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-12",
+    "category": "MA Plan Details by Carrier",
+    "title": "SCAN Health Plan Medicare Advantage",
+    "content": "SCAN Health Plan operates HMO and SNP plans primarily in CA, AZ, NV, TX, and CO. Strong focus on seniors and dual-eligibles. Key features: $0 PCP, dental/vision/hearing, OTC, transportation, fitness (SilverSneakers), and robust care management. SCAN offers D-SNP and I-SNP plans. Known for high Star Ratings and member satisfaction. Commission: advance available. Appointment via SCAN broker portal.",
+    "keywords": [
+      "scan",
+      "scan health",
+      "d-snp",
+      "i-snp",
+      "silver sneakers",
+      "otc",
+      "california",
+      "arizona",
+      "star rating"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-13",
+    "category": "MA Plan Details by Carrier",
+    "title": "Health Net Medicare Advantage",
+    "content": "Health Net (a Centene company) offers HMO, PPO, and SNP plans in CA, AZ, OR, and WA. Key features: $0 premium plans common, $0 PCP, dental/vision/hearing, OTC, transportation, and fitness. Health Net focuses heavily on the California market with D-SNP and C-SNP options. Commission: advance available. Appointment via Health Net/Centene broker portal. WellCare and Health Net are both Centene — verify which brand operates in your county.",
+    "keywords": [
+      "health net",
+      "centene",
+      "d-snp",
+      "c-snp",
+      "otc",
+      "california",
+      "arizona",
+      "oregon",
+      "washington"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-14",
+    "category": "MA Plan Details by Carrier",
+    "title": "Oscar Medicare Advantage (Oscar Tech)",
+    "content": "Oscar offers HMO and PPO plans in select markets (FL, TX, NY, CA, NJ, others). Known for tech-forward member experience via the Oscar app. Key features: $0 PCP on select plans, virtual care (Oscar Virtual Visit), dental/vision/hearing, OTC, and care navigation. Oscar's MA footprint is smaller than its ACA exchange presence — verify county availability. Commission: advance available. Appointment via Oscar broker portal.",
+    "keywords": [
+      "oscar",
+      "oscar health",
+      "virtual visit",
+      "app",
+      "otc",
+      "florida",
+      "texas",
+      "tech",
+      "broker"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-15",
+    "category": "MA Plan Details by Carrier",
+    "title": "Highmark Blue Cross Medicare Advantage",
+    "content": "Highmark (a BCBS licensee) operates in PA, WV, DE, and parts of NY. Key features: broad PPO and HMO networks, $0 PCP, dental/vision/hearing, fitness (RenActive), OTC, and chronic care management. Highmark offers D-SNP plans in PA. Commission and appointment via Highmark broker portal — processes differ from other BCBS licensees. Verify with the local Highmark Medicare team.",
+    "keywords": [
+      "highmark",
+      "bcbs",
+      "blue cross",
+      "pennsylvania",
+      "west virginia",
+      "renactive",
+      "d-snp",
+      "ppo"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-16",
+    "category": "MA Plan Details by Carrier",
+    "title": "Anthem Blue Cross Medicare Advantage",
+    "content": "Anthem (a BCBS licensee, now Elevance Health) operates in CA, CO, CT, GA, IN, KY, ME, MO, NV, NH, NY, OH, VA, WI, and others. Key features: EPO and PPO networks (EPO = no out-of-network except emergencies), $0 PCP, dental/vision/hearing, fitness (SilverSneakers or Active&Fit), OTC, and care management. Anthem offers D-SNP and C-SNP plans. Commission: advance available. Appointment via Anthem broker portal.",
+    "keywords": [
+      "anthem",
+      "elevance",
+      "bcbs",
+      "epo",
+      "ppo",
+      "silver sneakers",
+      "d-snp",
+      "c-snp",
+      "california"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-17",
+    "category": "MA Plan Details by Carrier",
+    "title": "Florida Blue Medicare Advantage",
+    "content": "Florida Blue (a BCBS licensee) operates HMO and PPO plans statewide in Florida. Key features: broad PPO network, $0 PCP, dental/vision/hearing, fitness, OTC, and transportation. Florida Blue offers D-SNP plans in select counties. Strong network in rural Florida counties where other carriers may not operate. Commission: advance available. Appointment via Florida Blue broker portal.",
+    "keywords": [
+      "florida blue",
+      "bcbs",
+      "florida",
+      "ppo",
+      "hmo",
+      "d-snp",
+      "rural",
+      "otc",
+      "transportation"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-18",
+    "category": "MA Plan Details by Carrier",
+    "title": "Humana Honor Plan (Veterans)",
+    "content": "Humana Honor is a specialized MA plan for veterans, available in select markets. Key features: $0 premium, $0 PCP, VA coordination, dental/vision/hearing, OTC, transportation, and fitness. Honor plans may include enhanced benefits for veterans such as hearing aids and preventive care. No VA enrollment required — veterans with Medicare Part A and B qualify. Commission: advance available. Verify Honor plan availability by county.",
+    "keywords": [
+      "humana",
+      "honor",
+      "veteran",
+      "va",
+      "hearing aid",
+      "preventive",
+      "otc",
+      "transportation"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-19",
+    "category": "MA Plan Details by Carrier",
+    "title": "UnitedHealthcare Dual Complete (D-SNP)",
+    "content": "UHC Dual Complete is the flagship D-SNP product, available in most states. Key features: $0 premium, $0 PCP, coordinated Medicaid-Medicare benefits, dental/vision/hearing, OTC, transportation (up to 24 one-way trips), healthy food card (select plans), and care management. UHC Dual Complete is fully integrated in select states (NY, OH, TX, others). Requires Medicaid eligibility verification. Commission: advance available. Ideal for dual-eligible clients.",
+    "keywords": [
+      "uhc",
+      "unitedhealthcare",
+      "dual complete",
+      "d-snp",
+      "dual",
+      "medicaid",
+      "food card",
+      "otc",
+      "integrated"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-20",
+    "category": "MA Plan Details by Carrier",
+    "title": "Aetna Medicare Eagle (Veterans)",
+    "content": "Aetna Medicare Eagle is designed for veterans, available in select markets. Key features: $0 premium, $0 PCP, VA care coordination, dental/vision/hearing, OTC, transportation, and fitness. Eagle plans may include enhanced hearing and vision benefits. Veterans with Part A and B qualify — no VA enrollment needed. Commission: advance available. Verify Eagle plan availability by county — not all markets have it.",
+    "keywords": [
+      "aetna",
+      "eagle",
+      "veteran",
+      "va",
+      "hearing",
+      "vision",
+      "otc",
+      "transportation",
+      "fitness"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-21",
+    "category": "MA Plan Details by Carrier",
+    "title": "WellCare Value Script (Part D)",
+    "content": "WellCare Value Script is a standalone Part D (PDP) plan available nationwide. Key features: low premium, broad formulary, preferred generic tier, and coverage during the donut hole. Value Script is a good option for clients staying on Original Medicare who need drug coverage. Full LIS beneficiaries may pay $0 on the benchmark version. Commission: ~$103 initial / $51 renewal. Appointment not required for PDP-only sales in most states.",
+    "keywords": [
+      "wellcare",
+      "value script",
+      "part d",
+      "pdp",
+      "standalone",
+      "drug",
+      "formulary",
+      "lis",
+      "benchmark"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-22",
+    "category": "MA Plan Details by Carrier",
+    "title": "SilverScript (CVS/Aetna) Part D",
+    "content": "SilverScript is Aetna/CVS's standalone Part D plan, available nationwide. Key features: low premium, broad formulary, preferred pharmacy network (CVS), and donut hole coverage. SilverScript is one of the most-enrolled PDP plans. Full LIS beneficiaries may qualify for $0 premium. Commission: ~$103 initial / $51 renewal. No appointment needed for PDP-only enrollment.",
+    "keywords": [
+      "silverscript",
+      "aetna",
+      "cvs",
+      "part d",
+      "pdp",
+      "drug",
+      "formulary",
+      "cvs pharmacy",
+      "lis"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-23",
+    "category": "MA Plan Details by Carrier",
+    "title": "Mutual of Omaha Medicare Supplement (Medigap)",
+    "content": "Mutual of Omaha is a top Medigap carrier. Key features: Plans A, B, C, D, F, G, High-Deductible G, K, L, M, and N available (Plan F only for those eligible before 2020). Plan G is the most popular — covers everything except Part B deductible. Medigap is guaranteed renewable and portable across all 50 states. Underwriting required in most states (not during IEP/OEP). Commission: 20–25% of premium for 6–9 years depending on plan. Appointment via Mutual of Omaha broker portal.",
+    "keywords": [
+      "mutual of omaha",
+      "medigap",
+      "supplement",
+      "plan g",
+      "plan f",
+      "plan n",
+      "underwriting",
+      "portable",
+      "guaranteed renewable"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-24",
+    "category": "MA Plan Details by Carrier",
+    "title": "AARP / UHC Medicare Supplement (Medigap)",
+    "content": "UnitedHealthcare offers Medigap plans under the AARP branding. Key features: Plans A, B, C, F, G, High-Deductible G, K, L, and N. AARP/UHC Medigap is one of the most recognized and widely held. Plan G is the most popular (covers all but Part B deductible). Household discount available in most states. Commission: 20–25% of premium. Appointment via UHC broker portal. Underwriting required outside IEP/OEP.",
+    "keywords": [
+      "aarp",
+      "uhc",
+      "unitedhealthcare",
+      "medigap",
+      "supplement",
+      "plan g",
+      "plan f",
+      "plan n",
+      "household discount"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-25",
+    "category": "MA Plan Details by Carrier",
+    "title": "Blue Cross Blue Shield Medicare Supplement (Medigap)",
+    "content": "BCBS licensees offer Medigap plans in their respective states. Key features: Plans A, B, C, D, F, G, High-Deductible G, K, L, M, and N (availability varies by state licensee). BCBS Medigap is popular due to brand recognition and broad acceptance. Household discounts available in many states. Commission: 20–25% of premium. Underwriting required outside IEP/OEP. Appointment processes vary by licensee.",
+    "keywords": [
+      "bcbs",
+      "blue cross",
+      "medigap",
+      "supplement",
+      "plan g",
+      "plan n",
+      "household discount",
+      "underwriting",
+      "state"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-26",
+    "category": "MA Plan Details by Carrier",
+    "title": "WellCare Medicare Supplement (Medigap)",
+    "content": "WellCare offers Medigap plans in select states. Key features: Plans A, F, G, High-Deductible G, and N (availability varies). WellCare Medigap competes on price — premiums may be lower than Mutual of Omaha or AARP/UHC for the same plan letter. Commission: 20–25% of premium. Appointment via WellCare/Centene broker portal. Underwriting required outside IEP/OEP. Verify state availability.",
+    "keywords": [
+      "wellcare",
+      "medigap",
+      "supplement",
+      "plan g",
+      "plan n",
+      "plan f",
+      "price",
+      "underwriting",
+      "centene"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-27",
+    "category": "MA Plan Details by Carrier",
+    "title": "Humana Medicare Supplement (Medigap)",
+    "content": "Humana offers Medigap plans in select states. Key features: Plans A, C, F, G, High-Deductible G, and N. Humana Medigap may include household discounts and online application in some states. Commission: 20–25% of premium. Appointment via Humana broker portal. Underwriting required outside IEP/OEP. Humana Medigap is a good cross-sell for clients who prefer Original Medicare over MA.",
+    "keywords": [
+      "humana",
+      "medigap",
+      "supplement",
+      "plan g",
+      "plan n",
+      "plan f",
+      "household discount",
+      "underwriting",
+      "original medicare"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-28",
+    "category": "MA Plan Details by Carrier",
+    "title": "Cigna Medicare Supplement (Medigap)",
+    "content": "Cigna offers Medigap plans in select states. Key features: Plans A, B, C, D, F, G, High-Deductible G, K, L, and N. Cigna Medigap includes household discounts in many states and online application. Commission: 20–25% of premium. Appointment via Cigna broker portal. Underwriting required outside IEP/OEP. Cigna Medigap availability varies — check state.",
+    "keywords": [
+      "cigna",
+      "medigap",
+      "supplement",
+      "plan g",
+      "plan n",
+      "plan f",
+      "household discount",
+      "underwriting",
+      "online"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-29",
+    "category": "MA Plan Details by Carrier",
+    "title": "Carrier comparison: MA vs Medigap decision guide",
+    "content": "When helping a client choose between Medicare Advantage and Medigap + Original Medicare: MA pros — lower or $0 premium, extra benefits (dental, vision, hearing, OTC, fitness), max out-of-pocket cap. MA cons — network restrictions, referrals (HMO), prior authorization, annual plan changes. Medigap pros — any Medicare provider nationwide, no referrals, predictable costs, portable. Medigap cons — higher monthly premium, no extra benefits, no drug coverage (need standalone PDP). For clients who travel, see specialists frequently, or want freedom, Medigap + PDP is often better. For budget-conscious clients who use in-network providers, MA is often better.",
+    "keywords": [
+      "comparison",
+      "medigap",
+      "advantage",
+      "ma vs medigap",
+      "original medicare",
+      "network",
+      "premium",
+      "out of pocket",
+      "travel"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-30",
+    "category": "MA Plan Details by Carrier",
+    "title": "Carrier appointment & contracting quick reference",
+    "content": "Appointment process by carrier (approximate): UHC — online via UHC broker portal, 3–5 business days; Humana — online via Humana broker portal, 2–4 business days; Aetna — online via Aetna broker portal, 3–7 business days; WellCare/Centene — online via Centene broker portal, 5–10 business days; BCBS — varies by licensee, contact local Medicare broker team; Cigna — online via Cigna broker portal, 3–5 business days; Kaiser — restricted, contact Kaiser broker relations; Devoted/Clover/Alignment — online via respective portals, 3–7 business days. AHIP certification required annually before appointment with most carriers.",
+    "keywords": [
+      "appointment",
+      "contracting",
+      "broker",
+      "portal",
+      "ahip",
+      "certification",
+      "carrier",
+      "process",
+      "timeline"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "car-31",
+    "category": "MA Plan Details by Carrier",
+    "title": "Carrier Star Ratings overview (2025)",
+    "content": "CMS Star Ratings (1–5) measure MA and Part D plan quality. 5-star plans allow year-round enrollment via 5-Star SEP. Recent high performers: Kaiser (4.5–5 in most markets), UHC (4–4.5 in many markets), Humana (4 in many markets), Devoted Health (4 in select markets). Ratings are updated each October. Lower-rated plans (2–3 stars) may face CMS penalties and reduced rebates. Always check current Star Ratings on CMS.gov before recommending — ratings change annually.",
+    "keywords": [
+      "star rating",
+      "cms",
+      "5-star",
+      "quality",
+      "kaiser",
+      "uhc",
+      "humana",
+      "devoted",
+      "penalty",
+      "rating"
+    ],
+    "needsReview": true
+  },
+  {
+    "key": "car-32",
+    "category": "MA Plan Details by Carrier",
+    "title": "OTC & supplemental benefit cards by carrier",
+    "content": "OTC and supplemental benefit cards vary by carrier and plan: UHC — $0–$2,500/yr OTC + healthy food/produce card on select plans; Humana — Healthy Foods card + OTC on select plans (especially D-SNP); Aetna — OTC card + grocery on select D-SNPs; WellCare — Flex Card (dental/vision/hearing/transportation) + OTC + grocery on D-SNPs; Devoted — OTC + healthy food; Clover — OTC + transportation; Molina — OTC + transportation + healthy food on D-SNPs. Amounts and eligible items vary by plan — always verify in the plan's Evidence of Coverage (EOC).",
+    "keywords": [
+      "otc",
+      "flex card",
+      "healthy food",
+      "grocery",
+      "produce",
+      "supplemental",
+      "benefit card",
+      "d-snp",
+      "carrier"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "ep-1",
+    "category": "Election Periods",
+    "title": "Annual Enrollment Period (AEP) — Oct 15 to Dec 7",
+    "content": "The AEP (also called Open Enrollment) runs October 15 – December 7 each year. During AEP, beneficiaries can: join a Medicare Advantage plan, switch MA plans, switch from MA to Original Medicare + Part D, or switch Part D plans. Coverage changes take effect January 1. This is the busiest time for agents — all marketing and enrollment activity is concentrated here. SOA (Scope of Appointment) must be completed 48 hours before any in-home sales appointment during AEP.",
+    "keywords": [
+      "aep",
+      "annual",
+      "open enrollment",
+      "october",
+      "december",
+      "january",
+      "soa",
+      "scope"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "ep-2",
+    "category": "Election Periods",
+    "title": "Medicare Advantage Open Enrollment Period (MA OEP) — Jan 1 to Mar 31",
+    "content": "The MA OEP runs January 1 – March 31. Beneficiaries enrolled in an MA plan can make ONE change: switch to another MA plan, or disenroll from MA and return to Original Medicare (with or without a standalone Part D plan). Cannot switch Part D standalone plans during MA OEP (unless disenrolling from MA). Beneficiaries new to Medicare get a 3-month MA OEP starting the first month of Part B coverage. Marketing restrictions apply — agents cannot target MA OEP for marketing.",
+    "keywords": [
+      "oep",
+      "ma oep",
+      "january",
+      "march",
+      "switch",
+      "disenroll",
+      "original medicare",
+      "one change"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "ep-3",
+    "category": "Election Periods",
+    "title": "Initial Enrollment Period (IEP)",
+    "content": "The IEP is the 7-month window around a beneficiary's 65th birthday: 3 months before, the birthday month, and 3 months after. Beneficiaries can enroll in Medicare Part A, B, C (MA), and/or D. If enrolled during the first 3 months, coverage starts the birthday month. If enrolled during the birthday month or later months, coverage starts the following month. IEP also applies to those qualifying by disability (25-month SSDI).",
+    "keywords": [
+      "iep",
+      "initial",
+      "65",
+      "birthday",
+      "7 month",
+      "part b",
+      "disability",
+      "ssdi"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "ep-4",
+    "category": "Election Periods",
+    "title": "Special Election Periods (SEP) overview",
+    "content": "SEPs allow enrollment changes outside of AEP/MA OEP due to qualifying life events. Common SEPs: moving out of plan service area, losing employer coverage, losing Medicaid/LIS eligibility, entering/leaving a long-term care facility, CMS plan non-renewal, and 5-star SEP (enroll in a 5-star plan anytime, once per year). Each SEP has specific enrollment windows (typically 2–3 months after the triggering event). Documentation may be required.",
+    "keywords": [
+      "sep",
+      "special election",
+      "move",
+      "employer",
+      "medicaid",
+      "lis",
+      "5-star",
+      "non-renewal",
+      "trigger"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "sep-1",
+    "category": "Carrier SEP Requirements",
+    "title": "SEP documentation requirements by carrier",
+    "content": "Most carriers require SEP documentation before enrollment can be submitted. Common documents: proof of address change (utility bill, lease), loss of employer coverage (employer letter, COBRA notice), Medicaid/LIS status change (state notice), institutional admission/discharge (facility letter). UHC and Humana allow online SEP attestation for some SEPs but may request documentation post-enrollment. Aetna and WellCare typically require documentation upfront. Always verify with the carrier's enrollment guide.",
+    "keywords": [
+      "sep",
+      "documentation",
+      "proof",
+      "address",
+      "employer",
+      "medicaid",
+      "attestation",
+      "carrier"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "sep-2",
+    "category": "Carrier SEP Requirements",
+    "title": "5-Star SEP — carrier availability",
+    "content": "The 5-Star SEP allows enrollment into a CMS-rated 5-star MA or Part D plan at any time, once per year, without waiting for AEP. Not all carriers have 5-star plans in all markets — check CMS Star Ratings (published each October). As of recent ratings, select UHC, Humana, and Kaiser plans have held 5-star status in certain counties. The beneficiary must be enrolling in the specific 5-star-rated plan (not just any plan from a carrier with a 5-star plan elsewhere).",
+    "keywords": [
+      "5-star",
+      "sep",
+      "star rating",
+      "cms",
+      "kaiser",
+      "uhc",
+      "humana",
+      "county"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "sep-3",
+    "category": "Carrier SEP Requirements",
+    "title": "Losing employer coverage SEP — carrier-specific notes",
+    "content": "When a beneficiary loses employer/union group health coverage, they qualify for a SEP (2 months after loss of coverage). UHC: accepts employer attestation letter or COBRA notice; enrollment effective the month after submission. Humana: requires employer termination letter with date; fast-tracks within 48 hours. Aetna: accepts retirement or layoff documentation; may require Part B activation proof. WellCare: streamlined for loss of employer drug coverage (Part D SEP). Always confirm effective dates — they vary.",
+    "keywords": [
+      "employer",
+      "loss",
+      "cobra",
+      "retirement",
+      "termination",
+      "part b",
+      "effective",
+      "carrier"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "sep-4",
+    "category": "Carrier SEP Requirements",
+    "title": "Moving SEP — service area change",
+    "content": "When a beneficiary moves to a new address outside their current plan's service area, they qualify for a SEP (2 months before or 3 months after the move). If the new address has the same plan available, no change is required. If the plan is unavailable, the beneficiary must choose a new plan or return to Original Medicare. UHC and Humana accept new address via online attestation; Aetna and BCBS may require a utility bill or lease. D-SNP beneficiaries moving states must re-verify Medicaid status in the new state.",
+    "keywords": [
+      "move",
+      "relocate",
+      "address",
+      "service area",
+      "new state",
+      "d-snp",
+      "medicaid",
+      "utility"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "na-1",
+    "category": "Needs Analysis & Fact Finding",
+    "title": "Essential fact-finding questions for MA enrollment",
+    "content": "Before recommending a Medicare Advantage plan, gather: 1) Current coverage (Original Medicare, MA, employer, Medicaid); 2) Doctors and specialists (names, NPIs, in-network verification); 3) Prescription drugs (name, dosage, frequency, pharmacy); 4) Monthly budget and premium tolerance; 5) Travel patterns (snowbirds, frequent travelers); 6) Chronic conditions and specialist needs; 7) Dental/vision/hearing needs; 8) Hospital or surgery anticipated in the next year. Document all answers on the needs assessment form.",
+    "keywords": [
+      "fact finding",
+      "needs analysis",
+      "questions",
+      "doctors",
+      "drugs",
+      "budget",
+      "travel",
+      "chronic"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "na-2",
+    "category": "Needs Analysis & Fact Finding",
+    "title": "Scope of Appointment (SOA) requirements",
+    "content": "A Scope of Appointment (SOA) form must be completed at least 48 hours before any in-person or telephonic sales appointment for MA or Part D. The SOA documents which products will be discussed (MA, Part D, Medigap, etc.). Agents may only discuss and sell products listed on the SOA. SOA is not required for existing clients for service-related meetings or for Medigap-only discussions. Keep SOA on file for 10 years. CMS audits SOA compliance regularly.",
+    "keywords": [
+      "soa",
+      "scope of appointment",
+      "48 hours",
+      "sales",
+      "cms",
+      "audit",
+      "document",
+      "compliance"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "na-3",
+    "category": "Needs Analysis & Fact Finding",
+    "title": "Drug formulary verification process",
+    "content": "Always verify the client's medications against each plan's formulary before recommending. Steps: 1) Collect complete drug list with dosages and frequencies; 2) Check each plan's formulary via carrier portal or Medicare Plan Finder; 3) Note tier levels (Tier 1 preferred generic to Tier 5 specialty); 4) Check for prior authorization, step therapy, or quantity limits; 5) Calculate total annual drug cost across plans. A plan with a $0 premium but Tier 4 for the client's main medication may cost more overall than a higher-premium plan.",
+    "keywords": [
+      "formulary",
+      "drug",
+      "tier",
+      "prior auth",
+      "step therapy",
+      "plan finder",
+      "medication",
+      "cost"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "na-4",
+    "category": "Needs Analysis & Fact Finding",
+    "title": "Provider network verification",
+    "content": "Before recommending a plan, verify all the client's providers are in-network: 1) Collect provider names and NPIs; 2) Check each carrier's online provider directory or call provider relations; 3) Confirm primary care, specialists, hospitals, and ancillary (physical therapy, dialysis); 4) Note if any providers are out-of-network and assess impact (HMO = no coverage, PPO = higher cost). Document verification dates — directories change frequently. If a key provider is leaving the network, flag for the client.",
+    "keywords": [
+      "provider",
+      "network",
+      "npi",
+      "directory",
+      "specialist",
+      "hospital",
+      "in-network",
+      "verify"
+    ],
+    "needsReview": false
+  },
+  {
+    "key": "na-5",
+    "category": "Needs Analysis & Fact Finding",
+    "title": "Documenting the enrollment — required forms checklist",
+    "content": "Required documents for a clean MA enrollment submission: 1) Signed SOA (48 hrs prior); 2) Completed needs assessment; 3) Plan enrollment application (paper or e-app); 4) SEP documentation (if applicable); 5) Proof of Part B activation (for IEP/SEP enrollments); 6) Medicaid/LIS documentation (for D-SNP); 7) Authorization for representative (if spouse/family assisting). Missing any item delays the enrollment. Submit via carrier portal and retain copies for 10 years per CMS retention rules.",
+    "keywords": [
+      "document",
+      "enrollment",
+      "soa",
+      "application",
+      "sep",
+      "part b",
+      "d-snp",
+      "retention",
+      "cms"
+    ],
+    "needsReview": false
+  }
+]
