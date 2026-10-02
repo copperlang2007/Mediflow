@@ -64,6 +64,9 @@ export class ObjectNotFoundError extends Error {
   }
 }
 
+/** Signed into recording upload URLs: the PUT may only create the object, never replace it. */
+export const CALL_RECORDING_CREATE_ONLY_HEADER = "x-goog-if-generation-match";
+
 export class ObjectStorageService {
   constructor() {}
 
@@ -296,6 +299,52 @@ export class ObjectStorageService {
       method: "GET",
       ttlSec,
     });
+  }
+
+  /**
+   * Call recordings live at `PRIVATE_OBJECT_DIR/call-recordings/{orgId}/{id}`.
+   * The key is always built here from the org and the recording id, never
+   * taken from a client, so one agency can never point at another's audio.
+   */
+  callRecordingKey(orgId: string, recordingId: string): string {
+    return `call-recordings/${orgId}/${recordingId}`;
+  }
+
+  /**
+   * A short-lived signed URL the browser PUTs the recording to directly. The
+   * content type is part of the signature, so the upload must send exactly it.
+   * It is create-only (`x-goog-if-generation-match: 0` is signed in), so once
+   * the object exists the URL cannot overwrite it after it was validated.
+   */
+  async getCallRecordingUploadURL(objectKey: string, contentType: string, ttlSec = 900): Promise<string> {
+    const { bucketName, objectName } = parseObjectPath(`${this.getPrivateObjectDir()}/${objectKey}`);
+    const [url] = await objectStorageClient
+      .bucket(bucketName)
+      .file(objectName)
+      .getSignedUrl({
+        version: "v4",
+        action: "write",
+        contentType,
+        extensionHeaders: { [CALL_RECORDING_CREATE_ONLY_HEADER]: "0" },
+        expires: Date.now() + ttlSec * 1000,
+      });
+    return url;
+  }
+
+  /** Remove an uploaded recording (rejected uploads). Missing objects are fine. */
+  async deleteCallRecording(objectKey: string): Promise<void> {
+    const { bucketName, objectName } = parseObjectPath(`${this.getPrivateObjectDir()}/${objectKey}`);
+    await objectStorageClient.bucket(bucketName).file(objectName).delete({ ignoreNotFound: true });
+  }
+
+  /** Size and type of an uploaded recording, or null when nothing was uploaded. */
+  async getCallRecordingMetadata(objectKey: string): Promise<{ size: number; contentType: string | null } | null> {
+    const { bucketName, objectName } = parseObjectPath(`${this.getPrivateObjectDir()}/${objectKey}`);
+    const file = objectStorageClient.bucket(bucketName).file(objectName);
+    const [exists] = await file.exists();
+    if (!exists) return null;
+    const [meta] = await file.getMetadata();
+    return { size: Number(meta.size ?? 0), contentType: typeof meta.contentType === "string" ? meta.contentType : null };
   }
 
   /**

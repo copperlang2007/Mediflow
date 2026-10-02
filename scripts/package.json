@@ -12,6 +12,7 @@
     "smoke:bedrock": "tsx ../artifacts/api-server/src/scripts/bedrock-smoke.ts",
     "seed:demo": "tsx ./src/seed-demo.ts",
     "move:clients": "tsx ./src/move-clients-between-orgs.ts",
+    "import:agencybridge-kb": "tsx ./src/import-agencybridge-kb.ts",
     "check:migration-journal": "tsx ./src/check-migration-journal.ts",
     "lq:sign": "tsx ./src/sign-lead-queue-request.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -1,7 +1,7 @@
 /**
  * Paste or upload one transcript, or import a batch for the look-back.
- * Text transcripts only: audio can't be transcribed yet, and this says so
- * instead of pretending.
+ * Recordings go through RecordingUpload (transcribed when Speech-to-Text is
+ * set up; otherwise it says so instead of pretending).
  */
 import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MiniStat, SectionCard, StatusPill } from "@/components/shared";
 import { AlertTriangle, CheckCircle2, FileAudio, PhoneOff, Upload } from "lucide-react";
 import { COMPLIANCE_TONE, QK, apiMessage, type CsConfig, type Compliance } from "./shared";
+import { RecordingUpload } from "./RecordingUpload";
 
 interface ScoreSummary {
   transcriptId: string;
@@ -47,6 +48,7 @@ interface ImportResponse {
 }
 
 function AudioNote({ config }: { config: CsConfig | undefined }) {
+  if (config?.audio.supported) return null;
   return (
     <p className="flex items-start gap-2 rounded-md bg-muted/60 p-3 text-sm text-muted-foreground">
       <FileAudio className="mt-0.5 h-4 w-4 shrink-0" />
@@ -335,6 +337,7 @@ export function AddTranscripts({
 }) {
   return (
     <div className="space-y-6">
+      <RecordingUpload config={config} onOpen={onOpen} />
       <SingleUpload config={config} onOpen={onOpen} onDone={() => undefined} />
       <BulkImport config={config} onShowDnc={onShowDnc} />
     </div>

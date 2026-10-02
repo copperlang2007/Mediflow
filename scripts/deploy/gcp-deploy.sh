@@ -169,6 +169,11 @@ OPTIONAL_ENV_FLAG=""
 [ -n "${TWILIO_TWIML_APP_SID:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}TWILIO_TWIML_APP_SID=${TWILIO_TWIML_APP_SID},"
 [ -n "${TWILIO_API_KEY_SID:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}TWILIO_API_KEY_SID=${TWILIO_API_KEY_SID},"
 [ -n "${TWILIO_VOICE_CALLER_ID:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}TWILIO_VOICE_CALLER_ID=${TWILIO_VOICE_CALLER_ID},"
+# Call recordings: opt in with SPEECH_TO_TEXT_PROVIDER=google (repo variable)
+# only after gcp-bootstrap.sh enabled the API, IAM and bucket CORS. Optional
+# per-agency daily cap.
+[ -n "${SPEECH_TO_TEXT_PROVIDER:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}SPEECH_TO_TEXT_PROVIDER=${SPEECH_TO_TEXT_PROVIDER},"
+[ -n "${CALL_RECORDINGS_DAILY_LIMIT:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}CALL_RECORDINGS_DAILY_LIMIT=${CALL_RECORDINGS_DAILY_LIMIT},"
 # "," separates --set-env-vars entries; a value containing one would split into
 # malformed entries. Fail loudly instead of deploying a garbled environment.
 for v in EMAIL_FROM_ADDRESS CONTRACTING_EMAIL_FROM GHL_LOCATION_ID; do
@@ -196,6 +201,7 @@ MFA_REQUIRED=true,\
 LOG_LEVEL=${LOG_LEVEL:-info},\
 WEB_STATIC_DIR=/app/artifacts/web-app/dist/public,\
 PRIVATE_OBJECT_DIR=${GCP_PHI_BUCKET}/private,\
+GOOGLE_CLOUD_PROJECT=${GCP_PROJECT_ID},\
 BUILD_SHA=${SHA}${OPTIONAL_ENV_FLAG:+,${OPTIONAL_ENV_FLAG%,}}"
 
 log "Deploying ${SERVICE} to Cloud Run (${GCP_REGION})…"

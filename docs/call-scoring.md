@@ -1,4 +1,4 @@
-# Call scoring (phase 2a: text transcripts)
+# Call scoring (text transcripts and recordings)
 
 Call scoring reads a call **transcript** and checks it against a compliance and
 quality checklist. It also looks for wording that may be a request to stop
@@ -15,6 +15,9 @@ You will find it in the sidebar under **Compliance > Call scoring**.
 
 - Scores pasted or uploaded transcripts (TXT, VTT, SRT or JSON) against the
   Medicare sales-call checklist or a general sales checklist.
+- Scores **recordings** (ENROLLHERE downloads or any dialer's export: MP3, WAV,
+  M4A and most audio formats, up to 500 MB) once Google Speech-to-Text is set up.
+  See "Recordings (phase 2b)" below.
 - Shows every finding with the **exact words**, **who said them** (agent, client,
   or "speaker not identified"), and **where** (time and turn). "Jump to it"
   highlights the words in the transcript.
@@ -28,9 +31,11 @@ You will find it in the sidebar under **Compliance > Call scoring**.
 
 ## What it does not do
 
-- **No audio transcription.** It cannot listen to recordings. Upload a
-  recording and you get a plain "audio transcription is not set up" message.
-  Nothing is transcribed, guessed or invented. See "Next step: audio" below.
+- **No audio transcription until it is set up.** Until Google Speech-to-Text
+  is turned on (below), a recording gets a plain "audio transcription is not
+  set up" message. Nothing is transcribed, guessed or invented.
+- **No live transcription yet.** Recordings are scored after the call. Live
+  transcription of web-based dialers is a later phase.
 - It does not add anyone to the do-not-contact list on its own. Ever. A person
   presses the button.
 - It does not use anyone's race or health answers. The checklist scores only
@@ -159,17 +164,77 @@ so today you need **transcripts** of those calls (TXT, VTT, SRT or JSON).
 Bulk imports use rules only (no AI). To add AI review to one call, open it and
 rescore it from the API, or paste it again once AI review is set up.
 
-## Next step: audio (phase 2b)
+## Recordings (phase 2b)
 
-To score recordings directly, the app needs speech-to-text. That means choosing a
-vendor **with a signed HIPAA business associate agreement (BAA)**. This is the
-owner's decision. Nothing is integrated yet, and no vendor is called by this
-code. When you have chosen one, phase 2b can add:
+On **Call scoring > Add calls > Score a recording**, choose the file and its
+channel layout, then **Upload and score**. The file goes straight from the
+browser to the private Cloud Storage bucket (it never passes through the app
+server, so long calls are fine). Google Speech-to-Text transcribes it, usually
+in a few minutes, and the call is then scored exactly like a transcript. The
+**Recent recordings** list shows where each one is and opens the scored call.
 
-- audio upload and transcription into the same transcript, score and review flow,
-  keeping speaker labels from the recording channels;
-- linking native Twilio calls (call sessions) to their transcripts automatically;
-- live coaching during a call.
+**Who is speaking.** Pick the channel layout that matches the file:
+
+- **One track** (most downloads): speakers are told apart by voice and shown as
+  "Speaker 1" / "Speaker 2". Roles are never guessed from what was said, so
+  agent-only checks are marked for review, as with an unlabelled transcript.
+- **Stereo, agent on the left / right**: each side is transcribed separately and
+  labelled Agent / Client. Use this whenever the dialer can export dual-channel
+  audio; scoring is much more precise.
+
+Turn times on a recording are approximate (to the end of each sentence), not
+word by word: word timing would cut Google's limit to 20-minute calls.
+
+**If something goes wrong** the recording shows **Failed** with a plain reason
+(for example "No speech was found", or a permission problem in the setup).
+Google's own error text is never shown, because it can name the bucket.
+
+### Setting up Google Speech-to-Text (one time)
+
+Speech-to-Text is covered by the Google Cloud BAA; confirm the BAA is accepted
+for the project before turning this on.
+
+1. In the Google Cloud project that runs the app, enable the **Cloud
+   Speech-to-Text API**.
+2. Give the app's Cloud Run service account the **Cloud Speech Client** role
+   (`roles/speech.client`), and the Speech-to-Text service agent
+   (`service-PROJECT_NUMBER@gcp-sa-speech.iam.gserviceaccount.com`) **Storage
+   Object Viewer** on the private bucket, since Google reads the recording as
+   that agent.
+3. Allow the browser to upload to the bucket (CORS). Without this every upload
+   fails. `scripts/deploy/gcp-bootstrap.sh` does steps 1-3 when you run it with
+   `APP_ORIGIN=https://your-app-address`. To do it by hand, save this as
+   `cors.json`, with your app's address:
+
+   ```json
+   [{ "origin": ["https://your-app-address"], "method": ["PUT"], "responseHeader": ["Content-Type", "x-goog-if-generation-match"], "maxAgeSeconds": 3600 }]
+   ```
+
+   then run `gcloud storage buckets update gs://YOUR_BUCKET --cors-file=cors.json`.
+4. Turn it on. On Cloud Run, set the GitHub Actions repository variable
+   `SPEECH_TO_TEXT_PROVIDER` to `google` (and optionally
+   `CALL_RECORDINGS_DAILY_LIMIT`); the deploy workflow passes them to the
+   service and always sets `GOOGLE_CLOUD_PROJECT`. A manual edit on the Cloud
+   Run service is erased by the next deploy. On other hosts set:
+
+   | Setting | Value |
+   | --- | --- |
+   | `SPEECH_TO_TEXT_PROVIDER` | `google` (turns the feature on) |
+   | `GOOGLE_CLOUD_PROJECT` | the project ID (optional on Cloud Run) |
+   | `SPEECH_LOCATION` | optional, default `us` (data stays in the US) |
+   | `SPEECH_MODEL` | optional, default `chirp_3`; use `long` if your region lacks it |
+   | `CALL_RECORDINGS_DAILY_LIMIT` | optional, default `300` recordings per agency per 24 hours (a ceiling on Speech-to-Text spend) |
+
+   `PRIVATE_OBJECT_DIR` must already be set (it is for document storage).
+5. Open Call scoring: the **Audio transcription** box should say **Set up**.
+   Upload a short test call before sending real ones.
+
+Recordings are kept encrypted in the private bucket with the same 10-year
+"retain until" date as transcripts; the file name and phone number are stored
+only inside encrypted details.
+
+**Still to come:** live transcription for web-based dialers, and linking native
+softphone calls to their recordings automatically.
 
 ## Retention and privacy
 
@@ -196,14 +261,17 @@ code. When you have chosen one, phase 2b can add:
 
 | Role | Read | Upload / rescore / import | Override grades / resolve do-not-contact |
 | --- | --- | --- | --- |
-| Super admin, Agency admin, Compliance manager | All calls | Yes | Yes |
+| Super admin, Agency admin, Compliance manager | All calls | Yes (including recordings) | Yes |
 | Agent | Only calls linked to a softphone call **they** placed (matched by user, not by a shared agent profile) | No | No |
 | Everyone else | No | No | No |
 
 ## Limits
 
-- One file up to 1 MB; up to 50 files per import; pasted text up to 500,000
-  characters.
+- One transcript file up to 1 MB; up to 50 files per import; pasted text up to
+  500,000 characters. One recording up to 500 MB and about an hour of audio
+  (longer calls: split them); 300 recordings per agency per day by default. A
+  transcription that runs longer than 6 hours is stopped, and a background sweep
+  every 10 minutes restarts any that stalled.
 - Known follow-up: at very large volumes (tens of thousands of transcripts) the
   list scans in batches of 500 and assembles the effective result in memory. The
   next step is to push the rubric, compliance and open-request filters into SQL.
@@ -225,7 +293,12 @@ Code lives in `artifacts/api-server/src/lib/callScoring/` (rules, DNC detector,
 rubrics as data, redaction, fail-closed merge, parsing, storage) and
 `routes/callScoring.ts`. The web page is `pages/call-scoring.tsx`. Tables are
 `call_transcripts`, `call_scores`, `call_score_findings`, `call_score_reviews`
-(migration 0063). Endpoints are under `/api/call-scoring/`: `config`,
+(migration 0063) and `call_recordings` (migration 0064). Recordings:
+`lib/callScoring/speech.ts` (Google Speech-to-Text v2 batch),
+`lib/callScoring/recordings.ts` (one idempotent step per run of the
+`transcribe-recording` job, `workers/transcribeRecording.ts`), and
+`components/call-scoring/RecordingUpload.tsx`. Endpoints are under `/api/call-scoring/`: `config`,
 `transcripts` (POST, GET), `transcripts/:id` (GET), `transcripts/:id/rescore`,
 `transcripts/:id/criteria/:criterionId` (PATCH), `summary`, `dnc-review` (GET),
-`dnc-review/:findingId/resolve` (POST), `import` (POST).
+`dnc-review/:findingId/resolve` (POST), `import` (POST),
+`recordings/upload-url` (POST), `recordings/:id/uploaded` (POST), `recordings` (GET).

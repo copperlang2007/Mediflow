@@ -121,6 +121,8 @@ app.use(helmet({
         "https://*.protect.clerk.com:*",
         // Twilio Voice SDK signalling (browser calling): HTTPS + secure WebSocket.
         "https://*.twilio.com", "wss://*.twilio.com",
+        // Call recordings upload straight to Cloud Storage with a signed URL.
+        "https://storage.googleapis.com",
       ],
       // The Voice SDK plays its ring / disconnect tones from Twilio's CDN.
       "media-src": ["'self'", "https://sdk.twilio.com", "data:", "blob:"],
