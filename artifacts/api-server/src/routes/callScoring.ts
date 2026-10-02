@@ -57,7 +57,7 @@ import { listDncQueue, resolveDncFinding } from "../lib/callScoring/dncReview";
 import { loadTranscriptRow, retainUntil, type ScopeFilter } from "../lib/callScoring/store";
 import { speechSetup } from "../lib/callScoring/speech";
 import type { RecordingDetails } from "../lib/callScoring/recordings";
-import { enqueue, JOB_NAMES } from "../lib/jobs";
+import { enqueue, JOB_NAMES, transcribeJobKey } from "../lib/jobs";
 import type { Rubric, TranscriptFormat } from "../lib/callScoring/types";
 
 const router: IRouter = Router();
@@ -1045,7 +1045,7 @@ router.post(
       .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "uploading")))
       .returning({ id: callRecordingsTable.id });
     if (moved.length) {
-      const jobId = await enqueue(JOB_NAMES.TRANSCRIBE_RECORDING, { recordingId: row.id }, { singletonKey: `transcribe:${row.id}` });
+      const jobId = await enqueue(JOB_NAMES.TRANSCRIBE_RECORDING, { recordingId: row.id }, { singletonKey: transcribeJobKey(row.id) });
       if (!jobId) logger.error({ recordingId: row.id }, "Call recording: could not queue transcription");
     }
     res.status(202).json({ recordingId: row.id, status: "queued" });

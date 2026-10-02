@@ -6,7 +6,7 @@
  * itself with a delay instead of holding a worker slot. Steps are idempotent,
  * so a duplicate or retried job is harmless.
  */
-import { enqueue, JOB_NAMES } from "../lib/jobs";
+import { enqueue, JOB_NAMES, transcribeJobKey } from "../lib/jobs";
 import { POLL_INTERVAL_SEC, processRecording } from "../lib/callScoring/recordings";
 import { logger } from "../lib/logger";
 
@@ -21,7 +21,9 @@ export async function transcribeRecordingWorker(payload: TranscribeRecordingPayl
   const id = await enqueue(
     JOB_NAMES.TRANSCRIBE_RECORDING,
     { recordingId: payload.recordingId },
-    { startAfter: outcome === "retry_start" ? 120 : POLL_INTERVAL_SEC },
+    { startAfter: outcome === "retry_start" ? 120 : POLL_INTERVAL_SEC, singletonKey: transcribeJobKey(payload.recordingId) },
   );
-  if (!id) logger.error({ recordingId: payload.recordingId }, "Transcription: could not queue the next check");
+  // null: a check is already waiting (deduped by key) or the queue was down;
+  // either way the recordings sweep picks the row up if nothing runs.
+  if (!id) logger.warn({ recordingId: payload.recordingId }, "Transcription: next check not queued (already waiting, or queue unavailable)");
 }

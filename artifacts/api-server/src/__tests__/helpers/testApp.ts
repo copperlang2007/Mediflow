@@ -206,6 +206,7 @@ export const jobsMockFactory = (): Record<string, unknown> => ({
     TRANSCRIBE_RECORDING: "transcribe-recording",
     RECORDINGS_SWEEP: "recordings-sweep",
   },
+  transcribeJobKey: (id: string): string => `transcribe:${id}`,
   enqueue: async (name: string, data: unknown): Promise<string> => {
     (globalThis.__TEST_ENQUEUED__ ??= []).push({ name, data });
     return "job-id";

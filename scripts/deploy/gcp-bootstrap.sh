@@ -224,7 +224,12 @@ if [[ -n "${APP_ORIGIN:-}" ]]; then
   gcloud storage buckets update "gs://${BUCKET}" --cors-file="${CORS_FILE}"
   rm -f "${CORS_FILE}"
 else
-  log "APP_ORIGIN not set: skipping the bucket CORS rule (call recording uploads need it)."
+  if [[ "$(gcloud storage buckets describe "gs://${BUCKET}" --format='value(cors_config)')" == "" ]]; then
+    echo "WARNING: APP_ORIGIN is not set and gs://${BUCKET} has no CORS rule. Browser uploads of call" >&2
+    echo "         recordings will fail until you re-run with APP_ORIGIN=https://your-app-address." >&2
+  else
+    log "APP_ORIGIN not set: keeping the bucket's existing CORS rule."
+  fi
 fi
 
 # ---------------------------------------------------------------------------

@@ -216,9 +216,26 @@ const EXPIRY_OVERRIDES: Partial<Record<JobName, number>> = {
   [JOB_NAMES.GHL_SYNC]: 40 * 60,
 };
 
+/**
+ * Queue policies other than pg-boss's default ("standard", where singletonKey
+ * dedupes nothing). Fixed when the queue is first created.
+ *   transcribe-recording: "short" — at most one waiting job per recording
+ *   (singletonKey transcribe:<id>), so the route, the worker's own next check
+ *   and the sweep cannot stack duplicate jobs.
+ */
+const POLICY_OVERRIDES: Partial<Record<JobName, Queue["policy"]>> = {
+  [JOB_NAMES.TRANSCRIBE_RECORDING]: "short",
+};
+
+/** pg-boss key that dedupes transcription jobs for one recording (with the "short" policy). */
+export function transcribeJobKey(recordingId: string): string {
+  return `transcribe:${recordingId}`;
+}
+
 function queueOptions(name: JobName): Omit<Queue, "name"> {
   return {
     ...(RETRY_OVERRIDES[name] ?? DEFAULT_RETRY),
+    ...(POLICY_OVERRIDES[name] ? { policy: POLICY_OVERRIDES[name] } : {}),
     ...(EXPIRY_OVERRIDES[name] ? { expireInSeconds: EXPIRY_OVERRIDES[name] } : {}),
     deadLetter: DEAD_LETTER_QUEUE,
   };
