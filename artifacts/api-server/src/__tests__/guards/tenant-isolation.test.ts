@@ -39,6 +39,10 @@ const GLOBAL_TABLES = new Set([
   "organizationsTable", // the tenant root itself, scoped by its own PK
   "sessionActivityTable", // keyed by Clerk session id
   "billingEventsTable", // webhook ledger, keyed by the provider's event id
+  // Platform-wide Knowledge Base articles: no org_id by design. Only super_admin
+  // (MFA) can write them; agencies read them and record their own choices in
+  // kbLibraryChoicesTable, which IS org-scoped and still guarded.
+  "kbLibraryArticlesTable",
 ]);
 
 /**
