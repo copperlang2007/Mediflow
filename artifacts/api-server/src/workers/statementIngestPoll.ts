@@ -10,7 +10,7 @@
  * recorded on the source and never thrown, so the next tick is the retry.
  */
 import { randomUUID } from "crypto";
-import { and, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt } from "drizzle-orm";
 import {
   db,
   notificationsTable,
@@ -128,18 +128,36 @@ async function notifyReviewers(source: StatementIngestSource, count: number): Pr
     .from(usersTable)
     .where(and(eq(usersTable.orgId, source.orgId), inArray(usersTable.role, ["agency_admin", "compliance_manager"])));
   if (reviewers.length === 0) return;
-  const rows = reviewers.map((u) => ({
-    id: randomUUID(),
-    orgId: source.orgId,
-    userId: u.id,
-    type: "statement_ingest_review",
-    title: `${count} carrier statement${count === 1 ? "" : "s"} need review`,
-    body: "Automatic statement intake could not finish these files. Open Commissions to review them.",
-    priority: "high",
-    resourceType: "statement_ingest_source",
-    resourceId: source.id,
-  }));
-  await db.insert(notificationsTable).values(rows).onConflictDoNothing();
+  // One unread alert per reviewer per source: the table has no unique key to dedup on, and a
+  // poll every 10 minutes would otherwise add a row (and an SSE ping) per flagged file per tick.
+  const alreadyAlerted = await db
+    .select({ userId: notificationsTable.userId })
+    .from(notificationsTable)
+    .where(
+      and(
+        eq(notificationsTable.orgId, source.orgId),
+        eq(notificationsTable.type, "statement_ingest_review"),
+        eq(notificationsTable.resourceId, source.id),
+        inArray(notificationsTable.userId, reviewers.map((u) => u.id)),
+        isNull(notificationsTable.readAt),
+      ),
+    );
+  const skip = new Set(alreadyAlerted.map((r) => r.userId));
+  const rows = reviewers
+    .filter((u) => !skip.has(u.id))
+    .map((u) => ({
+      id: randomUUID(),
+      orgId: source.orgId,
+      userId: u.id,
+      type: "statement_ingest_review",
+      title: `${count} carrier statement${count === 1 ? "" : "s"} need review`,
+      body: "Automatic statement intake could not finish these files. Open Commissions to review them.",
+      priority: "high",
+      resourceType: "statement_ingest_source",
+      resourceId: source.id,
+    }));
+  if (rows.length === 0) return;
+  await db.insert(notificationsTable).values(rows);
   broadcastToUsers(
     rows.map((r) => r.userId),
     { type: "notification", resourceType: "statement_ingest_source", resourceId: source.id },

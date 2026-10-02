@@ -106,8 +106,9 @@ export class DriveStatementSource implements StatementSource {
           externalId: f.id,
           name: f.name,
           folderName,
-          // Native Google files have no md5; the modified time still changes on edit.
-          checksum: f.md5Checksum ?? `modified:${f.modifiedTime ?? "unknown"}`,
+          // Native Google files have no md5. They can never be read as bytes anyway, so use a
+          // STABLE fingerprint: one review row per file, not a new one on every edit/recalc.
+          checksum: f.md5Checksum ?? "native-google-file",
           modifiedTime: modified,
           sizeBytes: f.size ? Number(f.size) : null,
           downloadable: !native,

@@ -65,9 +65,11 @@ Start in `hold` and switch to `auto` once a full cycle has come through cleanly.
 |---|---|
 | `GET /api/commissions/ingest[?status=held,needs_review,failed]` | source config + files |
 | `POST /api/commissions/ingest/check` | poll now |
-| `POST /api/commissions/ingest/files/:id/approve` | reconcile a held or flagged statement |
+| `POST /api/commissions/ingest/files/:id/approve` | reconcile a held statement (or recover one whose reconcile failed); for an auto-reconciled file that was only flagged, it accepts the result without reconciling again |
 | `POST /api/commissions/ingest/files/:id/retry` | forget a failed / flagged file that created no statement, so the next poll re-reads it (fix the name or the mapping first) |
-| `POST /api/commissions/ingest/files/:id/dismiss` | clear a flagged file without posting it |
+| `POST /api/commissions/ingest/files/:id/dismiss` | stop tracking a flagged or failed file that has **not** been posted. Refused (409) once its statement is reconciled: the payouts are already credited, and dismiss cannot take them back. There is no reversal action yet |
+
+Reviewers get one unread alert per source until they read it. Native Google Docs/Sheets in the folder show once as "unsupported" (edits do not create new rows); dismiss them.
 
 A poll failure (revoked access, wrong folder id) shows as `lastError` on the source and
 is reported to Sentry at most once an hour.

@@ -39,12 +39,15 @@ export type IngestOutcome = "skipped_seen" | StatementIngestFile["status"];
 
 export interface IngestDeps {
   storeFile: (content: Buffer, fileName: string, orgId: string) => Promise<string>;
+  /** Removes an object written by `storeFile` (compensation when nothing ends up owning it). */
+  deleteFile: (storageKey: string) => Promise<void>;
   reconcile: typeof reconcileStatement;
 }
 
 const defaultDeps: IngestDeps = {
   storeFile: (content, fileName, orgId) =>
     new ObjectStorageService().uploadDocument(content, fileName, orgId, { contentType: "text/csv" }),
+  deleteFile: (storageKey) => new ObjectStorageService().deleteDocument(storageKey),
   reconcile: reconcileStatement,
 };
 
@@ -159,29 +162,43 @@ export async function ingestFile(
     // 3. STORE
     const storageKey = await deps.storeFile(content, file.name, source.orgId);
 
-    // 4. CREATE: statement + lines together or not at all
+    // 4. CREATE: statement + lines together or not at all. The ledger row is stamped with
+    // the statement id in the SAME transaction, so a later failure (e.g. reconcile throws)
+    // can never leave a statement the ingest workflow cannot reach and approve.
     const statementId = randomUUID();
-    await db.transaction(async (tx) => {
-      await tx.insert(commissionStatementsTable).values({
-        id: statementId,
-        orgId: source.orgId,
-        carrierId: carrier.id,
-        statementDate: inferStatementDate(file.name, file.modifiedTime, period),
-        periodStart: period.periodStart,
-        periodEnd: period.periodEnd,
-        // The files carry no carrier-stated total, so none is recorded. Writing the
-        // sum of the lines here would make the variance check always pass.
-        totalAmount: null,
-        currency: "USD",
-        // The table's CHECK allows csv_upload | manual | api. "api" = automated intake;
-        // which file it came from is recorded in statement_ingest_files.statement_id.
-        source: "api",
-        storageKey,
-        status: "parsed",
-        uploadedByUserId: null,
+    try {
+      await db.transaction(async (tx) => {
+        await tx.insert(commissionStatementsTable).values({
+          id: statementId,
+          orgId: source.orgId,
+          carrierId: carrier.id,
+          statementDate: inferStatementDate(file.name, file.modifiedTime, period),
+          periodStart: period.periodStart,
+          periodEnd: period.periodEnd,
+          // The files carry no carrier-stated total, so none is recorded. Writing the
+          // sum of the lines here would make the variance check always pass.
+          totalAmount: null,
+          currency: "USD",
+          // The table's CHECK allows csv_upload | manual | api. "api" = automated intake;
+          // which file it came from is recorded in statement_ingest_files.statement_id.
+          source: "api",
+          storageKey,
+          status: "parsed",
+          uploadedByUserId: null,
+        });
+        await insertLineItems(tx, statementId, source.orgId, lines);
+        await tx
+          .update(statementIngestFilesTable)
+          .set({ statementId, lineCount: lines.length })
+          .where(eq(statementIngestFilesTable.id, ledgerId));
       });
-      await insertLineItems(tx, statementId, source.orgId, lines);
-    });
+    } catch (err) {
+      // Nothing owns the stored PHI object now; don't leave it orphaned in the bucket.
+      await deps.deleteFile(storageKey).catch((delErr) =>
+        logger.warn({ errName: describeError(delErr), orgId: source.orgId, ledgerId }, "Statement ingest: could not remove orphaned upload"),
+      );
+      throw err;
+    }
 
     // 5. RECONCILE (auto) or HOLD
     if (source.mode === "hold") {
@@ -215,9 +232,18 @@ async function reconcileAndSettle(
 }
 
 /**
- * Approve a statement that was parsed but not yet reconciled: reconcile it now.
- * Returns null when the row is not approvable (not found, no statement was
- * created, or it is already being processed / done).
+ * Approve a statement that has a ledger entry but may not be reconciled yet.
+ *
+ *   - held                      parsed, never reconciled   -> reconcile now
+ *   - failed (statement exists) reconcile threw            -> reconcile now (recovery)
+ *   - needs_review (statement)  auto-reconciled, flagged   -> already posted; just accept it
+ *
+ * An already-reconciled statement is NOT reconciled again: the worker's payouts are
+ * idempotent but it re-queues the commission/chargeback automations on every run, which
+ * would send duplicate emails, SMS and tasks.
+ *
+ * Returns null when the row is not approvable (not found, no statement was created, or
+ * it is already being processed / done).
  */
 export async function approveHeldFile(
   orgId: string,
@@ -232,13 +258,21 @@ export async function approveHeldFile(
       and(
         eq(statementIngestFilesTable.id, ledgerId),
         eq(statementIngestFilesTable.orgId, orgId),
-        inArray(statementIngestFilesTable.status, ["held", "needs_review"]),
+        inArray(statementIngestFilesTable.status, ["held", "needs_review", "failed"]),
         isNotNull(statementIngestFilesTable.statementId),
       ),
     )
     .returning();
   if (!row?.statementId) return null;
   try {
+    const [stmt] = await db
+      .select({ status: commissionStatementsTable.status })
+      .from(commissionStatementsTable)
+      .where(and(eq(commissionStatementsTable.id, row.statementId), eq(commissionStatementsTable.orgId, orgId)))
+      .limit(1);
+    if (stmt?.status === "reconciled") {
+      return await settle(row.id, "approved", { reason: null });
+    }
     const result = await deps.reconcile(row.statementId, orgId);
     return await settle(row.id, "approved", {
       matchedCount: result.matched,

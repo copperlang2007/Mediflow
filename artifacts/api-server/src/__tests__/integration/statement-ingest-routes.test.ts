@@ -168,6 +168,36 @@ describe("file actions", () => {
     expect(row.status).toBe("dismissed");
   });
 
+  it("dismiss is refused once the statement is reconciled, because its payouts are already credited", async () => {
+    const statementId = `stmt-${randomUUID()}`;
+    await db.insert(commissionStatementsTable).values({
+      id: statementId, orgId: org.id, carrierId: humanaId, statementDate: "2026-02-28",
+      periodStart: "2026-02-01", periodEnd: "2026-02-28", currency: "USD", source: "api", status: "reconciled",
+    });
+    const id = await seedFile(org.id, sourceId, { status: "needs_review", statementId });
+    const res = await request(app).post(`/api/commissions/ingest/files/${id}/dismiss`).set(withAuth(admin.id));
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/already reconciled/);
+    const [row] = await db.select().from(statementIngestFilesTable).where(eq(statementIngestFilesTable.id, id));
+    expect(row.status).toBe("needs_review");
+
+    // Approve is the way to accept it, and it must not reconcile a second time.
+    const approved = await request(app).post(`/api/commissions/ingest/files/${id}/approve`).set(withAuth(admin.id));
+    expect(approved.status).toBe(200);
+    expect(approved.body.status).toBe("approved");
+  });
+
+  it("dismiss still clears an un-posted statement (parsed, not reconciled)", async () => {
+    const statementId = `stmt-${randomUUID()}`;
+    await db.insert(commissionStatementsTable).values({
+      id: statementId, orgId: org.id, carrierId: humanaId, statementDate: "2026-03-31",
+      periodStart: "2026-03-01", periodEnd: "2026-03-31", currency: "USD", source: "api", status: "parsed",
+    });
+    const id = await seedFile(org.id, sourceId, { status: "failed", statementId });
+    const res = await request(app).post(`/api/commissions/ingest/files/${id}/dismiss`).set(withAuth(admin.id));
+    expect(res.status).toBe(200);
+  });
+
   it("another org cannot act on this org's files", async () => {
     const id = await seedFile(org.id, sourceId, { status: "needs_review" });
     for (const action of ["retry", "dismiss", "approve"]) {

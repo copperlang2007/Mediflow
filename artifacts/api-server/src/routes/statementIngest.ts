@@ -7,7 +7,9 @@
  *   POST   /commissions/ingest/check           poll now
  *   POST   /commissions/ingest/files/:id/approve   reconcile a held / flagged statement
  *   POST   /commissions/ingest/files/:id/retry     forget a failed / flagged file so the next poll re-reads it
- *   POST   /commissions/ingest/files/:id/dismiss   clear a flagged file without posting it
+ *   POST   /commissions/ingest/files/:id/dismiss   stop tracking a flagged file that has NOT been posted
+ *                                                  (refused once its statement is reconciled: money is already
+ *                                                  credited; use approve to accept it)
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import { and, desc, eq, inArray } from "drizzle-orm";
@@ -16,6 +18,7 @@ import { z } from "zod";
 import {
   db,
   carriersTable,
+  commissionStatementsTable,
   statementIngestFilesTable,
   statementIngestSourcesTable,
   STATEMENT_INGEST_FILE_STATUSES,
@@ -216,20 +219,31 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     const { orgId } = req as AuthenticatedRequest;
     const [row] = await db
-      .update(statementIngestFilesTable)
-      .set({ status: "dismissed" })
-      .where(
-        and(
-          eq(statementIngestFilesTable.id, idParam(req)),
-          eq(statementIngestFilesTable.orgId, orgId),
-          inArray(statementIngestFilesTable.status, ["needs_review", "failed"]),
-        ),
-      )
-      .returning({ id: statementIngestFilesTable.id });
-    if (!row) {
-      res.status(404).json({ error: "No flagged file with that id" });
+      .select({
+        id: statementIngestFilesTable.id,
+        status: statementIngestFilesTable.status,
+        statementStatus: commissionStatementsTable.status,
+      })
+      .from(statementIngestFilesTable)
+      .leftJoin(commissionStatementsTable, eq(commissionStatementsTable.id, statementIngestFilesTable.statementId))
+      .where(and(eq(statementIngestFilesTable.id, idParam(req)), eq(statementIngestFilesTable.orgId, orgId)))
+      .limit(1);
+    if (!row || !["needs_review", "failed"].includes(row.status)) {
+      res.status(404).json({ error: "No flagged or failed file with that id" });
       return;
     }
+    // Dismiss only stops tracking a file; it cannot take back a posting. Once the
+    // statement is reconciled its lines are already credited to agents' payouts.
+    if (row.statementStatus === "reconciled") {
+      res.status(409).json({
+        error: "This statement is already reconciled and its payouts are credited, so it cannot be dismissed. Use approve to accept it, or correct it from the Commissions page.",
+      });
+      return;
+    }
+    await db
+      .update(statementIngestFilesTable)
+      .set({ status: "dismissed" })
+      .where(and(eq(statementIngestFilesTable.id, row.id), inArray(statementIngestFilesTable.status, ["needs_review", "failed"])));
     res.json({ status: "dismissed" });
   },
 );

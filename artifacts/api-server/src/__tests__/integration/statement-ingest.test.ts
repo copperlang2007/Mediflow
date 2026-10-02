@@ -46,13 +46,20 @@ let approveHeldFile: typeof import("../../lib/statementIngest/ingest").approveHe
 let pollWorker: typeof import("../../workers/statementIngestPoll").statementIngestPollWorker;
 
 const stored: string[] = [];
+const deleted: string[] = [];
+let reconcileCalls = 0;
 const deps = () => ({
   storeFile: async (_c: Buffer, name: string, orgId: string) => {
     stored.push(name);
     return `/objects/documents/${orgId}/${randomUUID()}/${name}`;
   },
-  reconcile: (async (...a: Parameters<typeof import("../../workers/reconcileCommissionStatement").reconcileStatement>) =>
-    (await import("../../workers/reconcileCommissionStatement")).reconcileStatement(...a)),
+  deleteFile: async (key: string) => {
+    deleted.push(key);
+  },
+  reconcile: (async (...a: Parameters<typeof import("../../workers/reconcileCommissionStatement").reconcileStatement>) => {
+    reconcileCalls += 1;
+    return (await import("../../workers/reconcileCommissionStatement")).reconcileStatement(...a);
+  }),
 });
 
 /** Humana's headerless pipe layout: policy|last|member|first|dob|state|plan|year|start|end|premium|commission|type */
@@ -135,6 +142,8 @@ afterAll(async () => {
 beforeEach(() => {
   clearEnqueuedJobs();
   stored.length = 0;
+  deleted.length = 0;
+  reconcileCalls = 0;
 });
 
 describe("ingestFile", () => {
@@ -290,6 +299,93 @@ describe("ingestFile", () => {
     const f = from.add("2025-10.csv", humanaFile([{ member: "M1", amount: "5.00" }]), { folderName: "Q3 Payments" });
     // Neither "Q3 Payments" nor "2025-10.csv" names a carrier; the mapping carries it.
     expect(await ingestFile(source, f, from, deps())).toBe("held");
+  });
+});
+
+describe("review findings (regressions)", () => {
+  it("a reconcile failure leaves the ledger pointing at the statement, and approve recovers it", async () => {
+    const { db } = await bootTestDb();
+    const source = await newSource("auto");
+    const from = new FakeSource();
+    const member = await seedMatchableMember();
+    const f = from.add("Humana_2024-12.csv", humanaFile([{ member, amount: "12.00" }]));
+    const throwing = { ...deps(), reconcile: async () => { throw new Error("lock timeout"); } };
+
+    expect(await ingestFile(source, f, from, throwing)).toBe("failed");
+    const [row] = await ledger(source.id);
+    expect(row.status).toBe("failed");
+    expect(row.statementId).not.toBeNull();
+    const [stmt] = await db.select().from(commissionStatementsTable).where(eq(commissionStatementsTable.id, row.statementId!));
+    expect(stmt.status).toBe("parsed");
+
+    // The operator can still reach it through the ingest workflow.
+    expect(await approveHeldFile(orgId, row.id, deps())).toBe("approved");
+    const [after] = await db.select().from(commissionStatementsTable).where(eq(commissionStatementsTable.id, row.statementId!));
+    expect(after.status).toBe("reconciled");
+  });
+
+  it("approving an auto-reconciled flagged file does not reconcile (or re-fire automations) again", async () => {
+    const source = await newSource("auto");
+    const from = new FakeSource();
+    const member = await seedMatchableMember();
+    // 1 matched + 2 unmatched = 67% unmatched -> flagged AFTER reconcile ran.
+    const f = from.add("Humana_2024-11.csv", humanaFile([
+      { member, amount: "10.00" }, { member: "NOPE-A", amount: "1.00" }, { member: "NOPE-B", amount: "1.00" },
+    ]));
+    expect(await ingestFile(source, f, from, deps())).toBe("needs_review");
+    const [flagged] = await ledger(source.id);
+    expect(reconcileCalls).toBe(1);
+    const automationsBefore = ((globalThis.__TEST_ENQUEUED__ ?? []) as Array<{ name: string }>)
+      .filter((j) => j.name === "run-automation-rules").length;
+    expect(automationsBefore).toBeGreaterThan(0);
+
+    expect(await approveHeldFile(orgId, flagged.id, deps())).toBe("approved");
+
+    expect(reconcileCalls).toBe(1);
+    const automationsAfter = ((globalThis.__TEST_ENQUEUED__ ?? []) as Array<{ name: string }>)
+      .filter((j) => j.name === "run-automation-rules").length;
+    expect(automationsAfter).toBe(automationsBefore);
+    const [after] = await ledger(source.id);
+    expect(after).toMatchObject({ status: "approved", matchedCount: 1, unmatchedCount: 2 });
+  });
+
+  it("a failure creating the statement removes the uploaded object and leaves nothing behind", async () => {
+    const { db } = await bootTestDb();
+    const source = await newSource("hold");
+    const from = new FakeSource();
+    // 11 digits before the point overflows numeric(10,2): the line insert fails mid-transaction.
+    const f = from.add("Humana_2024-10.csv", humanaFile([{ member: "M1", amount: "99999999999.00" }]));
+
+    expect(await ingestFile(source, f, from, deps())).toBe("failed");
+    expect(stored).toHaveLength(1);
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]).toContain("Humana_2024-10.csv");
+    const [row] = await ledger(source.id);
+    expect(row.statementId).toBeNull();
+    const stmts = await db.select().from(commissionStatementsTable).where(eq(commissionStatementsTable.carrierId, humanaId));
+    expect(stmts.filter((s) => s.periodStart === "2024-10-01")).toHaveLength(0);
+  });
+
+  it("a failed cleanup does not mask the original failure", async () => {
+    const source = await newSource("hold");
+    const from = new FakeSource();
+    const f = from.add("Humana_2024-09.csv", humanaFile([{ member: "M1", amount: "99999999999.00" }]));
+    const brokenDelete = { ...deps(), deleteFile: async () => { throw new Error("bucket down"); } };
+    expect(await ingestFile(source, f, from, brokenDelete)).toBe("failed");
+  });
+
+  it("repeated polls alert each reviewer once while an alert is unread", async () => {
+    const { db } = await bootTestDb();
+    const source = await newSource("hold");
+    const from = new FakeSource();
+    for (let i = 0; i < 3; i++) {
+      from.add(`notes-${i}.pdf`, Buffer.from("x"));
+      await pollWorker({ sourceId: source.id }, { makeSource: () => from, ingest: deps() });
+    }
+    expect(await ledger(source.id)).toHaveLength(3);
+    const notes = await db.select().from(notificationsTable).where(eq(notificationsTable.resourceId, source.id));
+    // One reviewer in this org (the agency_admin), one unread alert.
+    expect(notes).toHaveLength(1);
   });
 });
 

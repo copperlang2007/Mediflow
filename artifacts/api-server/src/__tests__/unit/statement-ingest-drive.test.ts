@@ -53,15 +53,15 @@ describe("DriveStatementSource", () => {
     expect(await src.list()).toHaveLength(0);
   });
 
-  it("marks native Google files not downloadable and fingerprints them by modified time", async () => {
-    const src = new DriveStatementSource("root", async () =>
-      fakeClient({
-        root: [[{ id: "s1", name: "Sheet", mimeType: "application/vnd.google-apps.spreadsheet", modifiedTime: "2026-10-01T00:00:00Z" }]],
-      }) as never,
-    );
-    const [f] = await src.list();
-    expect(f.downloadable).toBe(false);
-    expect(f.checksum).toBe("modified:2026-10-01T00:00:00Z");
+  it("marks native Google files not downloadable with a checksum that survives edits", async () => {
+    const sheet = (modifiedTime: string) => ({
+      id: "s1", name: "Sheet", mimeType: "application/vnd.google-apps.spreadsheet", modifiedTime,
+    });
+    const first = await new DriveStatementSource("root", async () => fakeClient({ root: [[sheet("2026-10-01T00:00:00Z")]] }) as never).list();
+    const edited = await new DriveStatementSource("root", async () => fakeClient({ root: [[sheet("2026-10-02T09:30:00Z")]] }) as never).list();
+    expect(first[0].downloadable).toBe(false);
+    // An edit must not mint a new (file, checksum) key, or the ledger grows with every save.
+    expect(edited[0].checksum).toBe(first[0].checksum);
   });
 
   it("escapes the folder id in the query and downloads bytes", async () => {
