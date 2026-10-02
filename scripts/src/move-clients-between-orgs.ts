@@ -30,8 +30,16 @@
  *
  * Known limit: clients with deals or campaign history point at pipelines and
  * campaigns that belong to the source agency through NOT NULL columns. Those
- * rows cannot be re-pointed, so the run aborts safely and lists them. Detach or
- * delete those records first, or ask for the walker to be extended.
+ * rows cannot be re-pointed, so the run aborts safely (nothing changes) and
+ * lists EVERY such blocker at once, so the clean-up list is complete before
+ * --apply. Detach or delete those records first, or extend the walker.
+ *
+ * Other guards: a unique-key clash with a row already in the target is reported
+ * by table, constraint and key columns (never values); a reference to a table
+ * that no agency owns aborts unless allowed with --allow-shared-parent
+ * <table.column>; clients that only have a Medicare ID hash (no stored ID)
+ * block --apply unless --allow-hash-only is passed; the "already in target" CSV
+ * is written only at the end and named .dryrun.csv or .applied.csv (none on abort).
  *
  * On --apply a row is written to audit_log in BOTH agencies (operator, org ids,
  * per-table counts; no PHI).
@@ -118,17 +126,25 @@ async function main() {
       `select id, medicare_id_encrypted e, medicare_id_hash h from contacts where org_id = $1 and deleted_at is null and (medicare_id_encrypted is not null or medicare_id_hash is not null)`, [from.id]);
     const ids: string[] = [];
     const hashes: string[] = [];
+    const undecryptable: string[] = [];
+    const hashOnlyIds = new Set<string>();
     for (const r of enc) {
       const set = new Set<string>();
       if (r.h) set.add(Buffer.from(r.h).toString("hex"));
       if (r.e) {
-        let plain: string;
-        try { plain = decryptMedicareId(r.e); } catch {
-          throw new Error("Could not decrypt a source Medicare ID with the PHI_* keys in this environment. Use the same PHI_ENCRYPTION_KEY / PHI_HMAC_KEY as the app, or duplicates cannot be checked.");
+        try {
+          for (const h of mbiCandidateHashes(decryptMedicareId(r.e))) set.add(h.toString("hex"));
+        } catch {
+          undecryptable.push(r.id);
         }
-        for (const h of mbiCandidateHashes(plain)) set.add(h.toString("hex"));
+      } else if (r.h) {
+        // Only the hash is on file: the other spelling of this MBI cannot be derived.
+        hashOnlyIds.add(r.id);
       }
       for (const h of set) { ids.push(r.id); hashes.push(h); }
+    }
+    if (undecryptable.length) {
+      throw new Error(`Could not decrypt the Medicare ID on ${undecryptable.length} source contact(s) with the PHI_* keys in this environment (contact ids: ${undecryptable.slice(0, 20).join(", ")}${undecryptable.length > 20 ? ", ..." : ""}). Use the same PHI_ENCRYPTION_KEY / PHI_HMAC_KEY as the app, or repair those rows, then re-run.`);
     }
     for (let i = 0; i < ids.length; i += 5000) {
       await db.query(`insert into src_mbi select i, decode(h, 'hex') from unnest($1::text[], $2::text[]) as u(i, h)`, [ids.slice(i, i + 5000), hashes.slice(i, i + 5000)]);
@@ -153,14 +169,16 @@ async function main() {
       }
     }
     const matches = [...matchMap.values()];
-    const csvName = `move-clients-already-in-target-${Date.now()}.csv`;
-    writeFileSync(csvName, ["source_contact_id,target_contact_id,matched_on", ...matches.map((m) => `${m.src},${m.tgt},${m.reason}`)].join("\n") + "\n");
+    // Written only once the outcome is known, and named for it, so a file can never be mistaken for a record of a move that did not happen.
+    const csvName = `move-clients-already-in-target-${Date.now()}.${APPLY ? "applied" : "dryrun"}.csv`;
+    const csvBody = ["source_contact_id,target_contact_id,matched_on", ...matches.map((m) => `${m.src},${m.tgt},${m.reason}`)].join("\n") + "\n";
 
     await db.query(`create temp table mv_contacts (id text primary key) on commit drop`);
     await db.query(
       `insert into mv_contacts select id from contacts where org_id = $1 and deleted_at is null and id <> all($2::text[])`,
       [from.id, matches.map((m) => m.src)]);
     const toMove = Number((await one<{ n: string }>(`select count(*) n from mv_contacts`))[0]!.n);
+    const hashOnly = [...hashOnlyIds].filter((id) => !matchMap.has(id)).length;
 
     // ── 2. Discover everything that hangs off a client ──────────────────────
     const orgTables = new Set((await one<{ t: string }>(
@@ -254,9 +272,17 @@ async function main() {
     const contactsMoved = await db.query(`update contacts set org_id = $2 where org_id = $1 and id in (select id from mv_contacts)`, [from.id, to.id]);
     moved.contacts = contactsMoved.rowCount ?? 0;
     for (const j of jobs) {
-      const r = await db.query(
-        `update ${q(j.child)} set org_id = $2 where org_id = $1 and ${q(j.col)}::text in (select id from ${mv.get(j.parent)})`, [from.id, to.id]);
-      moved[j.child] = (moved[j.child] ?? 0) + (r.rowCount ?? 0);
+      try {
+        const r = await db.query(
+          `update ${q(j.child)} set org_id = $2 where org_id = $1 and ${q(j.col)}::text in (select id from ${mv.get(j.parent)})`, [from.id, to.id]);
+        moved[j.child] = (moved[j.child] ?? 0) + (r.rowCount ?? 0);
+      } catch (e) {
+        const pgErr = e as { code?: string; constraint?: string; detail?: string };
+        if (pgErr.code !== "23505") throw e;
+        // Names the table, constraint and key columns, never the values (they can be PHI).
+        const keyCols = /Key \(([^)]*)\)=/.exec(pgErr.detail ?? "")?.[1] ?? "unknown columns";
+        throw new Error(`Moving ${j.child} would break unique constraint "${pgErr.constraint}" on (${keyCols}): a moved row has the same key as a row already in the target agency. Resolve those ${j.child} rows first, then re-run.`);
+      }
     }
     for (const [t, tmp] of mv) {
       if (t === "contacts") continue;
@@ -267,6 +293,8 @@ async function main() {
     // ── 5. Re-point references that must not cross agencies ─────────────────
     const remapped: Record<string, number> = {};
     const sharedParents = new Set<string>();
+    const blockers: string[] = [];
+    const allowShared = new Set(process.argv.flatMap((a, i, all) => (a === "--allow-shared-parent" && all[i + 1] ? [all[i + 1]!] : [])));
     for (const [t, tmp] of mv) {
       for (const f of fks.filter((x) => x.child === t && x.col !== "org_id" && !mv.has(x.parent))) {
         const where = `id in (select id from ${tmp}) and ${q(f.col)} is not null`;
@@ -276,7 +304,7 @@ async function main() {
           const stale = `exists (select 1 from ${f.parent} s where s.id = ${q(t)}.${q(f.col)} and s.org_id = $1)`;
           if (f.notNull) {
             const bad = await one<{ n: string }>(`select count(*) n from ${q(t)} where ${where} and ${stale} and not exists (${match})`, [from.id, to.id]);
-            if (Number(bad[0]!.n) > 0) throw new Error(`${t}.${f.col} is required but ${bad[0]!.n} rows have no ${f.parent} match in the target agency`);
+            if (Number(bad[0]!.n) > 0) blockers.push(`${t}.${f.col}: ${bad[0]!.n} rows need a ${f.parent} match in the target agency (none by ${f.parent === "agents" ? "email" : "name"}). Create or match it there first.`);
           }
           const r = await db.query(`update ${q(t)} set ${q(f.col)} = (${match}) where ${where} and ${stale}`, [from.id, to.id]);
           if (r.rowCount) remapped[`${t}.${f.col} -> ${f.parent}`] = r.rowCount;
@@ -284,13 +312,24 @@ async function main() {
           const foreign = `not exists (select 1 from ${q(f.parent)} p where p.id = ${q(t)}.${q(f.col)} and p.org_id = $1)`;
           const n = Number((await one<{ n: string }>(`select count(*) n from ${q(t)} where ${where} and ${foreign}`, [to.id]))[0]!.n);
           if (n === 0) continue;
-          if (f.notNull) throw new Error(`${t}.${f.col} (-> ${f.parent}) is required and points at the source agency's ${f.parent} on ${n} rows, so those clients cannot move safely. Detach or remove those records first.`);
+          if (f.notNull) {
+            blockers.push(`${t}.${f.col} (-> ${f.parent}): ${n} rows are required to point at the source agency's ${f.parent}. Detach or remove those records first.`);
+            continue;
+          }
           await db.query(`update ${q(t)} set ${q(f.col)} = null where ${where} and ${foreign}`, [to.id]);
           remapped[`${t}.${f.col} -> ${f.parent} (cleared)`] = n;
         } else if (f.parent !== "organizations") {
-          sharedParents.add(`${t}.${f.col} -> ${f.parent}`);
+          // The parent has no agency of its own, so we cannot tell whether the row it points at is the source's. Refuse unless allowed.
+          const n = Number((await one<{ n: string }>(`select count(*) n from ${q(t)} where ${where}`))[0]!.n);
+          if (n === 0) continue;
+          const edge = `${t}.${f.col}`;
+          if (allowShared.has(edge)) sharedParents.add(`${edge} -> ${f.parent} (allowed)`);
+          else blockers.push(`${edge} (-> ${f.parent}): ${n} rows point at a table that is not owned by an agency, so they cannot be checked. If that is intended, re-run with --allow-shared-parent ${edge}.`);
         }
       }
+    }
+    if (blockers.length) {
+      throw new Error(`${blockers.length} blocker(s) prevent a safe move:\n  - ${blockers.join("\n  - ")}`);
     }
 
     // ── 6. Invariants, report, audit ────────────────────────────────────────
@@ -317,10 +356,14 @@ async function main() {
     console.log(`Carriers created in target:     ${carriersCreated}`);
     console.log(`References re-pointed/cleared:  ${JSON.stringify(remapped)}`);
     if (sharedParents.size) console.log(`Left pointing at shared (non-agency) tables: ${[...sharedParents].join(", ")}`);
+    if (hashOnly > 0) console.log(`WARNING: ${hashOnly} client(s) to move have a Medicare ID hash but no stored Medicare ID, so only the exact spelling could be checked for duplicates.`);
     console.log(`Source contacts/enrollments:    ${before.src_contacts}/${before.src_enrollments}  ->  ${after.src_contacts}/${after.src_enrollments}`);
     console.log(`Target contacts/enrollments:    ${before.tgt_contacts}/${before.tgt_enrollments}  ->  ${after.tgt_contacts}/${after.tgt_enrollments}`);
     console.log(`Duplicate Medicare-ID groups in target: ${before.tgt_duplicate_mbi_groups} -> ${after.tgt_duplicate_mbi_groups}`);
 
+    if (APPLY && hashOnly > 0 && !process.argv.includes("--allow-hash-only")) {
+      throw new Error(`${hashOnly} client(s) to move have a Medicare ID hash but no stored Medicare ID, so a dashed-vs-undashed duplicate cannot be ruled out. Run an encryption backfill, or re-run with --allow-hash-only to accept that.`);
+    }
     if (APPLY) {
       const changes = JSON.stringify({ operator, fromOrgId: from.id, toOrgId: to.id, movedRows: moved, leftInPlace: matches.length, carriersCreated, dedupCsv: csvName });
       for (const orgId of [from.id, to.id]) {
@@ -330,9 +373,13 @@ async function main() {
       }
       await db.query("COMMIT");
       console.log("\nCOMMITTED.");
+      writeFileSync(csvName, csvBody);
+      console.log(`Clients left in place (already in target): ${csvName}`);
     } else {
       await db.query("ROLLBACK");
+      writeFileSync(csvName, csvBody);
       console.log("\nDRY RUN: rolled back, nothing changed. Re-run with --apply to commit.");
+      console.log(`Clients that would be left in place (already in target): ${csvName}`);
     }
   } catch (err) {
     await db.query("ROLLBACK").catch(() => undefined);
