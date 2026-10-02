@@ -287,6 +287,8 @@ export const callRecordingsTable = pgTable(
     /** Plain-language reason, safe to show; never contains transcript text. */
     error: text("error"),
     attempts: integer("attempts").notNull().default(0),
+    /** Last time the transcription job looked at this row; the sweeper re-queues stalled ones. */
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
     durationSeconds: integer("duration_seconds"),
     createdBy: text("created_by").references(() => usersTable.id, { onDelete: "set null" }),
     retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),

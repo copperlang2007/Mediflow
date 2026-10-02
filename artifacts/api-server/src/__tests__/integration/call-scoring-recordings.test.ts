@@ -47,6 +47,7 @@ vi.mock("../../lib/objectStorage", storageF);
 import { eq } from "drizzle-orm";
 import * as schema from "@workspace/db/schema";
 import { bootTestDb, clearEnqueuedJobs, getEnqueuedJobs, shutdownTestDb, withAuth } from "../helpers/testApp";
+import { safeReason } from "../../lib/callScoring/speech";
 import { seedAgent, seedOrg, seedUser } from "../helpers/testDb";
 import type { Express } from "express";
 
@@ -88,7 +89,8 @@ function stereoResults(): unknown[] {
   unique++;
   const r = (channelTag: number, transcript: string, start: number) => ({
     channelTag,
-    alternatives: [{ transcript, words: [{ word: transcript.split(" ")[0], startOffset: `${start}s`, endOffset: `${start + 2}s` }] }],
+    resultEndOffset: `${start + 2}s`,
+    alternatives: [{ transcript }],
   });
   return [
     r(1, "Thank you for calling Sunrise Benefits, my name is Dana Brooks and I'm a licensed insurance agent.", 0),
@@ -384,5 +386,89 @@ describe("listing recordings", () => {
     expect(first).toMatchObject({ id, status: "queued", filename: "listed-call.wav" });
     expect(first.detailsEncrypted).toBeUndefined();
     expect(res.body.audio.supported).toBe(true);
+  });
+});
+
+describe("review fixes", () => {
+  it("two jobs racing on one recording start only one transcription", async () => {
+    const id = await uploadAndConfirm(admin.id);
+    const calls = fakeGoogle({ poll: "running" });
+    const outcomes = await Promise.all([recordings.processRecording(id), recordings.processRecording(id)]);
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+    expect(outcomes.sort()).toEqual(["finished", "poll"]);
+    expect((await rowOf(id)).operationName).toBe(OP);
+  });
+
+  it("a start that died before saving its operation is retried, not failed", async () => {
+    const id = await uploadAndConfirm(admin.id);
+    await handle.db
+      .update(schema.callRecordingsTable)
+      .set({ status: "transcribing", operationName: null, updatedAt: new Date() })
+      .where(eq(schema.callRecordingsTable.id, id));
+    expect(await recordings.processRecording(id)).toBe("poll");
+    await handle.db
+      .update(schema.callRecordingsTable)
+      .set({ updatedAt: new Date(Date.now() - 11 * 60 * 1000) })
+      .where(eq(schema.callRecordingsTable.id, id));
+    expect(await recordings.processRecording(id)).toBe("retry_start");
+    expect((await rowOf(id)).status).toBe("queued");
+  });
+
+  it("an already-scored call links to the existing transcript without an error", async () => {
+    const results = stereoResults();
+    const first = await uploadAndConfirm(admin.id);
+    fakeGoogle({ poll: "done", results });
+    await recordings.processRecording(first);
+    await recordings.processRecording(first);
+    const second = await uploadAndConfirm(admin.id);
+    await recordings.processRecording(second);
+    await recordings.processRecording(second);
+    const [a, b] = [await rowOf(first), await rowOf(second)];
+    expect(b.status).toBe("scored");
+    expect(b.transcriptId).toBe(a.transcriptId);
+    expect(b.error).toBeNull();
+  });
+
+  it("logs only the kind of Google failure, never the bucket path", () => {
+    expect(safeReason("could not read object gs://test-bucket/private/call-recordings/x")).not.toContain("gs://");
+    expect(safeReason("Audio duration exceeds the limit")).toMatch(/too long/);
+  });
+
+  it("caps recordings per agency per day", async () => {
+    process.env.CALL_RECORDINGS_DAILY_LIMIT = "1";
+    try {
+      const org2 = await seedOrg(handle.db, { id: `rec-cap-${Date.now()}` });
+      const capAdmin = await seedUser(handle.db, { orgId: org2.id, role: "agency_admin" });
+      const post = () => request(app).post("/api/call-scoring/recordings/upload-url").set(withAuth(capAdmin.id)).send(startBody());
+      expect((await post()).status).toBe(201);
+      const second = await post();
+      expect(second.status).toBe(429);
+      expect(second.body.code).toBe("daily_limit");
+    } finally {
+      delete process.env.CALL_RECORDINGS_DAILY_LIMIT;
+    }
+  });
+
+  it("the sweeper re-queues stalled recordings once and fails abandoned uploads", async () => {
+    const stalled = await uploadAndConfirm(admin.id);
+    const old = new Date(Date.now() - recordings.STALLED_AFTER_MS - 60_000);
+    await handle.db.update(schema.callRecordingsTable).set({ checkedAt: old, updatedAt: old }).where(eq(schema.callRecordingsTable.id, stalled));
+    const start = await request(app).post("/api/call-scoring/recordings/upload-url").set(withAuth(admin.id)).send(startBody());
+    const abandoned = start.body.recordingId as string;
+    await handle.db
+      .update(schema.callRecordingsTable)
+      .set({ createdAt: new Date(Date.now() - recordings.UPLOAD_ABANDONED_AFTER_MS - 60_000) })
+      .where(eq(schema.callRecordingsTable.id, abandoned));
+
+    const requeued: string[] = [];
+    const out = await recordings.sweepStalledRecordings(async (id) => (requeued.push(id), true));
+    expect(requeued).toContain(stalled);
+    expect(out.abandoned).toBeGreaterThanOrEqual(1);
+    expect((await rowOf(abandoned)).status).toBe("failed");
+
+    // Claimed: an immediate second sweep does not queue it again.
+    const again: string[] = [];
+    await recordings.sweepStalledRecordings(async (id) => (again.push(id), true));
+    expect(again).not.toContain(stalled);
   });
 });

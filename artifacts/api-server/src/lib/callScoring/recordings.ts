@@ -9,21 +9,24 @@
  *   transcribing  → poll the operation; when done, turn the result into the
  *                   utterance JSON parse.ts reads and score it through the
  *                   same ingestTranscript() every text transcript uses
- *   scored        → linked to its call_transcripts row
+ *   scored        → linked to its call_transcripts row (an already-scored
+ *                   call links to the existing transcript; that is not an error)
  *   failed        → a plain reason, safe to show (never transcript text)
  *
- * Each step is idempotent: it re-reads the row and only acts on the status it
- * expects, so a retried or duplicated job never starts a second transcription
- * or scores the same call twice (ingestTranscript also dedupes by content).
+ * Each step is idempotent: it re-reads the row and claims each transition with
+ * a conditional update BEFORE calling Google, so a retried or duplicated job
+ * never starts a second transcription or scores the same call twice
+ * (ingestTranscript also dedupes by content). `checked_at` records each look;
+ * the sweeper (workers/recordingsSweep.ts) re-queues rows whose job chain died.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db, callRecordingsTable, type CallRecordingLayout } from "@workspace/db";
 import { logger } from "../logger";
 import { open } from "./seal";
 import { DEFAULT_RUBRIC_ID, getRubric } from "./rubrics";
 import { ingestTranscript, resolveRubric } from "./ingest";
 import type { Rubric } from "./types";
-import { gsUri, pollTranscription, resultsToTurns, speechSetup, startTranscription } from "./speech";
+import { gsUri, pollTranscription, resultsToTurns, safeReason, speechSetup, startTranscription } from "./speech";
 
 /** How long a transcription may run before it is given up on. */
 export const TRANSCRIBE_TIMEOUT_MS = 6 * 60 * 60 * 1000;
@@ -40,12 +43,15 @@ export interface RecordingDetails {
 
 export type StepOutcome = "poll" | "retry_start" | "finished";
 
-async function fail(id: string, reason: string, extra: { attempts?: number } = {}): Promise<StepOutcome> {
+async function fail(id: string, reason: string): Promise<StepOutcome> {
   await db.update(callRecordingsTable)
-    .set({ status: "failed", error: reason, updatedAt: new Date(), ...extra })
+    .set({ status: "failed", error: reason, updatedAt: new Date() })
     .where(eq(callRecordingsTable.id, id));
   return "finished";
 }
+
+/** A start that was claimed but never recorded its operation (a crash mid-start) is retried after this. */
+const START_STALL_MS = 10 * 60 * 1000;
 
 export async function processRecording(recordingId: string, deps: { privateObjectDir?: string } = {}): Promise<StepOutcome> {
   const [row] = await db.select().from(callRecordingsTable).where(eq(callRecordingsTable.id, recordingId)).limit(1);
@@ -54,33 +60,49 @@ export async function processRecording(recordingId: string, deps: { privateObjec
   const setup = speechSetup();
   if (!setup.ready) return fail(row.id, setup.message);
   const layout = row.layout as CallRecordingLayout;
+  const now = new Date();
 
   if (row.status === "queued") {
+    // Claim first, then call Google: of two jobs racing on one recording only
+    // the one that wins this update starts (and pays for) a transcription.
+    const attempts = row.attempts + 1;
+    const claimed = await db.update(callRecordingsTable)
+      .set({ status: "transcribing", operationName: null, attempts, error: null, checkedAt: now, updatedAt: now })
+      .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "queued")))
+      .returning({ id: callRecordingsTable.id });
+    if (!claimed.length) return "finished";
     const dir = deps.privateObjectDir ?? process.env.PRIVATE_OBJECT_DIR ?? "";
     try {
       const operationName = await startTranscription(gsUri(dir, row.objectKey), layout);
-      // Claim the transition: only the job that moves queued → transcribing keeps its operation.
-      const moved = await db.update(callRecordingsTable)
-        .set({ status: "transcribing", operationName, attempts: row.attempts + 1, error: null, updatedAt: new Date() })
-        .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "queued")))
-        .returning({ id: callRecordingsTable.id });
-      return moved.length ? "poll" : "finished";
+      await db.update(callRecordingsTable)
+        .set({ operationName, checkedAt: new Date() })
+        .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "transcribing")));
+      return "poll";
     } catch (err) {
-      logger.warn({ err: (err as Error).message, recordingId: row.id }, "Speech-to-Text: could not start transcription");
-      const attempts = row.attempts + 1;
-      if (attempts >= MAX_START_ATTEMPTS) return fail(row.id, "Speech-to-Text could not start transcribing this recording. Check the Speech-to-Text setup, then upload it again.", { attempts });
-      await db.update(callRecordingsTable).set({ attempts, updatedAt: new Date() }).where(eq(callRecordingsTable.id, row.id));
+      logger.warn({ reason: safeReason((err as Error).message), recordingId: row.id }, "Speech-to-Text: could not start transcription");
+      if (attempts >= MAX_START_ATTEMPTS) return fail(row.id, "Speech-to-Text could not start transcribing this recording. Check the Speech-to-Text setup, then upload it again.");
+      await db.update(callRecordingsTable)
+        .set({ status: "queued", updatedAt: new Date() })
+        .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "transcribing")));
       return "retry_start";
     }
   }
 
   // transcribing
-  if (!row.operationName) return fail(row.id, "The transcription job reference was lost. Upload the recording again.");
+  if (!row.operationName) {
+    // Another job is starting it right now, or that job died before saving the operation.
+    if (now.getTime() - row.updatedAt.getTime() < START_STALL_MS) return "poll";
+    await db.update(callRecordingsTable)
+      .set({ status: "queued", updatedAt: now })
+      .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "transcribing"), isNull(callRecordingsTable.operationName)));
+    return "retry_start";
+  }
+  await db.update(callRecordingsTable).set({ checkedAt: now }).where(eq(callRecordingsTable.id, row.id));
   let poll;
   try {
     poll = await pollTranscription(row.operationName);
   } catch (err) {
-    logger.warn({ err: (err as Error).message, recordingId: row.id }, "Speech-to-Text: poll failed; will retry");
+    logger.warn({ reason: safeReason((err as Error).message), recordingId: row.id }, "Speech-to-Text: poll failed; will retry");
     poll = { state: "running" as const };
   }
   if (poll.state === "running") {
@@ -122,9 +144,51 @@ export async function processRecording(recordingId: string, deps: { privateObjec
       status: "scored",
       transcriptId,
       durationSeconds: poll.durationSeconds,
-      error: result.kind === "duplicate" ? "This call had already been scored; linked to the existing transcript." : null,
+      error: null,
       updatedAt: new Date(),
     })
     .where(eq(callRecordingsTable.id, row.id));
   return "finished";
+}
+
+/** A queued or transcribing recording nobody has looked at for this long has lost its job chain. */
+export const STALLED_AFTER_MS = 10 * 60 * 1000;
+/** Signed upload URLs last 15 minutes; an upload never confirmed after this is given up on. */
+export const UPLOAD_ABANDONED_AFTER_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Recover recordings whose job chain died (a failed re-enqueue, a lost job,
+ * a crash): re-queue the job for stalled queued / transcribing rows, and fail
+ * uploads that were never confirmed. Each stalled row is claimed by bumping
+ * `checked_at` first, so overlapping sweeps queue it once.
+ */
+export async function sweepStalledRecordings(
+  requeue: (recordingId: string) => Promise<boolean>,
+  now: Date = new Date(),
+): Promise<{ requeued: number; abandoned: number }> {
+  const stalledBefore = new Date(now.getTime() - STALLED_AFTER_MS);
+  const stalled = await db
+    .update(callRecordingsTable)
+    .set({ checkedAt: now })
+    .where(
+      and(
+        inArray(callRecordingsTable.status, ["queued", "transcribing"]),
+        lt(sql`coalesce(${callRecordingsTable.checkedAt}, ${callRecordingsTable.updatedAt})`, stalledBefore),
+      ),
+    )
+    .returning({ id: callRecordingsTable.id });
+  let requeued = 0;
+  for (const r of stalled) if (await requeue(r.id)) requeued++;
+
+  const abandoned = await db
+    .update(callRecordingsTable)
+    .set({ status: "failed", error: "The upload was never finished. Upload the recording again.", updatedAt: now })
+    .where(
+      and(
+        eq(callRecordingsTable.status, "uploading"),
+        lt(callRecordingsTable.createdAt, new Date(now.getTime() - UPLOAD_ABANDONED_AFTER_MS)),
+      ),
+    )
+    .returning({ id: callRecordingsTable.id });
+  return { requeued, abandoned: abandoned.length };
 }

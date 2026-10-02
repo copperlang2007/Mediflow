@@ -25,7 +25,7 @@ import { Router, type IRouter, type NextFunction, type Request, type Response } 
 import multer from "multer";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { and, desc, eq, gt, ne, sql } from "drizzle-orm";
 import {
   CALL_RECORDING_LAYOUTS,
   CALL_TRANSCRIPT_FORMATS,
@@ -75,6 +75,15 @@ export const AUDIO_NOT_SET_UP =
 /** Recordings go straight to storage, not through this server: a long call fits. */
 export const MAX_RECORDING_BYTES = 500 * 1024 * 1024;
 const RECORDING_EXTENSIONS = [".mp3", ".wav", ".m4a", ".mp4", ".ogg", ".oga", ".flac", ".webm", ".opus", ".aac", ".amr"];
+/**
+ * Recordings an agency may start per rolling 24 hours: a ceiling on
+ * Speech-to-Text spend if an admin account is misused. Set
+ * CALL_RECORDINGS_DAILY_LIMIT to raise it for a large look-back.
+ */
+export function dailyRecordingLimit(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number.parseInt(env.CALL_RECORDINGS_DAILY_LIMIT ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : 300;
+}
 const RECORDING_TYPE_RE = /^(audio\/[a-z0-9.+-]+|video\/(mp4|webm))$/;
 
 // Reads of transcripts are PHI reads: audited. Summary/config carry no PHI.
@@ -925,6 +934,16 @@ router.post(
     const problem = await linkProblem(authReq.orgId, f);
     if (problem) {
       res.status(404).json({ error: problem.message, code: problem.code });
+      return;
+    }
+    const limit = dailyRecordingLimit();
+    const [{ started }] = await db
+      .select({ started: sql<number>`count(*)::int` })
+      .from(callRecordingsTable)
+      .where(and(eq(callRecordingsTable.orgId, authReq.orgId), gt(callRecordingsTable.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000))));
+    if (Number(started) >= limit) {
+      logger.warn({ orgId: authReq.orgId, limit }, "Call recording: daily limit reached");
+      res.status(429).json({ error: `Your agency has started ${limit} recordings in the last 24 hours, the daily limit. Try again later, or ask the administrator to raise it.`, code: "daily_limit" });
       return;
     }
 

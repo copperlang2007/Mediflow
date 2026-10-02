@@ -10,6 +10,7 @@
  *    export-anomaly-check        daily 02:15 UTC
  *    dialer-reconcile            every 15 min (missed-webhook recovery, §5.4)
  *    lead-callback-sweep         every 5 min (callback SLA queue re-attempt)
+ *    recordings-sweep            every 10 min (re-queue stalled call transcriptions)
  *    ghl-sync                    every 15 min (GoHighLevel contact feed; also ad-hoc backfill)
  *    import-rows-sweep           hourly (drop queued import rows / PHI of finished or dead jobs)
  *    integration-events-prune    daily 03:10 UTC (webhook idempotency ledger > 90 days)
@@ -141,6 +142,8 @@ export const JOB_NAMES = {
   // Call recording → Google Speech-to-Text → scored transcript. Re-enqueues
   // itself every 30s while the transcription runs. Idempotent per status.
   TRANSCRIBE_RECORDING: "transcribe-recording",
+  // Re-queues recordings whose transcription job chain died; fails abandoned uploads.
+  RECORDINGS_SWEEP: "recordings-sweep",
 } as const;
 
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
@@ -460,6 +463,8 @@ export async function startWorkers(): Promise<void> {
   // Appointment reminders — every 15 min at :04/:19/:34/:49. Idempotent via a
   // conditional claim on appointments.reminder_sent_at.
   await boss.schedule(JOB_NAMES.APPOINTMENT_REMINDERS, "4,19,34,49 * * * *", {}, { tz: "UTC" });
+  // Call recordings — every 10 min at :03/:13/…. Idempotent (claims rows via checked_at).
+  await boss.schedule(JOB_NAMES.RECORDINGS_SWEEP, "3-59/10 * * * *", {}, { tz: "UTC" });
 
   // ---- Workers ----
 
@@ -641,6 +646,17 @@ export async function startWorkers(): Promise<void> {
     JOB_NAMES.TRANSCRIBE_RECORDING,
     { batchSize: 1, localConcurrency: 4 },
     transcribeHandler,
+  );
+
+  const recordingsSweepHandler: WorkHandler<Record<string, never>> = async () => {
+    const { recordingsSweepWorker } = await import("../workers/recordingsSweep");
+    await recordingsSweepWorker();
+  };
+  // Scheduled cron — singleton; one sweep pass per node.
+  await boss.work<Record<string, never>>(
+    JOB_NAMES.RECORDINGS_SWEEP,
+    { batchSize: 1, localConcurrency: 1 },
+    recordingsSweepHandler,
   );
 
   const retentionHandler: WorkHandler<Record<string, never>> = async () => {

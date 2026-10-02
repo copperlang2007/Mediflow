@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS "call_recordings" (
 	"transcript_id" text REFERENCES "call_transcripts"("id") ON DELETE SET NULL,
 	"error" text,
 	"attempts" integer DEFAULT 0 NOT NULL,
+	"checked_at" timestamp with time zone,
 	"duration_seconds" integer,
 	"created_by" text REFERENCES "users"("id") ON DELETE SET NULL,
 	"retain_until" timestamp with time zone NOT NULL,

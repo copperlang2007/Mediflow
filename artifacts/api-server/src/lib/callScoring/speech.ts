@@ -96,10 +96,14 @@ async function projectId(cfg: SpeechConfig): Promise<string> {
   return client().getProjectId();
 }
 
+/**
+ * Word timestamps are left off: with them chirp_3 batch only takes 20 minutes
+ * of audio, and Medicare sales calls run longer (about an hour without). Turn
+ * times come from each result's end offset instead.
+ */
 export function recognitionConfig(cfg: SpeechConfig, layout: CallRecordingLayout): Record<string, unknown> {
   const features: Record<string, unknown> = {
     enableAutomaticPunctuation: true,
-    enableWordTimeOffsets: true,
   };
   if (layout === "mono") features.diarizationConfig = { minSpeakerCount: 2, maxSpeakerCount: 2 };
   else features.multiChannelMode = "SEPARATE_RECOGNITION_PER_CHANNEL";
@@ -167,8 +171,9 @@ export async function pollTranscription(operationName: string, cfg = speechConfi
 }
 
 /** Google's messages can name buckets and objects; keep only the kind of failure. */
-function safeReason(message: string | undefined): string {
+export function safeReason(message: string | undefined): string {
   const m = (message ?? "").toLowerCase();
+  if (m.includes("duration") || m.includes("too long") || m.includes("exceeds")) return "The recording is too long for transcription. Split the call into parts of under an hour.";
   if (m.includes("permission") || m.includes("denied")) return "Speech-to-Text could not read the recording (permission). The service account needs the Cloud Speech Client role and read access to the bucket.";
   if (m.includes("not found")) return "Speech-to-Text could not find the recording or the model in this region.";
   if (m.includes("audio") || m.includes("decod") || m.includes("encoding")) return "The audio could not be decoded. Upload MP3, WAV, FLAC, M4A, OGG or WEBM.";
@@ -193,7 +198,10 @@ export interface TranscriptTurn {
 /**
  * Speech results → the utterance JSON parse.ts already reads.
  *
- * Stereo: one turn per result, labelled by channel ("Agent" / "Client").
+ * Stereo: one turn per result, labelled by channel ("Agent" / "Client"). A
+ * turn starts where the previous result on the same channel ended. If Google
+ * returns no channel tags, nobody is labelled Agent or Client: every turn is
+ * an unknown "Speaker", so no check is scored against the wrong person.
  * Mono: consecutive words with the same speaker label become one turn,
  * labelled "Speaker N" (unknown role). Without word-level speakers, each
  * result is one unlabelled turn.
@@ -202,27 +210,31 @@ export function resultsToTurns(results: SpeechResult[], layout: CallRecordingLay
   const turns: TranscriptTurn[] = [];
   if (layout !== "mono") {
     const agentChannel = layout === "agent_left" ? 1 : 2;
+    const tagged = results.every((r) => typeof r.channelTag === "number" || !r.alternatives?.[0]?.transcript?.trim());
+    const lastEnd = new Map<number | undefined, number>();
     for (const r of results) {
       const alt = r.alternatives?.[0];
       const text = alt?.transcript?.trim();
+      const end = seconds(r.resultEndOffset) ?? undefined;
+      const start = lastEnd.get(r.channelTag) ?? 0;
+      if (end !== undefined) lastEnd.set(r.channelTag, end);
       if (!text) continue;
-      const words = alt?.words ?? [];
-      turns.push({
-        speaker: (r.channelTag ?? 1) === agentChannel ? "Agent" : "Client",
-        text,
-        start: seconds(words[0]?.startOffset) ?? undefined,
-        end: seconds(words[words.length - 1]?.endOffset) ?? seconds(r.resultEndOffset) ?? undefined,
-      });
+      const speaker = !tagged ? "Speaker" : r.channelTag === agentChannel ? "Agent" : "Client";
+      turns.push({ speaker, text, start: end !== undefined ? start : undefined, end });
     }
-    return turns.sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
+    return turns.sort((a, b) => (a.start ?? 0) - (b.start ?? 0) || (a.end ?? 0) - (b.end ?? 0));
   }
 
+  let prevEnd = 0;
   for (const r of results) {
     const alt = r.alternatives?.[0];
     const words = (alt?.words ?? []).filter((w) => w.word?.trim());
+    const resultEnd = seconds(r.resultEndOffset) ?? undefined;
+    const resultStart = prevEnd;
+    if (resultEnd !== undefined) prevEnd = resultEnd;
     if (!words.length || !words.some((w) => w.speakerLabel)) {
       const text = alt?.transcript?.trim();
-      if (text) turns.push({ speaker: "Speaker", text, start: seconds(words[0]?.startOffset) ?? undefined, end: seconds(r.resultEndOffset) ?? undefined });
+      if (text) turns.push({ speaker: "Speaker", text, start: seconds(words[0]?.startOffset) ?? (resultEnd !== undefined ? resultStart : undefined), end: resultEnd });
       continue;
     }
     for (const w of words) {

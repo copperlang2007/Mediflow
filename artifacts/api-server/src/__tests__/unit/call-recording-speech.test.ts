@@ -53,6 +53,8 @@ describe("recognitionConfig", () => {
   const cfg = { projectId: "p", location: "us", model: "chirp_3" };
   it("splits mono by voice and stereo by channel", () => {
     const mono = recognitionConfig(cfg, "mono") as { features: Record<string, unknown> };
+    // Word timestamps would cap chirp_3 batch at 20 minutes of audio.
+    expect(mono.features.enableWordTimeOffsets).toBeUndefined();
     expect(mono.features.diarizationConfig).toEqual({ minSpeakerCount: 2, maxSpeakerCount: 2 });
     expect(mono.features.multiChannelMode).toBeUndefined();
     const stereo = recognitionConfig(cfg, "agent_left") as { features: Record<string, unknown> };
@@ -131,15 +133,27 @@ describe("resultsToTurns", () => {
 
   it("labels stereo channels Agent and Client, in time order", () => {
     const results: SpeechResult[] = [
-      { channelTag: 2, alternatives: [{ transcript: "Hi, I have a question.", words: [w("Hi,", 3, 3.4)] }] },
-      { channelTag: 1, alternatives: [{ transcript: "Thanks for calling.", words: [w("Thanks", 0, 0.5), w("calling.", 1, 1.5)] }] },
+      { channelTag: 2, resultEndOffset: "3.4s", alternatives: [{ transcript: "Hi, I have a question." }] },
+      { channelTag: 1, resultEndOffset: "1.5s", alternatives: [{ transcript: "Thanks for calling." }] },
+      { channelTag: 1, resultEndOffset: "5s", alternatives: [{ transcript: "Sure, go ahead." }] },
       { channelTag: 1, alternatives: [{ transcript: "  " }] },
     ];
     expect(resultsToTurns(results, "agent_left")).toEqual([
       { speaker: "Agent", text: "Thanks for calling.", start: 0, end: 1.5 },
-      { speaker: "Client", text: "Hi, I have a question.", start: 3, end: 3.4 },
+      { speaker: "Client", text: "Hi, I have a question.", start: 0, end: 3.4 },
+      { speaker: "Agent", text: "Sure, go ahead.", start: 1.5, end: 5 },
     ]);
-    expect(resultsToTurns(results, "agent_right").map((t) => t.speaker)).toEqual(["Client", "Agent"]);
+    expect(resultsToTurns(results, "agent_right").map((t) => t.speaker)).toEqual(["Client", "Agent", "Client"]);
+  });
+
+  it("labels nobody Agent or Client when stereo results carry no channel tags", () => {
+    const results: SpeechResult[] = [
+      { resultEndOffset: "2s", alternatives: [{ transcript: "Thanks for calling." }] },
+      { resultEndOffset: "4s", alternatives: [{ transcript: "Please stop calling me." }] },
+    ];
+    for (const layout of ["agent_left", "agent_right"] as const) {
+      expect(new Set(resultsToTurns(results, layout).map((t) => t.speaker))).toEqual(new Set(["Speaker"]));
+    }
   });
 
   it("groups mono words by speaker label, never guessing roles", () => {
@@ -163,7 +177,7 @@ describe("resultsToTurns", () => {
 
   it("keeps unlabelled mono results as single turns", () => {
     expect(resultsToTurns([{ alternatives: [{ transcript: "just text" }], resultEndOffset: "4s" }], "mono")).toEqual([
-      { speaker: "Speaker", text: "just text", start: undefined, end: 4 },
+      { speaker: "Speaker", text: "just text", start: 0, end: 4 },
     ]);
   });
 });

@@ -38,6 +38,9 @@
 #                         ENTERPRISE for any db-custom-* tier; ENTERPRISE_PLUS
 #                         only accepts db-perf-optimized-N-* tiers.
 #   GITHUB_BRANCH         Default: claude/google-cloud-deployment-ml41c2
+#   APP_ORIGIN            The web app's address, e.g. https://app.example.com.
+#                         When set, the PHI bucket gets a CORS rule so browsers
+#                         can PUT call recordings to signed upload URLs.
 set -euo pipefail
 
 : "${PROJECT_ID:?Set PROJECT_ID to the target GCP project id}"
@@ -81,6 +84,7 @@ gcloud services enable \
   cloudresourcemanager.googleapis.com \
   sts.googleapis.com \
   storage.googleapis.com \
+  speech.googleapis.com \
   compute.googleapis.com \
   servicenetworking.googleapis.com \
   vpcaccess.googleapis.com
@@ -207,6 +211,22 @@ else
   log "Bucket gs://${BUCKET} already exists."
 fi
 
+# Call recordings upload from the browser straight to the bucket with a signed
+# PUT URL (docs/call-scoring.md); without this CORS rule every upload fails.
+if [[ -n "${APP_ORIGIN:-}" ]]; then
+  if [[ ! "${APP_ORIGIN}" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$ ]]; then
+    echo "APP_ORIGIN must look like https://app.example.com (no path)" >&2
+    exit 1
+  fi
+  log "Allowing recording uploads to gs://${BUCKET} from ${APP_ORIGIN}…"
+  CORS_FILE="$(mktemp)"
+  printf '[{"origin":["%s"],"method":["PUT"],"responseHeader":["Content-Type"],"maxAgeSeconds":3600}]\n' "${APP_ORIGIN}" > "${CORS_FILE}"
+  gcloud storage buckets update "gs://${BUCKET}" --cors-file="${CORS_FILE}"
+  rm -f "${CORS_FILE}"
+else
+  log "APP_ORIGIN not set: skipping the bucket CORS rule (call recording uploads need it)."
+fi
+
 # ---------------------------------------------------------------------------
 # Generated crypto secrets — created ONCE, never rotated by this script.
 # ---------------------------------------------------------------------------
@@ -270,6 +290,9 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/cloudsql.client" >/dev/null
 gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
   --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/storage.objectAdmin" >/dev/null
+# Call recordings are transcribed with Speech-to-Text (SPEECH_TO_TEXT_PROVIDER=google).
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/speech.client" >/dev/null
 for name in mediflow-database-url mediflow-phi-encryption-key mediflow-phi-hmac-key \
             mediflow-metrics-token mediflow-dialer-webhook-secret mediflow-lead-queue-webhook-secret \
             ${REQUIRED_CREDENTIAL_SECRETS} ${OPTIONAL_CREDENTIAL_SECRETS}; do

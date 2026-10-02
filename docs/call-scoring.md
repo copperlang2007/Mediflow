@@ -182,6 +182,9 @@ in a few minutes, and the call is then scored exactly like a transcript. The
   labelled Agent / Client. Use this whenever the dialer can export dual-channel
   audio; scoring is much more precise.
 
+Turn times on a recording are approximate (to the end of each sentence), not
+word by word: word timing would cut Google's limit to 20-minute calls.
+
 **If something goes wrong** the recording shows **Failed** with a plain reason
 (for example "No speech was found", or a permission problem in the setup).
 Google's own error text is never shown, because it can name the bucket.
@@ -198,8 +201,10 @@ for the project before turning this on.
    recording fails with a permission message, also give the Speech-to-Text
    service agent (`service-PROJECT_NUMBER@gcp-sa-speech.iam.gserviceaccount.com`)
    **Storage Object Viewer** on that bucket.
-3. Allow the browser to upload to the bucket (CORS). Save this as `cors.json`,
-   with your app's address:
+3. Allow the browser to upload to the bucket (CORS). Without this every upload
+   fails. `scripts/deploy/gcp-bootstrap.sh` does steps 1-3 when you run it with
+   `APP_ORIGIN=https://your-app-address`. To do it by hand, save this as
+   `cors.json`, with your app's address:
 
    ```json
    [{ "origin": ["https://your-app-address"], "method": ["PUT"], "responseHeader": ["Content-Type"], "maxAgeSeconds": 3600 }]
@@ -214,6 +219,7 @@ for the project before turning this on.
    | `GOOGLE_CLOUD_PROJECT` | the project ID (optional on Cloud Run) |
    | `SPEECH_LOCATION` | optional, default `us` (data stays in the US) |
    | `SPEECH_MODEL` | optional, default `chirp_3`; use `long` if your region lacks it |
+   | `CALL_RECORDINGS_DAILY_LIMIT` | optional, default `300` recordings per agency per 24 hours (a ceiling on Speech-to-Text spend) |
 
    `PRIVATE_OBJECT_DIR` must already be set (it is for document storage).
 5. Open Call scoring: the **Audio transcription** box should say **Set up**.
@@ -258,8 +264,10 @@ softphone calls to their recordings automatically.
 ## Limits
 
 - One transcript file up to 1 MB; up to 50 files per import; pasted text up to
-  500,000 characters. One recording up to 500 MB; a transcription that runs
-  longer than 6 hours is stopped.
+  500,000 characters. One recording up to 500 MB and about an hour of audio
+  (longer calls: split them); 300 recordings per agency per day by default. A
+  transcription that runs longer than 6 hours is stopped, and a background sweep
+  every 10 minutes restarts any that stalled.
 - Known follow-up: at very large volumes (tens of thousands of transcripts) the
   list scans in batches of 500 and assembles the effective result in memory. The
   next step is to push the rubric, compliance and open-request filters into SQL.
