@@ -4,6 +4,9 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock("@/lib/api", () => ({ apiFetch }));
+vi.mock("@workspace/api-client-react", () => ({
+  useGetMe: () => ({ data: { id: "u1", role: "super_admin", orgId: "o-home" } }),
+}));
 
 import { ViewAsAgencyControl } from "@/components/layout/ViewAsAgencyControl";
 
@@ -24,5 +27,17 @@ describe("ViewAsAgencyControl", () => {
     render(<ViewAsAgencyControl enabled />);
     expect(await screen.findByRole("alert")).toHaveTextContent(/could not load agencies/i);
     expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("never offers the user's own agency in the picker", async () => {
+    apiFetch.mockResolvedValue({
+      agencies: [
+        { id: "o-home", name: "Home Agency", slug: "home" },
+        { id: "o-other", name: "Other Agency", slug: "other" },
+      ],
+    });
+    render(<ViewAsAgencyControl enabled />);
+    expect(await screen.findByRole("option", { name: "Other Agency" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "Home Agency" })).toBeNull();
   });
 });
