@@ -75,7 +75,7 @@ export const AUDIO_NOT_SET_UP =
 /** Recordings go straight to storage, not through this server: a long call fits. */
 export const MAX_RECORDING_BYTES = 500 * 1024 * 1024;
 const RECORDING_EXTENSIONS = [".mp3", ".wav", ".m4a", ".mp4", ".ogg", ".oga", ".flac", ".webm", ".opus", ".aac", ".amr"];
-const RECORDING_TYPE_RE = /^(audio\/[a-z0-9.+-]+|video\/(mp4|webm))$/;
+const RECORDING_TYPE_RE = /^(audio\/[a-z0-9.+-]+|application\/ogg|video\/(mp4|webm))$/;
 
 // Reads of transcripts are PHI reads: audited. Summary/config carry no PHI.
 router.use(

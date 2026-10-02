@@ -19,7 +19,7 @@ import { SectionCard, StatusPill, type StatusTone } from "@/components/shared";
 import { FileAudio, Loader2, Upload } from "lucide-react";
 import { QK, apiMessage, fmtDate, type CsConfig } from "./shared";
 
-type Layout = "mono" | "agent_left" | "agent_right";
+type Layout = string;
 type RecordingStatus = "uploading" | "queued" | "transcribing" | "scored" | "failed";
 
 interface StartResponse {
@@ -41,11 +41,11 @@ export interface RecordingRow {
   createdAt: string;
 }
 
-const LAYOUTS: Array<{ value: Layout; label: string; hint: string }> = [
-  { value: "mono", label: "One track (most downloads)", hint: "Speakers are told apart by voice and shown as Speaker 1 / Speaker 2, not as agent or client." },
-  { value: "agent_left", label: "Stereo, agent on the left", hint: "Each side is transcribed on its own, so agent and client are labelled correctly." },
-  { value: "agent_right", label: "Stereo, agent on the right", hint: "Each side is transcribed on its own, so agent and client are labelled correctly." },
-];
+const LAYOUT_INFO: Record<string, { label: string; hint: string }> = {
+  mono: { label: "One track (most downloads)", hint: "Speakers are told apart by voice and shown as Speaker 1 / Speaker 2, not as agent or client." },
+  agent_left: { label: "Stereo, agent on the left", hint: "Each side is transcribed on its own, so agent and client are labelled correctly." },
+  agent_right: { label: "Stereo, agent on the right", hint: "Each side is transcribed on its own, so agent and client are labelled correctly." },
+};
 
 const STATUS: Record<RecordingStatus, { label: string; tone: StatusTone }> = {
   uploading: { label: "Upload not finished", tone: "neutral" },
@@ -100,10 +100,12 @@ export function RecordingUpload({ config, onOpen }: { config: CsConfig | undefin
   const [file, setFile] = useState<File | null>(null);
   const [layout, setLayout] = useState<Layout>("mono");
   const [phone, setPhone] = useState("");
-  const [ref, setRef] = useState("");
+  const [externalRef, setExternalRef] = useState("");
   const [progress, setProgress] = useState<number | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const audio = config?.audio;
+  const layouts = (audio?.layouts ?? []).map((value) => ({ value, ...(LAYOUT_INFO[value] ?? { label: value, hint: "" }) }));
+  const selectedLayout = layouts.find((item) => item.value === layout) ?? layouts[0];
   const maxBytes = audio?.maxBytes ?? 500 * 1024 * 1024;
   const accept = (audio?.acceptedFormats ?? [".mp3", ".wav", ".m4a"]).join(",");
 
@@ -123,9 +125,9 @@ export function RecordingUpload({ config, onOpen }: { config: CsConfig | undefin
           filename: f.name.slice(0, 200),
           contentType: typeFor(f),
           sizeBytes: f.size,
-          layout,
+          ...(selectedLayout ? { layout: selectedLayout.value } : {}),
           ...(phone.trim() ? { phone: phone.trim() } : {}),
-          ...(ref.trim() ? { externalRef: ref.trim() } : {}),
+          ...(externalRef.trim() ? { externalRef: externalRef.trim() } : {}),
         }),
       });
       setProgress(0);
@@ -159,7 +161,7 @@ export function RecordingUpload({ config, onOpen }: { config: CsConfig | undefin
   }
 
   const tooBig = file ? file.size > maxBytes : false;
-  const hint = LAYOUTS.find((l) => l.value === layout)?.hint;
+  const hint = selectedLayout?.hint;
 
   return (
     <SectionCard
@@ -181,29 +183,31 @@ export function RecordingUpload({ config, onOpen }: { config: CsConfig | undefin
             <Input id="cs-rec-file" ref={fileRef} type="file" accept={`${accept},audio/*`} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
             <p className="text-xs text-muted-foreground">Up to {mb(maxBytes)}. MP3, WAV, M4A and most audio formats.</p>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="cs-rec-layout">Channels</Label>
-            <Select value={layout} onValueChange={(v) => setLayout(v as Layout)}>
-              <SelectTrigger id="cs-rec-layout">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {LAYOUTS.map((l) => (
-                  <SelectItem key={l.value} value={l.value}>
-                    {l.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-          </div>
+          {layouts.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="cs-rec-layout">Channels</Label>
+              <Select value={selectedLayout?.value} onValueChange={setLayout}>
+                <SelectTrigger id="cs-rec-layout">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {layouts.map((l) => (
+                    <SelectItem key={l.value} value={l.value}>
+                      {l.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="cs-rec-phone">Client phone (optional)</Label>
             <Input id="cs-rec-phone" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="(512) 555-0100" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="cs-rec-ref">Call reference (optional)</Label>
-            <Input id="cs-rec-ref" value={ref} onChange={(e) => setRef(e.target.value)} maxLength={120} placeholder="ENROLLHERE call ID" />
+            <Input id="cs-rec-ref" value={externalRef} onChange={(e) => setExternalRef(e.target.value)} maxLength={120} placeholder="ENROLLHERE call ID" />
           </div>
         </div>
         {tooBig && (
