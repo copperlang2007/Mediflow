@@ -6,7 +6,7 @@
  * given, honest empty states, and "Coming soon" only where there's no engine.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
@@ -211,6 +211,57 @@ describe("Knowledge Base page", () => {
     renderPage(<KnowledgeBasePage />);
     expect(await screen.findByText("No articles yet")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add article/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("Knowledge Base — Mediflow library view", () => {
+  const library = {
+    articles: [{
+      id: "lib-1", category: "Mediflow Guide: Sales Tools", title: "Quoting Engine: what works today",
+      content: "Where: Sales Tools > Quoting Engine.", keywords: ["quoting"], kind: "mediflow_guide",
+      needsReview: false, defaultEnabled: true, enabled: true, chosen: false,
+    }],
+    stats: { total: 1, enabled: 1 },
+  };
+  const open = async (role: string) => {
+    state.role = role;
+    state.responses = {
+      "/api/kb/articles": { articles: [], stats: { total: 0, active: 0, categories: 0, keywords: 0 } },
+      "/api/kb/library": library,
+    };
+    const { default: KnowledgeBasePage } = await import("@/pages/knowledge-base");
+    renderPage(<KnowledgeBasePage />);
+    const toggle = await screen.findByRole("button", { name: "Mediflow library" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+    expect(await screen.findByText("Quoting Engine: what works today")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mediflow library" })).toHaveAttribute("aria-pressed", "true");
+  };
+
+  it("lets the platform owner add, edit and remove library articles", async () => {
+    await open("super_admin");
+    expect(screen.getByRole("button", { name: /add library article/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /edit for every agency/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /remove from the library/i })).toBeInTheDocument();
+    expect(screen.getByRole("switch")).toBeInTheDocument();
+  });
+
+  it("lets agency owners choose, but not edit the shared library", async () => {
+    await open("agency_admin");
+    expect(screen.getByRole("switch")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add library article/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /edit for every agency/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /remove from the library/i })).not.toBeInTheDocument();
+  });
+
+  it("is read-only for agents, and the full article can be expanded", async () => {
+    await open("agent");
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add library article/i })).not.toBeInTheDocument();
+    const more = screen.getByRole("button", { name: "Read the full article" });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(more);
+    expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
   });
 });
 
