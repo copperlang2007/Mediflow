@@ -1,0 +1,64 @@
+name: Bedrock smoke
+
+# Live check that the app's Claude-on-Bedrock client path works with the real
+# credentials stored as Actions secrets. Sends one literal "pong" prompt (no PHI),
+# once streaming and once not. Run it by hand from the Actions tab, or let it run
+# when the AI client code changes.
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "artifacts/api-server/src/lib/ai/**"
+      - "artifacts/api-server/src/lib/aiProvider.ts"
+      - "artifacts/api-server/src/scripts/bedrock-smoke.ts"
+      - ".github/workflows/bedrock-smoke.yml"
+
+concurrency:
+  group: bedrock-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  bedrock-smoke:
+    name: bedrock live smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AI_INTEGRATIONS_PROVIDER: bedrock
+      AI_INTEGRATIONS_BEDROCK_API_KEY: ${{ secrets.AI_INTEGRATIONS_BEDROCK_API_KEY }}
+      AI_INTEGRATIONS_BEDROCK_BASE_URL: ${{ secrets.AI_INTEGRATIONS_BEDROCK_BASE_URL }}
+      AI_INTEGRATIONS_MODEL: ${{ vars.AI_INTEGRATIONS_MODEL }}
+    steps:
+      - name: Skip when the secrets are not available (forks, unset)
+        id: gate
+        run: |
+          if [ -z "$AI_INTEGRATIONS_BEDROCK_API_KEY" ] || [ -z "$AI_INTEGRATIONS_BEDROCK_BASE_URL" ]; then
+            echo "::warning::AI_INTEGRATIONS_BEDROCK_API_KEY / _BASE_URL not set; skipping live Bedrock smoke"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+
+      - name: Install pnpm
+        if: steps.gate.outputs.run == 'true'
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install deps
+        if: steps.gate.outputs.run == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Live Bedrock smoke
+        if: steps.gate.outputs.run == 'true'
+        run: pnpm --filter @workspace/scripts run smoke:bedrock
