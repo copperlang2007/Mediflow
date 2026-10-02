@@ -7,15 +7,20 @@
  *   PATCH  /kb/articles/:id    — edit / turn on or off (agency owners)
  *   DELETE /kb/articles/:id    — remove (agency owners)
  *
+ * Mediflow library (migration 0065) — platform-wide articles each agency
+ * chooses from:
+ *   GET /kb/library            — list, with this agency's on/off state
+ *   PUT /kb/library/choices    — turn library articles on or off (agency owners)
+ *
  * Articles are non-PHI reference notes. Every handler is org-scoped: an
  * article id from another agency 404s. Active articles feed the AI
  * assistant's context (see lib/kbContext.ts).
  */
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, asc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { randomUUID } from "crypto";
-import { db, kbArticlesTable } from "@workspace/db";
+import { db, kbArticlesTable, kbLibraryArticlesTable, kbLibraryChoicesTable } from "@workspace/db";
 import {
   requireAuth,
   requirePermission,
@@ -112,6 +117,125 @@ router.get(
         keywords: Number(counts?.keywords ?? 0),
       },
     });
+  },
+);
+
+const LibraryChoicesSchema = z.object({
+  ids: z.array(z.string().min(1).max(200)).min(1).max(200),
+  enabled: z.boolean(),
+});
+
+router.get(
+  "/kb/library",
+  requireAuth,
+  requirePermission("kb_article", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const q = req.query as Record<string, string | undefined>;
+
+    const effective = sql<boolean>`coalesce(${kbLibraryChoicesTable.enabled}, ${kbLibraryArticlesTable.defaultEnabled})`;
+    const conditions: SQL[] = [];
+    if (q.kind === "mediflow_guide" || q.kind === "medicare_reference") {
+      conditions.push(eq(kbLibraryArticlesTable.kind, q.kind));
+    }
+    if (q.category) conditions.push(eq(kbLibraryArticlesTable.category, q.category));
+    const search = q.search?.trim().slice(0, 100);
+    if (search) {
+      const pattern = `%${likeEscape(search)}%`;
+      conditions.push(
+        or(
+          ilike(kbLibraryArticlesTable.title, pattern),
+          ilike(kbLibraryArticlesTable.content, pattern),
+          ilike(kbLibraryArticlesTable.category, pattern),
+          sql`EXISTS (SELECT 1 FROM unnest(${kbLibraryArticlesTable.keywords}) AS k WHERE k ILIKE ${pattern})`,
+        ) as SQL,
+      );
+    }
+
+    const rows = await db
+      .select({
+        id: kbLibraryArticlesTable.id,
+        category: kbLibraryArticlesTable.category,
+        title: kbLibraryArticlesTable.title,
+        content: kbLibraryArticlesTable.content,
+        keywords: kbLibraryArticlesTable.keywords,
+        kind: kbLibraryArticlesTable.kind,
+        needsReview: kbLibraryArticlesTable.needsReview,
+        defaultEnabled: kbLibraryArticlesTable.defaultEnabled,
+        enabled: effective,
+        chosen: sql<boolean>`${kbLibraryChoicesTable.enabled} IS NOT NULL`,
+        updatedAt: kbLibraryArticlesTable.updatedAt,
+      })
+      .from(kbLibraryArticlesTable)
+      .leftJoin(
+        kbLibraryChoicesTable,
+        and(
+          eq(kbLibraryChoicesTable.articleId, kbLibraryArticlesTable.id),
+          eq(kbLibraryChoicesTable.orgId, authReq.orgId),
+        ),
+      )
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(
+        asc(kbLibraryArticlesTable.kind),
+        asc(kbLibraryArticlesTable.category),
+        asc(kbLibraryArticlesTable.title),
+      )
+      .limit(safeLimit(q.limit, 200, 500))
+      .offset(safeOffset(q.offset));
+
+    const [counts] = await db
+      .select({
+        total: sql<number>`count(*)::int`,
+        enabled: sql<number>`count(*) FILTER (WHERE ${effective})::int`,
+      })
+      .from(kbLibraryArticlesTable)
+      .leftJoin(
+        kbLibraryChoicesTable,
+        and(
+          eq(kbLibraryChoicesTable.articleId, kbLibraryArticlesTable.id),
+          eq(kbLibraryChoicesTable.orgId, authReq.orgId),
+        ),
+      );
+
+    res.json({
+      articles: rows,
+      stats: { total: Number(counts?.total ?? 0), enabled: Number(counts?.enabled ?? 0) },
+    });
+  },
+);
+
+router.put(
+  "/kb/library/choices",
+  requireAuth,
+  requirePermission("kb_article", "update"),
+  audit,
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const parsed = LibraryChoicesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
+      return;
+    }
+    const { ids, enabled } = parsed.data;
+    const unique = Array.from(new Set(ids));
+
+    const found = await db
+      .select({ id: kbLibraryArticlesTable.id })
+      .from(kbLibraryArticlesTable)
+      .where(inArray(kbLibraryArticlesTable.id, unique));
+    if (found.length !== unique.length) {
+      res.status(404).json({ error: "Library article not found" });
+      return;
+    }
+
+    await db
+      .insert(kbLibraryChoicesTable)
+      .values(unique.map((articleId) => ({ orgId: authReq.orgId, articleId, enabled, updatedBy: authReq.userId })))
+      .onConflictDoUpdate({
+        target: [kbLibraryChoicesTable.orgId, kbLibraryChoicesTable.articleId],
+        set: { enabled, updatedBy: authReq.userId, updatedAt: new Date() },
+      });
+    res.json({ updated: unique.length, enabled });
   },
 );
 

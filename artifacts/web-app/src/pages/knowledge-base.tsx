@@ -4,7 +4,7 @@
  * owners add, edit, switch off and delete. Active articles are also handed to
  * the AI assistant as reference material when a question matches them.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import {
@@ -56,6 +56,7 @@ import { useToast } from "@/hooks/use-toast";
 import { EmptyState, MiniStat, PageHeader, StatusPill } from "@/components/shared";
 import { openAiAssistant } from "@/components/ai-assistant";
 import { cn } from "@/lib/utils";
+import { KnowledgeLibrary } from "./knowledge-library";
 
 export type KbArticle = {
   id: string;
@@ -80,7 +81,19 @@ const ALL = "all";
 type EditorState = { id?: string; category: string; title: string; content: string; keywords: string; isActive: boolean };
 const EMPTY: EditorState = { category: "", title: "", content: "", keywords: "", isActive: true };
 
+/** Switches between the agency's own articles and the shared Mediflow library. */
 export default function KnowledgeBasePage() {
+  const [view, setView] = useState<"own" | "library">("own");
+  const viewSwitch = (
+    <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="Which articles">
+      <Button size="sm" variant={view === "own" ? "default" : "ghost"} onClick={() => setView("own")}>Our articles</Button>
+      <Button size="sm" variant={view === "library" ? "default" : "ghost"} onClick={() => setView("library")}>Mediflow library</Button>
+    </div>
+  );
+  return view === "own" ? <OwnArticles viewSwitch={viewSwitch} /> : <KnowledgeLibrary viewSwitch={viewSwitch} />;
+}
+
+function OwnArticles({ viewSwitch }: { viewSwitch: ReactNode }) {
   const qc = useQueryClient();
   const { toast } = useToast();
   const { data: me } = useGetMe();
@@ -185,6 +198,7 @@ export default function KnowledgeBasePage() {
         title="Knowledge Base"
         subtitle="Your agency's answers in one place — plan rules, carrier quirks and how-tos. The AI assistant reads these too."
       >
+        {viewSwitch}
         {/* The assistant needs contact access (server: /ai/chat is contact:read). */}
         {me && AI_ROLES.includes(me.role) && (
           <Button variant="outline" size="sm" onClick={() => openAiAssistant()}>
