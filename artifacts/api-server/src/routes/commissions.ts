@@ -45,7 +45,6 @@ import { enqueue, JOB_NAMES } from "../lib/jobs";
 import {
   parseStatement,
   UnknownCarrierError,
-  type NormalizedLineItem,
 } from "../lib/commissionParsers";
 import { reconcileStatement } from "../workers/reconcileCommissionStatement";
 import { insertLineItems } from "../lib/commissions/insertLineItems";
@@ -343,7 +342,29 @@ const StatementMetaSchema = z.object({
   periodStart: z.string().min(1),
   periodEnd: z.string().min(1),
   totalAmount: z.union([z.string(), z.number()]).optional().nullable(),
+  // "true" = read the file straight away (the upload screen does this). Left
+  // off, the statement stays pending until POST .../parse is sent the file.
+  parse: z.enum(["true", "false"]).optional(),
 });
+
+/**
+ * Read a statement file into line items and mark the statement parsed.
+ * Throws UnknownCarrierError when there is no reader for the carrier.
+ */
+async function parseStatementFile(
+  statementId: string,
+  orgId: string,
+  carrierName: string,
+  buffer: Buffer,
+): Promise<number> {
+  const normalized = parseStatement(carrierName, buffer);
+  const inserted = normalized.length > 0 ? await insertLineItems(db, statementId, orgId, normalized) : 0;
+  await db
+    .update(commissionStatementsTable)
+    .set({ status: "parsed" })
+    .where(eq(commissionStatementsTable.id, statementId));
+  return inserted;
+}
 
 router.post(
   "/commissions/statements",
@@ -400,20 +421,28 @@ router.post(
       })
       .returning();
 
+    // The file is not stored (no blob storage yet), so it can only be read
+    // while this request still holds it. With `parse=true` we read it now;
+    // otherwise the caller re-sends it to POST .../parse.
+    if (data.parse === "true") {
+      try {
+        const inserted = await parseStatementFile(id, authReq.orgId, carrier.name, req.file.buffer);
+        res.status(201).json({ ...row, status: "parsed", parse: { inserted } });
+      } catch (err) {
+        // The statement stays pending; tell the caller why it could not be read.
+        const message =
+          err instanceof UnknownCarrierError
+            ? err.message
+            : "Could not read that file. Check it is a CSV statement from this carrier.";
+        res.status(201).json({ ...row, parse: { error: message } });
+      }
+      return;
+    }
+
     res.status(201).json({
       ...row,
-      // Keep buffer in-memory on the server filesystem under storageKey is a
-      // future concern; for now stash it on the response so the parse step
-      // can be run via a separate request that re-uploads, OR we can parse
-      // immediately. We do the immediate path in `parse` below using a
-      // base64 round-trip when storage is not configured.
       _hint: "POST /commissions/statements/:id/parse with the same file to extract line items",
     });
-
-    // Defer-then-encode: stash the buffer as base64 on the row's raw via
-    // line_items? No — we keep the parser inline by holding the file in
-    // memory under a session-scoped map. Instead the client should call
-    // parse with the file body again, or use the inline parse param below.
   },
 );
 
@@ -462,9 +491,9 @@ router.post(
       return;
     }
 
-    let normalized: NormalizedLineItem[];
     try {
-      normalized = parseStatement(carrier.name, req.file.buffer);
+      const inserted = await parseStatementFile(id, authReq.orgId, carrier.name, req.file.buffer);
+      res.json({ inserted, statementId: id });
     } catch (err) {
       if (err instanceof UnknownCarrierError) {
         res.status(400).json({ error: err.message });
@@ -472,24 +501,6 @@ router.post(
       }
       throw err;
     }
-
-    if (normalized.length === 0) {
-      await db
-        .update(commissionStatementsTable)
-        .set({ status: "parsed" })
-        .where(eq(commissionStatementsTable.id, id));
-      res.json({ inserted: 0, statementId: id });
-      return;
-    }
-
-    const inserted = await insertLineItems(db, id, authReq.orgId, normalized);
-
-    await db
-      .update(commissionStatementsTable)
-      .set({ status: "parsed" })
-      .where(eq(commissionStatementsTable.id, id));
-
-    res.json({ inserted, statementId: id });
   },
 );
 

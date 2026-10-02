@@ -94,6 +94,16 @@ describe("KB library — starting content and defaults", () => {
     expect(body.articles.filter((a) => a.kind === "mediflow_guide").every((a) => a.enabled && !a.chosen)).toBe(true);
   });
 
+  it("has the corrected statement-upload guide (no stale 'known issue')", async () => {
+    const res = await request(app).get("/api/kb/library?search=commission%20statements").set(withAuth(admin.id));
+    const guide = res.body.articles.find((a: { id: string }) => a.id === "lib-mf-commission-statement-upload");
+    expect(guide).toBeDefined();
+    expect(guide.content).toContain("Upload & parse");
+    expect(guide.content).toContain("Parse (choose file)");
+    expect(guide.content).not.toContain("KNOWN ISSUE");
+    expect(guide.content.length).toBeLessThanOrEqual(1500);
+  });
+
   it("lets every staff role read", async () => {
     for (const id of [agentUser.id, viewer.id, admin.id]) {
       expect((await library(id)).status).toBe(200);
