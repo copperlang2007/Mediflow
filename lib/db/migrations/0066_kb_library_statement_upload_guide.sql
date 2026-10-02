@@ -1,7 +1,7 @@
 -- Correct the "Uploading carrier commission statements" library guide: the
 -- upload screen now reads the file during the upload, and the file picker only
--- offers CSV/text. Only touches the article if no one has edited it since it was
--- seeded (updated_at = created_at), so a platform admin's own wording is kept.
+-- offers CSV/text. Only touches the article while it still contains the stale
+-- "KNOWN ISSUE" wording from the seed, so a platform admin's own rewrite is kept.
 UPDATE "kb_library_articles"
 SET "content" = $kb$WHERE: Commissions > Upload statement button, or Reconciliation > Upload statement. Only Super Admin and Agency Admin can upload, and MFA must be on.
 
@@ -14,4 +14,4 @@ SUPPORTED CARRIERS: Mediflow has readers for Humana (pipe-delimited, no header r
 BAD ROWS: For Humana, UHC and Anthem, rows with fewer than 12 columns or entirely blank are silently skipped, and not reported. Unreadable amounts become $0.00. Amounts in parentheses, like (500.00), are read as negative. Types CHGBK, CB, charge, recoup, reverse become chargebacks.$kb$,
     "updated_at" = now()
 WHERE "key" = 'mf-commission-statement-upload'
-  AND "updated_at" = "created_at";
+  AND "content" LIKE '%KNOWN ISSUE: Mediflow does not keep the uploaded file%';
