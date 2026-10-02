@@ -17,6 +17,7 @@ import {
 } from "../middlewares/requireAuth";
 import { AHIP_REQUIRED_AGENT_STATUSES, isAhipComplete } from "../lib/agents/ahipCoverage";
 import { expiredLicenseWhere } from "../lib/licenses/licenseStatus";
+import { sellingPlanYear } from "../lib/compliance/planYear";
 
 const router: IRouter = Router();
 
@@ -227,6 +228,10 @@ router.get(
     const in60 = new Date(now.getTime() + 60 * 86_400_000);
     const in90 = new Date(now.getTime() + 90 * 86_400_000);
     const currentYear = now.getFullYear();
+    // AHIP is scored against the plan year being sold (planYear.ts), the same
+    // year the dashboard and the Ready-to-Sell gate use. That is next year from
+    // Oct 1, so it is NOT always the calendar year.
+    const certYear = sellingPlanYear(now);
     const ahipDeadline = new Date(`${currentYear}-10-01T00:00:00Z`);
     const daysUntilAhipDeadline = Math.ceil(
       (ahipDeadline.getTime() - now.getTime()) / 86_400_000,
@@ -293,7 +298,7 @@ router.get(
         .where(
           and(
             eq(agentsTable.orgId, authReq.orgId),
-            eq(ahipRecordsTable.certificationYear, currentYear),
+            eq(ahipRecordsTable.certificationYear, certYear),
           ),
         ),
       // Licenses already past their expiry (shared definition), for agents
@@ -423,7 +428,7 @@ router.get(
 
     res.json({
       generatedAt: now.toISOString(),
-      currentCertYear: currentYear,
+      currentCertYear: certYear,
       ahipDeadline: ahipDeadline.toISOString(),
       daysUntilAhipDeadline,
       licenses: licCounts,

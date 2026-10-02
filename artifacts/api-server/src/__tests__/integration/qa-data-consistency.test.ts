@@ -59,9 +59,12 @@ import { bootTestDb, shutdownTestDb, withAuth, withMfaAuth } from "../helpers/te
 import { seedOrg, seedUser, seedAgent, seedContact } from "../helpers/testDb";
 import type { TestDb } from "../helpers/testDb";
 import type { Express } from "express";
+import { sellingPlanYear } from "../../lib/compliance/planYear";
 
 const DAY = 86_400_000;
-const YEAR = new Date().getFullYear();
+// The plan year the app is selling today, not the calendar year: from Oct 1 the
+// dashboard, compliance alerts and AHIP views all score against next year.
+const YEAR = sellingPlanYear();
 
 let app: Express;
 let request: typeof import("supertest");

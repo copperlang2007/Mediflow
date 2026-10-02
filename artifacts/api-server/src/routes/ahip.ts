@@ -9,6 +9,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { getAhipCoverage } from "../lib/agents/ahipCoverage";
+import { sellingPlanYear } from "../lib/compliance/planYear";
 import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 
 const router: IRouter = Router();
@@ -162,7 +163,7 @@ router.get(
   requirePermission("agent", "read"),
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
-    const year = parseInt((req.query.year as string) ?? String(new Date().getFullYear()), 10);
+    const year = parseInt((req.query.year as string) ?? String(sellingPlanYear()), 10);
 
     const [coverage, completed] = await Promise.all([
       getAhipCoverage(authReq.orgId, year),
