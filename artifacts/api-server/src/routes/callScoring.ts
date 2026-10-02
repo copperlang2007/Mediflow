@@ -25,7 +25,7 @@ import { Router, type IRouter, type NextFunction, type Request, type Response } 
 import multer from "multer";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import {
   CALL_RECORDING_LAYOUTS,
   CALL_TRANSCRIPT_FORMATS,
@@ -886,7 +886,7 @@ async function linkProblem(orgId: string, f: { agentId?: string; contactId?: str
     if (!a) return { code: "agent_not_found", message: "Agent not found." };
   }
   if (f.contactId) {
-    const [c] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, f.contactId), eq(contactsTable.orgId, orgId))).limit(1);
+    const [c] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, f.contactId), eq(contactsTable.orgId, orgId), isNull(contactsTable.deletedAt))).limit(1);
     if (!c) return { code: "contact_not_found", message: "Contact not found." };
   }
   if (f.callSessionId) {
@@ -958,7 +958,14 @@ router.post(
       const [{ started }] = await tx
         .select({ started: sql<number>`count(*)::int` })
         .from(callRecordingsTable)
-        .where(and(eq(callRecordingsTable.orgId, authReq.orgId), gt(callRecordingsTable.createdAt, new Date(now.getTime() - 24 * 60 * 60 * 1000))));
+        .where(
+          and(
+            eq(callRecordingsTable.orgId, authReq.orgId),
+            gt(callRecordingsTable.createdAt, new Date(now.getTime() - 24 * 60 * 60 * 1000)),
+            // A rejected upload (too large, never finished) was never transcribed: it costs nothing.
+            ne(callRecordingsTable.status, "failed"),
+          ),
+        );
       if (Number(started) >= limit) return false;
       await tx.insert(callRecordingsTable).values({
       id,
@@ -988,7 +995,14 @@ router.post(
       res.status(429).json({ error: `Your agency has started ${limit} recordings in the last 24 hours, the daily limit. Try again later, or ask the administrator to raise it.`, code: "daily_limit" });
       return;
     }
-    res.status(201).json({ recordingId: id, uploadUrl, method: "PUT", headers: { "Content-Type": f.contentType }, expiresInSeconds: 900 });
+    // Both headers are part of the signature; the second makes the URL create-only.
+    res.status(201).json({
+      recordingId: id,
+      uploadUrl,
+      method: "PUT",
+      headers: { "Content-Type": f.contentType, "x-goog-if-generation-match": "0" },
+      expiresInSeconds: 900,
+    });
   },
 );
 

@@ -104,6 +104,8 @@ export function RecordingUpload({ config, onOpen }: { config: CsConfig | undefin
   const [rubricId, setRubricId] = useState("");
   // A file already in storage whose confirmation failed: retrying only re-confirms it.
   const uploaded = useRef<{ file: File; recordingId: string } | null>(null);
+  // Mirrors the ref so the button label re-renders when a retry becomes possible.
+  const [retryFile, setRetryFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const audio = config?.audio;
@@ -146,10 +148,12 @@ export function RecordingUpload({ config, onOpen }: { config: CsConfig | undefin
         throw Object.assign(new Error("upload"), { data: { error: "The upload did not finish. Check your connection and try again." } });
       }
       uploaded.current = { file: f, recordingId: start.recordingId };
+      setRetryFile(f);
       return confirm(start.recordingId);
     },
     onSuccess: () => {
       uploaded.current = null;
+      setRetryFile(null);
       setFile(null);
       setProblem(null);
       if (fileRef.current) fileRef.current.value = "";
@@ -251,7 +255,7 @@ export function RecordingUpload({ config, onOpen }: { config: CsConfig | undefin
         <div className="flex flex-wrap items-center gap-3">
           <Button type="submit" disabled={!file || tooBig || send.isPending}>
             {send.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" /> : <Upload className="mr-1.5 h-4 w-4" aria-hidden="true" />}
-            {progress !== null ? `Uploading ${progress}%` : send.isPending ? "Starting…" : uploaded.current?.file === file ? "Retry" : "Upload and score"}
+            {progress !== null ? `Uploading ${progress}%` : send.isPending ? "Starting…" : retryFile && retryFile === file ? "Retry" : "Upload and score"}
           </Button>
           <span className="text-xs text-muted-foreground">Recordings are kept encrypted for the 10-year CMS retention period.</span>
         </div>

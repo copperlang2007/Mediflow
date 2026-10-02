@@ -51,7 +51,7 @@ import { eq } from "drizzle-orm";
 import * as schema from "@workspace/db/schema";
 import { bootTestDb, clearEnqueuedJobs, getEnqueuedJobs, shutdownTestDb, withAuth } from "../helpers/testApp";
 import { safeReason } from "../../lib/callScoring/speech";
-import { seedAgent, seedOrg, seedUser } from "../helpers/testDb";
+import { seedAgent, seedContact, seedOrg, seedUser } from "../helpers/testDb";
 import type { Express } from "express";
 
 const objects = () => (globalThis as unknown as { __REC_OBJECTS__: Map<string, { size: number; contentType: string }> }).__REC_OBJECTS__;
@@ -225,7 +225,8 @@ describe("starting an upload", () => {
     const res = await request(app).post("/api/call-scoring/recordings/upload-url").set(withAuth(compliance.id)).send(startBody({ agentId: agentProfile.id, key: "call-recordings/rec-other-org/steal" }));
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body.method).toBe("PUT");
-    expect(res.body.headers).toEqual({ "Content-Type": "audio/mpeg" });
+    // Create-only: the signed URL cannot overwrite the object once it exists.
+    expect(res.body.headers).toEqual({ "Content-Type": "audio/mpeg", "x-goog-if-generation-match": "0" });
     const row = await rowOf(res.body.recordingId);
     expect(row.objectKey).toBe(`call-recordings/${org.id}/${row.id}`);
     expect(signed().at(-1)).toEqual({ key: row.objectKey, contentType: "audio/mpeg" });
@@ -249,6 +250,11 @@ describe("starting an upload", () => {
     expect(cross.status).toBe(404);
     expect(cross.body.code).toBe("agent_not_found");
     expect((await post({ rubricId: "no-such-rubric" })).status).toBe(400);
+    const gone = await seedContact(handle.db, { orgId: org.id, firstName: "Gone", lastName: "Contact" });
+    await handle.db.update(schema.contactsTable).set({ deletedAt: new Date() }).where(eq(schema.contactsTable.id, gone.id));
+    const deleted = await post({ contactId: gone.id });
+    expect(deleted.status).toBe(404);
+    expect(deleted.body.code).toBe("contact_not_found");
   });
 
   it("is limited to people who can score calls", async () => {
@@ -453,6 +459,10 @@ describe("review fixes", () => {
       const second = await post();
       expect(second.status).toBe(429);
       expect(second.body.code).toBe("daily_limit");
+
+      // A rejected upload is never transcribed, so it frees its slot.
+      await handle.db.update(schema.callRecordingsTable).set({ status: "failed" }).where(eq(schema.callRecordingsTable.orgId, org2.id));
+      expect((await post()).status).toBe(201);
 
       // A burst cannot slip past the cap together.
       process.env.CALL_RECORDINGS_DAILY_LIMIT = "3";

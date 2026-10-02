@@ -164,8 +164,10 @@ OPTIONAL_ENV_FLAG=""
 # are joined with ";" here because "," separates --set-env-vars entries.
 [ -n "${GHL_SYNC_ORG_IDS:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}GHL_SYNC_ORG_IDS=${GHL_SYNC_ORG_IDS//,/;},"
 [ -n "${GHL_LOCATION_ID:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}GHL_LOCATION_ID=${GHL_LOCATION_ID},"
-# Call recordings: Speech-to-Text is on (bootstrap enables the API, grants
-# roles/speech.client and sets bucket CORS). Optional per-agency daily cap.
+# Call recordings: opt in with SPEECH_TO_TEXT_PROVIDER=google (repo variable)
+# only after gcp-bootstrap.sh enabled the API, IAM and bucket CORS. Optional
+# per-agency daily cap.
+[ -n "${SPEECH_TO_TEXT_PROVIDER:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}SPEECH_TO_TEXT_PROVIDER=${SPEECH_TO_TEXT_PROVIDER},"
 [ -n "${CALL_RECORDINGS_DAILY_LIMIT:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}CALL_RECORDINGS_DAILY_LIMIT=${CALL_RECORDINGS_DAILY_LIMIT},"
 # "," separates --set-env-vars entries; a value containing one would split into
 # malformed entries. Fail loudly instead of deploying a garbled environment.
@@ -194,7 +196,6 @@ MFA_REQUIRED=true,\
 LOG_LEVEL=${LOG_LEVEL:-info},\
 WEB_STATIC_DIR=/app/artifacts/web-app/dist/public,\
 PRIVATE_OBJECT_DIR=${GCP_PHI_BUCKET}/private,\
-SPEECH_TO_TEXT_PROVIDER=${SPEECH_TO_TEXT_PROVIDER:-google},\
 GOOGLE_CLOUD_PROJECT=${GCP_PROJECT_ID},\
 BUILD_SHA=${SHA}${OPTIONAL_ENV_FLAG:+,${OPTIONAL_ENV_FLAG%,}}"
 

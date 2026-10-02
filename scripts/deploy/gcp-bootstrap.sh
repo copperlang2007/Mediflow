@@ -220,15 +220,16 @@ if [[ -n "${APP_ORIGIN:-}" ]]; then
   fi
   log "Allowing recording uploads to gs://${BUCKET} from ${APP_ORIGIN}…"
   CORS_FILE="$(mktemp)"
-  printf '[{"origin":["%s"],"method":["PUT"],"responseHeader":["Content-Type"],"maxAgeSeconds":3600}]\n' "${APP_ORIGIN}" > "${CORS_FILE}"
+  printf '[{"origin":["%s"],"method":["PUT"],"responseHeader":["Content-Type","x-goog-if-generation-match"],"maxAgeSeconds":3600}]\n' "${APP_ORIGIN}" > "${CORS_FILE}"
   gcloud storage buckets update "gs://${BUCKET}" --cors-file="${CORS_FILE}"
   rm -f "${CORS_FILE}"
 else
-  if [[ "$(gcloud storage buckets describe "gs://${BUCKET}" --format='value(cors_config)')" == "" ]]; then
+  CORS_ORIGINS="$(gcloud storage buckets describe "gs://${BUCKET}" --format='value(cors_config[].origin)' 2>/dev/null || true)"
+  if [[ -z "${CORS_ORIGINS}" || "${CORS_ORIGINS}" == "[]" ]]; then
     echo "WARNING: APP_ORIGIN is not set and gs://${BUCKET} has no CORS rule. Browser uploads of call" >&2
     echo "         recordings will fail until you re-run with APP_ORIGIN=https://your-app-address." >&2
   else
-    log "APP_ORIGIN not set: keeping the bucket's existing CORS rule."
+    log "APP_ORIGIN not set: keeping the bucket's existing CORS rule (${CORS_ORIGINS})."
   fi
 fi
 
@@ -298,6 +299,13 @@ gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
 # Call recordings are transcribed with Speech-to-Text (SPEECH_TO_TEXT_PROVIDER=google).
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/speech.client" >/dev/null
+# Speech-to-Text reads the gs:// recording as its own service agent; give it
+# read access to the PHI bucket (created on first use of the API, hence the identity call).
+PROJECT_NUMBER="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
+gcloud beta services identity create --service=speech.googleapis.com --project="${PROJECT_ID}" >/dev/null 2>&1 || true
+gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
+  --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-speech.iam.gserviceaccount.com" \
+  --role="roles/storage.objectViewer" >/dev/null
 for name in mediflow-database-url mediflow-phi-encryption-key mediflow-phi-hmac-key \
             mediflow-metrics-token mediflow-dialer-webhook-secret mediflow-lead-queue-webhook-secret \
             ${REQUIRED_CREDENTIAL_SECRETS} ${OPTIONAL_CREDENTIAL_SECRETS}; do

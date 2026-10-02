@@ -197,24 +197,25 @@ for the project before turning this on.
 1. In the Google Cloud project that runs the app, enable the **Cloud
    Speech-to-Text API**.
 2. Give the app's Cloud Run service account the **Cloud Speech Client** role
-   (`roles/speech.client`). It already has access to the private bucket. If a
-   recording fails with a permission message, also give the Speech-to-Text
-   service agent (`service-PROJECT_NUMBER@gcp-sa-speech.iam.gserviceaccount.com`)
-   **Storage Object Viewer** on that bucket.
+   (`roles/speech.client`), and the Speech-to-Text service agent
+   (`service-PROJECT_NUMBER@gcp-sa-speech.iam.gserviceaccount.com`) **Storage
+   Object Viewer** on the private bucket, since Google reads the recording as
+   that agent.
 3. Allow the browser to upload to the bucket (CORS). Without this every upload
    fails. `scripts/deploy/gcp-bootstrap.sh` does steps 1-3 when you run it with
    `APP_ORIGIN=https://your-app-address`. To do it by hand, save this as
    `cors.json`, with your app's address:
 
    ```json
-   [{ "origin": ["https://your-app-address"], "method": ["PUT"], "responseHeader": ["Content-Type"], "maxAgeSeconds": 3600 }]
+   [{ "origin": ["https://your-app-address"], "method": ["PUT"], "responseHeader": ["Content-Type", "x-goog-if-generation-match"], "maxAgeSeconds": 3600 }]
    ```
 
    then run `gcloud storage buckets update gs://YOUR_BUCKET --cors-file=cors.json`.
-4. Settings on the API service. The Cloud Run deploy (`scripts/deploy/gcp-deploy.sh`)
-   already sets `SPEECH_TO_TEXT_PROVIDER=google` and `GOOGLE_CLOUD_PROJECT`, and
-   passes `CALL_RECORDINGS_DAILY_LIMIT` through when set; on other hosts set them
-   yourself (a manual edit on Cloud Run is erased by the next deploy):
+4. Turn it on. On Cloud Run, set the GitHub Actions repository variable
+   `SPEECH_TO_TEXT_PROVIDER` to `google` (and optionally
+   `CALL_RECORDINGS_DAILY_LIMIT`); the deploy workflow passes them to the
+   service and always sets `GOOGLE_CLOUD_PROJECT`. A manual edit on the Cloud
+   Run service is erased by the next deploy. On other hosts set:
 
    | Setting | Value |
    | --- | --- |

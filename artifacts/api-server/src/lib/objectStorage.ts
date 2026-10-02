@@ -64,6 +64,9 @@ export class ObjectNotFoundError extends Error {
   }
 }
 
+/** Signed into recording upload URLs: the PUT may only create the object, never replace it. */
+export const CALL_RECORDING_CREATE_ONLY_HEADER = "x-goog-if-generation-match";
+
 export class ObjectStorageService {
   constructor() {}
 
@@ -310,13 +313,21 @@ export class ObjectStorageService {
   /**
    * A short-lived signed URL the browser PUTs the recording to directly. The
    * content type is part of the signature, so the upload must send exactly it.
+   * It is create-only (`x-goog-if-generation-match: 0` is signed in), so once
+   * the object exists the URL cannot overwrite it after it was validated.
    */
   async getCallRecordingUploadURL(objectKey: string, contentType: string, ttlSec = 900): Promise<string> {
     const { bucketName, objectName } = parseObjectPath(`${this.getPrivateObjectDir()}/${objectKey}`);
     const [url] = await objectStorageClient
       .bucket(bucketName)
       .file(objectName)
-      .getSignedUrl({ version: "v4", action: "write", contentType, expires: Date.now() + ttlSec * 1000 });
+      .getSignedUrl({
+        version: "v4",
+        action: "write",
+        contentType,
+        extensionHeaders: { [CALL_RECORDING_CREATE_ONLY_HEADER]: "0" },
+        expires: Date.now() + ttlSec * 1000,
+      });
     return url;
   }
 
