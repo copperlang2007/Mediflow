@@ -84,7 +84,7 @@ export function dailyRecordingLimit(env: NodeJS.ProcessEnv = process.env): numbe
   const n = Number.parseInt(env.CALL_RECORDINGS_DAILY_LIMIT ?? "", 10);
   return Number.isFinite(n) && n > 0 ? n : 300;
 }
-const RECORDING_TYPE_RE = /^(audio\/[a-z0-9.+-]+|video\/(mp4|webm))$/;
+const RECORDING_TYPE_RE = /^(audio\/[a-z0-9.+-]+|application\/ogg|video\/(mp4|webm))$/;
 
 // Reads of transcripts are PHI reads: audited. Summary/config carry no PHI.
 router.use(
@@ -1075,12 +1075,15 @@ router.get(
       .limit(q.data.limit)
       .offset(q.data.offset);
     res.json({
-      recordings: rows.map(({ detailsEncrypted, ...r }) => ({
-        ...r,
-        filename: open<RecordingDetails>(detailsEncrypted)?.filename ?? null,
-        createdAt: r.createdAt.toISOString(),
-        updatedAt: r.updatedAt.toISOString(),
-      })),
+      recordings: rows.map(({ detailsEncrypted, ...r }) => {
+        const details = detailsEncrypted ? open<RecordingDetails>(detailsEncrypted) : null;
+        return {
+          ...r,
+          filename: details?.filename ?? null,
+          createdAt: r.createdAt.toISOString(),
+          updatedAt: r.updatedAt.toISOString(),
+        };
+      }),
       audio: audioConfig(),
     });
   },

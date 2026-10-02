@@ -60,13 +60,13 @@ class FakeXhr {
   }
 }
 
-const config = (supported: boolean): CsConfig =>
+const config = (supported: boolean, layouts = ["mono", "agent_left", "agent_right"]): CsConfig =>
   ({
     rubrics: [],
     defaultRubricId: "medicare-tpmo",
     ai: { status: "needs_setup", message: "" },
     audio: supported
-      ? { supported: true, message: "ok", maxBytes: 1000, acceptedFormats: [".mp3", ".wav"], layouts: ["mono", "agent_left", "agent_right"] }
+      ? { supported: true, message: "ok", maxBytes: 1000, acceptedFormats: [".mp3", ".wav"], layouts }
       : { supported: false, message: "Audio transcription is not set up yet." },
     limits: { maxFileBytes: 1, maxImportFiles: 1, maxPasteChars: 1, acceptedFormats: [] },
     canCreate: true,
@@ -74,11 +74,11 @@ const config = (supported: boolean): CsConfig =>
     disclaimer: "",
   }) as CsConfig;
 
-function renderIt(supported: boolean, onOpen = vi.fn()) {
+function renderIt(supported: boolean, onOpen = vi.fn(), layouts?: string[]) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <RecordingUpload config={config(supported)} onOpen={onOpen} />
+      <RecordingUpload config={config(supported, layouts)} onOpen={onOpen} />
     </QueryClientProvider>,
   );
   return onOpen;
@@ -134,6 +134,28 @@ describe("RecordingUpload", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "Open call" }));
     expect(onOpen).toHaveBeenCalledWith("t1");
+  });
+
+  it("uses only the layouts advertised by the server", async () => {
+    state.routes = {
+      "GET /api/call-scoring/recordings": () => ({ recordings: [] }),
+      "POST /api/call-scoring/recordings/upload-url": () => ({
+        recordingId: "r4",
+        uploadUrl: "https://storage.example/signed",
+        method: "PUT",
+        headers: { "Content-Type": "audio/mpeg" },
+      }),
+      "POST /api/call-scoring/recordings/r4/uploaded": () => ({ recordingId: "r4", status: "queued" }),
+    };
+    renderIt(true, vi.fn(), ["agent_right"]);
+    await userEvent.click(screen.getByRole("combobox", { name: "Channels" }));
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    expect(screen.getByRole("option")).toHaveTextContent("Stereo, agent on the right");
+    await userEvent.keyboard("{Escape}");
+    await userEvent.upload(screen.getByLabelText("Recording"), new File(["abc"], "call.mp3", { type: "audio/mpeg" }));
+    await userEvent.click(screen.getByRole("button", { name: /upload and score/i }));
+    await waitFor(() => expect(state.calls.some((c) => c.url.endsWith("/r4/uploaded"))).toBe(true));
+    expect(state.calls.find((c) => c.url === "/api/call-scoring/recordings/upload-url")?.body).toMatchObject({ layout: "agent_right" });
   });
 
   it("does not confirm when the upload to storage fails", async () => {

@@ -238,6 +238,9 @@ describe("starting an upload", () => {
     const post = (b: Record<string, unknown>) => request(app).post("/api/call-scoring/recordings/upload-url").set(withAuth(admin.id)).send(startBody(b));
     expect((await post({ filename: "notes.txt", contentType: "text/plain" })).status).toBe(415);
     expect((await post({ contentType: "application/octet-stream" })).status).toBe(415);
+    const ogg = await post({ filename: "call.ogg", contentType: "application/ogg" });
+    expect(ogg.status).toBe(201);
+    expect(signed().at(-1)?.contentType).toBe("application/ogg");
     expect((await post({ sizeBytes: 600 * 1024 * 1024 })).status).toBe(413);
     const cross = await post({ agentId: otherOrgAgent.id });
     expect(cross.status).toBe(404);
