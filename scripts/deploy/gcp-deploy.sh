@@ -142,6 +142,7 @@ declare -A OPTIONAL_SECRET_MAP=(
   [PUBLIC_OBJECT_SEARCH_PATHS]=mediflow-public-object-search-paths
   [ENROLLHERE_WEBHOOK_SECRET]=mediflow-enrollhere-webhook-secret
   [GHL_PRIVATE_INTEGRATION_TOKEN]=mediflow-ghl-private-integration-token
+  [TWILIO_API_KEY_SECRET]=mediflow-twilio-api-key-secret
 )
 sync_secret mediflow-esign-cert-pem "${ESIGN_SIGNING_CERT_PEM:-}"
 sync_secret mediflow-esign-key-pem "${ESIGN_SIGNING_KEY_PEM:-}"
@@ -164,6 +165,10 @@ OPTIONAL_ENV_FLAG=""
 # are joined with ";" here because "," separates --set-env-vars entries.
 [ -n "${GHL_SYNC_ORG_IDS:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}GHL_SYNC_ORG_IDS=${GHL_SYNC_ORG_IDS//,/;},"
 [ -n "${GHL_LOCATION_ID:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}GHL_LOCATION_ID=${GHL_LOCATION_ID},"
+# Twilio browser calling (Voice SDK). Non-secret identifiers; the API key secret goes through Secret Manager above.
+[ -n "${TWILIO_TWIML_APP_SID:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}TWILIO_TWIML_APP_SID=${TWILIO_TWIML_APP_SID},"
+[ -n "${TWILIO_API_KEY_SID:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}TWILIO_API_KEY_SID=${TWILIO_API_KEY_SID},"
+[ -n "${TWILIO_VOICE_CALLER_ID:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}TWILIO_VOICE_CALLER_ID=${TWILIO_VOICE_CALLER_ID},"
 # "," separates --set-env-vars entries; a value containing one would split into
 # malformed entries. Fail loudly instead of deploying a garbled environment.
 for v in EMAIL_FROM_ADDRESS CONTRACTING_EMAIL_FROM GHL_LOCATION_ID; do
