@@ -11,9 +11,13 @@
  *   GET   /call-scoring/dnc-review                          possible do-not-contact requests
  *   POST  /call-scoring/dnc-review/:findingId/resolve       a person confirms (add_opt_out) or dismisses
  *   POST  /call-scoring/import                              bulk look-back: files + optional CSV manifest
+ *   POST  /call-scoring/recordings/upload-url               start a recording upload (signed URL, phase 2b)
+ *   POST  /call-scoring/recordings/:id/uploaded             confirm the upload; queue transcription
+ *   GET   /call-scoring/recordings                          recordings and where each one is
  *
- * There is no audio transcription here: audio files are refused with a clear
- * "not set up" message and nothing is ever invented. Transcripts, quotes and
+ * Audio is only transcribed through Google Speech-to-Text when it is set up
+ * (lib/callScoring/speech.ts); otherwise audio is refused with a clear
+ * "not set up" message. Nothing is ever invented. Transcripts, quotes and
  * notes are PHI and are stored encrypted (lib/callScoring/seal.ts). Scores
  * assist review; they are not legal advice or a compliance certification.
  */
@@ -21,11 +25,15 @@ import { Router, type IRouter, type NextFunction, type Request, type Response } 
 import multer from "multer";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import {
+  CALL_RECORDING_LAYOUTS,
   CALL_TRANSCRIPT_FORMATS,
   CALL_TRANSCRIPT_SOURCES,
   agentsTable,
+  callRecordingsTable,
+  callSessionsTable,
+  contactsTable,
   auditLogTable,
   callScoreFindingsTable,
   callScoreReviewsTable,
@@ -39,14 +47,17 @@ import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { isSelfScopedAgent } from "../middlewares/agentSelfScope";
 import { parseCsvTolerant, parseFlexibleDate, CsvFileError } from "../lib/csvImport";
 import { logger } from "../lib/logger";
-import { seal } from "../lib/callScoring/seal";
+import { open, seal } from "../lib/callScoring/seal";
 import { PARSE_LIMITS } from "../lib/callScoring/parse";
 import { DEFAULT_RUBRIC_ID, builtInRubrics, getRubric } from "../lib/callScoring/rubrics";
 import { resolveAiReviewer } from "../lib/callScoring/aiReviewer";
 import { ingestTranscript, rescoreTranscript, resolveRubric, type IngestResult } from "../lib/callScoring/ingest";
 import { DISCLAIMER, buildDetail, buildList, buildSummary } from "../lib/callScoring/detail";
 import { listDncQueue, resolveDncFinding } from "../lib/callScoring/dncReview";
-import { loadTranscriptRow, type ScopeFilter } from "../lib/callScoring/store";
+import { loadTranscriptRow, retainUntil, type ScopeFilter } from "../lib/callScoring/store";
+import { speechSetup } from "../lib/callScoring/speech";
+import type { RecordingDetails } from "../lib/callScoring/recordings";
+import { enqueue, JOB_NAMES, transcribeJobKey } from "../lib/jobs";
 import type { Rubric, TranscriptFormat } from "../lib/callScoring/types";
 
 const router: IRouter = Router();
@@ -61,6 +72,19 @@ const AUDIO_EXTENSIONS = [".mp3", ".wav", ".m4a", ".mp4", ".ogg", ".oga", ".flac
 const TEXT_EXTENSIONS = [".txt", ".vtt", ".srt", ".json"];
 export const AUDIO_NOT_SET_UP =
   "Audio transcription is not set up yet, so recordings can't be scored directly. Upload a transcript (TXT, VTT, SRT or JSON) instead. Nothing is transcribed or guessed for you.";
+/** Recordings go straight to storage, not through this server: a long call fits. */
+export const MAX_RECORDING_BYTES = 500 * 1024 * 1024;
+const RECORDING_EXTENSIONS = [".mp3", ".wav", ".m4a", ".mp4", ".ogg", ".oga", ".flac", ".webm", ".opus", ".aac", ".amr"];
+/**
+ * Recordings an agency may start per rolling 24 hours: a ceiling on
+ * Speech-to-Text spend if an admin account is misused. Set
+ * CALL_RECORDINGS_DAILY_LIMIT to raise it for a large look-back.
+ */
+export function dailyRecordingLimit(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number.parseInt(env.CALL_RECORDINGS_DAILY_LIMIT ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : 300;
+}
+const RECORDING_TYPE_RE = /^(audio\/[a-z0-9.+-]+|application\/ogg|video\/(mp4|webm))$/;
 
 // Reads of transcripts are PHI reads: audited. Summary/config carry no PHI.
 router.use(
@@ -173,6 +197,20 @@ function aiModeFrom(ai: boolean | undefined): "auto" | "off" {
 
 // ---- config ----------------------------------------------------------------
 
+/** Audio sent to a transcript route: point at the recording upload when it exists. */
+function audioRefusal(): { error: string; code: string } {
+  return speechSetup().ready
+    ? { error: "This is a recording. Use Upload recording to have it transcribed and scored.", code: "use_recording_upload" }
+    : { error: AUDIO_NOT_SET_UP, code: "audio_transcription_not_set_up" };
+}
+
+function audioConfig() {
+  const setup = speechSetup();
+  return setup.ready
+    ? { supported: true, message: setup.message, maxBytes: MAX_RECORDING_BYTES, acceptedFormats: RECORDING_EXTENSIONS, layouts: CALL_RECORDING_LAYOUTS }
+    : { supported: false, message: AUDIO_NOT_SET_UP };
+}
+
 router.get(
   "/call-scoring/config",
   requireAuth,
@@ -188,7 +226,7 @@ router.get(
       ai: aiConfigured
         ? { status: "configured", message: "AI review is set up. Only PHI-redacted text is sent, through the HIPAA-gated provider." }
         : { status: "needs_setup", message: "AI review is not set up. Rule checks and the do-not-contact check still run; judgment items are marked needs review." },
-      audio: { supported: false, message: AUDIO_NOT_SET_UP },
+      audio: audioConfig(),
       limits: {
         maxFileBytes: MAX_FILE_BYTES,
         maxImportFiles: MAX_IMPORT_FILES,
@@ -230,7 +268,7 @@ router.post(
     if (file) {
       const ext = extOf(file.originalname);
       if (AUDIO_EXTENSIONS.includes(ext) || /^(audio|video)\//.test(file.mimetype)) {
-        res.status(415).json({ error: AUDIO_NOT_SET_UP, code: "audio_transcription_not_set_up" });
+        res.status(415).json(audioRefusal());
         return;
       }
       if (!TEXT_EXTENSIONS.includes(ext)) {
@@ -686,7 +724,8 @@ router.post(
       const warnings: string[] = [];
       const ext = extOf(filename);
       if (AUDIO_EXTENSIONS.includes(ext) || /^(audio|video)\//.test(f.mimetype)) {
-        results.push({ filename, status: "error", code: "audio_transcription_not_set_up", error: AUDIO_NOT_SET_UP, warnings });
+        const refusal = audioRefusal();
+        results.push({ filename, status: "error", code: refusal.code, error: refusal.error, warnings });
         continue;
       }
       if (!TEXT_EXTENSIONS.includes(ext)) {
@@ -827,6 +866,253 @@ router.post(
       note: "Possible do-not-contact requests are in the Do-not-contact review queue. Nothing was added to the do-not-contact list.",
     };
     res.status(200).json({ summary, results });
+  },
+);
+
+// ---- recordings (phase 2b) ---------------------------------------------------
+
+const RecordingStart = IngestFields.omit({ source: true }).extend({
+  filename: z.string().trim().min(1).max(200),
+  contentType: z.string().trim().toLowerCase().max(100),
+  sizeBytes: z.coerce.number().int().min(1),
+  layout: z.enum(CALL_RECORDING_LAYOUTS).default("mono"),
+  source: optional(z.enum(CALL_TRANSCRIPT_SOURCES)),
+});
+
+/** Linked records must be this agency's own; checked before anything is stored. */
+async function linkProblem(orgId: string, f: { agentId?: string; contactId?: string; callSessionId?: string }): Promise<{ code: string; message: string } | null> {
+  if (f.agentId) {
+    const [a] = await db.select({ id: agentsTable.id }).from(agentsTable).where(and(eq(agentsTable.id, f.agentId), eq(agentsTable.orgId, orgId))).limit(1);
+    if (!a) return { code: "agent_not_found", message: "Agent not found." };
+  }
+  if (f.contactId) {
+    const [c] = await db.select({ id: contactsTable.id }).from(contactsTable).where(and(eq(contactsTable.id, f.contactId), eq(contactsTable.orgId, orgId), isNull(contactsTable.deletedAt))).limit(1);
+    if (!c) return { code: "contact_not_found", message: "Contact not found." };
+  }
+  if (f.callSessionId) {
+    const [c] = await db.select({ id: callSessionsTable.id }).from(callSessionsTable).where(and(eq(callSessionsTable.id, f.callSessionId), eq(callSessionsTable.orgId, orgId))).limit(1);
+    if (!c) return { code: "call_not_found", message: "Call not found." };
+  }
+  return null;
+}
+
+router.post(
+  "/call-scoring/recordings/upload-url",
+  requireAuth,
+  requireMfa,
+  requirePermission("call_scoring", "create"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const setup = speechSetup();
+    if (!setup.ready) {
+      res.status(503).json({ error: AUDIO_NOT_SET_UP, code: "audio_transcription_not_set_up" });
+      return;
+    }
+    const parsed = RecordingStart.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "Check the fields you entered.", code: "invalid", details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })) });
+      return;
+    }
+    const f = parsed.data;
+    if (!RECORDING_EXTENSIONS.includes(extOf(f.filename)) || !RECORDING_TYPE_RE.test(f.contentType)) {
+      res.status(415).json({ error: "Upload an audio recording: MP3, WAV, M4A, MP4, OGG, FLAC, WEBM, OPUS, AAC or AMR.", code: "unsupported_file" });
+      return;
+    }
+    if (f.sizeBytes > MAX_RECORDING_BYTES) {
+      res.status(413).json({ error: `Recordings are limited to ${MAX_RECORDING_BYTES / 1024 / 1024} MB. Split the call or export it at a lower bitrate.`, code: "file_too_large" });
+      return;
+    }
+    if (f.rubricId && !resolveRubric(f.rubricId, getRubric(DEFAULT_RUBRIC_ID) as Rubric)) {
+      res.status(400).json({ error: "Unknown rubric.", code: "unknown_rubric" });
+      return;
+    }
+    const callDate = parseCallDate(f.callDate);
+    if (callDate === "invalid") {
+      res.status(400).json({ error: "The call date is not a valid date.", code: "invalid_date" });
+      return;
+    }
+    const problem = await linkProblem(authReq.orgId, f);
+    if (problem) {
+      res.status(404).json({ error: problem.message, code: problem.code });
+      return;
+    }
+    const { ObjectStorageService } = await import("../lib/objectStorage");
+    const storage = new ObjectStorageService();
+    const id = randomUUID();
+    const objectKey = storage.callRecordingKey(authReq.orgId, id);
+    const details: RecordingDetails = { filename: f.filename, phone: f.phone ?? null, externalRef: f.externalRef ?? null, uploaderRole: authReq.userRole };
+    let uploadUrl: string;
+    try {
+      uploadUrl = await storage.getCallRecordingUploadURL(objectKey, f.contentType);
+    } catch (err) {
+      logger.error({ err: (err as Error).message }, "Call recording: could not sign the upload URL");
+      res.status(503).json({ error: "Recording storage is not available right now. Try again in a few minutes.", code: "storage_unavailable" });
+      return;
+    }
+    // Count and insert under a per-agency lock so a burst of requests cannot
+    // all see the same count and pass the daily cap together.
+    const limit = dailyRecordingLimit();
+    const now = new Date();
+    const inserted = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`call-recordings:${authReq.orgId}`}))`);
+      const [{ started }] = await tx
+        .select({ started: sql<number>`count(*)::int` })
+        .from(callRecordingsTable)
+        .where(
+          and(
+            eq(callRecordingsTable.orgId, authReq.orgId),
+            gt(callRecordingsTable.createdAt, new Date(now.getTime() - 24 * 60 * 60 * 1000)),
+            // A rejected upload (too large, never finished) was never transcribed: it costs nothing.
+            ne(callRecordingsTable.status, "failed"),
+          ),
+        );
+      if (Number(started) >= limit) return false;
+      await tx.insert(callRecordingsTable).values({
+      id,
+      orgId: authReq.orgId,
+      status: "uploading",
+      layout: f.layout,
+      objectKey,
+      contentType: f.contentType,
+      sizeBytes: f.sizeBytes,
+      detailsEncrypted: seal(details),
+      agentId: f.agentId ?? null,
+      contactId: f.contactId ?? null,
+      callSessionId: f.callSessionId ?? null,
+      callDate,
+      rubricId: f.rubricId ?? null,
+      aiMode: aiModeFrom(f.ai),
+      source: f.source ?? "upload",
+      createdBy: authReq.userId,
+      retainUntil: retainUntil(now),
+      createdAt: now,
+      updatedAt: now,
+    });
+      return true;
+    });
+    if (!inserted) {
+      logger.warn({ orgId: authReq.orgId, limit }, "Call recording: daily limit reached");
+      res.status(429).json({ error: `Your agency has started ${limit} recordings in the last 24 hours, the daily limit. Try again later, or ask the administrator to raise it.`, code: "daily_limit" });
+      return;
+    }
+    // Both headers are part of the signature; the second makes the URL create-only.
+    res.status(201).json({
+      recordingId: id,
+      uploadUrl,
+      method: "PUT",
+      headers: { "Content-Type": f.contentType, "x-goog-if-generation-match": "0" },
+      expiresInSeconds: 900,
+    });
+  },
+);
+
+router.post(
+  "/call-scoring/recordings/:id/uploaded",
+  requireAuth,
+  requireMfa,
+  requirePermission("call_scoring", "create"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const id = param(req.params.id);
+    const [row] = await db
+      .select()
+      .from(callRecordingsTable)
+      .where(and(eq(callRecordingsTable.id, id), eq(callRecordingsTable.orgId, authReq.orgId)))
+      .limit(1);
+    if (!row) {
+      res.status(404).json({ error: "Recording not found.", code: "not_found" });
+      return;
+    }
+    if (row.status !== "uploading") {
+      res.status(200).json({ recordingId: row.id, status: row.status });
+      return;
+    }
+    const { ObjectStorageService } = await import("../lib/objectStorage");
+    const storage = new ObjectStorageService();
+    let meta: { size: number; contentType: string | null } | null;
+    try {
+      meta = await storage.getCallRecordingMetadata(row.objectKey);
+    } catch (err) {
+      logger.error({ err: (err as Error).message }, "Call recording: could not check the upload");
+      res.status(503).json({ error: "Recording storage is not available right now. Try again in a few minutes.", code: "storage_unavailable" });
+      return;
+    }
+    if (!meta || meta.size <= 0) {
+      res.status(409).json({ error: "The recording has not finished uploading. Upload it again.", code: "not_uploaded" });
+      return;
+    }
+    if (meta.size > MAX_RECORDING_BYTES) {
+      // The signed URL cannot bind the length, so an oversized file is deleted here, not kept.
+      try {
+        await storage.deleteCallRecording(row.objectKey);
+      } catch (err) {
+        logger.error({ err: (err as Error).message, recordingId: row.id }, "Call recording: could not delete an oversized upload");
+      }
+      await db.update(callRecordingsTable)
+        .set({ status: "failed", error: "The recording is larger than the limit.", sizeBytes: meta.size, updatedAt: new Date() })
+        .where(eq(callRecordingsTable.id, row.id));
+      res.status(413).json({ error: `Recordings are limited to ${MAX_RECORDING_BYTES / 1024 / 1024} MB.`, code: "file_too_large" });
+      return;
+    }
+    const moved = await db.update(callRecordingsTable)
+      .set({ status: "queued", sizeBytes: meta.size, updatedAt: new Date() })
+      .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "uploading")))
+      .returning({ id: callRecordingsTable.id });
+    if (moved.length) {
+      const jobId = await enqueue(JOB_NAMES.TRANSCRIBE_RECORDING, { recordingId: row.id }, { singletonKey: transcribeJobKey(row.id) });
+      if (!jobId) logger.error({ recordingId: row.id }, "Call recording: could not queue transcription");
+    }
+    res.status(202).json({ recordingId: row.id, status: "queued" });
+  },
+);
+
+const RecordingListQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  offset: z.coerce.number().int().min(0).max(100_000).default(0),
+});
+
+router.get(
+  "/call-scoring/recordings",
+  requireAuth,
+  requireMfa,
+  requirePermission("call_scoring", "create"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const q = RecordingListQuery.safeParse(req.query);
+    if (!q.success) {
+      res.status(400).json({ error: "Invalid filters.", code: "invalid" });
+      return;
+    }
+    const rows = await db
+      .select({
+        id: callRecordingsTable.id,
+        status: callRecordingsTable.status,
+        layout: callRecordingsTable.layout,
+        sizeBytes: callRecordingsTable.sizeBytes,
+        durationSeconds: callRecordingsTable.durationSeconds,
+        transcriptId: callRecordingsTable.transcriptId,
+        error: callRecordingsTable.error,
+        detailsEncrypted: callRecordingsTable.detailsEncrypted,
+        createdAt: callRecordingsTable.createdAt,
+        updatedAt: callRecordingsTable.updatedAt,
+      })
+      .from(callRecordingsTable)
+      .where(eq(callRecordingsTable.orgId, authReq.orgId))
+      .orderBy(desc(callRecordingsTable.createdAt))
+      .limit(q.data.limit)
+      .offset(q.data.offset);
+    res.json({
+      recordings: rows.map(({ detailsEncrypted, ...r }) => {
+        const details = detailsEncrypted ? open<RecordingDetails>(detailsEncrypted) : null;
+        return {
+          ...r,
+          filename: details?.filename ?? null,
+          createdAt: r.createdAt.toISOString(),
+          updatedAt: r.updatedAt.toISOString(),
+        };
+      }),
+      audio: audioConfig(),
+    });
   },
 );
 

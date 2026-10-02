@@ -125,12 +125,20 @@ jobs:
           APP_ORIGIN: ${{ vars.GCP_APP_ORIGIN }}
           MIN_INSTANCES: ${{ vars.MIN_INSTANCES }}
           MAX_INSTANCES: ${{ vars.MAX_INSTANCES }}
+          # Call recording transcription: set the repo variable to "google" once
+          # gcp-bootstrap.sh has enabled Speech-to-Text, IAM and bucket CORS.
+          SPEECH_TO_TEXT_PROVIDER: ${{ vars.SPEECH_TO_TEXT_PROVIDER }}
+          CALL_RECORDINGS_DAILY_LIMIT: ${{ vars.CALL_RECORDINGS_DAILY_LIMIT }}
 
           # Optional — passed through only if set (feature no-ops otherwise).
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
           TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER }}
           TWILIO_WEBHOOK_PUBLIC_HOST: ${{ secrets.TWILIO_WEBHOOK_PUBLIC_HOST }}
+          TWILIO_TWIML_APP_SID: ${{ secrets.TWILIO_TWIML_APP_SID }}
+          TWILIO_API_KEY_SID: ${{ secrets.TWILIO_API_KEY_SID }}
+          TWILIO_API_KEY_SECRET: ${{ secrets.TWILIO_API_KEY_SECRET }}
+          TWILIO_VOICE_CALLER_ID: ${{ secrets.TWILIO_VOICE_CALLER_ID }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           EMAIL_FROM_ADDRESS: ${{ vars.EMAIL_FROM_ADDRESS }}
           CONTRACTING_EMAIL_FROM: ${{ vars.CONTRACTING_EMAIL_FROM }}
