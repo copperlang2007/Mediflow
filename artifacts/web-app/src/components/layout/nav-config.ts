@@ -200,6 +200,27 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+/**
+ * What a super admin sees while NOT viewing an agency: platform-level pages
+ * only. Agency pages (clients, commissions, …) appear once they open an agency.
+ */
+export const PLATFORM_NAV_GROUPS: NavGroup[] = [
+  {
+    group: "Platform",
+    items: [
+      { href: "/dashboard", label: "Platform Overview", icon: LayoutDashboard, roles: ["super_admin"] },
+      { href: "/admin/workspaces", label: "Agencies", icon: Boxes, roles: ["super_admin"] },
+      { href: "/admin/health", label: "System Health", icon: Activity, roles: ["super_admin"] },
+    ],
+  },
+  {
+    group: "Account",
+    items: [
+      { href: "/settings/security", label: "Account Security", icon: ShieldCheck, roles: ["super_admin"] },
+    ],
+  },
+];
+
 /** Developer console group — only added when DEV_CONSOLE_ENABLED is on. */
 export const DEV_NAV_GROUP: NavGroup = {
   group: "Developer",

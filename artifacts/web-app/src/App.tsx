@@ -10,6 +10,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useGetMe } from "@workspace/api-client-react";
 import AppShell from "@/components/layout/AppShell";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
@@ -21,7 +22,8 @@ import { MfaEnrollmentGate } from "@/components/auth/MfaEnrollmentGate";
 import { SessionGuard } from "@/components/auth/SessionGuard";
 
 // Route-level lazy loading
-const Dashboard = lazy(() => import("@/pages/dashboard"));
+const AgencyDashboard = lazy(() => import("@/pages/dashboard"));
+const SuperAdminDashboard = lazy(() => import("@/pages/super-admin-dashboard"));
 const AgentsPage = lazy(() => import("@/pages/agents"));
 const AgentProfilePage = lazy(() => import("@/pages/agent-profile"));
 const LicensingPage = lazy(() => import("@/pages/licensing"));
@@ -255,6 +257,17 @@ function DeploymentConfigRequired() {
       </div>
     </div>
   );
+}
+
+/**
+ * /dashboard: a super admin gets the platform overview; viewing an agency (or
+ * any other role) gets that agency's dashboard.
+ */
+function Dashboard() {
+  const { data: me, isLoading } = useGetMe();
+  if (isLoading) return <PageLoadingFallback />;
+  const viewingAgency = Boolean(localStorage.getItem("mediflow:view-as-org"));
+  return me?.role === "super_admin" && !viewingAgency ? <SuperAdminDashboard /> : <AgencyDashboard />;
 }
 
 function HomeRedirect() {
