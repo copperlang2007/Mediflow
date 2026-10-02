@@ -11,6 +11,7 @@ import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGetMe } from "@workspace/api-client-react";
+import { isPlatformView, type Role } from "@/components/layout/nav-config";
 import AppShell from "@/components/layout/AppShell";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
@@ -267,7 +268,7 @@ function Dashboard() {
   const { data: me, isLoading } = useGetMe();
   if (isLoading) return <PageLoadingFallback />;
   const viewingAgency = Boolean(localStorage.getItem("mediflow:view-as-org"));
-  return me?.role === "super_admin" && !viewingAgency ? <SuperAdminDashboard /> : <AgencyDashboard />;
+  return isPlatformView((me?.role ?? null) as Role | null, viewingAgency) ? <SuperAdminDashboard /> : <AgencyDashboard />;
 }
 
 function HomeRedirect() {

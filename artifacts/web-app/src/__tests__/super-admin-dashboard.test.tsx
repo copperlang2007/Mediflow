@@ -3,6 +3,10 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
+vi.mock("@workspace/api-client-react", () => ({
+  useGetMe: () => ({ data: { id: "u1", role: "super_admin", orgId: "a1" } }),
+}));
+
 vi.mock("@/lib/api", () => ({
   apiFetch: async () => ({
     agencies: [
@@ -13,7 +17,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import SuperAdminDashboard from "@/pages/super-admin-dashboard";
-import { PLATFORM_NAV_GROUPS, visibleNavGroups } from "@/components/layout/nav-config";
+import { PLATFORM_NAV_GROUPS, isPlatformView, visibleNavGroups } from "@/components/layout/nav-config";
 
 describe("SuperAdminDashboard", () => {
   it("shows platform totals and every agency", async () => {
@@ -30,5 +34,23 @@ describe("SuperAdminDashboard", () => {
   it("platform nav has no agency pages", () => {
     const hrefs = visibleNavGroups("super_admin", PLATFORM_NAV_GROUPS).flatMap((g) => g.items.map((i) => i.href));
     expect(hrefs).toEqual(["/dashboard", "/admin/workspaces", "/admin/health", "/settings/security"]);
+  });
+
+  it("hides View for the super admin's own organization only", async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <SuperAdminDashboard />
+      </QueryClientProvider>,
+    );
+    await screen.findByText("Cascade Senior Advisors");
+    // a1 is own org (no View); a2 shows View in the table and in "Needs a nudge".
+    expect(screen.getAllByRole("button", { name: /view/i })).toHaveLength(2);
+  });
+
+  it("chooses the platform view only for a super admin not viewing an agency", () => {
+    expect(isPlatformView("super_admin", false)).toBe(true);
+    expect(isPlatformView("super_admin", true)).toBe(false);
+    expect(isPlatformView("agency_admin", false)).toBe(false);
+    expect(isPlatformView(null, false)).toBe(false);
   });
 });

@@ -221,6 +221,11 @@ export const PLATFORM_NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+/** A super admin who is not viewing an agency gets the platform view. */
+export function isPlatformView(role: Role | null, viewingAgency: boolean): boolean {
+  return role === "super_admin" && !viewingAgency;
+}
+
 /** Developer console group — only added when DEV_CONSOLE_ENABLED is on. */
 export const DEV_NAV_GROUP: NavGroup = {
   group: "Developer",

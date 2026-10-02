@@ -21,6 +21,7 @@ import {
   UserCog,
   Users,
 } from "lucide-react";
+import { useGetMe } from "@workspace/api-client-react";
 import { KpiCard, PageHeader, SectionCard, EmptyState } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -40,9 +41,12 @@ interface AgencyRow {
 
 const OVERVIEW_KEY = ["/api/admin/agencies/overview"] as const;
 const VIEW_AS_KEY = "mediflow:view-as-org";
+const SUPPORT_REASON_KEY = "mediflow:support-edit-reason";
 
 function viewAgency(id: string) {
   try {
+    // A support-edit reason from an earlier agency must not carry over.
+    sessionStorage.removeItem(SUPPORT_REASON_KEY);
     localStorage.setItem(VIEW_AS_KEY, id);
   } catch {
     return;
@@ -53,11 +57,14 @@ function viewAgency(id: string) {
 const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export default function SuperAdminDashboard() {
+  const { data: me } = useGetMe();
   const overview = useQuery({
     queryKey: OVERVIEW_KEY,
     queryFn: () => apiFetch<{ agencies: AgencyRow[] }>("/api/admin/agencies/overview"),
   });
   const agencies = overview.data?.agencies;
+  const ready = overview.isSuccess;
+  const dash = (n: number) => (ready ? n : "–");
 
   const totals = useMemo(() => {
     const rows = agencies ?? [];
@@ -108,17 +115,19 @@ export default function SuperAdminDashboard() {
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard label="Agencies" value={totals.agencies} icon={Building2} color="navy" loading={overview.isLoading} href="/admin/workspaces" />
-        <KpiCard label="Active accounts" value={totals.users} icon={Users} color="blue" loading={overview.isLoading} />
-        <KpiCard label="Agents" value={totals.agents} icon={UserCog} color="green" loading={overview.isLoading} />
-        <KpiCard label="Clients managed" value={totals.clients} icon={ShieldCheck} color="orange" loading={overview.isLoading} />
+        <KpiCard label="Agencies" value={dash(totals.agencies)} icon={Building2} color="navy" loading={overview.isLoading} href="/admin/workspaces" />
+        <KpiCard label="Active accounts" value={dash(totals.users)} icon={Users} color="blue" loading={overview.isLoading} />
+        <KpiCard label="Agents" value={dash(totals.agents)} icon={UserCog} color="green" loading={overview.isLoading} />
+        <KpiCard label="Clients managed" value={dash(totals.clients)} icon={ShieldCheck} color="orange" loading={overview.isLoading} />
       </div>
 
       <div className="grid items-start gap-6 lg:grid-cols-[1.6fr_1fr] [&>*]:min-w-0">
         <SectionCard title="Agencies" description="Live counts from each agency's records.">
           {overview.isLoading ? (
             <div className="space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-12" />)}</div>
-          ) : (agencies?.length ?? 0) === 0 ? (
+          ) : !ready ? (
+            <p className="text-sm text-muted-foreground">Agency data is unavailable right now.</p>
+          ) : agencies!.length === 0 ? (
             <EmptyState icon={Building2} title="No agencies yet" description="Create the first one with “New agency”." compact />
           ) : (
             <div className="relative overflow-x-auto">
@@ -151,9 +160,11 @@ export default function SuperAdminDashboard() {
                       <td className="px-3 py-2.5 text-right tabular-nums">{a.agents}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{a.clients}</td>
                       <td className="px-3 py-2.5 text-right">
-                        <Button size="sm" variant="ghost" onClick={() => viewAgency(a.id)} title="Open this agency read-only">
-                          <Eye className="mr-1 h-3.5 w-3.5" /> View
-                        </Button>
+                        {a.id !== me?.orgId && (
+                          <Button size="sm" variant="ghost" onClick={() => viewAgency(a.id)} title="Open this agency read-only">
+                            <Eye className="mr-1 h-3.5 w-3.5" /> View
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -170,7 +181,9 @@ export default function SuperAdminDashboard() {
                 {totals.stalled.map((a) => (
                   <li key={a.id} className="flex items-center justify-between gap-2">
                     <span className="truncate font-medium">{a.name}</span>
-                    <Button size="sm" variant="ghost" onClick={() => viewAgency(a.id)}>View</Button>
+                    {a.id !== me?.orgId && (
+                      <Button size="sm" variant="ghost" onClick={() => viewAgency(a.id)}>View</Button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -180,6 +193,8 @@ export default function SuperAdminDashboard() {
           <SectionCard title="Plans" description="How agencies are subscribed today.">
             {overview.isLoading ? (
               <Skeleton className="h-16" />
+            ) : !ready ? (
+              <p className="text-sm text-muted-foreground">Unavailable right now.</p>
             ) : totals.plans.length === 0 ? (
               <p className="text-sm text-muted-foreground">No agencies yet.</p>
             ) : (

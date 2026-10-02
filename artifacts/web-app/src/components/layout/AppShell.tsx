@@ -19,6 +19,7 @@ import {
   DEV_NAV_GROUP,
   NAV_GROUPS,
   PLATFORM_NAV_GROUPS,
+  isPlatformView,
   ROLE_LABELS,
   activeNavHref,
   visibleNavGroups,
@@ -256,7 +257,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // has a developer/super_admin role.
   const showDevNav =
     DEV_CONSOLE_ENABLED && (userRole === "developer" || userRole === "super_admin");
-  const platformView = userRole === "super_admin" && !viewingAgency;
+  const platformView = isPlatformView(userRole, viewingAgency);
   const baseGroups = platformView ? PLATFORM_NAV_GROUPS : NAV_GROUPS;
   const allGroups: NavGroup[] = showDevNav ? [...baseGroups, DEV_NAV_GROUP] : baseGroups;
   const groups = visibleNavGroups(userRole, allGroups);
