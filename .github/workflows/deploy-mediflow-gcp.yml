@@ -143,6 +143,7 @@ jobs:
           GHL_PRIVATE_INTEGRATION_TOKEN: ${{ secrets.GHL_PRIVATE_INTEGRATION_TOKEN || secrets.GHL_BEARER_TOKEN }}
           GHL_LOCATION_ID: ${{ vars.GHL_LOCATION_ID || secrets.GHL_LOCATION_ID }}
           GHL_SYNC_ORG_IDS: ${{ vars.GHL_SYNC_ORG_IDS }}
+          STATEMENT_INGEST_GOOGLE_CREDENTIALS: ${{ secrets.STATEMENT_INGEST_GOOGLE_CREDENTIALS }}
 
           GITHUB_SHA: ${{ github.sha }}
 

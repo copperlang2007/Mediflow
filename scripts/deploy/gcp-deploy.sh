@@ -142,6 +142,7 @@ declare -A OPTIONAL_SECRET_MAP=(
   [PUBLIC_OBJECT_SEARCH_PATHS]=mediflow-public-object-search-paths
   [ENROLLHERE_WEBHOOK_SECRET]=mediflow-enrollhere-webhook-secret
   [GHL_PRIVATE_INTEGRATION_TOKEN]=mediflow-ghl-private-integration-token
+  [STATEMENT_INGEST_GOOGLE_CREDENTIALS]=mediflow-statement-ingest-google-credentials
 )
 sync_secret mediflow-esign-cert-pem "${ESIGN_SIGNING_CERT_PEM:-}"
 sync_secret mediflow-esign-key-pem "${ESIGN_SIGNING_KEY_PEM:-}"

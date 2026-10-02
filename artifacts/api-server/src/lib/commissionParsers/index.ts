@@ -35,12 +35,26 @@ import { parseUnitedHealthStatement } from "./unitedhealth";
 import { parseAetnaStatement } from "./aetna";
 import { parseAnthemStatement } from "./anthem";
 
-const PARSERS: Array<{ matcher: RegExp; parser: CommissionParser }> = [
-  { matcher: /humana/i, parser: parseHumanaStatement },
-  { matcher: /united\s*health|aarp|uhc/i, parser: parseUnitedHealthStatement },
-  { matcher: /aetna|cvs/i, parser: parseAetnaStatement },
-  { matcher: /anthem|bcbs|blue\s*cross/i, parser: parseAnthemStatement },
+const PARSERS: Array<{ family: string; matcher: RegExp; parser: CommissionParser }> = [
+  { family: "humana", matcher: /humana/i, parser: parseHumanaStatement },
+  { family: "unitedhealth", matcher: /united\s*health|aarp|uhc/i, parser: parseUnitedHealthStatement },
+  { family: "aetna", matcher: /aetna|cvs/i, parser: parseAetnaStatement },
+  { family: "anthem", matcher: /anthem|bcbs|blue\s*cross/i, parser: parseAnthemStatement },
 ];
+
+/**
+ * The parser family a free-text name (a carrier row's name, a folder name, a
+ * filename) belongs to, or null. Same matching rules as `parseStatement`, so a
+ * name that maps to a family here is guaranteed to have a parser.
+ */
+export function carrierFamily(text: string | null | undefined): string | null {
+  const t = (text ?? "").trim();
+  if (!t) return null;
+  for (const { family, matcher } of PARSERS) {
+    if (matcher.test(t)) return family;
+  }
+  return null;
+}
 
 export class UnknownCarrierError extends Error {
   constructor(carrierName: string) {

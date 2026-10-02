@@ -106,6 +106,7 @@ export const JOB_NAMES = {
   // Callback SLA queue: re-attempt `open` lead_callbacks (dropped inbounds),
   // resolving once capacity returns and expiring past-SLA misses. Every 5 min.
   LEAD_CALLBACK_SWEEP: "lead-callback-sweep",
+  STATEMENT_INGEST_POLL: "statement-ingest-poll",
   // AEP annual-review task generation: once a year (Sept 1 UTC, before the
   // Oct 1 cutoff) create one "set the annual review appointment" to-do per
   // current MA member, assigned to their agent, due Sept 30. Idempotent.
@@ -208,6 +209,8 @@ const RETRY_OVERRIDES: Partial<
  */
 const EXPIRY_OVERRIDES: Partial<Record<JobName, number>> = {
   [JOB_NAMES.GHL_SYNC]: 40 * 60,
+  // Up to 25 files per run, each a download + parse + (auto mode) reconcile.
+  [JOB_NAMES.STATEMENT_INGEST_POLL]: 30 * 60,
 };
 
 function queueOptions(name: JobName): Omit<Queue, "name"> {
@@ -442,6 +445,10 @@ export async function startWorkers(): Promise<void> {
   // with still nobody. Idempotent (each row only leaves `open` once), so a
   // frequent sweep is safe.
   await boss.schedule(JOB_NAMES.LEAD_CALLBACK_SWEEP, "*/5 * * * *", {}, { tz: "UTC" });
+  // Carrier-statement folder poll — every 10 minutes at :03/:13/... (offset from the
+  // :00 and :15 jobs). A no-op when no org has a source configured. Idempotent: every
+  // file is claimed by a unique ledger row before it is processed.
+  await boss.schedule(JOB_NAMES.STATEMENT_INGEST_POLL, "3,13,23,33,43,53 * * * *", {}, { tz: "UTC" });
   // AEP annual-review task generation — annually on Sept 1 at 06:00 UTC
   // (`0 6 1 9 *`). Runs comfortably before the Oct 1 cutoff so every current
   // MA member's review appointment can be set in time. Singleton; the pass is
@@ -767,6 +774,18 @@ export async function startWorkers(): Promise<void> {
     JOB_NAMES.GHL_SYNC,
     { batchSize: 1, localConcurrency: 1 },
     ghlSyncHandler,
+  );
+
+  const statementIngestPollHandler: WorkHandler<{ sourceId?: string }> = async (jobs) => {
+    const { statementIngestPollWorker } = await import("../workers/statementIngestPoll");
+    for (const job of jobs) await statementIngestPollWorker(job.data);
+  };
+  // One at a time: a source is never polled by two runs at once on this node, and the
+  // per-file ledger claim keeps overlapping nodes safe.
+  await boss.work<{ sourceId?: string }>(
+    JOB_NAMES.STATEMENT_INGEST_POLL,
+    { batchSize: 1, localConcurrency: 1 },
+    statementIngestPollHandler,
   );
 
   const importRowsSweepHandler: WorkHandler<Record<string, never>> = async () => {

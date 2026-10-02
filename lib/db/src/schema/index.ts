@@ -11,6 +11,7 @@ export * from "./settings";
 export * from "./analytics";
 export * from "./admin";
 export * from "./commissions";
+export * from "./statementIngest";
 export * from "./onboarding";
 export * from "./esign";
 export * from "./dialer";
