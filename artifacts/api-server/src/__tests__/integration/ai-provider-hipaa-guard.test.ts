@@ -315,7 +315,22 @@ describe("bedrockRoutingIssues — reported, never fatal", () => {
   it("still reports the bare id a GovCloud operator forgot to qualify", () => {
     process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
       "https://bedrock-runtime.us-gov-west-1.amazonaws.com/anthropic";
+    process.env.AI_INTEGRATIONS_MODEL = "claude-sonnet-5";
     expect(bedrockRoutingIssues().join(" ")).toContain("no Bedrock provider prefix");
+  });
+
+  it("flags the commercial default model on a GovCloud/China host when no model is set", () => {
+    // The default is a `us.anthropic.…` inference profile, which those
+    // partitions do not serve. With AI_INTEGRATIONS_MODEL unset the operator
+    // must still be told to qualify the id.
+    delete process.env.AI_INTEGRATIONS_MODEL;
+    for (const url of [
+      "https://bedrock-runtime.us-gov-west-1.amazonaws.com/anthropic",
+      "https://bedrock-runtime.cn-north-1.amazonaws.com.cn/anthropic",
+    ]) {
+      process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL = url;
+      expect(bedrockRoutingIssues().join(" ")).toContain("commercial-partition");
+    }
   });
 
   it("says nothing about a sound commercial configuration", () => {

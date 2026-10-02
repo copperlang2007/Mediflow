@@ -68,7 +68,7 @@ services:
       - key: AI_INTEGRATIONS_PROVIDER
         value: bedrock # HIPAA: AWS Bedrock is BAA-covered (your signed AWS BAA)
       - key: AI_INTEGRATIONS_MODEL
-        value: us.anthropic.claude-sonnet-4-6 # Bedrock model id (matches IntelBRIDGE)
+        value: us.anthropic.claude-haiku-4-5-20251001-v1:0 # Bedrock inference profile (Claude Haiku 4.5), verified by the bedrock live smoke
       - key: MFA_REQUIRED
         value: "true"
       - key: LOG_LEVEL

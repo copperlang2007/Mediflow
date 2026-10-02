@@ -116,7 +116,7 @@ const STATIC_CONFIG = {
   NODE_ENV: "production",
   AI_INTEGRATIONS_PROVIDER: "bedrock", // HIPAA: AWS Bedrock, covered by your AWS BAA
   AI_INTEGRATIONS_MODEL:
-    process.env.AI_INTEGRATIONS_MODEL || "us.anthropic.claude-sonnet-4-6",
+    process.env.AI_INTEGRATIONS_MODEL || "us.anthropic.claude-haiku-4-5-20251001-v1:0",
   MFA_REQUIRED: "true",
   LOG_LEVEL: process.env.LOG_LEVEL || "info",
   WEB_STATIC_DIR: "/opt/render/project/src/artifacts/web-app/dist/public",

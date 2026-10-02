@@ -120,17 +120,15 @@ down. Now there is.
   retry-with-repair (feed the parse error back once) is the obvious mitigation
   if the rate turns out to matter; measuring it first needs the provider
   telemetry in Follow-Up Actions.
-- **The Bedrock credential is sent in two headers.** AWS's page for the
-  `/anthropic` Messages route documents `x-api-key`; AWS's general
-  "Use an Amazon Bedrock API key" page documents `Authorization: Bearer` (all
-  of its examples target the native `/model/<id>/converse` route instead). The
-  route-specific page is the better authority, so `x-api-key` leads, but the
-  cost of guessing wrong is every AI request and the health ping returning 401,
-  against a cost of one duplicated credential inside a TLS request to a host
-  that already holds it. Both are sent until the live endpoint settles it; the
-  redundant header should then be removed — see Follow-Up Actions for how to
-  tell which one authenticated, which is not self-evident from a 200. Raised as
-  a P1 by the Codex reviewer, reading the general page.
+- **The Bedrock credential is sent in `x-api-key` only.** AWS's page for the
+  `/anthropic` Messages route documents `x-api-key`; its general "Use an Amazon
+  Bedrock API key" page documents `Authorization: Bearer`. The first
+  implementation sent both as a hedge. The first live call (the
+  `bedrock live smoke` workflow, 2026-10-02) showed the endpoint rejects that:
+  `400 "Cannot provide both x-api-key and Authorization headers. Use one
+  authentication method."` — so the hedge would have failed every AI request.
+  Only `x-api-key` is sent now. If the live smoke ever returns 401 on it, switch
+  to `authToken` (Bearer) instead of, never alongside, `apiKey`.
 - **Leading assistant turns are dropped, not preserved.** The Messages API
   requires a user-first history, so a window opening on an assistant turn
   loses that turn. The AWS review agent proposed a better mitigation than
@@ -276,12 +274,9 @@ duplication, which nobody wants back.
 1. **Verify against the live account.** Once the deploy is unblocked, call
    `/admin/health/ai` and confirm `ping.ok: true` and the reported model id.
    This ADR's Status stays qualified until then.
-1b. **Then drop the redundant auth header.** A `ping.ok: true` proves one of
-   the two headers worked, not which — so determine it deliberately rather
-   than by assumption: read the request in Bedrock CloudTrail, or A/B it by
-   removing one header and re-pinging. Delete the loser and its assertion in
-   `bedrock-anthropic-client.test.ts`. Method suggested by the AWS review
-   agent; without it this follow-up is not actually executable.
+1b. **Auth header settled (2026-10-02).** The dual-header hedge was rejected by
+   the live endpoint (see Tradeoffs); only `x-api-key` is sent now. Confirm it
+   with the `bedrock live smoke` workflow.
 2. **Resolve the structured-outputs contradiction** against the live endpoint
    and, if AWS is right, replace the prompt emulation with the real parameter.
 3. **Add provider-call telemetry** (latency, error class, model served, token
