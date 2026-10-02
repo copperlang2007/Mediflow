@@ -48,6 +48,7 @@ import {
   type NormalizedLineItem,
 } from "../lib/commissionParsers";
 import { reconcileStatement } from "../workers/reconcileCommissionStatement";
+import { insertLineItems } from "../lib/commissions/insertLineItems";
 import { can, type Role } from "../lib/permissions";
 import {
   displayStatementStatus,
@@ -481,43 +482,14 @@ router.post(
       return;
     }
 
-    const rows = normalized.map((n) => ({
-      id: randomUUID(),
-      statementId: id,
-      orgId: authReq.orgId,
-      contactId: null,
-      memberId: n.memberId,
-      policyNumber: n.policyNumber,
-      planType: n.planType,
-      planYear: n.planYear,
-      periodStart: n.periodStart,
-      periodEnd: n.periodEnd,
-      premium: n.premium,
-      commissionAmount: n.commissionAmount,
-      type: n.type,
-      writingAgentId: null,
-      matchStatus: "unmatched" as const,
-      raw: {
-        ...n.raw,
-        contactFirstName: n.contactFirstName,
-        contactLastName: n.contactLastName,
-        contactDob: n.contactDob,
-        contactStateCode: n.contactStateCode,
-      },
-    }));
-
-    // Insert in chunks to keep parameter count manageable
-    const chunkSize = 200;
-    for (let i = 0; i < rows.length; i += chunkSize) {
-      await db.insert(commissionLineItemsTable).values(rows.slice(i, i + chunkSize));
-    }
+    const inserted = await insertLineItems(db, id, authReq.orgId, normalized);
 
     await db
       .update(commissionStatementsTable)
       .set({ status: "parsed" })
       .where(eq(commissionStatementsTable.id, id));
 
-    res.json({ inserted: rows.length, statementId: id });
+    res.json({ inserted, statementId: id });
   },
 );
 

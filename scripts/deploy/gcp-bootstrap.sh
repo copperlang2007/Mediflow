@@ -268,7 +268,9 @@ OPTIONAL_CREDENTIAL_SECRETS="mediflow-twilio-account-sid mediflow-twilio-auth-to
 mediflow-twilio-from-number mediflow-twilio-webhook-host mediflow-resend-api-key \
 mediflow-sentry-dsn mediflow-esign-cert-pem mediflow-esign-key-pem \
 mediflow-public-object-search-paths mediflow-enrollhere-webhook-secret \
-mediflow-ghl-private-integration-token"
+mediflow-ghl-private-integration-token \
+mediflow-twilio-api-key-secret \
+mediflow-statement-ingest-google-credentials"
 for name in ${REQUIRED_CREDENTIAL_SECRETS} ${OPTIONAL_CREDENTIAL_SECRETS}; do
   if ! gcloud secrets describe "${name}" >/dev/null 2>&1; then
     log "Creating placeholder secret ${name} (CI fills the real value in if you use it)…"
