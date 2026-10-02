@@ -7,10 +7,12 @@
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, BookOpen, Search, Sparkles, Tag } from "lucide-react";
+import { AlertTriangle, BookOpen, Pencil, Plus, Search, ShieldAlert, Sparkles, Tag, Trash2 } from "lucide-react";
 import { customFetch, useGetMe } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -24,6 +26,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { EmptyState, MiniStat, PageHeader, StatusPill } from "@/components/shared";
 import { cn } from "@/lib/utils";
@@ -44,19 +47,44 @@ type LibraryArticle = {
 type LibraryResponse = { articles: LibraryArticle[]; stats: { total: number; enabled: number } };
 
 const EDITOR_ROLES = ["super_admin", "agency_admin"];
+/** Only the platform owner can change the shared library itself. */
+const PLATFORM_ROLE = "super_admin";
 const ALL = "all";
+
+type EditorState = {
+  id?: string;
+  category: string;
+  title: string;
+  content: string;
+  keywords: string;
+  kind: LibraryArticle["kind"];
+  defaultEnabled: boolean;
+  needsReview: boolean;
+};
+const EMPTY: EditorState = {
+  category: "",
+  title: "",
+  content: "",
+  keywords: "",
+  kind: "mediflow_guide",
+  defaultEnabled: true,
+  needsReview: false,
+};
 
 export function KnowledgeLibrary({ viewSwitch }: { viewSwitch: ReactNode }) {
   const qc = useQueryClient();
   const { toast } = useToast();
   const { data: me } = useGetMe();
   const canEdit = EDITOR_ROLES.includes(me?.role ?? "");
+  const isPlatformOwner = me?.role === PLATFORM_ROLE;
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState(ALL);
   const [confirm, setConfirm] = useState<{ ids: string[]; reviewCount: number } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<LibraryArticle | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleExpanded = (id: string) =>
     setExpanded((prev) => {
@@ -95,6 +123,50 @@ export function KnowledgeLibrary({ viewSwitch }: { viewSwitch: ReactNode }) {
     }
   };
 
+  const refresh = () => void qc.invalidateQueries({ queryKey: ["/api/kb/library"] });
+
+  const saveArticle = async () => {
+    if (!editor) return;
+    if (!editor.title.trim() || !editor.content.trim() || !editor.category.trim()) {
+      toast({ title: "Almost there", description: "Category, title and the article text are all needed.", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const body = JSON.stringify({
+        category: editor.category.trim(),
+        title: editor.title.trim(),
+        content: editor.content.trim(),
+        keywords: editor.keywords.split(",").map((k) => k.trim()).filter(Boolean),
+        kind: editor.kind,
+        defaultEnabled: editor.defaultEnabled,
+        needsReview: editor.needsReview,
+      });
+      if (editor.id) await customFetch(`/api/kb/library/articles/${editor.id}`, { method: "PATCH", body });
+      else await customFetch("/api/kb/library/articles", { method: "POST", body });
+      toast({ title: editor.id ? "Saved for every agency" : "Added to the library" });
+      setEditor(null);
+      refresh();
+    } catch {
+      toast({ title: "Couldn't save that", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await customFetch(`/api/kb/library/articles/${deleteTarget.id}`, { method: "DELETE" });
+      toast({ title: "Removed from the library" });
+      refresh();
+    } catch {
+      toast({ title: "Couldn't remove that", variant: "destructive" });
+    } finally {
+      setDeleteTarget(null);
+    }
+  };
+
   // Notes flagged "needs review" ask for a second confirmation before they go on.
   const switchOn = (items: LibraryArticle[]) => {
     const ids = items.filter((a) => !a.enabled).map((a) => a.id);
@@ -115,6 +187,11 @@ export function KnowledgeLibrary({ viewSwitch }: { viewSwitch: ReactNode }) {
         subtitle="Articles from Mediflow, shared with every agency. Switch on the ones you want your team and the AI assistant to use."
       >
         {viewSwitch}
+        {isPlatformOwner && (
+          <Button size="sm" onClick={() => setEditor({ ...EMPTY })}>
+            <Plus className="mr-1.5 h-4 w-4" /> Add library article
+          </Button>
+        )}
       </PageHeader>
 
       <div className="grid grid-cols-2 gap-4">
@@ -180,19 +257,103 @@ export function KnowledgeLibrary({ viewSwitch }: { viewSwitch: ReactNode }) {
                     <p className="mt-2 text-xs text-muted-foreground">Written in 2025 — some figures or rules may have changed. Check it against current guidance before relying on it.</p>
                   )}
                 </div>
-                {canEdit && (
-                  <Switch
-                    checked={a.enabled}
-                    disabled={saving}
-                    onCheckedChange={(on) => (on ? switchOn([a]) : switchOff([a]))}
-                    aria-label={a.enabled ? "Switch off" : "Switch on"}
-                  />
-                )}
+                <div className="flex shrink-0 items-center gap-1">
+                  {canEdit && (
+                    <Switch
+                      checked={a.enabled}
+                      disabled={saving}
+                      onCheckedChange={(on) => (on ? switchOn([a]) : switchOff([a]))}
+                      aria-label={a.enabled ? "Switch off" : "Switch on"}
+                    />
+                  )}
+                  {isPlatformOwner && (
+                    <>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Edit for every agency"
+                        onClick={() => setEditor({ id: a.id, category: a.category, title: a.title, content: a.content, keywords: a.keywords.join(", "), kind: a.kind, defaultEnabled: a.defaultEnabled, needsReview: a.needsReview })}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" aria-label="Remove from the library" onClick={() => setDeleteTarget(a)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
             </article>
           ))}
         </div>
       )}
+
+      <Dialog open={editor !== null} onOpenChange={(o) => !o && setEditor(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display">{editor?.id ? "Edit library article" : "Add library article"}</DialogTitle>
+            <DialogDescription>Write it the way you'd explain it to a new agent.</DialogDescription>
+          </DialogHeader>
+          {editor && (
+            <div className="space-y-4">
+              <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs">
+                <ShieldAlert className="h-4 w-4 shrink-0 text-warning" />
+                <span>Changes here reach <strong>every agency</strong> and the AI assistant. Agencies that already chose on or off keep their choice. Never put client information in an article.</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="kbl-category">Category</Label>
+                  <Input id="kbl-category" value={editor.category} onChange={(e) => setEditor({ ...editor, category: e.target.value })} placeholder="e.g. Mediflow Guide: Sales Tools" className="mt-1" />
+                </div>
+                <div>
+                  <Label htmlFor="kbl-title">Title</Label>
+                  <Input id="kbl-title" value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} className="mt-1" />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="kbl-content">Article</Label>
+                <Textarea id="kbl-content" rows={10} value={editor.content} onChange={(e) => setEditor({ ...editor, content: e.target.value })} className="mt-1" />
+                <p className="mt-1 text-xs text-muted-foreground">{editor.content.length.toLocaleString()} characters. The assistant reads the first 1,500.</p>
+              </div>
+              <div>
+                <Label htmlFor="kbl-keywords">Keywords</Label>
+                <Input id="kbl-keywords" value={editor.keywords} onChange={(e) => setEditor({ ...editor, keywords: e.target.value })} placeholder="aep, switching, oep (separate with commas)" className="mt-1" />
+              </div>
+              <div>
+                <Label htmlFor="kbl-kind">Type</Label>
+                <Select value={editor.kind} onValueChange={(v) => setEditor({ ...editor, kind: v as LibraryArticle["kind"] })}>
+                  <SelectTrigger id="kbl-kind" className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="mediflow_guide">How Mediflow works</SelectItem>
+                    <SelectItem value="medicare_reference">General Medicare notes</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={editor.defaultEnabled} onCheckedChange={(v) => setEditor({ ...editor, defaultEnabled: v })} />
+                On by default for agencies that haven't chosen
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={editor.needsReview} onCheckedChange={(v) => setEditor({ ...editor, needsReview: v })} />
+                Mark "Check before using" (figures or rules may be out of date)
+              </label>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditor(null)}>Cancel</Button>
+            <Button onClick={() => void saveArticle()} disabled={saving}>{saving ? "Saving…" : editor?.id ? "Save for every agency" : "Add to the library"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove “{deleteTarget?.title}” for every agency?</AlertDialogTitle>
+            <AlertDialogDescription>It disappears for all agencies, along with each agency's on/off choice for it, and the assistant stops using it. To just hide it by default, edit it and turn off “On by default” instead.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmDelete()}>Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={confirm !== null} onOpenChange={(o) => !o && setConfirm(null)}>
         <AlertDialogContent>

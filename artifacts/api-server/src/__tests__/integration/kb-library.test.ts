@@ -203,3 +203,75 @@ describe("KB library → retrieval ranking", () => {
     expect(block).toContain("Zorblax handbook");
   });
 });
+
+describe("KB library — platform editor (super_admin only)", () => {
+  let superAdmin: { id: string };
+  let createdId: string;
+
+  beforeAll(async () => {
+    superAdmin = await seedUser(handle.db, { orgId: org.id, role: "super_admin" });
+  });
+
+  const body = {
+    category: "Mediflow Guide: Test",
+    title: "Editor test article",
+    content: "Written in the platform editor.",
+    keywords: ["Editor", " test ", "editor"],
+  };
+
+  it("forbids agency owners and other staff from writing the library", async () => {
+    for (const id of [admin.id, agentUser.id, viewer.id]) {
+      const create = await request(app).post("/api/kb/library/articles").set(withAuth(id)).send(body);
+      expect(create.status).toBe(403);
+      const patch = await request(app).patch(`/api/kb/library/articles/${GUIDE_ID}`).set(withAuth(id)).send({ title: "hijack" });
+      expect(patch.status).toBe(403);
+      const del = await request(app).delete(`/api/kb/library/articles/${GUIDE_ID}`).set(withAuth(id));
+      expect(del.status).toBe(403);
+    }
+    expect((await find(admin.id, GUIDE_ID))?.id).toBe(GUIDE_ID);
+  });
+
+  it("rejects bad input", async () => {
+    const empty = await request(app).post("/api/kb/library/articles").set(withAuth(superAdmin.id)).send({ ...body, title: "  " });
+    expect(empty.status).toBe(400);
+    const badKind = await request(app).post("/api/kb/library/articles").set(withAuth(superAdmin.id)).send({ ...body, kind: "nope" });
+    expect(badKind.status).toBe(400);
+    const nothing = await request(app).patch(`/api/kb/library/articles/${GUIDE_ID}`).set(withAuth(superAdmin.id)).send({});
+    expect(nothing.status).toBe(400);
+  });
+
+  it("creates an article that every agency sees with its defaults", async () => {
+    const res = await request(app).post("/api/kb/library/articles").set(withAuth(superAdmin.id)).send(body);
+    expect(res.status).toBe(201);
+    createdId = res.body.id;
+    expect(res.body.keywords).toEqual(["editor", "test"]);
+    expect(res.body).toMatchObject({ kind: "mediflow_guide", defaultEnabled: true, needsReview: false });
+    for (const id of [admin.id, otherAdmin.id]) {
+      expect(await find(id, createdId)).toMatchObject({ enabled: true, chosen: false });
+    }
+  });
+
+  it("edits an article for every agency, and keeps each agency's own choice", async () => {
+    await request(app).put("/api/kb/library/choices").set(withAuth(otherAdmin.id)).send({ ids: [createdId], enabled: false });
+    const res = await request(app)
+      .patch(`/api/kb/library/articles/${createdId}`)
+      .set(withAuth(superAdmin.id))
+      .send({ title: "Editor test article (edited)", needsReview: true, defaultEnabled: false });
+    expect(res.status).toBe(200);
+    expect(res.body.title).toBe("Editor test article (edited)");
+    // Agency with no choice follows the new default; the agency that chose keeps its choice.
+    expect(await find(admin.id, createdId)).toMatchObject({ enabled: false, chosen: false, needsReview: true });
+    expect(await find(otherAdmin.id, createdId)).toMatchObject({ enabled: false, chosen: true });
+    const missing = await request(app).patch("/api/kb/library/articles/lib-nope").set(withAuth(superAdmin.id)).send({ title: "x" });
+    expect(missing.status).toBe(404);
+  });
+
+  it("deletes an article, and every agency's choice for it goes with it", async () => {
+    const del = await request(app).delete(`/api/kb/library/articles/${createdId}`).set(withAuth(superAdmin.id));
+    expect(del.status).toBe(204);
+    expect(await find(admin.id, createdId)).toBeUndefined();
+    expect(await find(otherAdmin.id, createdId)).toBeUndefined();
+    const again = await request(app).delete(`/api/kb/library/articles/${createdId}`).set(withAuth(superAdmin.id));
+    expect(again.status).toBe(404);
+  });
+});

@@ -11,6 +11,10 @@
  * chooses from:
  *   GET /kb/library            — list, with this agency's on/off state
  *   PUT /kb/library/choices    — turn library articles on or off (agency owners)
+ *   POST/PATCH/DELETE /kb/library/articles[/:id]
+ *                              — write the shared library itself (super_admin,
+ *                                the platform owner, MFA). Changes reach EVERY
+ *                                agency; deleting also removes each agency's choice.
  *
  * Articles are non-PHI reference notes. Every handler is org-scoped: an
  * article id from another agency 404s. Active articles feed the AI
@@ -24,8 +28,10 @@ import { db, kbArticlesTable, kbLibraryArticlesTable, kbLibraryChoicesTable } fr
 import {
   requireAuth,
   requirePermission,
+  requireRole,
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
+import { requireMfa } from "../middlewares/requireMfa";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import { normalizeKeywords } from "../lib/kbContext";
@@ -201,6 +207,109 @@ router.get(
       articles: rows,
       stats: { total: Number(counts?.total ?? 0), enabled: Number(counts?.enabled ?? 0) },
     });
+  },
+);
+
+const LibraryArticleCreateSchema = CreateSchema.omit({ isActive: true }).extend({
+  kind: z.enum(["mediflow_guide", "medicare_reference"]).default("mediflow_guide"),
+  defaultEnabled: z.boolean().default(true),
+  needsReview: z.boolean().default(false),
+});
+const LibraryArticleUpdateSchema = LibraryArticleCreateSchema.partial();
+
+const libraryAudit = auditMiddleware("kb_article", undefined, {
+  getResourceId: (req) => {
+    const raw = req.params.id;
+    return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
+  },
+});
+
+router.post(
+  "/kb/library/articles",
+  requireAuth,
+  requireMfa,
+  requireRole("super_admin"),
+  libraryAudit,
+  async (req: Request, res: Response): Promise<void> => {
+    const parsed = LibraryArticleCreateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
+      return;
+    }
+    const d = parsed.data;
+    const uid = randomUUID();
+    const [row] = await db
+      .insert(kbLibraryArticlesTable)
+      .values({
+        id: `lib-${uid}`,
+        key: `custom-${uid}`,
+        category: d.category,
+        title: d.title,
+        content: d.content,
+        keywords: normalizeKeywords(d.keywords ?? []),
+        kind: d.kind,
+        defaultEnabled: d.defaultEnabled,
+        needsReview: d.needsReview,
+      })
+      .returning();
+    res.status(201).json(row);
+  },
+);
+
+router.patch(
+  "/kb/library/articles/:id",
+  requireAuth,
+  requireMfa,
+  requireRole("super_admin"),
+  libraryAudit,
+  async (req: Request, res: Response): Promise<void> => {
+    const parsed = LibraryArticleUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body", details: parsed.error.issues });
+      return;
+    }
+    const d = parsed.data;
+    const updates: Partial<typeof kbLibraryArticlesTable.$inferInsert> = {};
+    if (d.category !== undefined) updates.category = d.category;
+    if (d.title !== undefined) updates.title = d.title;
+    if (d.content !== undefined) updates.content = d.content;
+    if (d.keywords !== undefined) updates.keywords = normalizeKeywords(d.keywords);
+    if (d.kind !== undefined) updates.kind = d.kind;
+    if (d.defaultEnabled !== undefined) updates.defaultEnabled = d.defaultEnabled;
+    if (d.needsReview !== undefined) updates.needsReview = d.needsReview;
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({ error: "Nothing to update" });
+      return;
+    }
+    const [row] = await db
+      .update(kbLibraryArticlesTable)
+      .set(updates)
+      .where(eq(kbLibraryArticlesTable.id, idParam(req)))
+      .returning();
+    if (!row) {
+      res.status(404).json({ error: "Library article not found" });
+      return;
+    }
+    res.json(row);
+  },
+);
+
+router.delete(
+  "/kb/library/articles/:id",
+  requireAuth,
+  requireMfa,
+  requireRole("super_admin"),
+  libraryAudit,
+  async (req: Request, res: Response): Promise<void> => {
+    const [row] = await db
+      .delete(kbLibraryArticlesTable)
+      .where(eq(kbLibraryArticlesTable.id, idParam(req)))
+      .returning({ id: kbLibraryArticlesTable.id });
+    if (!row) {
+      res.status(404).json({ error: "Library article not found" });
+      return;
+    }
+    res.status(204).end();
   },
 );
 
