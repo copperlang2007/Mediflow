@@ -22,6 +22,7 @@ import type {
 } from "@workspace/api-client-react";
 import { apiFetch } from "@/lib/api";
 import { IS_DEMO_BUILD } from "@/lib/demo/isDemo";
+import { setCallInProgress } from "@/lib/auth/sessionGuard";
 
 /** Roles the API grants `call:create` (lib/permissions.ts). UX only — the API enforces it. */
 export const CALL_CREATE_ROLES = ["super_admin", "agency_admin", "agent_support", "agent"] as const;
@@ -174,6 +175,13 @@ export function useSoftphoneCall(opts: { deviceFactory?: DeviceFactory } = {}) {
   // connecting, reset and unmount bump it, so a late Device / call from an
   // abandoned attempt is torn down instead of going live.
   const genRef = useRef(0);
+
+  // Tell the session guard a call is live so it never counts as idle time.
+  useEffect(() => {
+    // Not "connecting": that can sit on a microphone prompt indefinitely.
+    setCallInProgress(state.phase === "ringing" || state.phase === "in_call");
+    return () => setCallInProgress(false);
+  }, [state.phase]);
 
   const patch = useCallback((p: Partial<CallState>) => setState((s) => ({ ...s, ...p })), []);
 

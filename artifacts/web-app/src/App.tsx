@@ -18,6 +18,7 @@ import { BrandMark } from "@/components/brand/BrandMark";
 import Landing from "@/pages/landing";
 import { BrandingProvider } from "@/lib/branding/BrandingProvider";
 import { MfaEnrollmentGate } from "@/components/auth/MfaEnrollmentGate";
+import { SessionGuard } from "@/components/auth/SessionGuard";
 
 // Route-level lazy loading
 const Dashboard = lazy(() => import("@/pages/dashboard"));
@@ -403,6 +404,7 @@ function ClerkProviderWithRoutes() {
         <TooltipProvider>
           <ClerkQueryClientCacheInvalidator />
           <ErrorBoundary>
+            <SessionGuard>
             <Switch>
               <Route path="/" component={HomeRedirect} />
               <Route path="/sign-in/*?" component={SignInPage} />
@@ -620,6 +622,7 @@ function ClerkProviderWithRoutes() {
                 </Suspense>
               </Route>
             </Switch>
+            </SessionGuard>
           </ErrorBoundary>
           {/* Radix toaster: used by the few pages on hooks/use-toast. */}
           <Toaster />

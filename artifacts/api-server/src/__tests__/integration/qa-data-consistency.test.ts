@@ -59,11 +59,12 @@ import { bootTestDb, shutdownTestDb, withAuth, withMfaAuth } from "../helpers/te
 import { seedOrg, seedUser, seedAgent, seedContact } from "../helpers/testDb";
 import type { TestDb } from "../helpers/testDb";
 import type { Express } from "express";
+import { sellingPlanYear } from "../../lib/compliance/planYear";
 
 const DAY = 86_400_000;
-const YEAR = new Date().getFullYear();
-/** AHIP is counted for the plan year being sold (next year from Oct 1), on every screen. */
-let AHIP_YEAR: number;
+// The plan year the app is selling today, not the calendar year: from Oct 1 the
+// dashboard, compliance alerts and AHIP views all score against next year.
+const YEAR = sellingPlanYear();
 
 let app: Express;
 let request: typeof import("supertest");
@@ -125,11 +126,10 @@ beforeAll(async () => {
     },
   ]);
 
-  AHIP_YEAR = (await import("../../lib/compliance/planYear")).sellingPlanYear();
   // --- AHIP: ok agent passed, onboarding agent waived, expired agent none.
   await testDb.insert(ahipRecordsTable).values([
-    { id: `ahip-${randomUUID()}`, agentId: okAgent.id, certificationYear: AHIP_YEAR, status: "passed" },
-    { id: `ahip-${randomUUID()}`, agentId: onboardingAgent.id, certificationYear: AHIP_YEAR, status: "waived" },
+    { id: `ahip-${randomUUID()}`, agentId: okAgent.id, certificationYear: YEAR, status: "passed" },
+    { id: `ahip-${randomUUID()}`, agentId: onboardingAgent.id, certificationYear: YEAR, status: "waived" },
   ]);
 
   // --- contacts: 2 leads, 1 prospect, 1 enrolled; one lead soft-deleted.
@@ -339,7 +339,7 @@ describe("#5 statement status never shows reconciled when totals disagree", () =
 
 describe("#6 one AHIP definition", () => {
   it("certifications and renewals agree: active + onboarding agents, passed or waived", async () => {
-    const ahip = await get(`/api/ahip/dashboard?year=${AHIP_YEAR}`);
+    const ahip = await get(`/api/ahip/dashboard?year=${YEAR}`);
     const alerts = await get(`/api/compliance-alerts`);
     expect(ahip.status).toBe(200);
     expect(ahip.body.agentsRequiringAhip).toBe(3);

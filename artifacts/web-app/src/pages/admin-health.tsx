@@ -39,7 +39,7 @@ import { useProductName } from "@/lib/branding/BrandingProvider";
 // type — the web-app and api-server are independent packages and copying the
 // type would couple them. The fields below are the documented contract.
 
-export type HealthProvider = "azure" | "openai" | "unset";
+export type HealthProvider = "azure" | "openai" | "bedrock" | "unset";
 
 export type PingErrorCategory =
   | "auth_failed"
@@ -69,6 +69,7 @@ export interface AiHealthResult {
 const PROVIDER_BADGE: Record<HealthProvider, string> = {
   azure: "bg-success/12 text-success border-success/25",
   openai: "bg-accent/10 text-accent border-accent/25",
+  bedrock: "bg-success/12 text-success border-success/25",
   unset: "bg-destructive/10 text-destructive border-destructive/25",
 };
 
@@ -555,7 +556,9 @@ export function normalizeResult(raw: unknown): AiHealthResult {
   const r = (raw ?? {}) as Record<string, unknown>;
   const rawPing = (r.ping ?? {}) as Record<string, unknown>;
   const provider: HealthProvider =
-    r.provider === "azure" || r.provider === "openai" ? r.provider : "unset";
+    r.provider === "azure" || r.provider === "openai" || r.provider === "bedrock"
+      ? r.provider
+      : "unset";
   const category =
     typeof rawPing.category === "string" &&
     (["auth_failed", "rate_limited", "network", "not_found", "timeout", "unknown"] as const).includes(

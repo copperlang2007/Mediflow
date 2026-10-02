@@ -142,6 +142,7 @@ declare -A OPTIONAL_SECRET_MAP=(
   [PUBLIC_OBJECT_SEARCH_PATHS]=mediflow-public-object-search-paths
   [ENROLLHERE_WEBHOOK_SECRET]=mediflow-enrollhere-webhook-secret
   [GHL_PRIVATE_INTEGRATION_TOKEN]=mediflow-ghl-private-integration-token
+  [TWILIO_API_KEY_SECRET]=mediflow-twilio-api-key-secret
 )
 sync_secret mediflow-esign-cert-pem "${ESIGN_SIGNING_CERT_PEM:-}"
 sync_secret mediflow-esign-key-pem "${ESIGN_SIGNING_KEY_PEM:-}"
@@ -164,6 +165,10 @@ OPTIONAL_ENV_FLAG=""
 # are joined with ";" here because "," separates --set-env-vars entries.
 [ -n "${GHL_SYNC_ORG_IDS:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}GHL_SYNC_ORG_IDS=${GHL_SYNC_ORG_IDS//,/;},"
 [ -n "${GHL_LOCATION_ID:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}GHL_LOCATION_ID=${GHL_LOCATION_ID},"
+# Twilio browser calling (Voice SDK). Non-secret identifiers; the API key secret goes through Secret Manager above.
+[ -n "${TWILIO_TWIML_APP_SID:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}TWILIO_TWIML_APP_SID=${TWILIO_TWIML_APP_SID},"
+[ -n "${TWILIO_API_KEY_SID:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}TWILIO_API_KEY_SID=${TWILIO_API_KEY_SID},"
+[ -n "${TWILIO_VOICE_CALLER_ID:-}" ] && OPTIONAL_ENV_FLAG="${OPTIONAL_ENV_FLAG}TWILIO_VOICE_CALLER_ID=${TWILIO_VOICE_CALLER_ID},"
 # Call recordings: opt in with SPEECH_TO_TEXT_PROVIDER=google (repo variable)
 # only after gcp-bootstrap.sh enabled the API, IAM and bucket CORS. Optional
 # per-agency daily cap.
@@ -191,7 +196,7 @@ AI_INTEGRATIONS_BEDROCK_BASE_URL=mediflow-ai-openai-base-url:latest"
 STATIC_ENV="NODE_ENV=production,\
 AI_INTEGRATIONS_PROVIDER=bedrock,\
 ESIGN_PROVIDER=docusign,\
-AI_INTEGRATIONS_MODEL=${AI_INTEGRATIONS_MODEL:-us.anthropic.claude-sonnet-4-6},\
+AI_INTEGRATIONS_MODEL=${AI_INTEGRATIONS_MODEL:-us.anthropic.claude-haiku-4-5-20251001-v1:0},\
 MFA_REQUIRED=true,\
 LOG_LEVEL=${LOG_LEVEL:-info},\
 WEB_STATIC_DIR=/app/artifacts/web-app/dist/public,\

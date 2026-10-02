@@ -42,6 +42,17 @@
  *   plus every agencyBRIDGE secret/config var (see REQUIRED_SECRETS / OPTIONAL_SECRETS).
  */
 
+// DO NOT DEPLOY TO RENDER. Render has no BAA with us and this script ships a
+// PHI-handling production service. Production is GCP Cloud Run
+// (docs/DEPLOY_GCP_PRODUCTION.md). The script refuses to run; delete this guard
+// only after a BAA is signed with Render.
+console.error(
+  "FATAL: Render deploys are disabled -- no BAA with Render. " +
+    "Deploy to GCP instead (docs/DEPLOY_GCP_PRODUCTION.md).",
+);
+process.exit(1);
+
+
 import { randomBytes } from "node:crypto";
 
 const API = "https://api.render.com/v1";
@@ -116,7 +127,7 @@ const STATIC_CONFIG = {
   NODE_ENV: "production",
   AI_INTEGRATIONS_PROVIDER: "bedrock", // HIPAA: AWS Bedrock, covered by your AWS BAA
   AI_INTEGRATIONS_MODEL:
-    process.env.AI_INTEGRATIONS_MODEL || "us.anthropic.claude-sonnet-4-6",
+    process.env.AI_INTEGRATIONS_MODEL || "us.anthropic.claude-haiku-4-5-20251001-v1:0",
   MFA_REQUIRED: "true",
   LOG_LEVEL: process.env.LOG_LEVEL || "info",
   WEB_STATIC_DIR: "/opt/render/project/src/artifacts/web-app/dist/public",

@@ -135,6 +135,10 @@ jobs:
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
           TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER }}
           TWILIO_WEBHOOK_PUBLIC_HOST: ${{ secrets.TWILIO_WEBHOOK_PUBLIC_HOST }}
+          TWILIO_TWIML_APP_SID: ${{ secrets.TWILIO_TWIML_APP_SID }}
+          TWILIO_API_KEY_SID: ${{ secrets.TWILIO_API_KEY_SID }}
+          TWILIO_API_KEY_SECRET: ${{ secrets.TWILIO_API_KEY_SECRET }}
+          TWILIO_VOICE_CALLER_ID: ${{ secrets.TWILIO_VOICE_CALLER_ID }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           EMAIL_FROM_ADDRESS: ${{ vars.EMAIL_FROM_ADDRESS }}
           CONTRACTING_EMAIL_FROM: ${{ vars.CONTRACTING_EMAIL_FROM }}

@@ -85,6 +85,7 @@ vi.mock("@anthropic-ai/sdk", () => {
 
 import { bootTestDb, shutdownTestDb, withAuth, withMfaAuth } from "../helpers/testApp";
 import { seedOrg, seedUser } from "../helpers/testDb";
+import { DEFAULT_BEDROCK_MODEL } from "../../lib/aiProvider";
 
 import type { Express } from "express";
 
@@ -541,14 +542,41 @@ describe("GET /admin/health/ai — defense in depth", () => {
     // failure this test exists to prevent.
     expect(res.body.ping.ok).toBe(true);
     expect(res.body.ping.model).toContain("claude-");
+    // The default is already a fully qualified inference-profile id, so it is
+    // sent exactly as configured -- no prefix rewrite, and no "sent as" warning.
+    expect(res.body.ping.modelRequested).toBe(DEFAULT_BEDROCK_MODEL);
+    expect(warned).not.toMatch(/is sent to Bedrock as/);
+    expect(JSON.stringify(res.body)).not.toContain(TEST_API_KEY);
+  });
+
+  it("shows the prefix rewrite when an operator sets a bare claude- id on bedrock", async () => {
     // The adapter's prefix rewrite must be visible. An operator who set a
     // bare id and gets model-not-found needs to see the id we actually sent,
     // not just the one they configured.
-    expect(res.body.ping.modelRequested).toBe(
-      "global.anthropic.claude-sonnet-5",
-    );
-    expect(warned).toMatch(/is sent to Bedrock as/);
-    expect(JSON.stringify(res.body)).not.toContain(TEST_API_KEY);
+    const priorModel = process.env.AI_INTEGRATIONS_MODEL;
+    process.env.AI_INTEGRATIONS_MODEL = "claude-sonnet-5";
+    delete process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+    process.env.AI_INTEGRATIONS_PROVIDER = "bedrock";
+    process.env.AI_INTEGRATIONS_BEDROCK_API_KEY = TEST_API_KEY;
+    process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
+      "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
+    resetOpenAIClient();
+
+    const envUser = await freshAdmin();
+    const res = await request(app)
+      .get("/api/admin/health/ai")
+      .set(withAuth(envUser.id));
+
+    if (priorModel === undefined) delete process.env.AI_INTEGRATIONS_MODEL;
+    else process.env.AI_INTEGRATIONS_MODEL = priorModel;
+    delete process.env.AI_INTEGRATIONS_BEDROCK_API_KEY;
+    delete process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL;
+    setAzureEnv();
+    resetOpenAIClient();
+
+    expect(res.status).toBe(200);
+    expect(res.body.ping.modelRequested).toBe("global.anthropic.claude-sonnet-5");
+    expect(res.body.warnings.join(" ")).toMatch(/is sent to Bedrock as/);
   });
 
   it("does not report azure as configured when ONLY the bedrock key is set", async () => {

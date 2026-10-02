@@ -8,9 +8,9 @@ service-account key stored in GitHub.
 
 > For the throwaway, auth-bypassed local demo instead, use
 > `docker compose up` (`docker-compose.yml`) — no GCP account required. This
-> doc is the real production path. `render.prod.yaml` / `railway.json` are
-> the pre-existing Render/Railway paths; this GCP path runs alongside them —
-> nothing here touches or disables those.
+> doc is the real production path. `render.prod.yaml` is a disabled
+> reference (Render has no BAA, so it must not be deployed); `railway.json` is
+> the pre-existing Railway path.
 
 ## Why Cloud Run + Cloud SQL
 
@@ -80,7 +80,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `CLERK_PUBLISHABLE_KEY` | Clerk dashboard → API Keys. Must be **live** (`pk_live_…`). Baked into the web bundle at image build time. |
 | `AI_INTEGRATIONS_BEDROCK_API_KEY` | Your Amazon Bedrock API key. Sent as `x-api-key` by `@anthropic-ai/sdk` against the Bedrock Anthropic Messages endpoint (see `lib/ai/bedrockAnthropicClient.ts`) — not an OpenAI credential. |
 | `AI_INTEGRATIONS_BEDROCK_BASE_URL` | Bedrock's **Anthropic Messages** endpoint for your region. Either host works with an Amazon Bedrock API key: `https://bedrock-runtime.us-east-1.amazonaws.com/anthropic` (AWS's recommendation for new applications) or `https://bedrock-mantle.us-east-1.api.aws/anthropic`. **Not** `/openai/v1`: AWS's API-compatibility matrix lists Chat Completions as unsupported for every Anthropic model, so Claude is unreachable over the OpenAI path. The legacy `AI_INTEGRATIONS_OPENAI_BASE_URL` name is still read as a fallback so a pre-rename environment keeps booting. |
-| `AI_INTEGRATIONS_MODEL` | Optional. The Claude model to call. Defaults to `claude-sonnet-5`. Bedrock model ids carry a provider prefix that differs by endpoint — `global.anthropic.claude-sonnet-5` on `bedrock-runtime`, `anthropic.claude-sonnet-5` on `bedrock-mantle` — so a bare `claude-…` id is prefixed automatically for whichever host the base URL names. Set a fully-prefixed id here to pin a specific routing (e.g. `us.anthropic.claude-sonnet-5` for US-only inference). |
+| `AI_INTEGRATIONS_MODEL` | Optional. The Claude model to call. Defaults to `us.anthropic.claude-haiku-4-5-20251001-v1:0` (verified live; `claude-sonnet-5` is not enabled on the current AWS account). Bedrock model ids carry a provider prefix that differs by endpoint — `global.anthropic.claude-sonnet-5` on `bedrock-runtime`, `anthropic.claude-sonnet-5` on `bedrock-mantle` — so a bare `claude-…` id is prefixed automatically for whichever host the base URL names. Set a fully-prefixed id here to pin a specific routing (e.g. `us.anthropic.claude-sonnet-5` for US-only inference). |
 
 **Optional (a feature simply no-ops until its secret is set):** `RESEND_API_KEY`,
 `EMAIL_FROM_ADDRESS`* , `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,

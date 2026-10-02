@@ -1,7 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, and, sql, gt, lte, desc, inArray } from "drizzle-orm";
 import { randomUUID } from "crypto";
-import { sellingPlanYear } from "../lib/compliance/planYear";
 import {
   db,
   agentsTable,
@@ -18,6 +17,7 @@ import {
 } from "../middlewares/requireAuth";
 import { AHIP_REQUIRED_AGENT_STATUSES, isAhipComplete } from "../lib/agents/ahipCoverage";
 import { expiredLicenseWhere } from "../lib/licenses/licenseStatus";
+import { sellingPlanYear } from "../lib/compliance/planYear";
 
 const router: IRouter = Router();
 
@@ -228,7 +228,9 @@ router.get(
     const in60 = new Date(now.getTime() + 60 * 86_400_000);
     const in90 = new Date(now.getTime() + 90 * 86_400_000);
     const currentYear = now.getFullYear();
-    // AHIP counts for the plan year being sold, as on the dashboard (from Oct 1 that is next year's).
+    // AHIP is scored against the plan year being sold (planYear.ts), the same
+    // year the dashboard and the Ready-to-Sell gate use. That is next year from
+    // Oct 1, so it is NOT always the calendar year.
     const certYear = sellingPlanYear(now);
     const ahipDeadline = new Date(`${currentYear}-10-01T00:00:00Z`);
     const daysUntilAhipDeadline = Math.ceil(
