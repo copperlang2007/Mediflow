@@ -89,7 +89,7 @@ export default function SuperAdminDashboard() {
       agents: rows.reduce((s, r) => s + r.agents, 0),
       clients: rows.reduce((s, r) => s + r.clients, 0),
       plans: [...plans.entries()].sort((a, b) => b[1] - a[1]),
-      // Invited but nobody has signed in yet — the ones worth a nudge.
+      // Invited, with no active accounts yet — the ones worth a nudge.
       stalled: rows.filter((r) => r.pendingInvitations > 0 && r.users === 0),
     };
   }, [agencies]);
@@ -189,7 +189,7 @@ export default function SuperAdminDashboard() {
 
         <div className="space-y-6">
           {totals.stalled.length > 0 && (
-            <SectionCard title="Needs a nudge" description="Invited, but nobody has signed in yet.">
+            <SectionCard title="Needs a nudge" description="Invited, with no active accounts yet.">
               <ul className="space-y-2 text-sm">
                 {totals.stalled.map((a) => (
                   <li key={a.id} className="flex items-center justify-between gap-2">

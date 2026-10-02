@@ -212,7 +212,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
   const aiContext = useAiContext();
 
-  const viewingAgency = Boolean(localStorage.getItem("mediflow:view-as-org"));
+  let viewingAgency = false;
+  try {
+    viewingAgency = Boolean(localStorage.getItem("mediflow:view-as-org"));
+  } catch {
+    // storage unavailable — same as not viewing an agency
+  }
   const { unreadCount } = useSSENotifications(0, !viewingAgency);
   const { data: me } = useGetMe();
   const userRole = (me?.role ?? null) as Role | null;
@@ -266,6 +271,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Client search is agency data; the platform view has none.
   const canSearch = !platformView && (!userRole || CONTACT_READERS.includes(userRole));
   const isOwner = userRole === "super_admin" || userRole === "agency_admin";
+  // The AI assistant answers from an agency's data; the platform view has none.
+  const aiEnabled = !viewingAgency && !platformView;
   const isSuperAdmin = userRole === "super_admin";
   const roleLabel = userRole ? (ROLE_LABELS[userRole] ?? userRole) : null;
   const initials =
@@ -468,7 +475,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <DropdownMenuContent align="end" className="w-60">
                 <DropdownMenuLabel>Need a hand?</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                {!viewingAgency && (
+                {aiEnabled && (
                   <DropdownMenuItem onClick={() => openAiAssistant()} className="cursor-pointer">
                     <Sparkles className="h-4 w-4 mr-2" />
                     Ask the AI assistant
@@ -538,19 +545,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     Profile
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/settings">
-                    <Building2 className="h-4 w-4 mr-2" />
-                    Agency settings
-                  </Link>
-                </DropdownMenuItem>
+                {!platformView && (
+                  <DropdownMenuItem asChild>
+                    <Link href="/settings">
+                      <Building2 className="h-4 w-4 mr-2" />
+                      Agency settings
+                    </Link>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem asChild>
                   <Link href="/settings/security">
                     <ShieldCheck className="h-4 w-4 mr-2" />
                     Account security
                   </Link>
                 </DropdownMenuItem>
-                {isOwner && (
+                {isOwner && !platformView && (
                   <>
                     <DropdownMenuItem asChild>
                       <Link href="/settings/team">
@@ -584,7 +593,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <main
           className={cn(
             "flex-1 overflow-y-auto overflow-x-hidden",
-            !viewingAgency && "pb-[calc(5.5rem+env(safe-area-inset-bottom))]",
+            aiEnabled && "pb-[calc(5.5rem+env(safe-area-inset-bottom))]",
           )}
         >
           {children}
@@ -607,7 +616,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {isSuperAdmin && <ViewAsAgencyDialog open={viewAsOpen} onOpenChange={setViewAsOpen} />}
 
       {/* Floating AI Assistant (existing /api/ai/chat feature) */}
-      {!viewingAgency && <AiAssistantPanel context={aiContext} />}
+      {aiEnabled && <AiAssistantPanel context={aiContext} />}
     </div>
   );
 }
