@@ -107,7 +107,7 @@ jobs:
           PRIVATE_OBJECT_DIR: ${{ secrets.PRIVATE_OBJECT_DIR }}
 
           # ---- Optional config / credentials (passed through only if set) ----
-          # Override the default Bedrock model id (us.anthropic.claude-sonnet-4-6).
+          # Override the default Bedrock model id (us.anthropic.claude-haiku-4-5-20251001-v1:0).
           AI_INTEGRATIONS_MODEL: ${{ vars.AI_INTEGRATIONS_MODEL }}
           PUBLIC_OBJECT_SEARCH_PATHS: ${{ secrets.PUBLIC_OBJECT_SEARCH_PATHS }}
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
