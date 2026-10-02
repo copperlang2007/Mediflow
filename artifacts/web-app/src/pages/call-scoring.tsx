@@ -34,9 +34,14 @@ function Capabilities({ config, loading }: { config: CsConfig | undefined; loadi
           <FileAudio className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
           <div>
             <p className="flex items-center gap-2 font-medium">
-              Audio transcription <StatusPill tone="neutral">Not set up</StatusPill>
+              Audio transcription{" "}
+              {config?.audio.supported ? <StatusPill tone="success">Set up</StatusPill> : <StatusPill tone="neutral">Not set up</StatusPill>}
             </p>
-            <p className="text-xs text-muted-foreground">Score transcripts (TXT, VTT, SRT, JSON) for now. Nothing is transcribed or guessed.</p>
+            <p className="text-xs text-muted-foreground">
+              {config?.audio.supported
+                ? "Recordings are transcribed with Google Speech-to-Text, then scored."
+                : "Score transcripts (TXT, VTT, SRT, JSON) for now. Nothing is transcribed or guessed."}
+            </p>
           </div>
         </li>
         <li className="flex items-start gap-2">
@@ -182,7 +187,7 @@ export default function CallScoringPage() {
               Possible do-not-contact requests{totals && totals.openDnc > 0 ? ` (${totals.openDnc})` : ""}
             </TabsTrigger>
           )}
-          {canCreate && <TabsTrigger value="add">Add transcripts</TabsTrigger>}
+          {canCreate && <TabsTrigger value="add">{config?.audio.supported ? "Add calls" : "Add transcripts"}</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="calls" className="mt-4">

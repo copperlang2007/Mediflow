@@ -138,6 +138,9 @@ export const JOB_NAMES = {
   // Omnichannel campaign fan-out (stage2/campaigns). Idempotent per
   // recipient (claim-before-send), throttled, re-enqueues itself until done.
   CAMPAIGN_SEND: "campaign-send",
+  // Call recording → Google Speech-to-Text → scored transcript. Re-enqueues
+  // itself every 30s while the transcription runs. Idempotent per status.
+  TRANSCRIBE_RECORDING: "transcribe-recording",
 } as const;
 
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
@@ -628,6 +631,16 @@ export async function startWorkers(): Promise<void> {
     JOB_NAMES.CAMPAIGN_SEND,
     { batchSize: 1, localConcurrency: 2 },
     campaignSendHandler,
+  );
+
+  const transcribeHandler: WorkHandler<{ recordingId: string }> = async (jobs) => {
+    const { transcribeRecordingWorker } = await import("../workers/transcribeRecording");
+    for (const job of jobs) await transcribeRecordingWorker(job.data);
+  };
+  await boss.work<{ recordingId: string }>(
+    JOB_NAMES.TRANSCRIBE_RECORDING,
+    { batchSize: 1, localConcurrency: 4 },
+    transcribeHandler,
   );
 
   const retentionHandler: WorkHandler<Record<string, never>> = async () => {

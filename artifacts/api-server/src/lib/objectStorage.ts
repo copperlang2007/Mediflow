@@ -299,6 +299,38 @@ export class ObjectStorageService {
   }
 
   /**
+   * Call recordings live at `PRIVATE_OBJECT_DIR/call-recordings/{orgId}/{id}`.
+   * The key is always built here from the org and the recording id, never
+   * taken from a client, so one agency can never point at another's audio.
+   */
+  callRecordingKey(orgId: string, recordingId: string): string {
+    return `call-recordings/${orgId}/${recordingId}`;
+  }
+
+  /**
+   * A short-lived signed URL the browser PUTs the recording to directly. The
+   * content type is part of the signature, so the upload must send exactly it.
+   */
+  async getCallRecordingUploadURL(objectKey: string, contentType: string, ttlSec = 900): Promise<string> {
+    const { bucketName, objectName } = parseObjectPath(`${this.getPrivateObjectDir()}/${objectKey}`);
+    const [url] = await objectStorageClient
+      .bucket(bucketName)
+      .file(objectName)
+      .getSignedUrl({ version: "v4", action: "write", contentType, expires: Date.now() + ttlSec * 1000 });
+    return url;
+  }
+
+  /** Size and type of an uploaded recording, or null when nothing was uploaded. */
+  async getCallRecordingMetadata(objectKey: string): Promise<{ size: number; contentType: string | null } | null> {
+    const { bucketName, objectName } = parseObjectPath(`${this.getPrivateObjectDir()}/${objectKey}`);
+    const file = objectStorageClient.bucket(bucketName).file(objectName);
+    const [exists] = await file.exists();
+    if (!exists) return null;
+    const [meta] = await file.getMetadata();
+    return { size: Number(meta.size ?? 0), contentType: typeof meta.contentType === "string" ? meta.contentType : null };
+  }
+
+  /**
    * Permanently delete a document from object storage.
    *
    * @param objectPath — normalized `/objects/...` path returned by `uploadDocument`

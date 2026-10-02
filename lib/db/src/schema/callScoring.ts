@@ -53,6 +53,7 @@ export const CALL_TRANSCRIPT_SOURCES = [
   "enrollhere_download",
   "dialer",
   "other",
+  "recording",
 ] as const;
 export type CallTranscriptSource = (typeof CALL_TRANSCRIPT_SOURCES)[number];
 
@@ -239,3 +240,64 @@ export const callScoreReviewsTable = pgTable(
 );
 
 export type CallScoreReview = typeof callScoreReviewsTable.$inferSelect;
+
+/**
+ * Call recordings sent to speech-to-text (phase 2b).
+ *
+ * The audio lives in the private object store (GCS, under PRIVATE_OBJECT_DIR)
+ * at a key the server chose; this row tracks it through transcription into a
+ * scored `call_transcripts` row. The original file name is PHI-adjacent and is
+ * kept only inside `details_encrypted`. Retained like transcripts: never
+ * earlier than the CMS 10-year floor.
+ */
+export const CALL_RECORDING_STATUSES = ["uploading", "queued", "transcribing", "scored", "failed"] as const;
+export type CallRecordingStatus = (typeof CALL_RECORDING_STATUSES)[number];
+
+/** mono = one mixed track (speakers separated by voice); stereo = agent and client on separate channels. */
+export const CALL_RECORDING_LAYOUTS = ["mono", "agent_left", "agent_right"] as const;
+export type CallRecordingLayout = (typeof CALL_RECORDING_LAYOUTS)[number];
+
+export const callRecordingsTable = pgTable(
+  "call_recordings",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizationsTable.id),
+    status: text("status").notNull().default("uploading"),
+    layout: text("layout").notNull().default("mono"),
+    /** Object key relative to PRIVATE_OBJECT_DIR, chosen by the server. */
+    objectKey: text("object_key").notNull(),
+    contentType: text("content_type"),
+    sizeBytes: integer("size_bytes"),
+    /** AES-256-GCM JSON: file name, phone, external reference. */
+    detailsEncrypted: bytea("details_encrypted"),
+    agentId: text("agent_id").references(() => agentsTable.id, { onDelete: "set null" }),
+    contactId: text("contact_id").references(() => contactsTable.id, { onDelete: "set null" }),
+    callSessionId: text("call_session_id").references(() => callSessionsTable.id, {
+      onDelete: "set null",
+    }),
+    callDate: timestamp("call_date", { withTimezone: true }),
+    rubricId: text("rubric_id"),
+    aiMode: text("ai_mode").notNull().default("auto"),
+    source: text("source").notNull().default("upload"),
+    /** The speech provider's long-running operation name while transcribing. */
+    operationName: text("operation_name"),
+    transcriptId: text("transcript_id").references(() => callTranscriptsTable.id, { onDelete: "set null" }),
+    /** Plain-language reason, safe to show; never contains transcript text. */
+    error: text("error"),
+    attempts: integer("attempts").notNull().default(0),
+    durationSeconds: integer("duration_seconds"),
+    createdBy: text("created_by").references(() => usersTable.id, { onDelete: "set null" }),
+    retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("call_recordings_org_created_idx").on(t.orgId, t.createdAt),
+    index("call_recordings_status_idx").on(t.status),
+  ],
+);
+
+export type CallRecording = typeof callRecordingsTable.$inferSelect;
+
