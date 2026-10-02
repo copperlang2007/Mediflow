@@ -315,6 +315,7 @@ describe("bedrockRoutingIssues — reported, never fatal", () => {
   it("still reports the bare id a GovCloud operator forgot to qualify", () => {
     process.env.AI_INTEGRATIONS_BEDROCK_BASE_URL =
       "https://bedrock-runtime.us-gov-west-1.amazonaws.com/anthropic";
+    process.env.AI_INTEGRATIONS_MODEL = "claude-sonnet-5";
     expect(bedrockRoutingIssues().join(" ")).toContain("no Bedrock provider prefix");
   });
 

@@ -84,11 +84,15 @@ export function resolveAiProvider(): AiProvider {
  * Bedrock, where an unset variable previously produced a model-not-found error
  * on the first AI request of an otherwise healthy deploy.
  *
- * The bare id is deliberate: Bedrock's required provider prefix depends on
- * which endpoint host the base URL names, so `normalizeBedrockModelId()` adds
- * the right one at request time rather than baking one in here.
+ * This is the Claude Haiku 4.5 US inference profile, verified end-to-end (plain
+ * and streaming) against the production Bedrock endpoint by the
+ * `bedrock live smoke` workflow on 2026-10-02. The bare id this used to be
+ * (`claude-sonnet-5`) is not enabled on that account (403), and the bare
+ * dated Haiku id is rejected too: Bedrock only invokes this model through an
+ * inference profile. It is a fully qualified id, so `normalizeBedrockModelId()`
+ * leaves it alone. Set `AI_INTEGRATIONS_MODEL` to use another model.
  */
-export const DEFAULT_BEDROCK_MODEL = "claude-sonnet-5";
+export const DEFAULT_BEDROCK_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
 const DEFAULT_OPENAI_MODEL = "gpt-5.4";
 
 /**
