@@ -57,6 +57,14 @@ export function KnowledgeLibrary({ viewSwitch }: { viewSwitch: ReactNode }) {
   const [kind, setKind] = useState(ALL);
   const [confirm, setConfirm] = useState<{ ids: string[]; reviewCount: number } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpanded = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 250);
@@ -157,7 +165,17 @@ export function KnowledgeLibrary({ viewSwitch }: { viewSwitch: ReactNode }) {
                     <StatusPill tone={a.enabled ? "success" : "neutral"}>{a.enabled ? "On" : "Off"}</StatusPill>
                   </div>
                   <h3 className="font-display text-base font-semibold">{a.title}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground line-clamp-3 whitespace-pre-line">{a.content}</p>
+                  <p id={`kb-lib-${a.id}`} className={cn("mt-1 text-sm text-muted-foreground whitespace-pre-line", !expanded.has(a.id) && "line-clamp-3")}>{a.content}</p>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto px-0 py-1 text-xs"
+                    aria-expanded={expanded.has(a.id)}
+                    aria-controls={`kb-lib-${a.id}`}
+                    onClick={() => toggleExpanded(a.id)}
+                  >
+                    {expanded.has(a.id) ? "Show less" : "Read the full article"}
+                  </Button>
                   {a.needsReview && (
                     <p className="mt-2 text-xs text-muted-foreground">Written in 2025 — some figures or rules may have changed. Check it against current guidance before relying on it.</p>
                   )}

@@ -120,6 +120,21 @@ export async function findRelevantArticles(
     matchers.push(ilike(kbArticlesTable.content, pattern));
   }
 
+  // Rank in SQL so the 25-row cap keeps the BEST matches, not arbitrary ones.
+  // Same weights as the in-memory score below (keyword 3, title 2, body 1).
+  const rank = (
+    keywords: SQL,
+    title: SQL,
+    content: SQL,
+  ): SQL<number> =>
+    sql<number>`(${sql.join(
+      terms.map(
+        (t) =>
+          sql`(CASE WHEN ${t} = ANY(${keywords}) THEN 3 ELSE 0 END) + (CASE WHEN ${title} ILIKE ${`%${likeEscape(t)}%`} THEN 2 ELSE 0 END) + (CASE WHEN ${content} ILIKE ${`%${likeEscape(t)}%`} THEN 1 ELSE 0 END)`,
+      ),
+      sql` + `,
+    )})`;
+
   const candidates = await db
     .select({
       id: kbArticlesTable.id,
@@ -136,6 +151,7 @@ export async function findRelevantArticles(
         or(...matchers),
       ),
     )
+    .orderBy(sql`${rank(sql`${kbArticlesTable.keywords}`, sql`${kbArticlesTable.title}`, sql`${kbArticlesTable.content}`)} DESC`)
     .limit(25);
 
   const scored = candidates.map((a) => {
@@ -186,6 +202,7 @@ export async function findRelevantArticles(
         or(...libMatchers),
       ),
     )
+    .orderBy(sql`${rank(sql`${kbLibraryArticlesTable.keywords}`, sql`${kbLibraryArticlesTable.title}`, sql`${kbLibraryArticlesTable.content}`)} DESC`)
     .limit(25);
 
   const score = (a: { title: string; content: string; keywords: string[] | null }) => {

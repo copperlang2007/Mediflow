@@ -86,8 +86,8 @@ export default function KnowledgeBasePage() {
   const [view, setView] = useState<"own" | "library">("own");
   const viewSwitch = (
     <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="Which articles">
-      <Button size="sm" variant={view === "own" ? "default" : "ghost"} onClick={() => setView("own")}>Our articles</Button>
-      <Button size="sm" variant={view === "library" ? "default" : "ghost"} onClick={() => setView("library")}>Mediflow library</Button>
+      <Button size="sm" variant={view === "own" ? "default" : "ghost"} aria-pressed={view === "own"} onClick={() => setView("own")}>Our articles</Button>
+      <Button size="sm" variant={view === "library" ? "default" : "ghost"} aria-pressed={view === "library"} onClick={() => setView("library")}>Mediflow library</Button>
     </div>
   );
   return view === "own" ? <OwnArticles viewSwitch={viewSwitch} /> : <KnowledgeLibrary viewSwitch={viewSwitch} />;

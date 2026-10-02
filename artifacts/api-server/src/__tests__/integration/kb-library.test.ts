@@ -164,6 +164,42 @@ describe("KB library → AI assistant context", () => {
     const question = "knowledge base articles switch on assistant";
     expect(await buildKnowledgeBaseContext(otherOrg.id, question)).toContain("Knowledge Base");
     // `org` switched this guide off in the previous block.
-    expect(await buildKnowledgeBaseContext(org.id, question)).not.toContain("Knowledge Base: agency notes");
+    expect(await buildKnowledgeBaseContext(org.id, question)).not.toContain("Knowledge Base: your articles");
+  });
+});
+
+describe("KB library → retrieval ranking", () => {
+  it("keeps the best match even when more than 25 library articles match", async () => {
+    const { buildKnowledgeBaseContext } = await import("../../lib/kbContext");
+    const { kbLibraryArticlesTable } = await import("@workspace/db");
+    // 30 weak matches (the word only in the body) plus one strong match
+    // (keyword + title). Inserted AFTER the weak ones so an unordered LIMIT
+    // would be free to drop it.
+    await handle.db.insert(kbLibraryArticlesTable).values(
+      Array.from({ length: 30 }, (_, i) => ({
+        id: `lib-rank-weak-${i}`,
+        key: `rank-weak-${i}`,
+        category: "Ranking test",
+        title: `Weak note ${i}`,
+        content: "mentions zorblax once in passing",
+        keywords: [],
+        kind: "mediflow_guide" as const,
+        defaultEnabled: true,
+        needsReview: false,
+      })),
+    );
+    await handle.db.insert(kbLibraryArticlesTable).values({
+      id: "lib-rank-strong",
+      key: "rank-strong",
+      category: "Ranking test",
+      title: "Zorblax handbook",
+      content: "zorblax details",
+      keywords: ["zorblax"],
+      kind: "mediflow_guide",
+      defaultEnabled: true,
+      needsReview: false,
+    });
+    const block = await buildKnowledgeBaseContext(org.id, "zorblax");
+    expect(block).toContain("Zorblax handbook");
   });
 });
