@@ -260,32 +260,45 @@ function DeploymentConfigRequired() {
   );
 }
 
-/**
- * /dashboard: a super admin gets the platform overview; viewing an agency (or
- * any other role) gets that agency's dashboard.
- */
-function Dashboard() {
+/** Who is looking, and whether they are in the platform view (super admin, no agency open). */
+function usePlatformState() {
   const { data: me, isLoading, isError, refetch } = useGetMe();
-  if (isLoading) return <PageLoadingFallback />;
-  // Without a known role we can't tell a super admin from anyone else, so
-  // don't guess an agency dashboard.
-  if (isError && !me) {
-    return (
-      <div role="alert" className="p-8 text-center text-sm text-muted-foreground">
-        Could not load your account.{" "}
-        <button type="button" className="underline underline-offset-2" onClick={() => void refetch()}>
-          Try again
-        </button>
-      </div>
-    );
-  }
   let viewingAgency = false;
   try {
     viewingAgency = Boolean(localStorage.getItem("mediflow:view-as-org"));
   } catch {
     // storage unavailable — same as not viewing an agency
   }
-  return isPlatformView((me?.role ?? null) as Role | null, viewingAgency) ? <SuperAdminDashboard /> : <AgencyDashboard />;
+  const role = (me?.role ?? null) as Role | null;
+  return {
+    isLoading,
+    // Without a known role we can't tell a super admin from anyone else.
+    failed: isError && !me,
+    refetch,
+    platformView: isPlatformView(role, viewingAgency),
+  };
+}
+
+function AccountLoadError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div role="alert" className="p-8 text-center text-sm text-muted-foreground">
+      Could not load your account.{" "}
+      <button type="button" className="underline underline-offset-2" onClick={onRetry}>
+        Try again
+      </button>
+    </div>
+  );
+}
+
+/**
+ * /dashboard: a super admin gets the platform overview; viewing an agency (or
+ * any other role) gets that agency's dashboard.
+ */
+function Dashboard() {
+  const state = usePlatformState();
+  if (state.isLoading) return <PageLoadingFallback />;
+  if (state.failed) return <AccountLoadError onRetry={() => void state.refetch()} />;
+  return state.platformView ? <SuperAdminDashboard /> : <AgencyDashboard />;
 }
 
 function HomeRedirect() {
@@ -301,19 +314,21 @@ function HomeRedirect() {
  * the screen says "platform".
  */
 function PlatformRouteGuard({ children }: { children: React.ReactNode }) {
-  const { data: me } = useGetMe();
+  const state = usePlatformState();
   const [location] = useLocation();
-  let viewingAgency = false;
-  try {
-    viewingAgency = Boolean(localStorage.getItem("mediflow:view-as-org"));
-  } catch {
-    // storage unavailable — same as not viewing an agency
-  }
-  const role = (me?.role ?? null) as Role | null;
-  if (isPlatformView(role, viewingAgency) && !isPlatformPath(location)) {
-    return <Redirect to="/dashboard" />;
-  }
+  // Platform pages (incl. /dashboard) never need the guard; everything else
+  // waits for the role so an agency page can't mount under the platform view.
+  if (isPlatformPath(location)) return <>{children}</>;
+  if (state.isLoading) return <PageLoadingFallback />;
+  if (state.failed) return <AccountLoadError onRetry={() => void state.refetch()} />;
+  if (state.platformView) return <Redirect to="/dashboard" />;
   return <>{children}</>;
+}
+
+/** Platform view has no agency of its own, so it must not wear one agency's branding. */
+function PlatformAwareBranding({ children }: { children: React.ReactNode }) {
+  const { platformView } = usePlatformState();
+  return <BrandingProvider disabled={platformView}>{children}</BrandingProvider>;
 }
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
@@ -321,7 +336,7 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
     <>
       <Show when="signed-in">
         <ProvisioningGate>
-          <BrandingProvider>
+          <PlatformAwareBranding>
             <AppShell>
               <ErrorBoundary>
                 <PlatformRouteGuard>
@@ -331,7 +346,7 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
                 </PlatformRouteGuard>
               </ErrorBoundary>
             </AppShell>
-          </BrandingProvider>
+          </PlatformAwareBranding>
         </ProvisioningGate>
       </Show>
       <Show when="signed-out">

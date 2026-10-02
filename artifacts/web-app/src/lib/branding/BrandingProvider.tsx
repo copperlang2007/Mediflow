@@ -192,14 +192,18 @@ function upsertHeadElement<T extends HTMLElement>(id: string, create: () => T): 
   return el;
 }
 
-export function BrandingProvider({ children }: { children: ReactNode }) {
+export function BrandingProvider({ children, disabled = false }: { children: ReactNode; disabled?: boolean }) {
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({
+  const { data: fetched, isLoading: fetching } = useQuery({
     queryKey: BRANDING_QUERY_KEY,
     queryFn: () => apiFetch<BrandingData>("/api/organizations/me/branding"),
     staleTime: 5 * 60_000,
     retry: 1,
+    // Disabled (platform view): no organization, so defaults and no fetch.
+    enabled: !disabled,
   });
+  const data = disabled ? undefined : fetched;
+  const isLoading = disabled ? false : fetching;
 
   const resolved = useMemo(() => resolveBranding(data), [data]);
 
