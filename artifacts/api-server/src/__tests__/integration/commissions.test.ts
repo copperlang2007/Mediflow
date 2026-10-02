@@ -341,6 +341,124 @@ describe("Commissions integration", () => {
     expect(stmt.status).toBe("parsed");
   });
 
+  it("statement upload with parse=true reads the file in the same request", async () => {
+    const handle = await bootTestDb();
+    const res = await request(app)
+      .post("/api/commissions/statements")
+      .set(withAuth(admin.id))
+      .field("carrierId", carrier.id)
+      .field("statementDate", "2025-02-01")
+      .field("periodStart", "2025-01-01")
+      .field("periodEnd", "2025-01-31")
+      .field("parse", "true")
+      .attach("file", HUMANA_CSV_BUFFER, "humana.csv");
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe("parsed");
+    expect(res.body.parse).toEqual({ inserted: 3 });
+
+    const items = await handle.db
+      .select()
+      .from(commissionLineItemsTable)
+      .where(eq(commissionLineItemsTable.statementId, res.body.id));
+    expect(items.length).toBe(3);
+    const [stmt] = await handle.db
+      .select()
+      .from(commissionStatementsTable)
+      .where(eq(commissionStatementsTable.id, res.body.id));
+    expect(stmt.status).toBe("parsed");
+  });
+
+  it("statement upload with parse=true keeps the statement pending and says why when it can't read the file", async () => {
+    const handle = await bootTestDb();
+    const [noReader] = await handle.db
+      .insert(carriersTable)
+      .values({ id: randomUUID(), orgId: org.id, name: "Carrier With No Reader" })
+      .returning();
+    const res = await request(app)
+      .post("/api/commissions/statements")
+      .set(withAuth(admin.id))
+      .field("carrierId", noReader!.id)
+      .field("statementDate", "2025-02-01")
+      .field("periodStart", "2025-01-01")
+      .field("periodEnd", "2025-01-31")
+      .field("parse", "true")
+      .attach("file", HUMANA_CSV_BUFFER, "x.csv");
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe("pending");
+    expect(typeof res.body.parse.error).toBe("string");
+    const items = await handle.db
+      .select()
+      .from(commissionLineItemsTable)
+      .where(eq(commissionLineItemsTable.statementId, res.body.id));
+    expect(items.length).toBe(0);
+  });
+
+  it("statement parse: a second parse of an already-read statement is refused and adds no duplicate lines", async () => {
+    const handle = await bootTestDb();
+    const upload = await request(app)
+      .post("/api/commissions/statements")
+      .set(withAuth(admin.id))
+      .field("carrierId", carrier.id)
+      .field("statementDate", "2025-02-01")
+      .field("periodStart", "2025-01-01")
+      .field("periodEnd", "2025-01-31")
+      .field("parse", "true")
+      .attach("file", HUMANA_CSV_BUFFER, "humana.csv");
+    expect(upload.body.parse).toEqual({ inserted: 3 });
+
+    const again = await request(app)
+      .post(`/api/commissions/statements/${upload.body.id}/parse`)
+      .set(withAuth(admin.id))
+      .attach("file", HUMANA_CSV_BUFFER, "humana.csv");
+    expect(again.status).toBe(409);
+
+    const items = await handle.db
+      .select()
+      .from(commissionLineItemsTable)
+      .where(eq(commissionLineItemsTable.statementId, upload.body.id));
+    expect(items.length).toBe(3);
+  });
+
+  it("statement parse: two simultaneous requests read the statement once", async () => {
+    const handle = await bootTestDb();
+    const upload = await request(app)
+      .post("/api/commissions/statements")
+      .set(withAuth(admin.id))
+      .field("carrierId", carrier.id)
+      .field("statementDate", "2025-02-01")
+      .field("periodStart", "2025-01-01")
+      .field("periodEnd", "2025-01-31")
+      .attach("file", HUMANA_CSV_BUFFER, "humana.csv");
+    const send = () =>
+      request(app)
+        .post(`/api/commissions/statements/${upload.body.id}/parse`)
+        .set(withAuth(admin.id))
+        .attach("file", HUMANA_CSV_BUFFER, "humana.csv");
+    const [a, b] = await Promise.all([send(), send()]);
+    expect([a.status, b.status].sort()).toEqual([200, 409]);
+
+    const items = await handle.db
+      .select()
+      .from(commissionLineItemsTable)
+      .where(eq(commissionLineItemsTable.statementId, upload.body.id));
+    expect(items.length).toBe(3);
+  });
+
+  it("statement parse without a file is refused (the file is not stored)", async () => {
+    const upload = await request(app)
+      .post("/api/commissions/statements")
+      .set(withAuth(admin.id))
+      .field("carrierId", carrier.id)
+      .field("statementDate", "2025-02-01")
+      .field("periodStart", "2025-01-01")
+      .field("periodEnd", "2025-01-31")
+      .attach("file", HUMANA_CSV_BUFFER, "humana.csv");
+    const parse = await request(app)
+      .post(`/api/commissions/statements/${upload.body.id}/parse`)
+      .set(withAuth(admin.id));
+    expect(parse.status).toBe(400);
+  });
+
   it("reconcile worker: happy path matches member_id → contact, populates writing agent, upserts payout", async () => {
     const handle = await bootTestDb();
     const writing = await seedAgent(handle.db, { orgId: org.id });

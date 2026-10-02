@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -263,23 +263,21 @@ export function UploadStatementDialog({
       fd.append("periodStart", periodStart);
       fd.append("periodEnd", periodEnd);
       fd.append("totalAmount", totalAmount);
+      fd.append("parse", "true");
       fd.append("file", file);
 
-      const created = await customFetch<CommissionStatement>(
+      // The server reads the file during the upload (it doesn't keep the file,
+      // so it can't be read later without sending it again).
+      const created = await customFetch<CommissionStatement & { parse?: { inserted?: number; error?: string } }>(
         "/api/commissions/statements",
         { method: "POST", body: fd },
       );
 
-      // Auto-trigger parse — non-fatal if it fails (user can retry from row).
-      try {
-        await customFetch(`/api/commissions/statements/${created.id}/parse`, {
-          method: "POST",
-        });
-      } catch {
-        toast.message("Statement uploaded, but parse failed — retry from the list");
+      if (created.parse?.error) {
+        toast.message(`Statement uploaded, but it couldn't be read: ${created.parse.error} Use Parse on the list to try again with the file.`);
+      } else {
+        toast.success(`Statement uploaded — ${created.parse?.inserted ?? 0} lines read`);
       }
-
-      toast.success("Statement uploaded");
       void qc.invalidateQueries({ queryKey: ["/api/commissions/statements"] });
       onUploaded?.(created);
       onOpenChange(false);
@@ -342,10 +340,13 @@ export function UploadStatementDialog({
             <Label>Statement file *</Label>
             <Input
               type="file"
-              accept=".pdf,.csv,.xlsx,.xls"
+              accept=".csv,.txt,text/csv,text/plain"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               required
             />
+            <p className="text-xs text-muted-foreground">
+              Text files only (.csv or .txt) — PDF and Excel statements can't be read yet.
+            </p>
             {file && (
               <p className="text-xs text-muted-foreground">
                 {file.name} · {(file.size / 1024).toFixed(1)} KB
@@ -446,14 +447,21 @@ function StatementsTab({ onUpload }: { onUpload: () => void }) {
   const rows = unwrap(data);
   const { slice, page, totalPages, setPage } = usePaged(rows);
 
+  // The server doesn't keep uploaded files, so reading a pending statement
+  // means choosing the file again.
+  const parseFileInput = useRef<HTMLInputElement>(null);
+  const [parseTarget, setParseTarget] = useState<string | null>(null);
   const parse = useMutation({
-    mutationFn: (id: string) =>
-      customFetch(`/api/commissions/statements/${id}/parse`, { method: "POST" }),
-    onSuccess: () => {
-      toast.success("Parse queued");
+    mutationFn: ({ id, file }: { id: string; file: File }) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return customFetch<{ inserted: number }>(`/api/commissions/statements/${id}/parse`, { method: "POST", body: fd });
+    },
+    onSuccess: (res) => {
+      toast.success(`Statement read — ${res.inserted} lines`);
       void qc.invalidateQueries({ queryKey: ["/api/commissions/statements"] });
     },
-    onError: () => toast.error("Parse failed"),
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Couldn't read that file"),
   });
 
   const reconcile = useMutation({
@@ -548,9 +556,9 @@ function StatementsTab({ onUpload }: { onUpload: () => void }) {
                           <Button
                             size="sm" variant="outline" className="h-7 px-2 text-xs"
                             disabled={parse.isPending}
-                            onClick={() => parse.mutate(s.id)}
+                            onClick={() => { setParseTarget(s.id); parseFileInput.current?.click(); }}
                           >
-                            Parse
+                            Parse (choose file)
                           </Button>
                         )}
                         {s.status === "parsed" && (
@@ -569,6 +577,18 @@ function StatementsTab({ onUpload }: { onUpload: () => void }) {
               </TableBody>
             </Table>
           </TableFrame>
+          <input
+            ref={parseFileInput}
+            type="file"
+            accept=".csv,.txt,text/csv,text/plain"
+            className="hidden"
+            aria-label="Choose the statement file to read"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f && parseTarget) parse.mutate({ id: parseTarget, file: f });
+            }}
+          />
           <PaginationBar page={page} totalPages={totalPages} setPage={setPage} total={rows.length} />
         </>
       )}
