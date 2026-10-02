@@ -5,7 +5,12 @@ name: Bedrock smoke
 # once streaming and once not. Run it by hand from the Actions tab, or let it run
 # when the AI client code changes.
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Bedrock model id to test (overrides the AI_INTEGRATIONS_MODEL variable), e.g. anthropic.claude-haiku-4-5"
+        required: false
+        type: string
   pull_request:
     paths:
       - "artifacts/api-server/src/lib/ai/**"
@@ -29,7 +34,7 @@ jobs:
       AI_INTEGRATIONS_PROVIDER: bedrock
       AI_INTEGRATIONS_BEDROCK_API_KEY: ${{ secrets.AI_INTEGRATIONS_BEDROCK_API_KEY }}
       AI_INTEGRATIONS_BEDROCK_BASE_URL: ${{ secrets.AI_INTEGRATIONS_BEDROCK_BASE_URL }}
-      AI_INTEGRATIONS_MODEL: ${{ vars.AI_INTEGRATIONS_MODEL }}
+      AI_INTEGRATIONS_MODEL: ${{ inputs.model || vars.AI_INTEGRATIONS_MODEL }}
     steps:
       - name: Skip when the secrets are not available (forks, unset)
         id: gate
