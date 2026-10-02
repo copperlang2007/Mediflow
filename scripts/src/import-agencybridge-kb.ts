@@ -10,9 +10,12 @@
  * Safe to re-run: article ids are derived from the org and entry key, and
  * existing rows are never overwritten (so edits made in the app survive).
  *
- * Entries that quote 2025 figures (`needsReview`) are imported INACTIVE so the
- * AI assistant does not quote out-of-date numbers. An agency owner should
- * check them against current CMS figures, then switch them on in the app.
+ * EVERY article is imported INACTIVE. The source is a snapshot written in
+ * 2025: it holds dated figures (commission caps, LIS limits) and rules that
+ * have since changed (SOA wait period, moving-SEP window, carrier names and
+ * channels). Active articles are fed straight to the AI assistant, so an
+ * agency owner must review each one against current CMS/carrier guidance and
+ * switch it on in the app.
  *
  * Run:
  *   pnpm --filter @workspace/scripts run import:agencybridge-kb -- <orgId> [--dry-run]
@@ -71,7 +74,12 @@ async function main(): Promise<void> {
   let inserted = 0;
   for (const e of entries) {
     if (dryRun) {
-      inserted++;
+      const [existing] = await db
+        .select({ id: kbArticlesTable.id })
+        .from(kbArticlesTable)
+        .where(eq(kbArticlesTable.id, articleId(orgId, e.key)))
+        .limit(1);
+      if (!existing) inserted++;
       continue;
     }
     const rows = await db
@@ -83,7 +91,7 @@ async function main(): Promise<void> {
         title: e.title,
         content: e.content,
         keywords: normalizeKeywords(e.keywords),
-        isActive: !e.needsReview,
+        isActive: false,
         createdBy: null,
       })
       .onConflictDoNothing()
@@ -91,10 +99,9 @@ async function main(): Promise<void> {
     inserted += rows.length;
   }
 
-  const held = entries.filter((e) => e.needsReview).length;
   console.log(
     `${dryRun ? "[dry run] would import" : "Imported"} ${inserted} of ${entries.length} articles` +
-      ` (${entries.length - inserted} already present). ${held} dated articles are inactive pending review.`,
+      ` (${entries.length - inserted} already present). All are inactive until reviewed.`,
   );
   process.exit(0);
 }
