@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Eye, X } from "lucide-react";
 import { Link } from "wouter";
+import { useGetMe } from "@workspace/api-client-react";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +23,11 @@ function readActiveOrgId(): string | null {
 
 /** Agencies a super admin can view read-only, plus the one being viewed now. */
 function useViewAsAgencies(enabled: boolean) {
-  const [agencies, setAgencies] = useState<Agency[]>([]);
+  const { data: me } = useGetMe();
+  const [allAgencies, setAgencies] = useState<Agency[]>([]);
+  // Your own agency is just "using it" (writable, nothing read-only about it),
+  // so it is never offered as an agency to view.
+  const agencies = useMemo(() => allAgencies.filter((a) => a.id !== me?.orgId), [allAgencies, me?.orgId]);
   const [error, setError] = useState<string | null>(null);
   const [mfaRequired, setMfaRequired] = useState(false);
   const [activeOrgId] = useState<string | null>(readActiveOrgId);
