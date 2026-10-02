@@ -7,8 +7,6 @@
     "./workers/commissionSplits": "./src/workers/commissionSplits.ts",
     "./lib/carrierSeed": "./src/lib/carrierSeed.ts",
     "./lib/demoMode": "./src/lib/demoMode.ts",
-    "./lib/aiProvider": "./src/lib/aiProvider.ts",
-    "./lib/ai/buildAiClient": "./src/lib/ai/buildAiClient.ts",
     "./lib/aepRenewal/generate": "./src/lib/aepRenewal/generate.ts"
   },
   "scripts": {

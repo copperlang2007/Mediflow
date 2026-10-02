@@ -7,8 +7,7 @@
  *   AI_INTEGRATIONS_BEDROCK_BASE_URL=https://bedrock-runtime.<region>.amazonaws.com/anthropic \
  *   [AI_INTEGRATIONS_MODEL=<id>] pnpm --filter @workspace/scripts run smoke:bedrock
  *
- * Excluded from `tsc` (scripts/tsconfig.json): it imports api-server internals whose
- * ambient types live in that package's own program. Run via tsx.
+ * Typechecked with the rest of api-server (`pnpm --filter @workspace/api-server typecheck`).
  * Sends only the literal prompt below — no PHI. Exits non-zero on any failure.
  */
 import {
@@ -17,8 +16,8 @@ import {
   resolveAiModel,
   resolveAiProvider,
   bedrockRoutingIssues,
-} from "@workspace/api-server/lib/aiProvider";
-import { buildAiClient } from "@workspace/api-server/lib/ai/buildAiClient";
+} from "../lib/aiProvider";
+import { buildAiClient } from "../lib/ai/buildAiClient";
 
 const PROMPT = "Reply with exactly the single word: pong";
 
