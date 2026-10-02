@@ -160,7 +160,7 @@ export default function SuperAdminDashboard() {
                       <td className="px-3 py-2.5 text-right tabular-nums">{a.agents}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{a.clients}</td>
                       <td className="px-3 py-2.5 text-right">
-                        {a.id !== me?.orgId && (
+                        {me?.orgId && a.id !== me.orgId && (
                           <Button size="sm" variant="ghost" onClick={() => viewAgency(a.id)} title="Open this agency read-only">
                             <Eye className="mr-1 h-3.5 w-3.5" /> View
                           </Button>
@@ -181,7 +181,7 @@ export default function SuperAdminDashboard() {
                 {totals.stalled.map((a) => (
                   <li key={a.id} className="flex items-center justify-between gap-2">
                     <span className="truncate font-medium">{a.name}</span>
-                    {a.id !== me?.orgId && (
+                    {me?.orgId && a.id !== me.orgId && (
                       <Button size="sm" variant="ghost" onClick={() => viewAgency(a.id)}>View</Button>
                     )}
                   </li>

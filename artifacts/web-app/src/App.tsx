@@ -279,7 +279,12 @@ function Dashboard() {
       </div>
     );
   }
-  const viewingAgency = Boolean(localStorage.getItem("mediflow:view-as-org"));
+  let viewingAgency = false;
+  try {
+    viewingAgency = Boolean(localStorage.getItem("mediflow:view-as-org"));
+  } catch {
+    // storage unavailable — same as not viewing an agency
+  }
   return isPlatformView((me?.role ?? null) as Role | null, viewingAgency) ? <SuperAdminDashboard /> : <AgencyDashboard />;
 }
 
