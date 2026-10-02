@@ -26,6 +26,7 @@ import { KpiCard, PageHeader, SectionCard, EmptyState } from "@/components/share
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 interface AgencyRow {
   id: string;
@@ -43,21 +44,33 @@ const OVERVIEW_KEY = ["/api/admin/agencies/overview"] as const;
 const VIEW_AS_KEY = "mediflow:view-as-org";
 const SUPPORT_REASON_KEY = "mediflow:support-edit-reason";
 
-function viewAgency(id: string) {
+/** Returns false (and does not navigate) when browser storage is unavailable. */
+function viewAgency(id: string): boolean {
   try {
     // A support-edit reason from an earlier agency must not carry over.
     sessionStorage.removeItem(SUPPORT_REASON_KEY);
     localStorage.setItem(VIEW_AS_KEY, id);
   } catch {
-    return;
+    return false;
   }
   window.location.assign(`${import.meta.env.BASE_URL.replace(/\/$/, "")}/dashboard`);
+  return true;
 }
 
 const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export default function SuperAdminDashboard() {
   const { data: me } = useGetMe();
+  const { toast } = useToast();
+  const openAgency = (id: string) => {
+    if (!viewAgency(id)) {
+      toast({
+        title: "Could not open this agency",
+        description: "Site storage is disabled or full. Turn off private browsing or clear site data, then try again.",
+        variant: "destructive",
+      });
+    }
+  };
   const overview = useQuery({
     queryKey: OVERVIEW_KEY,
     queryFn: () => apiFetch<{ agencies: AgencyRow[] }>("/api/admin/agencies/overview"),
@@ -161,7 +174,7 @@ export default function SuperAdminDashboard() {
                       <td className="px-3 py-2.5 text-right tabular-nums">{a.clients}</td>
                       <td className="px-3 py-2.5 text-right">
                         {me?.orgId && a.id !== me.orgId && (
-                          <Button size="sm" variant="ghost" onClick={() => viewAgency(a.id)} title="Open this agency read-only">
+                          <Button size="sm" variant="ghost" onClick={() => openAgency(a.id)} title="Open this agency read-only">
                             <Eye className="mr-1 h-3.5 w-3.5" /> View
                           </Button>
                         )}
@@ -182,7 +195,7 @@ export default function SuperAdminDashboard() {
                   <li key={a.id} className="flex items-center justify-between gap-2">
                     <span className="truncate font-medium">{a.name}</span>
                     {me?.orgId && a.id !== me.orgId && (
-                      <Button size="sm" variant="ghost" onClick={() => viewAgency(a.id)}>View</Button>
+                      <Button size="sm" variant="ghost" onClick={() => openAgency(a.id)}>View</Button>
                     )}
                   </li>
                 ))}
