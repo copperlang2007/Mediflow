@@ -1,0 +1,626 @@
+[
+  {
+    "key": "mf-audit-compliance-page",
+    "category": "Mediflow Guide: Compliance & Security",
+    "title": "Audit & Compliance page: the audit trail and AI compliance report",
+    "content": "Where: sidebar group Compliance > Audit & Compliance. Visible to Super Admin, Agency Admin and Compliance Manager.\n\nWhat it shows:\n- Four tiles: events recorded (all time for your agency), changes and people in the current view, and how long ago the latest event was.\n- Audit log, newest first. Each row shows who did it, their role, the action (create, update, delete, read, export, login) and the type of record. The page says entries can't be edited or deleted.\n- Opening this log is itself recorded.\n\nAI compliance report:\n1. Click Generate Report.\n2. Watch the plain-English summary of each agent's licenses, certifications, AHIP and overdue tasks appear.\n3. When it finishes, click Download PDF.\n\nFor filters, date ranges, before/after details and CSV export, use Admin > Security & HIPAA checklist > Audit Log tab (see that article).\n\nNote: the log records activity on client, agent and commission records and other areas as they happen. It is a record of what people did, not a pass/fail grade.",
+    "keywords": [
+      "audit",
+      "audit log",
+      "audit trail",
+      "compliance",
+      "hipaa",
+      "who viewed",
+      "activity log",
+      "compliance report",
+      "pdf",
+      "history"
+    ]
+  },
+  {
+    "key": "mf-esign-consent",
+    "category": "Mediflow Guide: Compliance & Security",
+    "title": "E-signature for carrier contracting paperwork and consent fields",
+    "content": "What exists: an in-house e-signature window (labeled Beta) used for carrier contracting paperwork. Mediflow does not have a separate client Scope of Appointment (SOA) form or e-sign flow.\n\nWhere: an agent opens it from the onboarding step \"Sign carrier paperwork\" (sidebar Main > My Onboarding) by clicking Sign now once paperwork is generated. Super Admin, Agency Admin, Compliance Manager and Agent roles can start one.\n\nTo sign:\n1. Scroll through the document and tick \"I have scrolled through and reviewed\".\n2. Tick all three consent boxes (electronic business, read and understood, paper copy available).\n3. Type your full legal name (required). Optionally draw your signature too.\n4. Click Sign and complete.\n\nClosing the window before signing stores nothing. When you sign, Mediflow records your IP address and device on its own, plus the wording version you agreed to. Only the signer or an admin can sign; only an admin can void an envelope (a reason is required).\n\nClient texting consent: on a client's record you can enter a texting consent (TCPA) date and its source; a source is required with a date.\n\nSOA: Call scoring can check whether a scope of appointment was confirmed on a call transcript.",
+    "keywords": [
+      "e-sign",
+      "esign",
+      "signature",
+      "sign",
+      "consent",
+      "soa",
+      "scope of appointment",
+      "contracting",
+      "tcpa",
+      "paperwork",
+      "electronic signature"
+    ]
+  },
+  {
+    "key": "mf-call-scoring-recording",
+    "category": "Mediflow Guide: Compliance & Security",
+    "title": "Call scoring and call recording: what Mediflow does today",
+    "content": "Where: sidebar group Compliance > Call scoring. Super Admin, Agency Admin and Compliance Manager see all calls and can add and review. Agents see only calls linked to calls they placed, and cannot add or review.\n\nWhat it does: checks call transcripts against a checklist (Medicare sales call, or a general sales checklist) and flags possible do-not-contact requests. It assists review; it is not legal advice or a certification.\n\nAdd a transcript:\n1. Click Add transcripts.\n2. Paste text or upload a TXT, VTT, SRT or JSON file (1 MB max), pick a checklist, optionally add a client phone number and a reference.\n3. Open the result to see each finding with the exact words, who said them and when.\n\nReview:\n- A reviewer can override a grade with a required note; the automatic result is kept.\n- Calls with a failed critical item or an ungraded one are not shown as passed.\n- Possible do-not-contact tab: read the quote, then add the number to the do-not-contact list or mark Not a request with a note. Nothing is added automatically.\n\nLook-back import: up to 50 files plus an optional CSV manifest at once.\n\nNot available: it cannot transcribe audio. Call recording is off by default and the setup guide says nothing in the product can turn it on yet.",
+    "keywords": [
+      "call scoring",
+      "call recording",
+      "recording",
+      "transcript",
+      "do not call",
+      "dnc",
+      "do-not-contact",
+      "checklist",
+      "quality",
+      "review",
+      "soa",
+      "softphone"
+    ]
+  },
+  {
+    "key": "mf-security-hipaa-checklist",
+    "category": "Mediflow Guide: Compliance & Security",
+    "title": "Security & HIPAA checklist: readiness checks, sessions, access review, PHI masking",
+    "content": "Where: sidebar group Admin > Security & HIPAA checklist. Super Admin, Agency Admin and Compliance Manager can open it. Some actions are Super Admin / Agency Admin only.\n\nIt shows live checks worked out from your settings. It is not a certification.\n\nTabs:\n- Readiness checks: controls passing and needing attention (audit logging active, PHI masking for non-privileged roles, data retention set, breach-notification workflow, storage access policy). Generate PDF makes an evidence pack for your auditor (admins only).\n- Audit Log: filter by action, record type, dates and user; click a row to see before and after; Export CSV.\n- Sessions: see where people are signed in; revoke one session or force logout (admins).\n- Access Review: everyone with a login and their role; deactivate or reactivate (admins).\n- Login History: sign-in attempts with IP and failure reason.\n- Export Log: every data download.\n- Security Config (admins): idle sign-out timeout of 15, 30 or 60 minutes, and data retention per record type.\n\nPHI: Super Admin, Agency Admin and Compliance Manager see full client PHI; other roles see masked values. An Agent sees full details only for clients they service. Opening a full enrollment application is audited.",
+    "keywords": [
+      "hipaa",
+      "security",
+      "phi",
+      "audit trail",
+      "session timeout",
+      "force logout",
+      "access review",
+      "login history",
+      "evidence pack",
+      "data retention",
+      "masking",
+      "baa"
+    ]
+  },
+  {
+    "key": "mf-licensing-certs-renewals",
+    "category": "Mediflow Guide: Compliance & Security",
+    "title": "Licensing, Certifications and License Renewals: tracking expirations",
+    "content": "Where (sidebar group Compliance):\n- Licensing and Certifications: every role can open them (an Agent sees only their own licenses).\n- License Renewals: Super Admin, Agency Admin and Compliance Manager.\n\nLicensing: shows each agent's state licenses and a \"Renewals coming up\" list for the next 90 days. Tiles count expired and expiring licenses at 30 days, 31-60 and 61-90. Search agents or filter by status. Import from CSV needs agentId, stateCode and licenseType; licenseNumber, issueDate, expiryDate and status are optional. A license counts as active only if its status is active and its expiry date has not passed, so a past-date license reads as expired.\n\nCertifications: pick a plan year. The AHIP tab lists each agent's AHIP status; the Carrier certifications tab is a grid of agents by carrier; below is a list expiring in 90 days. Record AHIP and certifications on the agent's profile.\n\nLicense Renewals:\n1. Filter by type (licenses, certifications), days ahead (30 to 180) or urgency: Critical (30 days or less), Warning (31-60), Notice (61+).\n2. Click Snooze to hide an item for 30 days.\n3. Click Resolve to hide it for one year.\n\nNeither button changes the actual expiry date; update the license or certification itself on the agent's profile.",
+    "keywords": [
+      "license",
+      "licensing",
+      "certification",
+      "ahip",
+      "renewal",
+      "expiring",
+      "expired",
+      "state license",
+      "carrier certification",
+      "csv import",
+      "snooze",
+      "appointed"
+    ]
+  },
+  {
+    "key": "mf-marketing-approval-complaints",
+    "category": "Mediflow Guide: Compliance & Security",
+    "title": "Marketing Approval and Complaints: submit, review and track",
+    "content": "Both are in sidebar group Compliance and visible to Super Admin, Agency Admin and Compliance Manager.\n\nMarketing Approval:\n1. Click Submit material and fill in: title, type (flyer, social post, email, mailer, TV, radio, web, business card, presentation, script or other), optional carrier, asset link and description.\n2. A reviewer changes the status on the row: Submitted, In review, Approved, Rejected, Changes requested or Retired.\n3. The person who submitted a piece cannot approve or reject it; a different reviewer must.\n4. Approved material is locked; changing its content means resubmitting it.\nTiles show waiting, approved, expiring in 30 days and expired. Approved pieces show their use window when dates are on file; this page has no field for setting dates. Submissions and status changes are logged.\n\nComplaints:\n1. Click Log complaint and fill in: subject, description, severity (Critical, High, Medium, Low), source (CMS CTM, beneficiary, carrier, internal, other), category and optional CMS CTM case number. Do not enter member IDs or PHI.\n2. Change status on the row: Open, Investigating, Resolved, Closed.\n3. Mediflow sets a due date from severity: 2, 5, 10 or 30 days. These are Mediflow's own targets. Late open items show Overdue.\nFilter by status, severity or overdue only.",
+    "keywords": [
+      "marketing",
+      "marketing approval",
+      "complaint",
+      "complaints",
+      "ctm",
+      "flyer",
+      "approval",
+      "review",
+      "overdue",
+      "severity",
+      "cms",
+      "material"
+    ]
+  },
+  {
+    "key": "mf-clients-leads-pipeline",
+    "category": "Mediflow Guide: Sales Tools",
+    "title": "Clients & Leads: contacts, leads, pipeline stages and deals",
+    "content": "Where: Main > Clients & Leads (Super Admin, Agency Admin, Compliance Manager, Agent Support). Agents use Main > My Clients instead.\n\nTabs: Contacts, Leads, Pipeline, Inbox, Sequences, Retention.\n\nContacts: search, filter by status (Lead, Prospect, Enrolled, Retained, Lost) or plan type, add a contact, or select several to assign an agent, add/remove a tag, set status or export CSV. Click a person to open their record (Timeline, Call summaries, Deals, Tasks, Sequences, Applications). Buttons there: SMS, Email, Log, book an appointment, Create Lead, Edit.\n\nLeads: filter by status (New, Contacted, Qualified, Disqualified, Converted). Change a lead's status from its dropdown. A Qualified lead shows Convert, which marks it Converted and sets the contact to Prospect.\n\nPipeline: pick a pipeline, then use New Deal (pipeline, contact, title, stage, estimated value). Each deal card has a menu: Move to stage, Mark as won, Mark as lost (optional reason). Tiles show open value, weighted forecast (value x stage chance), won deals and conversion rate. No pipeline yet? Create a pipeline; Mediflow starts it with New Lead, Contacted, Qualified, Application, Enrolled.\n\nMy Clients (agents): search the clients assigned to you or whose policy you wrote; open one for details, policies and applications.",
+    "keywords": [
+      "clients",
+      "leads",
+      "contacts",
+      "crm",
+      "pipeline",
+      "deal",
+      "stage",
+      "convert lead",
+      "my clients",
+      "won",
+      "lost",
+      "forecast",
+      "add contact"
+    ]
+  },
+  {
+    "key": "mf-lead-routing-live-queue",
+    "category": "Mediflow Guide: Sales Tools",
+    "title": "Inbound lead routing, Live Call Queue and Queue Wallboard",
+    "content": "Where: Sales Tools > Live Call Queue and Sales Tools > Queue Wallboard (Super Admin and Agency Admin only).\n\nHow routing works: when an inbound call or lead arrives from a connected system, Mediflow picks one agent. The agent must be active, licensed in the lead's state, have a current AHIP record, and be certified with that carrier. Among those, the agent with the fewest open leads is picked, and only agents currently marked Available are considered (if no agent has ever checked in, this presence filter is skipped). If nobody qualifies, the call is recorded as missed and a callback is owed. Every decision is logged. Note: the connection to the outside call system (GoHighLevel/Atlas) needs setup on both sides; the code exists but verify it is live before relying on it.\n\nAgents: use the Available/Away toggle at the bottom of the sidebar. Mediflow is set up to drop an agent from the pool if no check-in arrives for about 90 seconds.\n\nLive Call Queue (refreshes every 15 seconds): agents available now, calls routed, missed, coverage gaps (carrier and state combinations with nobody free), routing analytics (24h or 7d), Callbacks owed (with a countdown and a cancel button), agent presence, and the last 50 routing decisions.\n\nQueue Wallboard: a read-only full-screen display for a wall TV with the same live numbers.",
+    "keywords": [
+      "live call queue",
+      "wallboard",
+      "routing",
+      "inbound",
+      "lead routing",
+      "available",
+      "away",
+      "presence",
+      "callback",
+      "coverage gap",
+      "missed calls",
+      "ready to sell"
+    ]
+  },
+  {
+    "key": "mf-softphone-supervisor",
+    "category": "Mediflow Guide: Sales Tools",
+    "title": "Softphone and Supervisor dashboard",
+    "content": "Softphone. Where: Main > Softphone (Super Admin, Agency Admin, Compliance Manager, Agent Support, Agent). Agents only see their own assigned contacts.\n1. Type a number on the dial pad, pick a recent call, or search by name. This only finds a contact; you can only call someone on file.\n2. Read the OK to call? card: consent on file, not on do-not-call/opt-out list, within calling hours, and agent licensed and certified. Mediflow is set up to treat 8am to 9pm in the contact's time zone as calling hours.\n3. Press Call to call from your browser. If calling is not configured it shows Needs setup, and in a demo no real call is placed.\n4. After hanging up, choose an outcome and add notes. Choosing do-not-call adds the number to the opt-out list.\nYou can also log a call made on your own phone. Live transcription, recording, hold/mute/transfer and listen-in are shown as Coming next.\n\nSupervisor. Where: Main > Supervisor (Super Admin, Agency Admin).\nLive Floor tab: agents online, available, on a call, routed and missed in 24 hours, open callbacks, coverage gaps; click an agent for details. Refreshes every 15 seconds.\nCall Review tab: recent post-call summaries with suggested outcome, risk flags and action items; suggestions are advisory.\nListen-in, whisper, barge and recordings are marked coming soon.",
+    "keywords": [
+      "softphone",
+      "dialer",
+      "call",
+      "dial pad",
+      "supervisor",
+      "ok to call",
+      "do not call",
+      "dnc",
+      "calling hours",
+      "call review",
+      "disposition",
+      "log a call",
+      "agent floor"
+    ]
+  },
+  {
+    "key": "mf-quoting-engine",
+    "category": "Mediflow Guide: Sales Tools",
+    "title": "Quoting Engine: what works today and what is not connected",
+    "content": "Where: Sales Tools > Quoting Engine (Super Admin, Agency Admin, Compliance Manager, Agent Support).\n\nImportant: Mediflow does not have plan, premium, formulary or star-rating data loaded. The Plan Comparison tab shows no plans, and the Compare plans button is disabled. It never shows sample prices. Do not use it to quote real premiums or drug costs.\n\nWhat does work:\n- Inputs: ZIP code, plan type (Medicare Advantage, Part D, Medigap) and a list of drugs (type a name, press Enter). These stay on the screen only and are not saved to a client record.\n- Provider Network tab: doctor lookup from the public CMS NPPES NPI Registry. Enter at least two letters of the last name; first name, state and ZIP are optional. Results show specialty, NPI and address, with Add to quote. It does not say whether a doctor is in a plan's network; that needs carrier network data that is not connected.\n- Your carriers card: lists active carriers, with Manage (Admin > Carriers).\n- Formulary Lookup tab: lists the drugs you added, marked as needing plan data.\n\nThe page says it is waiting on CMS plan landscape files, formulary files, provider networks and your carrier list. A disclaimer on the page reminds users that only plans the agency offers are shown.",
+    "keywords": [
+      "quoting",
+      "quote",
+      "plan comparison",
+      "formulary",
+      "drug",
+      "doctor lookup",
+      "npi",
+      "provider network",
+      "premium",
+      "medicare advantage",
+      "medigap",
+      "part d",
+      "compare plans"
+    ]
+  },
+  {
+    "key": "mf-aep-center",
+    "category": "Mediflow Guide: Sales Tools",
+    "title": "AEP Center: annual review readiness",
+    "content": "Where: Sales Tools > AEP Center (Super Admin, Agency Admin, Compliance Manager). The page is read-only reporting; it has no buttons to change anything.\n\nWhat it counts: current members, meaning contacts with status Enrolled or Retained whose current plan type is MA or MAPD. For each one, Mediflow creates a task to set the annual review appointment. Mediflow is set up to create these automatically once a year on Sept 1 (the agent must have a linked user), and an admin can also run it on demand through the system. Running it again does not create duplicates.\n\nWhat you see:\n- Tiles: Members to review, Reviews in progress, Reviews completed, Overdue.\n- Review coverage: members who have a review task, and how many do not.\n- Review completion: tasks marked done.\n- Season key dates: Mediflow is set up to show Sept 30 (set reviews by), Oct 1 (new plan details), Oct 15 to Dec 7 (AEP window) and Jan 1 renewal. These dates are built into the page, not looked up.\n- Review progress by agent: total, done, open and overdue for each agent.\n\nTo work a review, open the task on Main > Tasks. Mark it done when finished and the numbers here update. Members with no review task, or no assigned agent, show up as a coverage gap.",
+    "keywords": [
+      "aep",
+      "annual enrollment",
+      "aep center",
+      "renewal",
+      "annual review",
+      "review task",
+      "members to review",
+      "overdue",
+      "coverage",
+      "ma",
+      "mapd",
+      "enrollment period"
+    ]
+  },
+  {
+    "key": "mf-ready-to-sell",
+    "category": "Mediflow Guide: Sales Tools",
+    "title": "Ready to Sell: agent readiness board",
+    "content": "Where: Sales Tools > Ready to Sell (Super Admin, Agency Admin, Compliance Manager).\n\nPurpose: shows which agents can take routed calls and sell, and what is blocking the rest. It uses the same rules as inbound lead routing.\n\nAn agent is Ready when ALL are true: status is active; AHIP is current (passed or waived for the certification year); at least one active, unexpired state license; at least one passed or waived, unexpired carrier certification for that year.\n\nThe board:\n- Tiles: Ready to sell, Not ready yet, Expiring within 7 days, Expiring within 30 days.\n- Agent readiness table: name and NPN, a Ready or Not ready badge, AHIP (Current or Missing), count of licensed states, count of certified carriers, and Blockers.\n- Blocker labels: Inactive; AHIP not current; No active state license; State license expired; No carrier certifications.\n- Switch Not ready only to hide ready agents.\n- Expiring soon: licenses and certifications about to run out, within 30, 60 or 90 days. Renew them before the agent stops receiving routed calls.\n\nTo fix a blocker, update the agent's record (Management > Agents) or their Licensing and Certifications. This page does not edit anything.",
+    "keywords": [
+      "ready to sell",
+      "readiness",
+      "agent readiness",
+      "ahip",
+      "license",
+      "certification",
+      "blocker",
+      "expiring",
+      "routable",
+      "not ready",
+      "carrier certification"
+    ]
+  },
+  {
+    "key": "mf-policies",
+    "category": "Mediflow Guide: Sales Tools",
+    "title": "Policies: the agency's book of business",
+    "content": "Where: Main > Policies (Super Admin, Agency Admin, Compliance Manager, Agent Support). Agents see a client's policies through Main > My Clients.\n\nWhat it is: a list of every plan your clients are enrolled in, from the enrollments records. Columns: Policy #, Client (click to open the client), Carrier, Plan type, Status, Effectuated, Effective date and Agent.\n\nTop tiles: Active policies, Waiting on the carrier (pending), Effectuated, and Starting in 60 days. Tiles follow your filters, so the totals match the list.\n\nFilters: search by client or policy number, Status (Active, Pending, Terminated, Cancelled, Declined), Plan type, Carrier, Agent, Effectuated or not, and an effective date range. Clear filters resets them.\n\nExport CSV downloads the book (Super Admin, Agency Admin, Compliance Manager, Agent Support). Import and Export has a Policies tab for spreadsheet import.\n\nLimits: premium and per-policy commission are not tracked here (see Commissions). I found no Add Policy button on this page or on the client page; the empty-state text suggests recording a plan on a client's page or importing. The Applications tab on a client shows enrollment applications received from EnrollHere/Sunfire.",
+    "keywords": [
+      "policies",
+      "policy",
+      "enrollment",
+      "book of business",
+      "effectuated",
+      "carrier",
+      "plan type",
+      "effective date",
+      "export policies",
+      "pending",
+      "terminated"
+    ]
+  },
+  {
+    "key": "mf-tasks-calendar",
+    "category": "Mediflow Guide: Sales Tools",
+    "title": "Tasks and Calendar & Appointments",
+    "content": "TASKS. Where: Main > Tasks (all roles). A red badge on the sidebar item shows overdue tasks.\n- Tiles show To do, In progress and Done counts. Search or filter by status.\n- Click the circle next to a task to complete or reopen it. Overdue tasks show a red due date.\n- New Task (Super Admin, Agency Admin, Compliance Manager, Agent Support): title, details, due date, priority (low, medium, high, urgent).\n- Templates tab (same roles, not agents): save reusable tasks, optionally with an automatic trigger such as Agent Created or License Expiring (30d). From Template creates a task from one.\n- Agents see only their own tasks and can only change status; they cannot create tasks.\n- AEP review tasks made by Mediflow appear here too.\n\nCALENDAR. Where: Main > Calendar (all roles). Shows appointments only, not tasks. Switch Month, Week or Agenda, use Today and the arrows, and filter by agent. Tiles count Total, Confirmed, Pending, Completed.\n- Book appointment (Super Admin, Agency Admin, Compliance Manager, Agent Support, Agent): title, client, type (Enrollment, Review, Renewal, Consultation, Other), status, date, start, length, agent, where (Office, Phone, Video call, Home visit), notes. The form says clients with a phone or email get a reminder the day before unless opted out.\n- Only Super Admin, Agency Admin and Agents can delete one.\n- Google and Outlook sync is marked Coming soon.",
+    "keywords": [
+      "tasks",
+      "to do",
+      "task",
+      "overdue",
+      "template",
+      "calendar",
+      "appointment",
+      "book appointment",
+      "schedule",
+      "reminder",
+      "agenda",
+      "priority",
+      "due date"
+    ]
+  },
+  {
+    "key": "mf-documents",
+    "category": "Mediflow Guide: Client Service & Back Office",
+    "title": "Documents: storing and downloading agent files",
+    "content": "Where: sidebar > Clients & Service > Documents. The menu item shows for every role, but the page only loads for roles allowed to view agent records (Agency Admin, Compliance Manager, Agent Support, Viewer). The Agent role is not allowed in.\n\nWhat it is: one place for each agent's files, such as contracts, E&O certificates, licenses, compliance and training documents. Categories: Contract, E&O Certificate, Compliance, License, Training, Other.\n\nTo upload (Agency Admin or Compliance Manager only):\n1. Click Upload document.\n2. Pick the agent, pick a category, choose the file.\n3. Click upload. The file is sent to private storage and listed on the page.\n\nTo find a file: filter by agent or by category, then use the Download icon on its row.\nTo remove one: click the trash icon and confirm. The page warns that this cannot be undone. Only Agency Admin and Compliance Manager can delete.\n\nAccess: you only see your own agency's files. A download is checked against your agency before it starts, and files are not public. Agent Support and Viewer can see and download but cannot upload or delete. Documents filed against a client also show on that client's Client Portal preview.",
+    "keywords": [
+      "documents",
+      "upload",
+      "download",
+      "contract",
+      "e&o",
+      "certificate",
+      "license",
+      "files",
+      "storage",
+      "agent documents",
+      "delete document"
+    ]
+  },
+  {
+    "key": "mf-workflow-automation",
+    "category": "Mediflow Guide: Client Service & Back Office",
+    "title": "Workflow Automation: rules that run on their own",
+    "content": "Where: sidebar > Sales Tools > Workflow Automation (Agency Admin and Super Admin). Only they can create, edit, run or delete rules.\n\nA rule reads as a sentence: when this happens, do these steps.\n\nTo build one: click New rule, name it, pick \"When this happens\" (some need a number of days), optionally add \"Only if\" conditions, then add actions in order.\n\nTriggers: new lead; lead status changes; new client; client status changes; client assigned; client gone quiet (N days); deal moves stage; task overdue (N days); task completed; license expiring (within N days); certification expiring; AHIP deadline; enrollment period opens; commission received; commission missed; chargeback received; weekly check.\n\nConditions (is, is not, contains, more than, less than, is filled in) on: status, lead source, assigned agent, state, carrier, days until expiry, days since last contact, days overdue, old/new status.\n\nActions: create task, in-app alert, send email, send text, update client status, start a follow-up sequence, move deal stage, book appointment. Message text can use placeholders like {{first_name}}.\n\nOn each rule: a switch pauses it; Run now, Edit, Delete. Recent runs refresh every 30 seconds. Client texts and emails are checked against opt-outs, consent and texting hours, and skipped if the client cannot be messaged. Saving rules needs two-step verification on your account.",
+    "keywords": [
+      "workflow",
+      "automation",
+      "rules",
+      "trigger",
+      "condition",
+      "action",
+      "auto task",
+      "automatic text",
+      "automatic email",
+      "sequence",
+      "if then",
+      "run now"
+    ]
+  },
+  {
+    "key": "mf-reports",
+    "category": "Mediflow Guide: Client Service & Back Office",
+    "title": "Reports: dashboards and CSV downloads",
+    "content": "Where: sidebar > Management > Reports (Agency Admin, Compliance Manager, Agent Support). Page title: Reporting & Analytics.\n\nTabs: Report library, Executive, Agent Performance, Pipeline, Lead Sources, Compliance Matrix, Communications, Retention.\n\nReport library: seven reports, each downloaded as a CSV spreadsheet with the Run button. Dated reports (Executive summary, Agent production, Pipeline & win rate, Lead sources, Communications) use the date range you pick at the top; the options include last 30, 60, 90 days, 6 months and a year. Compliance status and Retention & churn show the situation right now.\n\nThe other tabs show the same data on screen (counts, charts, trends) with an Export CSV button.\n\nWho can do what:\n- Executive tab and its export: Agency Admin only.\n- Compliance Matrix (licenses by state, expirations, carrier certifications): Agency Admin and Compliance Manager.\n- Other tabs can be viewed by all four roles above. Their CSV exports are for Agency Admin and Compliance Manager.\n\nExports require that you signed in within the last 15 minutes. If you see a message asking you to refresh your session, reload the page, sign in again and retry. Exports are logged. Reports are agency-wide numbers; nothing is scheduled or emailed automatically.",
+    "keywords": [
+      "reports",
+      "analytics",
+      "export",
+      "csv",
+      "executive",
+      "agent performance",
+      "pipeline",
+      "lead sources",
+      "compliance matrix",
+      "communications",
+      "retention report",
+      "download"
+    ]
+  },
+  {
+    "key": "mf-client-portal",
+    "category": "Mediflow Guide: Client Service & Back Office",
+    "title": "Client Portal: staff preview of the client view",
+    "content": "Where: sidebar > Clients & Service > Client Portal (Agency Admin and Super Admin).\n\nImportant: this is a preview for staff. Clients cannot log in yet; the page says client logins are coming soon. Nothing here is a live client-facing site.\n\nWhat it does: shows what one client would see in a future self-service portal, built from real data on their record.\n\nSteps:\n1. Open Client Portal.\n2. Search for a client by name, phone or email.\n3. Review the preview.\n\nSections: My Plan (enrollments with carrier, plan type and year; if none, the plan recorded on the client), Messages (the latest 50 texts and emails with the client, oldest first), Documents (files filed against the client, with a download icon), Upcoming Appointments, and Contact Agent (the assigned agent). The \"Schedule New Appointment\" and contact buttons are shown as coming soon and are disabled.\n\nReplying: below Messages you can send a text or email. This is turned off if your role cannot send messages, or if the client opted out of that channel or has no phone or email.\n\nPrivacy: every time you open a client's preview, Mediflow records it in the audit log first; if that record cannot be saved, nothing is shown. Sensitive fields such as the Medicare ID and date of birth are masked for roles that are not cleared to see them, and health conditions are not part of the preview.",
+    "keywords": [
+      "client portal",
+      "portal",
+      "preview",
+      "client view",
+      "self-service",
+      "member portal",
+      "client login",
+      "messages",
+      "my plan",
+      "beneficiary"
+    ]
+  },
+  {
+    "key": "mf-campaigns-sequences",
+    "category": "Mediflow Guide: Client Service & Back Office",
+    "title": "Omnichannel Campaigns and drip sequences",
+    "content": "Where: sidebar > Sales Tools > Omnichannel Campaigns (Agency Admin, Compliance Manager, Agent Support, Super Admin). Tabs: Campaigns, Templates, Tracking, Unsubscribes (SMS Opt-Outs on the text channel), Drip Sequences. Switch between Email and SMS at the top.\n\nWho can do what: everyone above can view. Agency Admin and Agent Support can build drafts. Only Agency Admin can send, schedule, cancel or delete, change sender settings, or re-subscribe an email address.\n\nBuild a campaign: name it, optionally start from a template, write the subject and message (merge fields: {{first_name}}, {{last_name}}, {{agency_name}}, {{agent_name}}, {{plan_type}}, {{carrier}}, {{plan_year}}). Choose the audience by status, plan type, carrier, state, lead source, tag or birthday month; a live count shows who will receive it. Save as draft, then send now or schedule within 90 days.\n\nBuilt-in protections: clients marked do not contact, without an address, or opted out are left out automatically. Email needs a mailing address in settings and unsubscribe links set up; SMS needs Twilio connected. If something is missing, sending is blocked with a message.\n\nDrip Sequences: ordered steps (text, email, task, wait) with delays in minutes, hours or days. Enroll clients by hand or with a workflow rule action. Trigger labels like birthday do not enroll anyone automatically.",
+    "keywords": [
+      "campaign",
+      "email",
+      "sms",
+      "text",
+      "drip",
+      "sequence",
+      "template",
+      "audience",
+      "unsubscribe",
+      "opt-out",
+      "stop",
+      "schedule",
+      "blast",
+      "marketing"
+    ]
+  },
+  {
+    "key": "mf-retention-churn",
+    "category": "Mediflow Guide: Client Service & Back Office",
+    "title": "Retention & Churn Risk: who might leave",
+    "content": "Where: sidebar > Clients & Service > Retention & Churn Risk (Agency Admin, Compliance Manager, Super Admin).\n\nWhat it shows: every current member (clients with status Enrolled or Retained, up to 2,000) with a risk score from 0 to 100, ranked so you can call the riskiest first. Click a member to open their record.\n\nHow the score is built (a simple points total, capped at 100):\n- No contact on record or 90+ days: 35 points; 60 to 89 days: 18.\n- Open or investigating complaint: 25.\n- Open at-risk flag from the retention team: 25.\n- First plan renewal (plan year is last year): 15.\nBands: High 50 and up, Medium 25 to 49, Low below 25. Each member lists the reasons. Health and race answers are never used.\n\nPage layout: four cards (High, Medium, Low, average score; click one to filter) and a reference card of Medicare election periods (AEP Oct 15 to Dec 7, OEP Jan 1 to Mar 31, SEP with a qualifying event).\n\nRelated lists: Clients & Leads > Retention tab shows birthdays in the next 30 days, clients with no contact in 60+ days, and an AEP review list (enrolled, retained and prospect clients). Reports > Retention shows enrolled, at-risk and lost members. You can also start a workflow rule on \"Client gone quiet\".",
+    "keywords": [
+      "retention",
+      "churn",
+      "risk",
+      "at risk",
+      "lapse",
+      "disenroll",
+      "renewal",
+      "aep",
+      "oep",
+      "birthday",
+      "no contact",
+      "score",
+      "keep clients"
+    ]
+  },
+  {
+    "key": "mf-knowledge-base",
+    "category": "Mediflow Guide: Client Service & Back Office",
+    "title": "Knowledge Base: agency notes the assistant can use",
+    "content": "Where: sidebar > Clients & Service > Knowledge Base. All staff roles can read articles. Only Agency Admin and Super Admin can add, edit, switch on/off or delete.\n\nTo add an article (owners):\n1. Click Add article.\n2. Fill in Category, Title, the Article text, and Keywords separated by commas (for example: aep, switching).\n3. Leave \"Switched on\" selected, then click Add article.\nArticles are on right away. Use the switch on a row to turn one off or on; switched-off articles are hidden from everyone but owners and ignored by the assistant. You can also search by title, text or keyword, and filter by category.\n\nHow the AI assistant uses them: when someone asks the assistant a question, Mediflow looks only at your own agency's switched-on articles, matching words in the question against keywords, titles and text (keywords count most). It gives the best three to the assistant as reference notes, at most 1,500 characters from each. The assistant is told to treat them as facts, not instructions, and to say so if a note conflicts with Medicare/CMS rules or platform data.\n\nTips: put the words people will actually type in the keywords, and keep each article short and focused. Never put client names, Medicare IDs or other client information in an article. Article text can be up to 20,000 characters, but only the first 1,500 are used by the assistant.",
+    "keywords": [
+      "knowledge base",
+      "kb",
+      "articles",
+      "assistant",
+      "ai",
+      "notes",
+      "keywords",
+      "switch on",
+      "add article",
+      "reference",
+      "how-to",
+      "faq"
+    ]
+  },
+  {
+    "key": "mf-team-invitations",
+    "category": "Mediflow Guide: Client Service & Back Office",
+    "title": "Team: inviting people and managing seats",
+    "content": "Where: sidebar > Admin > Team (Agency Admin and Super Admin). Page title: Team.\n\nSeats: each person who can sign in uses one seat. An invitation that has not been accepted also uses a seat.\n\nTo invite someone:\n1. Click Invite member.\n2. Enter their email and choose a role: Agent, Agent Support, Compliance Manager, Viewer or Agency Admin. Super Admin cannot be given by invitation.\n3. Send. The invitation link works for 7 days.\nIf no seats are free, the Invite button is disabled. If email is not set up, Mediflow shows the link once so you can copy and send it yourself (\"Link copied\").\n\nFor a pending invitation (listed as \"Invited, not yet accepted\" with its expiry):\n- Resend creates a new link and the old one stops working.\n- Revoke cancels it and frees the seat.\n\nFor existing members:\n- Deactivate stops their access and frees the seat.\n- Reactivate brings them back, if a seat is free.\n\nYou cannot invite an email that is already a member or already has a pending invitation; Mediflow will tell you.\n\nRelated: Management > Agents lists agents with their licenses and compliance. Add Agent creates the agent record and starts their onboarding checklist. An agent record is separate from a login; to let the agent sign in, invite them here with the Agent role.",
+    "keywords": [
+      "team",
+      "invite",
+      "invitation",
+      "seat",
+      "user",
+      "role",
+      "deactivate",
+      "reactivate",
+      "add user",
+      "member",
+      "revoke",
+      "resend"
+    ]
+  },
+  {
+    "key": "mf-agent-contracting",
+    "category": "Mediflow Guide: Client Service & Back Office",
+    "title": "Agent contracting and onboarding with carriers",
+    "content": "Admin side: sidebar > Management > Contracting (Agency Admin, Compliance Manager, Super Admin).\nAgent side: sidebar > Main > My Onboarding (Agent role).\n\nSteps:\n1. Admin clicks Start new onboarding and picks an agent (not offboarded). If a run is open already, it opens that one.\n2. The agent works through the wizard: Welcome, Your profile, Carriers, Review, Authorize, Sign, Done. Answers save as they go. SSN and EIN are encrypted, and masked for roles not cleared to see them.\n3. The agent picks the carriers they want. The run then waits for admin review.\n4. An admin opens the run and clicks \"Review and request contracting\" to generate the paperwork. Admins can also Cancel onboarding.\n5. Authorize step: the agent chooses either to let the agency handle carrier submissions (they sign one power of attorney) or to finish each carrier themselves (invite requests are queued to the carriers; going back later needs an admin to cancel and restart).\n6. For each carrier request, an admin clicks Mark submitted, then records the writing number once the carrier appoints the agent; saving it marks the appointment complete.\n\nFilter runs by status: Draft, Profile in progress, Awaiting admin review, Signing paperwork, Submitted, Complete, Cancelled. Mediflow creates tasks for the agent and admins along the way.",
+    "keywords": [
+      "contracting",
+      "onboarding",
+      "carrier",
+      "appointment",
+      "writing number",
+      "poa",
+      "power of attorney",
+      "sign",
+      "agent",
+      "new agent",
+      "profile",
+      "paperwork"
+    ]
+  },
+  {
+    "key": "mf-import-export",
+    "category": "Mediflow Guide: Client Service & Back Office",
+    "title": "Import, export and data migration",
+    "content": "Where: sidebar > Admin > Import / Export (Agency Admin and Super Admin). Imports run in the wizard at Import & Migration (reached from the Import buttons); both are admin only.\n\nEXPORT: three CSV downloads of your whole book: clients, policies and agents (up to 25,000 rows each). Click Export on the card. Medicare IDs are never included, and dates of birth and health conditions are left out. The agent export has no SSN, EIN or contracting data. You must have signed in within the last 15 minutes; if asked, sign in again and retry. Every export is recorded in the audit log.\n\nIMPORT sources:\n- Agents from Monday.com (board export CSV).\n- Contacts from GoHighLevel (CSV). On duplicates choose Skip, Merge fields or Create new record.\n- Clients from any CSV, including Medicare ID, carrier, plan and effective date; rows with plan details also create an enrollment. Medicare IDs are encrypted when saved. If the person already exists choose Fill in blanks + add coverage, Skip the row, or Create a separate contact.\n\nWizard steps: Upload (CSV, up to 50 MB), Map Fields (match your columns), Validate (every row is checked before anything saves), Import (progress bar). Rows with problems are listed.\n\nAfter an import, Import history lists each job; download the errors CSV for rows that failed, fix them and import again. The Import / Export page also shows recent imports.",
+    "keywords": [
+      "import",
+      "export",
+      "migration",
+      "csv",
+      "monday",
+      "gohighlevel",
+      "ghl",
+      "spreadsheet",
+      "upload clients",
+      "backup",
+      "duplicates",
+      "map fields",
+      "data tools"
+    ]
+  },
+  {
+    "key": "mf-commissions-overview",
+    "category": "Mediflow Guide: Commissions & Carriers",
+    "title": "Commissions page (agency view) and My Commissions (agent view)",
+    "content": "WHERE: Sidebar group Commissions. \"Commissions\" is visible to Super Admin, Agency Admin, Compliance Manager and Agent Support. \"My Commissions\" is visible to the Agent role only.\n\nCOMMISSIONS (agency): Four cards for one month: Earned, Paid out, Waiting to be paid, Missed payments. The month is the latest with agent payouts. Four tabs:\n- Statements: carrier statements and their status (Pending, Parsed, Reconciled, Reconciled with variance). Click a row to open it.\n- Schedules: rate cards per carrier, plan type and year (initial %, renewal %, flat $).\n- Hierarchies: upline splits (writing agent, upline agent, split %, effective dates). When a statement is reconciled, the upline gets that % of each line and the writing agent keeps the rest.\n- Missed payments: expected commissions that never showed up. Click Resolve and add a note.\nUploading statements is Super Admin / Agency Admin only and requires MFA (see the upload article).\n\nMARK AN AGENT PAID: Management > Agents > open the agent > Commissions tab > Mark paid (admins only, MFA required).\n\nMY COMMISSIONS (agent): shows only your own pay periods, newest first, with Period, Amount, Status and Paid date. \"Paid to you\" adds up periods marked paid; \"On its way\" adds up everything else (open, approved or held). If you see \"commission account isn't set up\", ask your agency admin to link your profile.",
+    "keywords": [
+      "commissions",
+      "my commissions",
+      "commission statement",
+      "payout",
+      "paid",
+      "earned",
+      "pending",
+      "rate card",
+      "schedule",
+      "upline",
+      "hierarchy",
+      "split",
+      "override",
+      "mark paid"
+    ]
+  },
+  {
+    "key": "mf-commission-statement-upload",
+    "category": "Mediflow Guide: Commissions & Carriers",
+    "title": "Uploading carrier commission statements: supported carriers, formats and bad rows",
+    "content": "WHERE: Commissions > Upload statement button, or Reconciliation > Upload statement. Only Super Admin and Agency Admin can upload, and MFA must be on.\n\nSTEPS: 1) Choose the carrier, statement date, period start/end, total (required) and the file. 2) Submit. The statement is created as Pending, then Mediflow tries to read (parse) it. 3) A Parsed statement shows a Reconcile button.\n\nSUPPORTED CARRIERS: Mediflow has readers for Humana (pipe-delimited, no header row), UnitedHealthcare/AARP (CSV, no header), Aetna/CVS (CSV with a header row; needs Member ID and Commission Amount columns) and Anthem/BCBS (CSV, no header). The reader is chosen by the carrier's NAME (containing Humana, UHC, AARP, Aetna, CVS, Anthem, BCBS or Blue Cross). Other carriers (Cigna, Wellcare, etc.) have no reader: the parse is refused with \"No parser registered\". The picker lists PDF/XLSX/XLS, but readers handle only CSV/text.\n\nBAD ROWS: For Humana, UHC and Anthem, rows with fewer than 12 columns or entirely blank are silently skipped, and not reported. Unreadable amounts become $0.00. Amounts in parentheses, like (500.00), are read as negative. Types CHGBK, CB, charge, recoup, reverse become chargebacks.\n\nKNOWN ISSUE: Mediflow does not keep the uploaded file. The on-screen Parse step does not re-send it, so a statement can stay Pending with no lines and show \"parse failed\". Tell your admin.",
+    "keywords": [
+      "upload",
+      "statement",
+      "commission statement",
+      "csv",
+      "parse",
+      "parser",
+      "humana",
+      "unitedhealthcare",
+      "aetna",
+      "anthem",
+      "carrier file",
+      "bad rows",
+      "pending",
+      "no parser registered"
+    ]
+  },
+  {
+    "key": "mf-commission-reconciliation",
+    "category": "Mediflow Guide: Commissions & Carriers",
+    "title": "Reconciliation: how statement lines are matched and what variance means",
+    "content": "WHERE: Sidebar group Commissions > Reconciliation. Visible to Super Admin, Agency Admin, Compliance Manager and Agent Support.\n\nHOW MATCHING WORKS: On a Parsed statement, click Reconcile (on the list row or the statement page). For each line Mediflow: 1) looks for a client whose Medicare ID matches the line's Member ID; 2) if none, tries last name + date of birth (+ state when given); 3) finds the writing agent from the client's assigned agent, or else the client's earliest deal owner. A line with both a client and an agent is Matched; otherwise it is \"Needs a match\". Matched lines are credited to the agent's pay period, with upline splits applied.\n\nFIX UNMATCHED LINES: Open the statement (or use the Unmatched lines tab), click Match on a line, pick a contact and writing agent, Save. It is then \"Matched by hand\". The payout is only recalculated when Reconcile runs again, which the screen only offers while a statement is Parsed.\n\nSTATUSES: Pending = uploaded, not read. Parsed = read, ready to reconcile. Reconciled = matched and paid out. Reconciled with variance = reconciled, but the carrier's stated total differs from the sum of its lines by $0.01 or more; the page shows the difference. Disputed is never set today.\n\nDisputes & aging, 1099 rollup and GL export tabs say Coming soon and do nothing yet.",
+    "keywords": [
+      "reconciliation",
+      "reconcile",
+      "variance",
+      "unmatched",
+      "match",
+      "matched by hand",
+      "statement total",
+      "missed payments",
+      "needs a match",
+      "reconciled with variance",
+      "difference",
+      "carrier statement",
+      "does not add up"
+    ]
+  },
+  {
+    "key": "mf-missed-payments",
+    "category": "Mediflow Guide: Commissions & Carriers",
+    "title": "Missed payments: how Mediflow flags commissions that never arrived",
+    "content": "WHERE: Commissions > Missed payments tab, and Reconciliation > Missed payments tab. Same roles as Commissions (Super Admin, Agency Admin, Compliance Manager, Agent Support). Resolving is Super Admin / Agency Admin only, with MFA.\n\nHOW IT WORKS: A nightly check (02:30 UTC) looks at every active, effectuated enrollment (not lost or do-not-contact clients). If no commission line item for that policy turned up for last calendar month within the last 60 days, Mediflow adds an alert. It checks per policy, so a client with an MA plan and a separate PDP can have two alerts.\n\nEXPECTED AMOUNT: Mediflow looks up the active rate card for that carrier, plan type and plan year. The Expected $ is filled in only when the rate card has a flat dollar amount. If the card uses only percentages, the amount is left blank. Mediflow does not compute it from premium.\n\nWHAT YOU SEE: Contact, policy number, expected amount, expected period and days overdue (amber at 30 days, red at 60).\n\nSTEPS TO CLOSE ONE: Click Resolve, optionally type a note (for example, that the carrier confirmed payment next cycle), and confirm. A resolved alert leaves the list and cannot be re-resolved. Resolving does not change any payout.\n\nTIP: Add rate cards on the Schedules tab. Without one, alerts still appear but with no amount.",
+    "keywords": [
+      "missed payment",
+      "missed commission",
+      "expected commission",
+      "overdue",
+      "alert",
+      "resolve",
+      "rate card",
+      "schedule",
+      "never arrived",
+      "not paid",
+      "carrier did not pay",
+      "days overdue"
+    ]
+  },
+  {
+    "key": "mf-clawbacks",
+    "category": "Mediflow Guide: Commissions & Carriers",
+    "title": "Clawbacks (chargebacks): what the Clawbacks page shows",
+    "content": "WHERE: Sidebar group Commissions > Clawbacks. Visible to Super Admin, Agency Admin, Compliance Manager and Agent Support. It is a read-only report; there is nothing to edit or dispute on it.\n\nWHAT IT IS: A clawback is commission a carrier takes back, usually when a member leaves a plan early. Mediflow does not detect clawbacks itself. They appear only when an uploaded carrier statement has a line classed as a chargeback (type CHGBK, CB, or text containing charge, recoup or reverse).\n\nWHAT YOU CAN DO: Pick a window at the top: Last 90 days, Last 12 months (default) or Last 24 months. You see four cards: Clawed back (total dollars), Chargebacks (count), Clawback rate (clawed back as a share of gross commission), and Gross commission (non-chargeback lines). Below are Exposure by agent (who has the most clawed back, biggest first; \"Unassigned\" when no writing agent is linked) and Recent chargebacks (policy, member, agent, period, amount, newest first, up to 500).\n\nHOW THE PAYOUT IS AFFECTED: When a statement with chargebacks is reconciled and a line is matched to an agent, the negative amount is subtracted from that agent's earned total for the period, including any upline split.\n\nTIPS: Unmatched chargeback lines show as Unassigned and do not reduce any agent until matched and reconciled. The window is based on the line's period start date.",
+    "keywords": [
+      "clawback",
+      "clawbacks",
+      "chargeback",
+      "chargebacks",
+      "disenrollment",
+      "early disenroll",
+      "commission taken back",
+      "recoup",
+      "clawback rate",
+      "exposure",
+      "negative commission"
+    ]
+  },
+  {
+    "key": "mf-carrier-connectors",
+    "category": "Mediflow Guide: Commissions & Carriers",
+    "title": "Carrier connectors: what Mediflow really connects to (and what it does not)",
+    "content": "SHORT ANSWER: Mediflow has no live connection to any carrier's systems. There is no carrier API, portal login, SOAP feed or automatic commission download. Commission data enters only when an admin uploads a statement file.\n\nWHAT EXISTS: A \"connector\" in Mediflow is only for agent contracting (appointment) paperwork, not commissions. The one working connector is Email (appointment desk). When an agent's signed contracting packet is ready, Mediflow emails it, with the signed PDF attached, to the carrier's appointment-desk address you set on the Carriers page, optionally CCing your list and using your subject line. It sends for real through the email service. If a carrier has no desk email, or email sending is not configured, it does NOT pretend to have sent; the request stays open and retries once fixed.\n\nNO STATUS FEEDBACK: Email is fire-and-forget. Mediflow cannot ask the carrier for status, so carrier replies (acknowledged, appointed, rejected) are tracked by a person updating the request, not automatically.\n\nNOT BUILT YET: Native connectors for individual carriers (code comments mention a future Aetna connector) are planned only. Nothing is registered today, and the screens do not show a connector status. A server-side rehearsal mode (dry run) exists for testing and sends nothing.\n\nSEE ALSO: Carriers admin page article; Uploading carrier commission statements article.",
+    "keywords": [
+      "carrier connector",
+      "carrier integration",
+      "carrier api",
+      "integration",
+      "appointment desk",
+      "email connector",
+      "contracting",
+      "appointment",
+      "portal",
+      "soap",
+      "aetna api",
+      "connect to carrier",
+      "automatic commission feed"
+    ]
+  },
+  {
+    "key": "mf-carriers-admin",
+    "category": "Mediflow Guide: Commissions & Carriers",
+    "title": "Carriers admin page: add and edit carriers and appointment-desk emails",
+    "content": "WHERE: Sidebar group Admin > Carriers. Visible to Super Admin and Agency Admin only; other roles see \"You don't have access\".\n\nWHAT IT IS: The list of carriers your agency sells. New agencies start with these 11 carriers: Humana, UnitedHealth/AARP, Aetna/CVS, Cigna, Anthem/BCBS, Wellcare, Molina, Centene, Devoted, Oscar and Clover. Carriers are also used in statement uploads, rate cards, enrollments and the contracting workflow.\n\nTHE PAGE: Four counters (Carriers, Active, Missing a contracting email, Inactive), a search box (name or CMS contract number), and a table: Name, CMS contract #, Active, Appointment desk, Active requests.\n\nSTEPS TO ADD: 1) Click Add carrier. 2) Enter the name (required). Optional: CMS contract number (like H1234), logo URL, Active switch. 3) Under appointment desk, enter the desk email, an optional comma-separated CC list and an optional subject template. 4) Save.\nTO EDIT: click a row, change fields, Save. To retire a carrier, turn Active off.\n\nIMPORTANT: Mediflow picks its statement reader from the carrier NAME. Keep Humana, UnitedHealth/UHC/AARP, Aetna/CVS or Anthem/BCBS in the name or statement uploads for that carrier will not be readable. Contracting packets for a carrier with no desk email are not sent. There is no delete button on this page, and no connector settings.",
+    "keywords": [
+      "carriers",
+      "carrier list",
+      "add carrier",
+      "edit carrier",
+      "appointment desk email",
+      "cms contract number",
+      "carrier admin",
+      "contract number",
+      "inactive carrier",
+      "contracting email",
+      "logo"
+    ]
+  }
+]
