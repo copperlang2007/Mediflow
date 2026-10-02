@@ -200,6 +200,7 @@ export const jobsMockFactory = (): Record<string, unknown> => ({
     SUBMIT_CONTRACTING_PACKET: "submit-contracting-packet",
     DIALER_RECONCILE: "dialer-reconcile",
     LEAD_CALLBACK_SWEEP: "lead-callback-sweep",
+    STATEMENT_INGEST_POLL: "statement-ingest-poll",
     AEP_RENEWAL_REVIEW: "aep-renewal-review",
     GHL_SYNC: "ghl-sync",
     APPOINTMENT_REMINDERS: "appointment-reminders",
