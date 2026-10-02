@@ -7,8 +7,12 @@
  * skills and product features are NOT imported — they would mislead
  * Mediflow's assistant. The remaining 61 live in `data/agencybridge-kb.json`.
  *
- * Safe to re-run: article ids are derived from the org and entry key, and
- * existing rows are never overwritten (so edits made in the app survive).
+ * Meant as a ONE-TIME starter import. Article ids are derived from the org
+ * and entry key and existing rows are never overwritten, so edits made in the
+ * app survive. But a hard-deleted article looks "never imported", so a re-run
+ * would bring it back. To stop that happening by accident, the script refuses
+ * to run on an agency that already has imported articles unless you pass
+ * `--allow-rerun` (which restores anything deleted).
  *
  * EVERY article is imported INACTIVE. The source is a snapshot written in
  * 2025: it holds dated figures (commission caps, LIS limits) and rules that
@@ -18,11 +22,11 @@
  * switch it on in the app.
  *
  * Run:
- *   pnpm --filter @workspace/scripts run import:agencybridge-kb -- <orgId> [--dry-run]
+ *   pnpm --filter @workspace/scripts run import:agencybridge-kb -- <orgId> [--dry-run] [--allow-rerun]
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { eq } from "drizzle-orm";
+import { and, eq, like } from "drizzle-orm";
 import { db, kbArticlesTable, organizationsTable } from "@workspace/db";
 
 interface Entry {
@@ -68,6 +72,19 @@ async function main(): Promise<void> {
     .limit(1);
   if (!org) {
     console.error(`No organization with id "${orgId}".`);
+    process.exit(1);
+  }
+
+  const already = await db
+    .select({ id: kbArticlesTable.id })
+    .from(kbArticlesTable)
+    .where(and(eq(kbArticlesTable.orgId, orgId), like(kbArticlesTable.id, "kb-ab-%")))
+    .limit(1);
+  if (already.length > 0 && !args.includes("--allow-rerun")) {
+    console.error(
+      "This agency already has imported articles. Re-running would restore any you deleted.\n" +
+        "Pass --allow-rerun if that is what you want.",
+    );
     process.exit(1);
   }
 
