@@ -26,6 +26,7 @@
  * verifies under the embedded signer cert's public key. We do NOT walk
  * the chain to a CA — that's a separate, out-of-scope LTV concern.
  */
+import { createPublicKey, verify as cryptoVerify } from "node:crypto";
 import forge from "node-forge";
 import signpdfDefault from "@signpdf/signpdf";
 import { Signer, SignPdfError, extractSignature } from "@signpdf/utils";
@@ -390,12 +391,21 @@ export function verifyPdfSignature(pdfBuffer: Buffer): VerifyResult {
     return { valid: false, reason: "No certificates in CMS" };
   }
   const signerCert = certs[0];
-  const verifyMd = forge.md.sha256.create();
-  verifyMd.update(reTaggedDer);
-  const publicKey = signerCert.publicKey as forge.pki.rsa.PublicKey;
+  // Verified with Node's native RSASSA-PKCS1-v1_5, NOT node-forge's
+  // `publicKey.verify`: GHSA-86w9-cpqp-85rv (node-forge <=1.4.0, no patched
+  // release) makes forge's verifier accept extra nested DigestAlgorithm
+  // elements. forge is still used here to parse the CMS and to sign.
   let ok = false;
   try {
-    ok = publicKey.verify(verifyMd.digest().bytes(), encryptedDigest);
+    const keyObject = createPublicKey(
+      forge.pki.publicKeyToPem(signerCert.publicKey as forge.pki.rsa.PublicKey),
+    );
+    ok = cryptoVerify(
+      "sha256",
+      Buffer.from(reTaggedDer, "binary"),
+      keyObject,
+      Buffer.from(encryptedDigest, "binary"),
+    );
   } catch {
     // Drop the underlying error; the verify path runs over a CMS we may
     // not fully trust, so we treat exceptions as a fail without leaking
