@@ -1,3 +1,9 @@
+> **DO NOT USE. Render has no BAA with us, so a production (PHI) deploy there is
+> not permitted.** The Render deploy workflow was removed and
+> `scripts/deploy/render-deploy.mjs` refuses to run. Production is GCP Cloud Run:
+> see [DEPLOY_GCP_PRODUCTION.md](./DEPLOY_GCP_PRODUCTION.md). This document is
+> kept only as a historical reference.
+
 # agencyBRIDGE — Production deploy to Render
 
 This deploys agencyBRIDGE to Render in **production** mode (real Clerk auth + PHI

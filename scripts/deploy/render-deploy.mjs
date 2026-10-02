@@ -42,6 +42,17 @@
  *   plus every agencyBRIDGE secret/config var (see REQUIRED_SECRETS / OPTIONAL_SECRETS).
  */
 
+// DO NOT DEPLOY TO RENDER. Render has no BAA with us and this script ships a
+// PHI-handling production service. Production is GCP Cloud Run
+// (docs/DEPLOY_GCP_PRODUCTION.md). The script refuses to run; delete this guard
+// only after a BAA is signed with Render.
+console.error(
+  "FATAL: Render deploys are disabled -- no BAA with Render. " +
+    "Deploy to GCP instead (docs/DEPLOY_GCP_PRODUCTION.md).",
+);
+process.exit(1);
+
+
 import { randomBytes } from "node:crypto";
 
 const API = "https://api.render.com/v1";

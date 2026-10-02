@@ -1,3 +1,9 @@
+# ============================================================================
+# DO NOT DEPLOY TO RENDER. Render has no BAA with us, and this blueprint runs
+# a PHI-handling production service. The deploy workflow was removed and
+# scripts/deploy/render-deploy.mjs now refuses to run. Production is GCP Cloud
+# Run (docs/DEPLOY_GCP_PRODUCTION.md). Kept for reference only.
+# ============================================================================
 # Render Blueprint — agencyBRIDGE PRODUCTION deployment.
 #
 # This is the production counterpart to render.yaml (which is the auth-bypassed

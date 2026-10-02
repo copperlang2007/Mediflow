@@ -8,9 +8,9 @@ service-account key stored in GitHub.
 
 > For the throwaway, auth-bypassed local demo instead, use
 > `docker compose up` (`docker-compose.yml`) — no GCP account required. This
-> doc is the real production path. `render.prod.yaml` / `railway.json` are
-> the pre-existing Render/Railway paths; this GCP path runs alongside them —
-> nothing here touches or disables those.
+> doc is the real production path. `render.prod.yaml` is a disabled
+> reference (Render has no BAA, so it must not be deployed); `railway.json` is
+> the pre-existing Railway path.
 
 ## Why Cloud Run + Cloud SQL
 
