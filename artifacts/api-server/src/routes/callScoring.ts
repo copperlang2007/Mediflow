@@ -1008,9 +1008,10 @@ router.post(
       return;
     }
     const { ObjectStorageService } = await import("../lib/objectStorage");
+    const storage = new ObjectStorageService();
     let meta: { size: number; contentType: string | null } | null;
     try {
-      meta = await new ObjectStorageService().getCallRecordingMetadata(row.objectKey);
+      meta = await storage.getCallRecordingMetadata(row.objectKey);
     } catch (err) {
       logger.error({ err: (err as Error).message }, "Call recording: could not check the upload");
       res.status(503).json({ error: "Recording storage is not available right now. Try again in a few minutes.", code: "storage_unavailable" });
@@ -1021,6 +1022,12 @@ router.post(
       return;
     }
     if (meta.size > MAX_RECORDING_BYTES) {
+      // The signed URL cannot bind the length, so an oversized file is deleted here, not kept.
+      try {
+        await storage.deleteCallRecording(row.objectKey);
+      } catch (err) {
+        logger.error({ err: (err as Error).message, recordingId: row.id }, "Call recording: could not delete an oversized upload");
+      }
       await db.update(callRecordingsTable)
         .set({ status: "failed", error: "The recording is larger than the limit.", sizeBytes: meta.size, updatedAt: new Date() })
         .where(eq(callRecordingsTable.id, row.id));

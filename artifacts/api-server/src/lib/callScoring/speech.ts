@@ -132,6 +132,17 @@ export async function startTranscription(uri: string, layout: CallRecordingLayou
   return data.name;
 }
 
+interface BatchTranscript {
+  results?: SpeechResult[];
+  metadata?: { totalBilledDuration?: string };
+}
+interface BatchFileResult {
+  error?: { message?: string };
+  inlineResult?: { transcript?: BatchTranscript };
+  transcript?: BatchTranscript;
+  metadata?: { totalBilledDuration?: string };
+}
+
 export type TranscriptionPoll =
   | { state: "running" }
   | { state: "done"; results: SpeechResult[]; durationSeconds: number | null }
@@ -157,7 +168,7 @@ export async function pollTranscription(operationName: string, cfg = speechConfi
   const op = (await call({ url: `${endpoint(cfg.location)}/v2/${operationName}`, method: "GET" })) as {
     done?: boolean;
     error?: { message?: string };
-    response?: { results?: Record<string, { error?: { message?: string }; inlineResult?: { transcript?: { results?: SpeechResult[]; metadata?: { totalBilledDuration?: string } } }; metadata?: { totalBilledDuration?: string } }> };
+    response?: { results?: Record<string, BatchFileResult> };
   };
   if (!op?.done) return { state: "running" };
   if (op.error) return { state: "failed", reason: safeReason(op.error.message) };
@@ -165,9 +176,22 @@ export async function pollTranscription(operationName: string, cfg = speechConfi
   const file = files[0];
   if (!file) return { state: "failed", reason: "Speech-to-Text returned no result for the recording." };
   if (file.error?.message) return { state: "failed", reason: safeReason(file.error.message) };
-  const results = file.inlineResult?.transcript?.results ?? [];
-  const billed = file.metadata?.totalBilledDuration ?? file.inlineResult?.transcript?.metadata?.totalBilledDuration;
+  // Current API: inlineResult.transcript; older responses put it at `transcript`.
+  const transcript = file.inlineResult?.transcript ?? file.transcript;
+  const results = transcript?.results ?? [];
+  const billed = file.metadata?.totalBilledDuration ?? transcript?.metadata?.totalBilledDuration;
   return { state: "done", results, durationSeconds: billed ? Math.round(seconds(billed) ?? 0) || null : null };
+}
+
+/** Ask Google to stop an operation. Best effort: false when it could not be cancelled. */
+export async function cancelTranscription(operationName: string, cfg = speechConfig()): Promise<boolean> {
+  if (!/^projects\/[^/]+\/locations\/[^/]+\/operations\/[^/]+$/.test(operationName)) return false;
+  try {
+    await call({ url: `${endpoint(cfg.location)}/v2/${operationName}:cancel`, method: "POST", data: {} });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Google's messages can name buckets and objects; keep only the kind of failure. */

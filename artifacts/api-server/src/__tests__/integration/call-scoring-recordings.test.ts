@@ -32,6 +32,9 @@ const { dbF, clerkF, jobsF, storageF } = vi.hoisted(() => ({
         g.__REC_SIGNED__.push({ key, contentType });
         return `https://storage.example/${key}?signed=1`;
       }
+      async deleteCallRecording(key: string): Promise<void> {
+        g.__REC_OBJECTS__.delete(key);
+      }
       async getCallRecordingMetadata(key: string): Promise<{ size: number; contentType: string } | null> {
         return g.__REC_OBJECTS__.get(key) ?? null;
       }
@@ -278,6 +281,8 @@ describe("confirming an upload", () => {
     objects().set(`call-recordings/${org.id}/${id}`, { size: 501 * 1024 * 1024, contentType: "audio/mpeg" });
     await request(app).post(`/api/call-scoring/recordings/${id}/uploaded`).set(withAuth(admin.id)).send({}).expect(413);
     expect((await rowOf(id)).status).toBe("failed");
+    // The oversized object is deleted, not kept.
+    expect(objects().has(`call-recordings/${org.id}/${id}`)).toBe(false);
     expect(getEnqueuedJobs()).toHaveLength(0);
   });
 
@@ -370,14 +375,15 @@ describe("transcription job", () => {
 
   it("stops a transcription that runs past the time limit", async () => {
     const id = await uploadAndConfirm(admin.id);
-    fakeGoogle({ poll: "running" });
+    const calls = fakeGoogle({ poll: "running" });
     await recordings.processRecording(id);
     await handle.db
       .update(schema.callRecordingsTable)
       .set({ updatedAt: new Date(Date.now() - recordings.TRANSCRIBE_TIMEOUT_MS - 1000) })
       .where(eq(schema.callRecordingsTable.id, id));
     expect(await recordings.processRecording(id)).toBe("finished");
-    expect((await rowOf(id)).error).toMatch(/too long/i);
+    expect((await rowOf(id)).error).toMatch(/too long and was stopped/i);
+    expect(calls.some((c) => c.method === "POST" && c.url.endsWith(`${OP}:cancel`))).toBe(true);
   });
 });
 

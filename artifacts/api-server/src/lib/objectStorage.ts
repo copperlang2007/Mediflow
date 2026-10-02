@@ -320,6 +320,12 @@ export class ObjectStorageService {
     return url;
   }
 
+  /** Remove an uploaded recording (rejected uploads). Missing objects are fine. */
+  async deleteCallRecording(objectKey: string): Promise<void> {
+    const { bucketName, objectName } = parseObjectPath(`${this.getPrivateObjectDir()}/${objectKey}`);
+    await objectStorageClient.bucket(bucketName).file(objectName).delete({ ignoreNotFound: true });
+  }
+
   /** Size and type of an uploaded recording, or null when nothing was uploaded. */
   async getCallRecordingMetadata(objectKey: string): Promise<{ size: number; contentType: string | null } | null> {
     const { bucketName, objectName } = parseObjectPath(`${this.getPrivateObjectDir()}/${objectKey}`);

@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import {
+  cancelTranscription,
   gsUri,
   pollTranscription,
   recognitionConfig,
@@ -101,6 +102,24 @@ describe("startTranscription / pollTranscription", () => {
 
     setSpeechHttpForTests(async () => ({ done: true, response: { results: { "gs://b/k": { error: { message: "Audio decoding failed" } } } } }));
     expect(await pollTranscription(OP)).toMatchObject({ state: "failed", reason: expect.stringMatching(/could not be decoded/) });
+  });
+
+  it("also reads the older response shape (transcript on the file result)", async () => {
+    const results: SpeechResult[] = [{ alternatives: [{ transcript: "hi" }] }];
+    setSpeechHttpForTests(async () => ({ done: true, response: { results: { "gs://b/k": { transcript: { results } } } } }));
+    expect(await pollTranscription(OP)).toMatchObject({ state: "done", results });
+  });
+
+  it("cancels an operation, best effort", async () => {
+    const urls: string[] = [];
+    setSpeechHttpForTests(async (req) => (urls.push(req.url), {}));
+    expect(await cancelTranscription(OP, { projectId: "p1", location: "us", model: "chirp_3" })).toBe(true);
+    expect(urls).toEqual([`https://us-speech.googleapis.com/v2/${OP}:cancel`]);
+    setSpeechHttpForTests(async () => {
+      throw new Error("500");
+    });
+    expect(await cancelTranscription(OP)).toBe(false);
+    expect(await cancelTranscription("not-an-operation")).toBe(false);
   });
 
   it("refuses a malformed operation name without calling Google", async () => {

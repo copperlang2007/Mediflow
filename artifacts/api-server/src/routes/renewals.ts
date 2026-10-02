@@ -228,6 +228,8 @@ router.get(
     const in60 = new Date(now.getTime() + 60 * 86_400_000);
     const in90 = new Date(now.getTime() + 90 * 86_400_000);
     const currentYear = now.getFullYear();
+    // AHIP counts for the plan year being sold, as on the dashboard (from Oct 1 that is next year's).
+    const certYear = sellingPlanYear(now);
     const ahipDeadline = new Date(`${currentYear}-10-01T00:00:00Z`);
     const daysUntilAhipDeadline = Math.ceil(
       (ahipDeadline.getTime() - now.getTime()) / 86_400_000,
@@ -294,8 +296,7 @@ router.get(
         .where(
           and(
             eq(agentsTable.orgId, authReq.orgId),
-            // The plan year being sold, as on the dashboard (from Oct 1 that is next year's).
-            eq(ahipRecordsTable.certificationYear, sellingPlanYear(now)),
+            eq(ahipRecordsTable.certificationYear, certYear),
           ),
         ),
       // Licenses already past their expiry (shared definition), for agents
@@ -425,7 +426,7 @@ router.get(
 
     res.json({
       generatedAt: now.toISOString(),
-      currentCertYear: currentYear,
+      currentCertYear: certYear,
       ahipDeadline: ahipDeadline.toISOString(),
       daysUntilAhipDeadline,
       licenses: licCounts,

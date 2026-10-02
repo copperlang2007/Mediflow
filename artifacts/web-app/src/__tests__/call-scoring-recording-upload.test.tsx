@@ -158,6 +158,51 @@ describe("RecordingUpload", () => {
     expect(state.calls.find((c) => c.url === "/api/call-scoring/recordings/upload-url")?.body).toMatchObject({ layout: "agent_right" });
   });
 
+  it("retries only the confirmation when the file is already in storage", async () => {
+    let confirms = 0;
+    state.routes = {
+      "GET /api/call-scoring/recordings": () => ({ recordings: [] }),
+      "POST /api/call-scoring/recordings/upload-url": () => ({ recordingId: "r9", uploadUrl: "https://s/x", method: "PUT", headers: { "Content-Type": "audio/mpeg" } }),
+      "POST /api/call-scoring/recordings/r9/uploaded": () =>
+        ++confirms === 1 ? Object.assign(new Error("x"), { status: 503, data: { error: "Recording storage is not available right now." } }) : { recordingId: "r9", status: "queued" },
+    };
+    renderIt(true);
+    await userEvent.upload(screen.getByLabelText("Recording"), new File(["abc"], "call.mp3", { type: "audio/mpeg" }));
+    await userEvent.click(screen.getByRole("button", { name: /upload and score/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/not available/);
+    await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+    await waitFor(() => expect(confirms).toBe(2));
+    expect(state.calls.filter((c) => c.url.endsWith("/upload-url"))).toHaveLength(1);
+    expect(puts).toHaveLength(1);
+  });
+
+  it("sends the chosen checklist", async () => {
+    state.routes = {
+      "GET /api/call-scoring/recordings": () => ({ recordings: [] }),
+      "POST /api/call-scoring/recordings/upload-url": () => ({ recordingId: "r8", uploadUrl: "https://s/x", method: "PUT", headers: { "Content-Type": "audio/mpeg" } }),
+      "POST /api/call-scoring/recordings/r8/uploaded": () => ({ recordingId: "r8", status: "queued" }),
+    };
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const cfg = {
+      ...config(true),
+      rubrics: [
+        { id: "medicare-tpmo", name: "Medicare sales call", version: "1", description: "", passThreshold: 80 },
+        { id: "general-sales", name: "General sales call", version: "1", description: "", passThreshold: 75 },
+      ],
+    } as CsConfig;
+    render(
+      <QueryClientProvider client={client}>
+        <RecordingUpload config={cfg} onOpen={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    await userEvent.click(screen.getByLabelText("Checklist"));
+    await userEvent.click(await screen.findByRole("option", { name: "General sales call" }));
+    await userEvent.upload(screen.getByLabelText("Recording"), new File(["abc"], "call.mp3", { type: "audio/mpeg" }));
+    await userEvent.click(screen.getByRole("button", { name: /upload and score/i }));
+    await waitFor(() => expect(state.calls.some((c) => c.url.endsWith("/r8/uploaded"))).toBe(true));
+    expect((state.calls.find((c) => c.url.endsWith("/upload-url"))!.body as { rubricId?: string }).rubricId).toBe("general-sales");
+  });
+
   it("does not confirm when the upload to storage fails", async () => {
     putStatus = 403;
     state.routes = {

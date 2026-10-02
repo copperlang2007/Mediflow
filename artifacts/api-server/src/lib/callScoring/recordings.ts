@@ -26,7 +26,7 @@ import { open } from "./seal";
 import { DEFAULT_RUBRIC_ID, getRubric } from "./rubrics";
 import { ingestTranscript, resolveRubric } from "./ingest";
 import type { Rubric } from "./types";
-import { gsUri, pollTranscription, resultsToTurns, safeReason, speechSetup, startTranscription } from "./speech";
+import { cancelTranscription, gsUri, pollTranscription, resultsToTurns, safeReason, speechSetup, startTranscription } from "./speech";
 
 /** How long a transcription may run before it is given up on. */
 export const TRANSCRIBE_TIMEOUT_MS = 6 * 60 * 60 * 1000;
@@ -107,7 +107,14 @@ export async function processRecording(recordingId: string, deps: { privateObjec
   }
   if (poll.state === "running") {
     if (Date.now() - row.updatedAt.getTime() > TRANSCRIBE_TIMEOUT_MS) {
-      return fail(row.id, "Transcription took too long and was stopped. Try again, or split the recording.");
+      const cancelled = await cancelTranscription(row.operationName);
+      if (!cancelled) logger.warn({ recordingId: row.id }, "Speech-to-Text: could not cancel a timed-out transcription");
+      return fail(
+        row.id,
+        cancelled
+          ? "Transcription took too long and was stopped. Try again, or split the recording."
+          : "Transcription took too long and was abandoned. Try again, or split the recording.",
+      );
     }
     return "poll";
   }

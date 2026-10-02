@@ -101,6 +101,9 @@ export function RecordingUpload({ config, onOpen }: { config: CsConfig | undefin
   const [layout, setLayout] = useState<Layout>("mono");
   const [phone, setPhone] = useState("");
   const [externalRef, setExternalRef] = useState("");
+  const [rubricId, setRubricId] = useState("");
+  // A file already in storage whose confirmation failed: retrying only re-confirms it.
+  const uploaded = useRef<{ file: File; recordingId: string } | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const audio = config?.audio;
@@ -116,8 +119,13 @@ export function RecordingUpload({ config, onOpen }: { config: CsConfig | undefin
     refetchInterval: (q) => (q.state.data?.recordings.some((r) => PENDING.includes(r.status)) ? 15_000 : false),
   });
 
+  const confirm = (recordingId: string) =>
+    customFetch<{ status: RecordingStatus }>(`/api/call-scoring/recordings/${recordingId}/uploaded`, { method: "POST" });
+
   const send = useMutation({
     mutationFn: async (f: File) => {
+      const done = uploaded.current?.file === f ? uploaded.current.recordingId : null;
+      if (done) return confirm(done);
       const start = await customFetch<StartResponse>("/api/call-scoring/recordings/upload-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -128,6 +136,7 @@ export function RecordingUpload({ config, onOpen }: { config: CsConfig | undefin
           ...(selectedLayout ? { layout: selectedLayout.value } : {}),
           ...(phone.trim() ? { phone: phone.trim() } : {}),
           ...(externalRef.trim() ? { externalRef: externalRef.trim() } : {}),
+          ...(rubricId ? { rubricId } : {}),
         }),
       });
       setProgress(0);
@@ -136,9 +145,11 @@ export function RecordingUpload({ config, onOpen }: { config: CsConfig | undefin
       } catch {
         throw Object.assign(new Error("upload"), { data: { error: "The upload did not finish. Check your connection and try again." } });
       }
-      return customFetch<{ status: RecordingStatus }>(`/api/call-scoring/recordings/${start.recordingId}/uploaded`, { method: "POST" });
+      uploaded.current = { file: f, recordingId: start.recordingId };
+      return confirm(start.recordingId);
     },
     onSuccess: () => {
+      uploaded.current = null;
       setFile(null);
       setProblem(null);
       if (fileRef.current) fileRef.current.value = "";
@@ -201,6 +212,23 @@ export function RecordingUpload({ config, onOpen }: { config: CsConfig | undefin
               {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
             </div>
           )}
+          {(config?.rubrics.length ?? 0) > 1 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="cs-rec-rubric">Checklist</Label>
+              <Select value={rubricId || config?.defaultRubricId || ""} onValueChange={setRubricId}>
+                <SelectTrigger id="cs-rec-rubric">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {config!.rubrics.map((rb) => (
+                    <SelectItem key={rb.id} value={rb.id}>
+                      {rb.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="cs-rec-phone">Client phone (optional)</Label>
             <Input id="cs-rec-phone" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="(512) 555-0100" />
@@ -223,7 +251,7 @@ export function RecordingUpload({ config, onOpen }: { config: CsConfig | undefin
         <div className="flex flex-wrap items-center gap-3">
           <Button type="submit" disabled={!file || tooBig || send.isPending}>
             {send.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" /> : <Upload className="mr-1.5 h-4 w-4" aria-hidden="true" />}
-            {progress !== null ? `Uploading ${progress}%` : send.isPending ? "Starting…" : "Upload and score"}
+            {progress !== null ? `Uploading ${progress}%` : send.isPending ? "Starting…" : uploaded.current?.file === file ? "Retry" : "Upload and score"}
           </Button>
           <span className="text-xs text-muted-foreground">Recordings are kept encrypted for the 10-year CMS retention period.</span>
         </div>
