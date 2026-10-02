@@ -211,7 +211,10 @@ for the project before turning this on.
    ```
 
    then run `gcloud storage buckets update gs://YOUR_BUCKET --cors-file=cors.json`.
-4. Set these on the API service and redeploy:
+4. Settings on the API service. The Cloud Run deploy (`scripts/deploy/gcp-deploy.sh`)
+   already sets `SPEECH_TO_TEXT_PROVIDER=google` and `GOOGLE_CLOUD_PROJECT`, and
+   passes `CALL_RECORDINGS_DAILY_LIMIT` through when set; on other hosts set them
+   yourself (a manual edit on Cloud Run is erased by the next deploy):
 
    | Setting | Value |
    | --- | --- |

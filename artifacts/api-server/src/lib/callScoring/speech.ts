@@ -66,6 +66,12 @@ export function gsUri(privateObjectDir: string, objectKey: string): string {
   return `gs://${dir}/${objectKey.replace(/^\/+/, "")}`;
 }
 
+/** An operation lives in the region it was started in, whatever SPEECH_LOCATION says now. */
+function operationLocation(operationName: string, fallback: string): string {
+  const m = /^projects\/[^/]+\/locations\/([a-z0-9-]+)\/operations\//.exec(operationName);
+  return m?.[1] ?? fallback;
+}
+
 function endpoint(location: string): string {
   return location === "global" ? "https://speech.googleapis.com" : `https://${location}-speech.googleapis.com`;
 }
@@ -165,7 +171,7 @@ export async function pollTranscription(operationName: string, cfg = speechConfi
   if (!/^projects\/[^/]+\/locations\/[^/]+\/operations\/[^/]+$/.test(operationName)) {
     return { state: "failed", reason: "The transcription job reference is invalid." };
   }
-  const op = (await call({ url: `${endpoint(cfg.location)}/v2/${operationName}`, method: "GET" })) as {
+  const op = (await call({ url: `${endpoint(operationLocation(operationName, cfg.location))}/v2/${operationName}`, method: "GET" })) as {
     done?: boolean;
     error?: { message?: string };
     response?: { results?: Record<string, BatchFileResult> };
@@ -187,7 +193,7 @@ export async function pollTranscription(operationName: string, cfg = speechConfi
 export async function cancelTranscription(operationName: string, cfg = speechConfig()): Promise<boolean> {
   if (!/^projects\/[^/]+\/locations\/[^/]+\/operations\/[^/]+$/.test(operationName)) return false;
   try {
-    await call({ url: `${endpoint(cfg.location)}/v2/${operationName}:cancel`, method: "POST", data: {} });
+    await call({ url: `${endpoint(operationLocation(operationName, cfg.location))}/v2/${operationName}:cancel`, method: "POST", data: {} });
     return true;
   } catch {
     return false;
@@ -261,11 +267,13 @@ export function resultsToTurns(results: SpeechResult[], layout: CallRecordingLay
       if (text) turns.push({ speaker: "Speaker", text, start: seconds(words[0]?.startOffset) ?? (resultEnd !== undefined ? resultStart : undefined), end: resultEnd });
       continue;
     }
+    // Without word timestamps (the default), fall back to the result's own span.
+    const fallbackStart = resultEnd !== undefined ? resultStart : undefined;
     for (const w of words) {
       const speaker = w.speakerLabel ? `Speaker ${w.speakerLabel}` : "Speaker";
       const last = turns[turns.length - 1];
-      const start = seconds(w.startOffset) ?? undefined;
-      const end = seconds(w.endOffset) ?? undefined;
+      const start = seconds(w.startOffset) ?? fallbackStart;
+      const end = seconds(w.endOffset) ?? resultEnd;
       if (last && last.speaker === speaker) {
         last.text += ` ${w.word!.trim()}`;
         if (end !== undefined) last.end = end;

@@ -104,6 +104,15 @@ describe("startTranscription / pollTranscription", () => {
     expect(await pollTranscription(OP)).toMatchObject({ state: "failed", reason: expect.stringMatching(/could not be decoded/) });
   });
 
+  it("polls and cancels in the region the operation was started in", async () => {
+    const urls: string[] = [];
+    setSpeechHttpForTests(async (req) => (urls.push(req.url), { done: false }));
+    const euOp = "projects/p1/locations/eu/operations/9";
+    await pollTranscription(euOp, { projectId: "p1", location: "us", model: "chirp_3" });
+    await cancelTranscription(euOp, { projectId: "p1", location: "us", model: "chirp_3" });
+    expect(urls).toEqual([`https://eu-speech.googleapis.com/v2/${euOp}`, `https://eu-speech.googleapis.com/v2/${euOp}:cancel`]);
+  });
+
   it("also reads the older response shape (transcript on the file result)", async () => {
     const results: SpeechResult[] = [{ alternatives: [{ transcript: "hi" }] }];
     setSpeechHttpForTests(async () => ({ done: true, response: { results: { "gs://b/k": { transcript: { results } } } } }));
@@ -191,6 +200,17 @@ describe("resultsToTurns", () => {
       { speaker: "Speaker 1", text: "Hello there", start: 0, end: 0.8 },
       { speaker: "Speaker 2", text: "yes hi", start: 1, end: 1.5 },
       { speaker: "Speaker 1", text: "okay", start: 2, end: 2.3 },
+    ]);
+  });
+
+  it("times diarized mono turns from the result span when words have no offsets", () => {
+    const results: SpeechResult[] = [
+      { resultEndOffset: "5s", alternatives: [{ transcript: "Hello there", words: [{ word: "Hello", speakerLabel: "1" }, { word: "there", speakerLabel: "1" }] }] },
+      { resultEndOffset: "9s", alternatives: [{ transcript: "Hi", words: [{ word: "Hi", speakerLabel: "2" }] }] },
+    ];
+    expect(resultsToTurns(results, "mono")).toEqual([
+      { speaker: "Speaker 1", text: "Hello there", start: 0, end: 5 },
+      { speaker: "Speaker 2", text: "Hi", start: 5, end: 9 },
     ]);
   });
 

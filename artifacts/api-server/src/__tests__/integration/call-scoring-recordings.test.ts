@@ -453,6 +453,16 @@ describe("review fixes", () => {
       const second = await post();
       expect(second.status).toBe(429);
       expect(second.body.code).toBe("daily_limit");
+
+      // A burst cannot slip past the cap together.
+      process.env.CALL_RECORDINGS_DAILY_LIMIT = "3";
+      const org3 = await seedOrg(handle.db, { id: `rec-burst-${Date.now()}` });
+      const burstAdmin = await seedUser(handle.db, { orgId: org3.id, role: "agency_admin" });
+      const burst = await Promise.all(
+        Array.from({ length: 6 }, () => request(app).post("/api/call-scoring/recordings/upload-url").set(withAuth(burstAdmin.id)).send(startBody())),
+      );
+      expect(burst.filter((r) => r.status === 201)).toHaveLength(3);
+      expect(burst.filter((r) => r.status === 429)).toHaveLength(3);
     } finally {
       delete process.env.CALL_RECORDINGS_DAILY_LIMIT;
     }

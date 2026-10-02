@@ -936,17 +936,6 @@ router.post(
       res.status(404).json({ error: problem.message, code: problem.code });
       return;
     }
-    const limit = dailyRecordingLimit();
-    const [{ started }] = await db
-      .select({ started: sql<number>`count(*)::int` })
-      .from(callRecordingsTable)
-      .where(and(eq(callRecordingsTable.orgId, authReq.orgId), gt(callRecordingsTable.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000))));
-    if (Number(started) >= limit) {
-      logger.warn({ orgId: authReq.orgId, limit }, "Call recording: daily limit reached");
-      res.status(429).json({ error: `Your agency has started ${limit} recordings in the last 24 hours, the daily limit. Try again later, or ask the administrator to raise it.`, code: "daily_limit" });
-      return;
-    }
-
     const { ObjectStorageService } = await import("../lib/objectStorage");
     const storage = new ObjectStorageService();
     const id = randomUUID();
@@ -960,8 +949,18 @@ router.post(
       res.status(503).json({ error: "Recording storage is not available right now. Try again in a few minutes.", code: "storage_unavailable" });
       return;
     }
+    // Count and insert under a per-agency lock so a burst of requests cannot
+    // all see the same count and pass the daily cap together.
+    const limit = dailyRecordingLimit();
     const now = new Date();
-    await db.insert(callRecordingsTable).values({
+    const inserted = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`call-recordings:${authReq.orgId}`}))`);
+      const [{ started }] = await tx
+        .select({ started: sql<number>`count(*)::int` })
+        .from(callRecordingsTable)
+        .where(and(eq(callRecordingsTable.orgId, authReq.orgId), gt(callRecordingsTable.createdAt, new Date(now.getTime() - 24 * 60 * 60 * 1000))));
+      if (Number(started) >= limit) return false;
+      await tx.insert(callRecordingsTable).values({
       id,
       orgId: authReq.orgId,
       status: "uploading",
@@ -982,6 +981,13 @@ router.post(
       createdAt: now,
       updatedAt: now,
     });
+      return true;
+    });
+    if (!inserted) {
+      logger.warn({ orgId: authReq.orgId, limit }, "Call recording: daily limit reached");
+      res.status(429).json({ error: `Your agency has started ${limit} recordings in the last 24 hours, the daily limit. Try again later, or ask the administrator to raise it.`, code: "daily_limit" });
+      return;
+    }
     res.status(201).json({ recordingId: id, uploadUrl, method: "PUT", headers: { "Content-Type": f.contentType }, expiresInSeconds: 900 });
   },
 );
