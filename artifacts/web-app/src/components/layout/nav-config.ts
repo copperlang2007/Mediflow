@@ -226,6 +226,15 @@ export function isPlatformView(role: Role | null, viewingAgency: boolean): boole
   return role === "super_admin" && !viewingAgency;
 }
 
+/** Pages a super admin may open in the platform view (nav hrefs + the dev console). */
+export function isPlatformPath(path: string): boolean {
+  const clean = path.split(/[?#]/)[0].replace(/\/+$/, "") || "/";
+  if (clean === "/dev" || clean.startsWith("/dev/")) return true;
+  return PLATFORM_NAV_GROUPS.some((g) =>
+    g.items.some((i) => clean === i.href || clean.startsWith(`${i.href}/`)),
+  );
+}
+
 /** Developer console group — only added when DEV_CONSOLE_ENABLED is on. */
 export const DEV_NAV_GROUP: NavGroup = {
   group: "Developer",

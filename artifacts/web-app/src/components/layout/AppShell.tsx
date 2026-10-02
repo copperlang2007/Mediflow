@@ -223,7 +223,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const platformView = isPlatformView(userRole, viewingAgency);
   // Notifications, stats and the AI assistant all describe one agency; the
   // platform view has no agency of its own to show.
-  const { unreadCount } = useSSENotifications(0, !viewingAgency && !platformView);
+  const { unreadCount } = useSSENotifications(0, userRole !== null && !viewingAgency && !platformView);
 
   useEffect(() => {
     if (userRole && userRole !== "super_admin" && localStorage.getItem("mediflow:view-as-org")) {
@@ -253,7 +253,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       // keeps the page's stats live. Silence only applies while no other
       // (non-silent) component is watching — see isSilent in queryClient.
       queryKey: getGetDashboardStatsQueryKey(),
-      enabled: !platformView,
+      enabled: userRole !== null && !platformView,
       refetchInterval: 60_000,
       staleTime: 30_000,
       // Nav badge only; a failed background poll shouldn't toast every minute.

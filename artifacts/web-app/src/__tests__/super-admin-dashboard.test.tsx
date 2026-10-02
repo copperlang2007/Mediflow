@@ -17,7 +17,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import SuperAdminDashboard from "@/pages/super-admin-dashboard";
-import { PLATFORM_NAV_GROUPS, isPlatformView, visibleNavGroups } from "@/components/layout/nav-config";
+import { PLATFORM_NAV_GROUPS, isPlatformPath, isPlatformView, visibleNavGroups } from "@/components/layout/nav-config";
 
 describe("SuperAdminDashboard", () => {
   it("shows platform totals and every agency", async () => {
@@ -52,5 +52,14 @@ describe("SuperAdminDashboard", () => {
     expect(isPlatformView("super_admin", true)).toBe(false);
     expect(isPlatformView("agency_admin", false)).toBe(false);
     expect(isPlatformView(null, false)).toBe(false);
+  });
+
+  it("allows only platform pages in the platform view", () => {
+    for (const ok of ["/dashboard", "/admin/workspaces", "/admin/health", "/settings/security", "/settings/security/mfa", "/dev/db"]) {
+      expect(isPlatformPath(ok)).toBe(true);
+    }
+    for (const no of ["/crm", "/crm/contacts/1", "/commissions", "/settings", "/settings/team", "/admin/queue", "/agents"]) {
+      expect(isPlatformPath(no)).toBe(false);
+    }
   });
 });

@@ -11,7 +11,7 @@ import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGetMe } from "@workspace/api-client-react";
-import { isPlatformView, type Role } from "@/components/layout/nav-config";
+import { isPlatformView, isPlatformPath, type Role } from "@/components/layout/nav-config";
 import AppShell from "@/components/layout/AppShell";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
@@ -295,6 +295,27 @@ function HomeRedirect() {
   return isSignedIn ? <Redirect to="/dashboard" /> : <Landing />;
 }
 
+/**
+ * A super admin outside any agency may only open platform pages. A bookmarked
+ * agency URL (e.g. /crm) would otherwise read and edit their home agency while
+ * the screen says "platform".
+ */
+function PlatformRouteGuard({ children }: { children: React.ReactNode }) {
+  const { data: me } = useGetMe();
+  const [location] = useLocation();
+  let viewingAgency = false;
+  try {
+    viewingAgency = Boolean(localStorage.getItem("mediflow:view-as-org"));
+  } catch {
+    // storage unavailable — same as not viewing an agency
+  }
+  const role = (me?.role ?? null) as Role | null;
+  if (isPlatformView(role, viewingAgency) && !isPlatformPath(location)) {
+    return <Redirect to="/dashboard" />;
+  }
+  return <>{children}</>;
+}
+
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
@@ -303,9 +324,11 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
           <BrandingProvider>
             <AppShell>
               <ErrorBoundary>
-                <Suspense fallback={<PageLoadingFallback />}>
-                  {children}
-                </Suspense>
+                <PlatformRouteGuard>
+                  <Suspense fallback={<PageLoadingFallback />}>
+                    {children}
+                  </Suspense>
+                </PlatformRouteGuard>
               </ErrorBoundary>
             </AppShell>
           </BrandingProvider>
