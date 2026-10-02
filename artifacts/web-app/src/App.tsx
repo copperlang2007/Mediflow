@@ -331,22 +331,36 @@ function PlatformAwareBranding({ children }: { children: React.ReactNode }) {
   return <BrandingProvider disabled={platformView}>{children}</BrandingProvider>;
 }
 
+/**
+ * Nothing in the signed-in area renders (or fetches) until we know who the
+ * user is. Otherwise the shell, branding and per-page lookups start out as if
+ * for an agency user and then flip once the role arrives.
+ */
+function RoleGate({ children }: { children: React.ReactNode }) {
+  const state = usePlatformState();
+  if (state.isLoading) return <PageLoadingFallback />;
+  if (state.failed) return <AccountLoadError onRetry={() => void state.refetch()} />;
+  return <>{children}</>;
+}
+
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <Show when="signed-in">
         <ProvisioningGate>
-          <PlatformAwareBranding>
-            <AppShell>
-              <ErrorBoundary>
-                <PlatformRouteGuard>
-                  <Suspense fallback={<PageLoadingFallback />}>
-                    {children}
-                  </Suspense>
-                </PlatformRouteGuard>
-              </ErrorBoundary>
-            </AppShell>
-          </PlatformAwareBranding>
+          <RoleGate>
+            <PlatformAwareBranding>
+              <AppShell>
+                <ErrorBoundary>
+                  <PlatformRouteGuard>
+                    <Suspense fallback={<PageLoadingFallback />}>
+                      {children}
+                    </Suspense>
+                  </PlatformRouteGuard>
+                </ErrorBoundary>
+              </AppShell>
+            </PlatformAwareBranding>
+          </RoleGate>
         </ProvisioningGate>
       </Show>
       <Show when="signed-out">
