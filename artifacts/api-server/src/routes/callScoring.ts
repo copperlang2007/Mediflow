@@ -1056,12 +1056,15 @@ router.get(
       .limit(q.data.limit)
       .offset(q.data.offset);
     res.json({
-      recordings: rows.map(({ detailsEncrypted, ...r }) => ({
-        ...r,
-        filename: open<RecordingDetails>(detailsEncrypted)?.filename ?? null,
-        createdAt: r.createdAt.toISOString(),
-        updatedAt: r.updatedAt.toISOString(),
-      })),
+      recordings: rows.map(({ detailsEncrypted, ...r }) => {
+        const details = detailsEncrypted ? open<RecordingDetails>(detailsEncrypted) : null;
+        return {
+          ...r,
+          filename: details?.filename ?? null,
+          createdAt: r.createdAt.toISOString(),
+          updatedAt: r.updatedAt.toISOString(),
+        };
+      }),
       audio: audioConfig(),
     });
   },
