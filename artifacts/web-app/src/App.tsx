@@ -280,11 +280,27 @@ function usePlatformState() {
 }
 
 function AccountLoadError({ onRetry }: { onRetry: () => void }) {
+  const { signOut } = useClerk();
   return (
     <div role="alert" className="p-8 text-center text-sm text-muted-foreground">
       Could not load your account.{" "}
       <button type="button" className="underline underline-offset-2" onClick={onRetry}>
         Try again
+      </button>
+      {" · "}
+      <button
+        type="button"
+        className="underline underline-offset-2"
+        onClick={() => {
+          try {
+            localStorage.removeItem("mediflow:view-as-org");
+          } catch {
+            // storage unavailable — nothing to clear
+          }
+          void signOut();
+        }}
+      >
+        Sign out
       </button>
     </div>
   );
