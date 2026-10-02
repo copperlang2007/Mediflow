@@ -2,28 +2,44 @@
  * Move clients (contacts) and everything attached to them from one agency
  * (organization) to another, without creating duplicates.
  *
- *   DATABASE_URL=postgres://... pnpm --filter @workspace/scripts move:clients \
- *     --from "<source org id or name>" --to "<target org id or name>"          # dry run
- *   ... same command plus --apply                                              # real move
+ *   DATABASE_URL=postgres://... PHI_ENCRYPTION_KEY=... PHI_HMAC_KEY=... \
+ *     pnpm --filter @workspace/scripts move:clients \
+ *     --from "<source org id, name or slug>" --to "<target org id, name or slug>" [--operator you@x.com]   # dry run
+ *   ... same command plus --apply                                                                          # real move
  *
  * Safe by construction:
  *  - Dry run is the default. The whole move runs in ONE transaction and is
- *    rolled back unless --apply is passed.
- *  - A source client who already exists in the target (same Medicare ID, or
- *    email/phone + first name, or name + date of birth: the importer's rules)
+ *    rolled back unless --apply is passed. A transaction-level advisory lock
+ *    refuses to start if another run is in progress.
+ *  - Organizations are matched exactly (id, name or slug, case-insensitive).
+ *    No wildcards.
+ *  - A source client who already exists in the target (live OR soft-deleted)
  *    is NOT moved and NOT copied. It stays where it is and is listed in a CSV
- *    (ids only, no PHI) for a human to decide.
+ *    (ids only, no PHI) for a human to decide. Matching follows the importer's
+ *    rules: Medicare ID (canonical and dashed spellings, so it needs the same
+ *    PHI_* keys as the app), email or phone (normalized) + first name,
+ *    or name + date of birth.
  *  - Every table that points at a moved client (found through the database's
  *    foreign keys, plus bare `contact_id` columns) moves with it, recursively
  *    (client -> policies -> applications ...).
  *  - Carriers are matched to the target's carriers by name (created if
  *    missing). Agents are matched by email, else left unassigned.
  *  - Any reference to some other agency-owned row that cannot be carried over
- *    is nulled when the column allows it; otherwise the whole run aborts.
+ *    is nulled when the column allows it; otherwise the whole run aborts
+ *    (nothing is changed) and names the table and column.
+ *
+ * Known limit: clients with deals or campaign history point at pipelines and
+ * campaigns that belong to the source agency through NOT NULL columns. Those
+ * rows cannot be re-pointed, so the run aborts safely and lists them. Detach or
+ * delete those records first, or ask for the walker to be extended.
+ *
+ * On --apply a row is written to audit_log in BOTH agencies (operator, org ids,
+ * per-table counts; no PHI).
  */
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import pg from "pg";
+import { decryptMedicareId, hashMedicareId } from "@workspace/db/encryption/medicareId";
 
 const { Client } = pg;
 
@@ -37,20 +53,31 @@ const q = (id: string) => `"${id.replace(/"/g, '""')}"`;
 type Edge = { child: string; col: string; parent: string; notNull: boolean };
 type Job = { child: string; col: string; parent: string };
 
+const MBI_RE = /^[1-9][AC-HJKMNP-RT-Y][AC-HJKMNP-RT-Y0-9][0-9][AC-HJKMNP-RT-Y][AC-HJKMNP-RT-Y0-9][0-9][AC-HJKMNP-RT-Y]{2}[0-9]{2}$/;
+
+/** The hashes a stored Medicare ID could carry: canonical and 4-3-4 dashed (what the importer checks). */
+function mbiCandidateHashes(plain: string): Buffer[] {
+  const canonical = plain.trim().toUpperCase().replace(/[\s-]/g, "");
+  if (!MBI_RE.test(canonical)) return [hashMedicareId(plain)];
+  const dashed = `${canonical.slice(0, 4)}-${canonical.slice(4, 7)}-${canonical.slice(7)}`;
+  return [hashMedicareId(canonical), hashMedicareId(dashed)];
+}
+
 async function main() {
   const fromArg = arg("from");
   const toArg = arg("to");
   if (!process.env.DATABASE_URL || !fromArg || !toArg) {
-    console.error('Usage: DATABASE_URL=... move-clients-between-orgs --from "<org id|name>" --to "<org id|name>" [--apply]');
+    console.error('Usage: DATABASE_URL=... move-clients-between-orgs --from "<org id|name|slug>" --to "<org id|name|slug>" [--operator <who>] [--apply]');
     process.exit(2);
   }
+  const operator = arg("operator") ?? process.env.USER ?? process.env.USERNAME ?? "unknown";
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
   const one = async <T = Record<string, unknown>>(sql: string, params: unknown[] = []) => (await db.query(sql, params)).rows as T[];
 
   async function resolveOrg(label: string, v: string) {
     const rows = await one<{ id: string; name: string }>(
-      `select id, name from organizations where id = $1 or name ilike $1 or slug ilike $1`, [v]);
+      `select id, name from organizations where id = $1 or lower(name) = lower($1) or lower(slug) = lower($1)`, [v]);
     if (rows.length !== 1) {
       throw new Error(`--${label} "${v}" matched ${rows.length} organizations${rows.length ? `: ${rows.map((r) => `${r.name} (${r.id})`).join(", ")}` : ""}. Use the exact id.`);
     }
@@ -60,10 +87,13 @@ async function main() {
   await db.query("BEGIN");
   await db.query("SET LOCAL statement_timeout = 0");
   try {
+    const [{ ok }] = await one<{ ok: boolean }>(`select pg_try_advisory_xact_lock(hashtextextended('mediflow:move-clients', 0)) as ok`);
+    if (!ok) throw new Error("Another move-clients run is in progress; aborting.");
+
     const from = await resolveOrg("from", fromArg);
     const to = await resolveOrg("to", toArg);
     if (from.id === to.id) throw new Error("--from and --to are the same organization");
-    console.log(`FROM: ${from.name} (${from.id})\nTO:   ${to.name} (${to.id})\nMODE: ${APPLY ? "APPLY (will commit)" : "DRY RUN (will roll back)"}\n`);
+    console.log(`FROM: ${from.name} (${from.id})\nTO:   ${to.name} (${to.id})\nMODE: ${APPLY ? "APPLY (will commit)" : "DRY RUN (will roll back)"}\nOPERATOR: ${operator}\n`);
 
     const snapshot = async () => (await one<{ k: string; n: string }>(
       `select 'src_contacts' k, count(*) n from contacts where org_id=$1 and deleted_at is null
@@ -71,27 +101,58 @@ async function main() {
        union all select 'tgt_contacts', count(*) from contacts where org_id=$2 and deleted_at is null
        union all select 'tgt_enrollments', count(*) from enrollments where org_id=$2
        union all select 'tgt_duplicate_mbi_groups', count(*) from (
-         select medicare_id_hash from contacts where org_id=$2 and deleted_at is null and medicare_id_hash is not null
+         select medicare_id_hash from contacts where org_id=$2 and medicare_id_hash is not null
          group by 1 having count(*) > 1) d`, [from.id, to.id]))
       .reduce<Record<string, number>>((a, r) => ({ ...a, [r.k]: Number(r.n) }), {});
     const before = await snapshot();
 
-    // ── 1. Who is already in the target? ────────────────────────────────────
-    const matches = await one<{ src: string; tgt: string; reason: string }>(
-      `select distinct on (s.id) s.id src, t.id tgt, m.reason
-       from contacts s
-       join contacts t on t.org_id = $2 and t.deleted_at is null
-       cross join lateral (select case
-           when s.medicare_id_hash is not null and s.medicare_id_hash = t.medicare_id_hash then 'Medicare ID'
-           when s.email is not null and lower(s.email) = lower(t.email) and lower(s.first_name) = lower(t.first_name)
-                and (case when s.dob is not null and t.dob is not null then s.dob = t.dob else lower(s.last_name) = lower(t.last_name) end) then 'email + name'
-           when s.phone is not null and s.phone = t.phone and lower(s.first_name) = lower(t.first_name)
-                and (case when s.dob is not null and t.dob is not null then s.dob = t.dob else lower(s.last_name) = lower(t.last_name) end) then 'phone + name'
-           when s.dob is not null and s.dob = t.dob and lower(s.first_name) = lower(t.first_name) and lower(s.last_name) = lower(t.last_name) then 'name + date of birth'
-         end reason) m
-       where s.org_id = $1 and s.deleted_at is null and m.reason is not null
-       order by s.id, case m.reason when 'Medicare ID' then 1 when 'email + name' then 2 when 'phone + name' then 3 else 4 end`,
-      [from.id, to.id]);
+    // ── 1. Who is already in the target (live or soft-deleted)? ─────────────
+    await db.query(`create function pg_temp.pn(p text) returns text language sql immutable as $f$
+      select case when p is null then null else (
+        select case when length(d) = 11 and left(d, 1) = '1' then substr(d, 2) when length(d) = 10 then d else null end
+        from (select regexp_replace(regexp_replace(p, '\\s*(x|ext\\.?|extension)\\s*\\d+\\s*$', '', 'i'), '\\D', '', 'g') d) x) end $f$`);
+
+    // Medicare IDs: decrypt the source's, then check every spelling the app could have hashed.
+    await db.query(`create temp table src_mbi (id text, h bytea) on commit drop`);
+    const enc = await one<{ id: string; e: Buffer; h: Buffer | null }>(
+      `select id, medicare_id_encrypted e, medicare_id_hash h from contacts where org_id = $1 and deleted_at is null and (medicare_id_encrypted is not null or medicare_id_hash is not null)`, [from.id]);
+    const ids: string[] = [];
+    const hashes: string[] = [];
+    for (const r of enc) {
+      const set = new Set<string>();
+      if (r.h) set.add(Buffer.from(r.h).toString("hex"));
+      if (r.e) {
+        let plain: string;
+        try { plain = decryptMedicareId(r.e); } catch {
+          throw new Error("Could not decrypt a source Medicare ID with the PHI_* keys in this environment. Use the same PHI_ENCRYPTION_KEY / PHI_HMAC_KEY as the app, or duplicates cannot be checked.");
+        }
+        for (const h of mbiCandidateHashes(plain)) set.add(h.toString("hex"));
+      }
+      for (const h of set) { ids.push(r.id); hashes.push(h); }
+    }
+    for (let i = 0; i < ids.length; i += 5000) {
+      await db.query(`insert into src_mbi select i, decode(h, 'hex') from unnest($1::text[], $2::text[]) as u(i, h)`, [ids.slice(i, i + 5000), hashes.slice(i, i + 5000)]);
+    }
+
+    const sameName = `lower(s.first_name) = lower(t.first_name)
+      and (case when s.dob is not null and t.dob is not null then s.dob = t.dob else lower(s.last_name) = lower(t.last_name) end)`;
+    const reasons: { reason: string; sql: string }[] = [
+      { reason: "Medicare ID", sql: `select m.id src, t.id tgt from src_mbi m join contacts t on t.org_id = $2 and t.medicare_id_hash = m.h where $1::text is not null` },
+      { reason: "email + name", sql: `select s.id src, t.id tgt from contacts s join contacts t on lower(t.email) = lower(s.email) and t.org_id = $2
+          where s.org_id = $1 and s.deleted_at is null and s.email is not null and ${sameName}` },
+      { reason: "phone + name", sql: `select s.id src, t.id tgt from contacts s join contacts t on pg_temp.pn(t.phone) = pg_temp.pn(s.phone) and t.org_id = $2
+          where s.org_id = $1 and s.deleted_at is null and pg_temp.pn(s.phone) is not null and ${sameName}` },
+      { reason: "name + date of birth", sql: `select s.id src, t.id tgt from contacts s join contacts t
+          on lower(t.first_name) = lower(s.first_name) and lower(t.last_name) = lower(s.last_name) and t.dob = s.dob and t.org_id = $2
+          where s.org_id = $1 and s.deleted_at is null and s.dob is not null` },
+    ];
+    const matchMap = new Map<string, { src: string; tgt: string; reason: string }>();
+    for (const r of reasons) { // priority order: first reason wins
+      for (const m of await one<{ src: string; tgt: string }>(r.sql, [from.id, to.id])) {
+        if (!matchMap.has(m.src)) matchMap.set(m.src, { ...m, reason: r.reason });
+      }
+    }
+    const matches = [...matchMap.values()];
     const csvName = `move-clients-already-in-target-${Date.now()}.csv`;
     writeFileSync(csvName, ["source_contact_id,target_contact_id,matched_on", ...matches.map((m) => `${m.src},${m.tgt},${m.reason}`)].join("\n") + "\n");
 
@@ -106,7 +167,7 @@ async function main() {
       `select table_name t from information_schema.columns where table_schema='public' and column_name='org_id'`)).map((r) => r.t));
     const idTables = new Set((await one<{ t: string }>(
       `select table_name t from information_schema.columns where table_schema='public' and column_name='id'`)).map((r) => r.t));
-    const fks = await one<Edge & { child: string }>(
+    const fks = await one<Edge>(
       `select cl.relname child, a.attname col, pl.relname parent, a.attnotnull "notNull"
        from pg_constraint k join pg_class cl on cl.oid = k.conrelid join pg_class pl on pl.oid = k.confrelid
        join pg_namespace n on n.oid = cl.relnamespace and n.nspname = 'public'
@@ -147,22 +208,44 @@ async function main() {
     const refTo = (parent: string) => [...mv.keys()].flatMap((m) =>
       fks.filter((f) => f.child === m && f.parent === parent && f.col !== "org_id").map((f) => ({ ...f })));
     const carrierRefs = refTo("carriers");
-    const agentRefs = refTo("agents");
     const norm = (c: string) => `regexp_replace(lower(trim(${c})), '\\s+', ' ', 'g')`;
-    let carriersCreated = 0;
+    type SrcCarrier = { id: string; name: string; cms_contract_number: string | null; logo_url: string | null; is_active: boolean };
+    const used = new Map<string, SrcCarrier>();
     for (const r of carrierRefs) {
-      const missing = await one<{ id: string; name: string; cms_contract_number: string | null; logo_url: string | null; is_active: boolean }>(
+      for (const c of await one<SrcCarrier>(
         `select s.id, s.name, s.cms_contract_number, s.logo_url, s.is_active from carriers s
-         where s.org_id = $1 and s.id in (select ${q(r.col)} from ${q(r.child)} where id in (select id from ${mv.get(r.child)}))
-           and not exists (select 1 from carriers t where t.org_id = $2 and ${norm("t.name")} = ${norm("s.name")})`,
-        [from.id, to.id]);
-      for (const c of missing) {
-        const exists = await one(`select 1 from carriers where org_id = $1 and ${norm("name")} = ${norm("$2::text")}`, [to.id, c.name]);
-        if (exists.length) continue;
-        await db.query(
-          `insert into carriers (id, org_id, name, cms_contract_number, logo_url, is_active) values ($1,$2,$3,$4,$5,$6)`,
-          [randomUUID(), to.id, c.name.trim().replace(/\s+/g, " "), c.cms_contract_number, c.logo_url, c.is_active]);
-        carriersCreated++;
+         where s.org_id = $1 and s.id in (select ${q(r.col)} from ${q(r.child)} where id in (select id from ${mv.get(r.child)}))`, [from.id])) used.set(c.id, c);
+    }
+    // Two source carriers that collapse to one name must agree on their metadata, or we'd silently drop one.
+    const byName = new Map<string, SrcCarrier[]>();
+    const jsNorm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+    for (const c of used.values()) byName.set(jsNorm(c.name), [...(byName.get(jsNorm(c.name)) ?? []), c]);
+    for (const [name, group] of byName) {
+      const key = (c: SrcCarrier) => `${c.cms_contract_number ?? ""}|${c.is_active}|${c.logo_url ?? ""}`;
+      if (group.length > 1 && new Set(group.map(key)).size > 1) {
+        throw new Error(`Carriers "${name}" exist more than once in the source with different contract number / active flag / logo (${group.map((c) => c.id).join(", ")}). Merge them in the source first.`);
+      }
+    }
+    let carriersCreated = 0;
+    for (const group of byName.values()) {
+      const c = group[0]!;
+      const exists = await one(`select 1 from carriers where org_id = $1 and ${norm("name")} = $2`, [to.id, jsNorm(c.name)]);
+      if (exists.length) continue;
+      await db.query(
+        `insert into carriers (id, org_id, name, cms_contract_number, logo_url, is_active) values ($1,$2,$3,$4,$5,$6)`,
+        [randomUUID(), to.id, c.name.trim().replace(/\s+/g, " "), c.cms_contract_number, c.logo_url, c.is_active]);
+      carriersCreated++;
+    }
+    // Two of one client's policies must not collapse onto the same target carrier.
+    if (mv.has("enrollments") && fks.some((f) => f.child === "enrollments" && f.col === "carrier_id" && f.parent === "carriers")) {
+      const clash = await one<{ contact_id: string; plan_year: number; plan_type: string; names: string[] }>(
+        `select e.contact_id, e.plan_year, e.plan_type, array_agg(distinct sc.name) names
+         from enrollments e join carriers sc on sc.id = e.carrier_id and sc.org_id = $1
+         left join carriers tc on tc.org_id = $2 and ${norm("tc.name")} = ${norm("sc.name")}
+         where e.id in (select id from ${mv.get("enrollments")})
+         group by e.contact_id, e.plan_year, e.plan_type, coalesce(tc.id, sc.id) having count(*) > 1`, [from.id, to.id]);
+      if (clash.length) {
+        throw new Error(`${clash.length} client(s) have two ${clash[0]!.plan_type} policies for ${clash[0]!.plan_year} with carriers that become one carrier in the target (${clash[0]!.names.join(" / ")}). Consolidate those policies in the source first.`);
       }
     }
 
@@ -183,6 +266,7 @@ async function main() {
 
     // ── 5. Re-point references that must not cross agencies ─────────────────
     const remapped: Record<string, number> = {};
+    const sharedParents = new Set<string>();
     for (const [t, tmp] of mv) {
       for (const f of fks.filter((x) => x.child === t && x.col !== "org_id" && !mv.has(x.parent))) {
         const where = `id in (select id from ${tmp}) and ${q(f.col)} is not null`;
@@ -200,14 +284,24 @@ async function main() {
           const foreign = `not exists (select 1 from ${q(f.parent)} p where p.id = ${q(t)}.${q(f.col)} and p.org_id = $1)`;
           const n = Number((await one<{ n: string }>(`select count(*) n from ${q(t)} where ${where} and ${foreign}`, [to.id]))[0]!.n);
           if (n === 0) continue;
-          if (f.notNull) throw new Error(`${t}.${f.col} (-> ${f.parent}) is required and points at another agency's row on ${n} rows; cannot move safely`);
+          if (f.notNull) throw new Error(`${t}.${f.col} (-> ${f.parent}) is required and points at the source agency's ${f.parent} on ${n} rows, so those clients cannot move safely. Detach or remove those records first.`);
           await db.query(`update ${q(t)} set ${q(f.col)} = null where ${where} and ${foreign}`, [to.id]);
           remapped[`${t}.${f.col} -> ${f.parent} (cleared)`] = n;
+        } else if (f.parent !== "organizations") {
+          sharedParents.add(`${t}.${f.col} -> ${f.parent}`);
         }
       }
     }
 
-    // ── 6. Report ───────────────────────────────────────────────────────────
+    // ── 6. Invariants, report, audit ────────────────────────────────────────
+    // No moved row may still point at a source-agency row.
+    for (const [t, tmp] of mv) {
+      for (const f of fks.filter((x) => x.child === t && x.col !== "org_id" && !mv.has(x.parent) && orgTables.has(x.parent))) {
+        const leak = await one<{ n: string }>(
+          `select count(*) n from ${q(t)} c join ${q(f.parent)} p on p.id = c.${q(f.col)} where c.id in (select id from ${tmp}) and p.org_id = $1`, [from.id]);
+        if (Number(leak[0]!.n) > 0) throw new Error(`${leak[0]!.n} rows in ${t}.${f.col} still point at the source agency's ${f.parent}`);
+      }
+    }
     const after = await snapshot();
     const leftover = Number((await one<{ n: string }>(
       `select count(*) n from contacts where org_id = $1 and id in (select id from mv_contacts)`, [from.id]))[0]!.n);
@@ -222,11 +316,18 @@ async function main() {
     console.log(`Rows moved per table:           ${JSON.stringify(moved)}`);
     console.log(`Carriers created in target:     ${carriersCreated}`);
     console.log(`References re-pointed/cleared:  ${JSON.stringify(remapped)}`);
+    if (sharedParents.size) console.log(`Left pointing at shared (non-agency) tables: ${[...sharedParents].join(", ")}`);
     console.log(`Source contacts/enrollments:    ${before.src_contacts}/${before.src_enrollments}  ->  ${after.src_contacts}/${after.src_enrollments}`);
     console.log(`Target contacts/enrollments:    ${before.tgt_contacts}/${before.tgt_enrollments}  ->  ${after.tgt_contacts}/${after.tgt_enrollments}`);
     console.log(`Duplicate Medicare-ID groups in target: ${before.tgt_duplicate_mbi_groups} -> ${after.tgt_duplicate_mbi_groups}`);
 
     if (APPLY) {
+      const changes = JSON.stringify({ operator, fromOrgId: from.id, toOrgId: to.id, movedRows: moved, leftInPlace: matches.length, carriersCreated, dedupCsv: csvName });
+      for (const orgId of [from.id, to.id]) {
+        await db.query(
+          `insert into audit_log (id, org_id, user_role, action, resource_type, changes) values ($1, $2, 'system', 'cross_org_client_move', 'contact', $3::jsonb)`,
+          [randomUUID(), orgId, changes]);
+      }
       await db.query("COMMIT");
       console.log("\nCOMMITTED.");
     } else {
