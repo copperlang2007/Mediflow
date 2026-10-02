@@ -45,6 +45,7 @@ import { enqueue, JOB_NAMES } from "../lib/jobs";
 import {
   parseStatement,
   UnknownCarrierError,
+  type NormalizedLineItem,
 } from "../lib/commissionParsers";
 import { reconcileStatement } from "../workers/reconcileCommissionStatement";
 import { insertLineItems } from "../lib/commissions/insertLineItems";
@@ -347,23 +348,23 @@ const StatementMetaSchema = z.object({
   parse: z.enum(["true", "false"]).optional(),
 });
 
+/** The uploaded file could not be turned into statement lines (a problem with the file, not the server). */
+class StatementReadError extends Error {}
+
 /**
- * Read a statement file into line items and mark the statement parsed.
- * Throws UnknownCarrierError when there is no reader for the carrier.
+ * Turn a statement file into normalized lines. Only problems with the file
+ * (no reader for the carrier, unreadable content) are thrown as
+ * StatementReadError, so callers can tell them apart from database failures.
  */
-async function parseStatementFile(
-  statementId: string,
-  orgId: string,
-  carrierName: string,
-  buffer: Buffer,
-): Promise<number> {
-  const normalized = parseStatement(carrierName, buffer);
-  const inserted = normalized.length > 0 ? await insertLineItems(db, statementId, orgId, normalized) : 0;
-  await db
-    .update(commissionStatementsTable)
-    .set({ status: "parsed" })
-    .where(eq(commissionStatementsTable.id, statementId));
-  return inserted;
+function readStatementFile(carrierName: string, buffer: Buffer): NormalizedLineItem[] {
+  try {
+    return parseStatement(carrierName, buffer);
+  } catch (err) {
+    if (err instanceof UnknownCarrierError) throw new StatementReadError(err.message);
+    throw new StatementReadError(
+      "Could not read that file. Check it is a text or CSV statement from this carrier.",
+    );
+  }
 }
 
 router.post(
@@ -403,39 +404,51 @@ router.post(
     // actual blob upload to object storage is out of scope for this PR.
     const storageKey = `commission-statements/${authReq.orgId}/${id}/${req.file.originalname}`;
 
-    const [row] = await db
-      .insert(commissionStatementsTable)
-      .values({
-        id,
-        orgId: authReq.orgId,
-        carrierId: data.carrierId,
-        statementDate: data.statementDate,
-        periodStart: data.periodStart,
-        periodEnd: data.periodEnd,
-        totalAmount: data.totalAmount != null ? String(data.totalAmount) : null,
-        currency: "USD",
-        source: "csv_upload",
-        storageKey,
-        status: "pending",
-        uploadedByUserId: authReq.userId,
-      })
-      .returning();
-
     // The file is not stored (no blob storage yet), so it can only be read
     // while this request still holds it. With `parse=true` we read it now;
     // otherwise the caller re-sends it to POST .../parse.
+    let normalized: NormalizedLineItem[] | null = null;
+    let readError: string | null = null;
     if (data.parse === "true") {
       try {
-        const inserted = await parseStatementFile(id, authReq.orgId, carrier.name, req.file.buffer);
-        res.status(201).json({ ...row, status: "parsed", parse: { inserted } });
+        normalized = readStatementFile(carrier.name, req.file.buffer);
       } catch (err) {
-        // The statement stays pending; tell the caller why it could not be read.
-        const message =
-          err instanceof UnknownCarrierError
-            ? err.message
-            : "Could not read that file. Check it is a CSV statement from this carrier.";
-        res.status(201).json({ ...row, parse: { error: message } });
+        if (!(err instanceof StatementReadError)) throw err;
+        readError = err.message;
       }
+    }
+
+    // Statement + lines + status go in together: a database failure leaves
+    // nothing half-written and surfaces as a normal server error (not as a
+    // "couldn't read your file" message).
+    const row = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(commissionStatementsTable)
+        .values({
+          id,
+          orgId: authReq.orgId,
+          carrierId: data.carrierId,
+          statementDate: data.statementDate,
+          periodStart: data.periodStart,
+          periodEnd: data.periodEnd,
+          totalAmount: data.totalAmount != null ? String(data.totalAmount) : null,
+          currency: "USD",
+          source: "csv_upload",
+          storageKey,
+          status: normalized ? "parsed" : "pending",
+          uploadedByUserId: authReq.userId,
+        })
+        .returning();
+      if (normalized && normalized.length > 0) {
+        await insertLineItems(tx, id, authReq.orgId, normalized);
+      }
+      return created!;
+    });
+
+    if (data.parse === "true") {
+      res
+        .status(201)
+        .json({ ...row, parse: normalized ? { inserted: normalized.length } : { error: readError } });
       return;
     }
 
@@ -491,16 +504,66 @@ router.post(
       return;
     }
 
+    let normalized: NormalizedLineItem[];
     try {
-      const inserted = await parseStatementFile(id, authReq.orgId, carrier.name, req.file.buffer);
-      res.json({ inserted, statementId: id });
+      normalized = readStatementFile(carrier.name, req.file.buffer);
     } catch (err) {
-      if (err instanceof UnknownCarrierError) {
+      if (err instanceof StatementReadError) {
         res.status(400).json({ error: err.message });
         return;
       }
       throw err;
     }
+
+    // One parse at a time per statement, and only while it still has no lines:
+    // a second (or concurrent) request must not append the same lines again.
+    const result = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`commission-statement-parse:${id}`}))`);
+      const [current] = await tx
+        .select({ status: commissionStatementsTable.status })
+        .from(commissionStatementsTable)
+        .where(
+          and(
+            eq(commissionStatementsTable.id, id),
+            eq(commissionStatementsTable.orgId, authReq.orgId),
+          ),
+        )
+        .limit(1);
+      if (!current) return { kind: "missing" as const };
+      const [{ n } = { n: 0 }] = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(commissionLineItemsTable)
+        .where(
+          and(
+            eq(commissionLineItemsTable.statementId, id),
+            eq(commissionLineItemsTable.orgId, authReq.orgId),
+          ),
+        );
+      const readable = current.status === "pending" || (current.status === "parsed" && n === 0);
+      if (!readable) return { kind: "already_read" as const };
+      const inserted =
+        normalized.length > 0 ? await insertLineItems(tx, id, authReq.orgId, normalized) : 0;
+      await tx
+        .update(commissionStatementsTable)
+        .set({ status: "parsed" })
+        .where(
+          and(
+            eq(commissionStatementsTable.id, id),
+            eq(commissionStatementsTable.orgId, authReq.orgId),
+          ),
+        );
+      return { kind: "ok" as const, inserted };
+    });
+
+    if (result.kind === "missing") {
+      res.status(404).json({ error: "Statement not found" });
+      return;
+    }
+    if (result.kind === "already_read") {
+      res.status(409).json({ error: "This statement has already been read. Upload it again as a new statement if it needs re-reading." });
+      return;
+    }
+    res.json({ inserted: result.inserted, statementId: id });
   },
 );
 

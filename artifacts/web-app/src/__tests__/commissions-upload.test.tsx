@@ -13,15 +13,21 @@ const h = vi.hoisted(() => ({
   calls: [] as Array<{ url: string; init?: { method?: string; body?: unknown } }>,
   response: { id: "s1", status: "parsed", parse: { inserted: 3 } } as Record<string, unknown>,
   toasts: [] as string[],
+  list: [] as unknown[],
 }));
 
 vi.mock("@workspace/api-client-react", () => ({
   customFetch: vi.fn(async (url: string, init?: { method?: string; body?: unknown }) => {
     h.calls.push({ url: String(url), init });
+    const path = String(url).split("?")[0]!;
+    if (!init?.method && path === "/api/commissions/statements") return h.list;
+    if (!init?.method) return [];
     return h.response;
   }),
   useGetCarriers: () => ({ data: [{ id: "c1", name: "Humana" }] }),
 }));
+
+vi.mock("@/lib/branding/BrandingProvider", () => ({ useProductName: () => "Mediflow" }));
 
 vi.mock("sonner", () => ({
   toast: {
@@ -46,6 +52,7 @@ vi.mock("@/components/ui/select", () => ({
 }));
 
 afterEach(() => {
+  h.list = [];
   h.calls.length = 0;
   h.toasts.length = 0;
   h.response = { id: "s1", status: "parsed", parse: { inserted: 3 } };
@@ -80,7 +87,7 @@ describe("Upload commission statement", () => {
         <UploadStatementDialog open onOpenChange={() => {}} />
       </QueryClientProvider>,
     );
-    const input = (await screen.findByText(/CSV files only/i)).parentElement!.querySelector('input[type="file"]')!;
+    const input = (await screen.findByText(/Text files only/i)).parentElement!.querySelector('input[type="file"]')!;
     expect(input.getAttribute("accept")).toContain(".csv");
     expect(input.getAttribute("accept")).not.toContain(".pdf");
     expect(input.getAttribute("accept")).not.toContain(".xls");
@@ -106,5 +113,35 @@ describe("Upload commission statement", () => {
     expect(h.toasts.join()).toContain("couldn't be read");
     expect(h.toasts.join()).toContain("No reader for this carrier.");
     expect(h.toasts.some((t) => t.startsWith("success"))).toBe(false);
+  });
+});
+
+describe("Pending statement: Parse (choose file)", () => {
+  it("asks for the file and sends it to that statement's parse endpoint", async () => {
+    h.list = [{
+      id: "stmt-77", orgId: "o", carrierId: "c1", carrierName: "Humana", periodStart: "2026-01-01",
+      periodEnd: "2026-01-31", totalAmount: "37.50", status: "pending", uploadedAt: "2026-02-01T00:00:00Z",
+    }];
+    h.response = { inserted: 3 };
+    const { default: CommissionsPage } = await import("@/pages/commissions");
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <CommissionsPage />
+      </QueryClientProvider>,
+    );
+
+    const button = await screen.findByRole("button", { name: /parse \(choose file\)/i });
+    fireEvent.click(button);
+    const picker = screen.getByLabelText("Choose the statement file to read") as HTMLInputElement;
+    expect(picker.getAttribute("accept")).not.toContain(".pdf");
+    const file = new File(["a|b"], "humana.csv", { type: "text/csv" });
+    fireEvent.change(picker, { target: { files: [file] } });
+
+    await waitFor(() => expect(h.calls.some((c) => c.url === "/api/commissions/statements/stmt-77/parse")).toBe(true));
+    const call = h.calls.find((c) => c.url.endsWith("/parse"))!;
+    expect(call.init!.method).toBe("POST");
+    expect((call.init!.body as FormData).get("file")).toBe(file);
+    await waitFor(() => expect(h.toasts.join()).toContain("3 lines"));
   });
 });

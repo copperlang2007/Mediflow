@@ -345,7 +345,7 @@ export function UploadStatementDialog({
               required
             />
             <p className="text-xs text-muted-foreground">
-              CSV files only for now — PDF and Excel statements can't be read yet.
+              Text files only (.csv or .txt) — PDF and Excel statements can't be read yet.
             </p>
             {file && (
               <p className="text-xs text-muted-foreground">
