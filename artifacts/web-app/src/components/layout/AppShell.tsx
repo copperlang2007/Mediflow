@@ -275,7 +275,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const canSearch = !platformView && (!userRole || CONTACT_READERS.includes(userRole));
   const isOwner = userRole === "super_admin" || userRole === "agency_admin";
   // The AI assistant answers from an agency's data; the platform view has none.
-  const aiEnabled = !viewingAgency && !platformView;
+  const aiEnabled = userRole !== null && !viewingAgency && !platformView;
   const isSuperAdmin = userRole === "super_admin";
   const roleLabel = userRole ? (ROLE_LABELS[userRole] ?? userRole) : null;
   const initials =
