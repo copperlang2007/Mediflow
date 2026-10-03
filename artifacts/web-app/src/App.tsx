@@ -10,6 +10,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useGetMe } from "@workspace/api-client-react";
+import { effectiveViewAsOrg, isPlatformView, isPlatformPath, type Role } from "@/components/layout/nav-config";
 import AppShell from "@/components/layout/AppShell";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
@@ -21,7 +23,8 @@ import { MfaEnrollmentGate } from "@/components/auth/MfaEnrollmentGate";
 import { SessionGuard } from "@/components/auth/SessionGuard";
 
 // Route-level lazy loading
-const Dashboard = lazy(() => import("@/pages/dashboard"));
+const AgencyDashboard = lazy(() => import("@/pages/dashboard"));
+const SuperAdminDashboard = lazy(() => import("@/pages/super-admin-dashboard"));
 const AgentsPage = lazy(() => import("@/pages/agents"));
 const AgentProfilePage = lazy(() => import("@/pages/agent-profile"));
 const LicensingPage = lazy(() => import("@/pages/licensing"));
@@ -257,6 +260,72 @@ function DeploymentConfigRequired() {
   );
 }
 
+/** Who is looking, and whether they are in the platform view (super admin, no agency open). */
+function usePlatformState() {
+  const { data: me, isLoading, isError, refetch } = useGetMe();
+  let stored: string | null = null;
+  try {
+    stored = localStorage.getItem("mediflow:view-as-org");
+  } catch {
+    // storage unavailable — same as not viewing an agency
+  }
+  const viewAsOrg = effectiveViewAsOrg(stored, me?.orgId);
+  if (stored && !viewAsOrg) {
+    // A leftover key for the user's own agency; drop it so requests stop carrying it.
+    try {
+      localStorage.removeItem("mediflow:view-as-org");
+    } catch {
+      // nothing to clear
+    }
+  }
+  const role = (me?.role ?? null) as Role | null;
+  return {
+    isLoading,
+    // Without a known role we can't tell a super admin from anyone else.
+    failed: isError && !me,
+    refetch,
+    platformView: isPlatformView(role, Boolean(viewAsOrg)),
+  };
+}
+
+function AccountLoadError({ onRetry }: { onRetry: () => void }) {
+  const { signOut } = useClerk();
+  return (
+    <div role="alert" className="p-8 text-center text-sm text-muted-foreground">
+      Could not load your account.{" "}
+      <button type="button" className="underline underline-offset-2" onClick={onRetry}>
+        Try again
+      </button>
+      {" · "}
+      <button
+        type="button"
+        className="underline underline-offset-2"
+        onClick={() => {
+          try {
+            localStorage.removeItem("mediflow:view-as-org");
+          } catch {
+            // storage unavailable — nothing to clear
+          }
+          void signOut();
+        }}
+      >
+        Sign out
+      </button>
+    </div>
+  );
+}
+
+/**
+ * /dashboard: a super admin gets the platform overview; viewing an agency (or
+ * any other role) gets that agency's dashboard.
+ */
+function Dashboard() {
+  const state = usePlatformState();
+  if (state.isLoading) return <PageLoadingFallback />;
+  if (state.failed) return <AccountLoadError onRetry={() => void state.refetch()} />;
+  return state.platformView ? <SuperAdminDashboard /> : <AgencyDashboard />;
+}
+
 function HomeRedirect() {
   const { isLoaded, isSignedIn } = useAuth();
   // Clerk can be slow or unreachable; the public entry page must still render.
@@ -264,20 +333,59 @@ function HomeRedirect() {
   return isSignedIn ? <Redirect to="/dashboard" /> : <Landing />;
 }
 
+/**
+ * A super admin outside any agency may only open platform pages. A bookmarked
+ * agency URL (e.g. /crm) would otherwise read and edit their home agency while
+ * the screen says "platform".
+ */
+function PlatformRouteGuard({ children }: { children: React.ReactNode }) {
+  const state = usePlatformState();
+  const [location] = useLocation();
+  // Platform pages (incl. /dashboard) never need the guard; everything else
+  // waits for the role so an agency page can't mount under the platform view.
+  if (isPlatformPath(location)) return <>{children}</>;
+  if (state.isLoading) return <PageLoadingFallback />;
+  if (state.failed) return <AccountLoadError onRetry={() => void state.refetch()} />;
+  if (state.platformView) return <Redirect to="/dashboard" />;
+  return <>{children}</>;
+}
+
+/** Platform view has no agency of its own, so it must not wear one agency's branding. */
+function PlatformAwareBranding({ children }: { children: React.ReactNode }) {
+  const { platformView } = usePlatformState();
+  return <BrandingProvider disabled={platformView}>{children}</BrandingProvider>;
+}
+
+/**
+ * Nothing in the signed-in area renders (or fetches) until we know who the
+ * user is. Otherwise the shell, branding and per-page lookups start out as if
+ * for an agency user and then flip once the role arrives.
+ */
+function RoleGate({ children }: { children: React.ReactNode }) {
+  const state = usePlatformState();
+  if (state.isLoading) return <PageLoadingFallback />;
+  if (state.failed) return <AccountLoadError onRetry={() => void state.refetch()} />;
+  return <>{children}</>;
+}
+
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <Show when="signed-in">
         <ProvisioningGate>
-          <BrandingProvider>
-            <AppShell>
-              <ErrorBoundary>
-                <Suspense fallback={<PageLoadingFallback />}>
-                  {children}
-                </Suspense>
-              </ErrorBoundary>
-            </AppShell>
-          </BrandingProvider>
+          <RoleGate>
+            <PlatformAwareBranding>
+              <AppShell>
+                <ErrorBoundary>
+                  <PlatformRouteGuard>
+                    <Suspense fallback={<PageLoadingFallback />}>
+                      {children}
+                    </Suspense>
+                  </PlatformRouteGuard>
+                </ErrorBoundary>
+              </AppShell>
+            </PlatformAwareBranding>
+          </RoleGate>
         </ProvisioningGate>
       </Show>
       <Show when="signed-out">

@@ -18,6 +18,8 @@ import { GlobalSearch } from "@/components/layout/GlobalSearch";
 import {
   DEV_NAV_GROUP,
   NAV_GROUPS,
+  PLATFORM_NAV_GROUPS,
+  isPlatformView,
   ROLE_LABELS,
   activeNavHref,
   visibleNavGroups,
@@ -210,10 +212,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
   const aiContext = useAiContext();
 
-  const viewingAgency = Boolean(localStorage.getItem("mediflow:view-as-org"));
-  const { unreadCount } = useSSENotifications(0, !viewingAgency);
+  let viewingAgency = false;
+  try {
+    viewingAgency = Boolean(localStorage.getItem("mediflow:view-as-org"));
+  } catch {
+    // storage unavailable — same as not viewing an agency
+  }
   const { data: me } = useGetMe();
   const userRole = (me?.role ?? null) as Role | null;
+  const platformView = isPlatformView(userRole, viewingAgency);
+  // Notifications, stats and the AI assistant all describe one agency; the
+  // platform view has no agency of its own to show.
+  const { unreadCount } = useSSENotifications(0, userRole !== null && !viewingAgency && !platformView);
 
   useEffect(() => {
     if (userRole && userRole !== "super_admin" && localStorage.getItem("mediflow:view-as-org")) {
@@ -243,6 +253,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       // keeps the page's stats live. Silence only applies while no other
       // (non-silent) component is watching — see isSilent in queryClient.
       queryKey: getGetDashboardStatsQueryKey(),
+      enabled: userRole !== null && !platformView,
       refetchInterval: 60_000,
       staleTime: 30_000,
       // Nav badge only; a failed background poll shouldn't toast every minute.
@@ -255,12 +266,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // has a developer/super_admin role.
   const showDevNav =
     DEV_CONSOLE_ENABLED && (userRole === "developer" || userRole === "super_admin");
-  const allGroups: NavGroup[] = showDevNav ? [...NAV_GROUPS, DEV_NAV_GROUP] : NAV_GROUPS;
+  const baseGroups = platformView ? PLATFORM_NAV_GROUPS : NAV_GROUPS;
+  const allGroups: NavGroup[] = showDevNav ? [...baseGroups, DEV_NAV_GROUP] : baseGroups;
   const groups = visibleNavGroups(userRole, allGroups);
   const activeHref = activeNavHref(location, groups);
 
-  const canSearch = !userRole || CONTACT_READERS.includes(userRole);
+  // Client search is agency data; the platform view has none.
+  const canSearch = !platformView && (!userRole || CONTACT_READERS.includes(userRole));
   const isOwner = userRole === "super_admin" || userRole === "agency_admin";
+  // The AI assistant answers from an agency's data; the platform view has none.
+  const aiEnabled = userRole !== null && !viewingAgency && !platformView;
   const isSuperAdmin = userRole === "super_admin";
   const roleLabel = userRole ? (ROLE_LABELS[userRole] ?? userRole) : null;
   const initials =
@@ -430,7 +445,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <ViewAsAgencyControl enabled={isSuperAdmin} />
 
             {/* Notifications */}
-            {!viewingAgency && (
+            {!viewingAgency && !platformView && (
               <div className="relative">
                 <Button
                   variant="ghost"
@@ -463,7 +478,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <DropdownMenuContent align="end" className="w-60">
                 <DropdownMenuLabel>Need a hand?</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                {!viewingAgency && (
+                {aiEnabled && (
                   <DropdownMenuItem onClick={() => openAiAssistant()} className="cursor-pointer">
                     <Sparkles className="h-4 w-4 mr-2" />
                     Ask the AI assistant
@@ -475,12 +490,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     Back to my dashboard
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/settings">
-                    <Settings className="h-4 w-4 mr-2" />
-                    Account settings
-                  </Link>
-                </DropdownMenuItem>
+                {!platformView && (
+                  <DropdownMenuItem asChild>
+                    <Link href="/settings">
+                      <Settings className="h-4 w-4 mr-2" />
+                      Account settings
+                    </Link>
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
 
@@ -527,25 +544,29 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     View an agency…
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem asChild>
-                  <Link href="/settings">
-                    <User className="h-4 w-4 mr-2" />
-                    Profile
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/settings">
-                    <Building2 className="h-4 w-4 mr-2" />
-                    Agency settings
-                  </Link>
-                </DropdownMenuItem>
+                {!platformView && (
+                  <DropdownMenuItem asChild>
+                    <Link href="/settings">
+                      <User className="h-4 w-4 mr-2" />
+                      Profile
+                    </Link>
+                  </DropdownMenuItem>
+                )}
+                {!platformView && (
+                  <DropdownMenuItem asChild>
+                    <Link href="/settings">
+                      <Building2 className="h-4 w-4 mr-2" />
+                      Agency settings
+                    </Link>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem asChild>
                   <Link href="/settings/security">
                     <ShieldCheck className="h-4 w-4 mr-2" />
                     Account security
                   </Link>
                 </DropdownMenuItem>
-                {isOwner && (
+                {isOwner && !platformView && (
                   <>
                     <DropdownMenuItem asChild>
                       <Link href="/settings/team">
@@ -579,7 +600,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <main
           className={cn(
             "flex-1 overflow-y-auto overflow-x-hidden",
-            !viewingAgency && "pb-[calc(5.5rem+env(safe-area-inset-bottom))]",
+            aiEnabled && "pb-[calc(5.5rem+env(safe-area-inset-bottom))]",
           )}
         >
           {children}
@@ -602,7 +623,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {isSuperAdmin && <ViewAsAgencyDialog open={viewAsOpen} onOpenChange={setViewAsOpen} />}
 
       {/* Floating AI Assistant (existing /api/ai/chat feature) */}
-      {!viewingAgency && <AiAssistantPanel context={aiContext} />}
+      {aiEnabled && <AiAssistantPanel context={aiContext} />}
     </div>
   );
 }

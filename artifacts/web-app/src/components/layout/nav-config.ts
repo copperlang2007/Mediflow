@@ -200,6 +200,49 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+/**
+ * What a super admin sees while NOT viewing an agency: platform-level pages
+ * only. Agency pages (clients, commissions, …) appear once they open an agency.
+ */
+export const PLATFORM_NAV_GROUPS: NavGroup[] = [
+  {
+    group: "Platform",
+    items: [
+      { href: "/dashboard", label: "Platform Overview", icon: LayoutDashboard, roles: ["super_admin"] },
+      { href: "/admin/workspaces", label: "Agencies", icon: Boxes, roles: ["super_admin"] },
+      { href: "/admin/health", label: "System Health", icon: Activity, roles: ["super_admin"] },
+    ],
+  },
+  {
+    group: "Account",
+    items: [
+      { href: "/settings/security", label: "Account Security", icon: ShieldCheck, roles: ["super_admin"] },
+    ],
+  },
+];
+
+/**
+ * The agency a super admin is really viewing: a stored id that is their own
+ * (left by an older picker) is not a view at all, so it counts as none.
+ */
+export function effectiveViewAsOrg(stored: string | null, homeOrgId: string | null | undefined): string | null {
+  return stored && stored !== homeOrgId ? stored : null;
+}
+
+/** A super admin who is not viewing an agency gets the platform view. */
+export function isPlatformView(role: Role | null, viewingAgency: boolean): boolean {
+  return role === "super_admin" && !viewingAgency;
+}
+
+/** Pages a super admin may open in the platform view (nav hrefs + the dev console). */
+export function isPlatformPath(path: string): boolean {
+  const clean = path.split(/[?#]/)[0].replace(/\/+$/, "") || "/";
+  if (clean === "/dev" || clean.startsWith("/dev/")) return true;
+  return PLATFORM_NAV_GROUPS.some((g) =>
+    g.items.some((i) => clean === i.href || clean.startsWith(`${i.href}/`)),
+  );
+}
+
 /** Developer console group — only added when DEV_CONSOLE_ENABLED is on. */
 export const DEV_NAV_GROUP: NavGroup = {
   group: "Developer",
