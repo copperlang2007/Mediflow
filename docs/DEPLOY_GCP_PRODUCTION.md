@@ -47,7 +47,8 @@ From a machine with the `gcloud` CLI installed and authenticated
 
 ```bash
 export PROJECT_ID=mediflow-prod        # pick a globally-unique project id
-export GITHUB_REPO=copperlang2007/mediflow
+# Match the GitHub repository's owner/name casing exactly: WIF checks this claim.
+export GITHUB_REPO=copperlang2007/Mediflow
 export BILLING_ACCOUNT_ID=XXXXXX-XXXXXX-XXXXXX   # only if PROJECT_ID doesn't exist yet
 bash scripts/deploy/gcp-bootstrap.sh
 ```
