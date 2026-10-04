@@ -31,7 +31,7 @@ authoritative, dated version lives in [`docs/STATE.md`](docs/STATE.md).
 | PHI readiness | **Not cleared.** ADR 0004 (GCP production) is still "Proposed"; nothing in the repo proves a successful production deploy. Several vendor BAAs are unconfirmed (see [Compliance](#compliance-and-phi)). |
 | Auth | **Clerk** in production, MFA mandatory for everyone. Migration to GCP Identity Platform is *proposed only* (ADR 0006). |
 | AI | **Claude on AWS Bedrock** (Anthropic Messages API). Azure OpenAI is a supported alternate. Plain OpenAI is dev/test only. |
-| Unmerged work | One open PR (#272). Everything else on stale branches has already landed — see [`docs/BRANCH_AUDIT_2026-10-04.md`](docs/BRANCH_AUDIT_2026-10-04.md). |
+| Unmerged work | Open PRs change daily (list them on GitHub; do not trust a snapshot). On 2026-10-04 the only *branch* with unlanded work was PR #272; the other ~155 branches had already landed or add nothing — see [`docs/BRANCH_AUDIT_2026-10-04.md`](docs/BRANCH_AUDIT_2026-10-04.md). |
 
 ### Known gaps (intentional, not bugs)
 
@@ -62,7 +62,7 @@ authoritative, dated version lives in [`docs/STATE.md`](docs/STATE.md).
 | **AI** | Context-aware chat drawer, SMS/email drafting, weekly compliance report, transcript analysis. |
 
 Roles: `super_admin`, `agency_admin`, `compliance_manager`, `agent_support`,
-`viewer`, `agent`, `developer`. The permission matrix is `lib/permissions.ts`;
+`viewer`, `agent`, `developer`. The permission matrix is `artifacts/api-server/src/lib/permissions.ts`;
 the navigation only *hides* links — the server is the real gate.
 
 ---
@@ -151,16 +151,26 @@ runs in no-auth **demo mode**. Demo mode is ignored under `NODE_ENV=production`.
 
 ### Develop locally
 
+The Vite dev server has **no `/api` proxy**, so `vite` on port 5173 cannot reach
+the API by itself. Use the supported same-origin workflow: build the web app and
+let the API serve it.
+
 ```bash
 pnpm install --frozen-lockfile
 pnpm --filter @workspace/db run migrate        # needs DATABASE_URL
 pnpm seed:demo                                 # optional sample data
 
-# API (builds then starts; no hot reload)
-PORT=8080 DATABASE_URL=postgres://… pnpm --filter @workspace/api-server run dev
-# Web (needs VITE_CLERK_PUBLISHABLE_KEY, or build with VITE_DEMO_MODE=true)
-pnpm --filter @workspace/web-app run dev       # → http://localhost:5173
+# Build the web bundle (the API serves artifacts/web-app/dist/public itself).
+# Demo, no accounts:  VITE_DEMO_MODE=true  here AND  DEMO_MODE=true  on the API.
+# Real auth: set VITE_CLERK_PUBLISHABLE_KEY and the Clerk keys on the API.
+VITE_DEMO_MODE=true pnpm --filter @workspace/web-app run build
+
+# API (builds, then starts; no hot reload) → http://localhost:8080
+DEMO_MODE=true PORT=8080 DATABASE_URL=postgres://… pnpm --filter @workspace/api-server run dev
 ```
+
+`pnpm --filter @workspace/web-app run dev` (hot reload) is for UI-only work and
+will not talk to a local API unless you add your own proxy.
 
 There is no `.env.example`; variable names are listed per integration in
 [`docs/DEPLOY_GCP_PRODUCTION.md`](docs/DEPLOY_GCP_PRODUCTION.md) and

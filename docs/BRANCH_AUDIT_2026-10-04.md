@@ -2,111 +2,104 @@
 
 **Question answered:** which commits are not on `main`, and why?
 
-**Short answer:** almost nothing of value. Of 156 remote branches, 72 are fully
-merged and 69 are *already-landed* work whose branch tip was never cleaned up
-(this repo squash-merges, so Git still shows their original commits as "not on
-main"). Only **one open pull request** and **one closed-unmerged UI polish PR**
-carry real, unlanded work.
+**Short answer:** almost nothing of value. Of 156 remote branches, 93 add
+nothing to `main` at all, and 62 more are already-landed work whose branch was
+never deleted (this repo squash-merges, so Git still shows their original
+commits as "not on main"). One branch carries genuinely unlanded work: the
+open PR #272.
 
-Audit base: `origin/main` @ `f0195e0` ("Statement ingest: fix four post-merge
-review findings (#271)"). 666 commits on main, 272 pull requests ever opened
-(PR numbers 19–272 are visible; #1–#18 predate the available history).
+Snapshot: `origin/main` @ `f0195e0` (#271), taken 2026-10-04 ~15:00 UTC.
+**It goes stale fast** — parallel agent sessions keep opening PRs and even
+reuse merged branch names (during this audit `practical-thompson-09n6cr` and
+`dreamy-ptolemy-2ho4s0`, classed "landed" below, received new commits and
+became #273 and #275). Re-measure before acting. The per-branch list is in
+[`BRANCH_AUDIT_2026-10-04.branches.tsv`](BRANCH_AUDIT_2026-10-04.branches.tsv).
 
-## How this was measured (so it can be repeated)
+## Result (buckets add up to 156)
 
-1. `git fetch --unshallow` first. A shallow clone makes every merge-base wrong
-   and inflated the raw "ahead" counts to 400+ — do not audit from a shallow clone.
-2. `git rev-list --count origin/main..origin/<branch>` — raw commits "not on main".
-3. `git cherry origin/main origin/<branch>` — commits whose *patch* is not on
-   main. Squash merges defeat this, so it over-reports.
-4. `git merge-tree --write-tree origin/main origin/<branch>` — a merge that
-   leaves main's tree unchanged means the branch adds nothing.
-5. Per-branch count of added lines absent from main's current files, to tell
-   "never landed" apart from "landed, then evolved".
-6. Cross-check against the PR list: a PR whose number appears as `(#N)` or
-   `Merge pull request #N` in main's log landed.
-
-## Result
-
-| Bucket | Branches | What it means | Action |
+| Bucket | Branches | Meaning | Safe to delete? |
 | --- | ---: | --- | --- |
-| Fully merged (0 commits ahead) | 72 | Nothing unique. | Delete the branch. |
-| Landed via PR, tip never deleted | 69 | Work is on main (often evolved since). Git shows old commits only because of squash-merge. | Delete the branch. |
-| Content already on main, PR closed or merged by another route | 6 | A merge adds nothing to main. | Delete the branch. |
-| **Open PR with unlanded work** | **1** | See below. | **Review and merge.** |
-| **Closed unmerged, genuinely not on main** | **1** | See below. | Decide: revive or drop. |
-| Obsolete by decision | 2 | Superseded by a later deliberate choice. | Delete the branch. |
+| A. Fully merged | 72 | 0 commits ahead of main. | **Yes.** |
+| B. Content already on main | 21 | Has commits main lacks by hash, but a merge changes nothing (`git merge-tree` result equals main's tree). | **Yes.** |
+| C. Reviewed, landed, then evolved | 62 | Work landed through a squash-merged PR; main has since changed those files, so a merge would conflict or re-add old lines. Each was checked by counting its added lines missing from main (almost always a few dozen of thousands) and, for the unusual ones, by hand. | **Very likely, but not proven per branch.** Verify the branch tip has no commits newer than its PR before deleting (see rule below), or get owner sign-off. |
+| D. — (none) | 0 | No branch was found whose only copy of real work is unmerged and abandoned. | — |
+| E. Open PR, unlanded | 1 | `claude/agencybridge-compliance-review-s3nc6l` = PR #272. | **No. Review and merge.** |
 
-## Work that is genuinely not on main
+### Safe deletion rule
 
-### 1. PR #272 — `claude/agencybridge-compliance-review-s3nc6l` (OPEN, merges cleanly)
+Delete a branch only if **either**:
+1. `git rev-list --count origin/main..origin/<branch>` is `0`; **or**
+2. `git merge-tree --write-tree origin/main origin/<branch>` prints exactly
+   main's tree hash (`git rev-parse origin/main^{tree}`) — i.e. tree-neutral.
 
-Three commits, 7 files, +282/−31:
+For bucket C, additionally confirm every commit ahead of main belongs to a PR
+that landed (compare against `git log origin/main`, `git cherry -v`) — a PR
+number appearing in main's log does **not** prove commits pushed after that
+merge were also landed. Always run `git fetch --unshallow` first; a shallow
+clone makes every result wrong.
 
-- Call-recording hardening: bounded crash retries, one rescore per checklist,
-  refused audio is deleted (`lib/callScoring/recordings.ts`,
-  `routes/callScoring.ts`, `workers/recordingsSweep.ts`) plus a 152-line
-  integration test.
-- **CI unblocker:** ignores advisory `GHSA-vfj7-8cjw-p6xm` (`braces` DoS, no
-  patch published, not reachable) in `package.json`.
-- `scripts/deploy/gcp-bootstrap.sh` change (+4).
+## How this was measured (repeatable)
 
-**Why it matters now:** the `pnpm audit (moderate)` CI job is red on `main`
-(last two commits) solely because of that advisory. Typecheck and tests are
-green. Merging #272 should turn CI green.
+1. `git fetch --unshallow` — shallow clones inflate "ahead" counts to 400+.
+2. `git rev-list --count origin/main..origin/<b>` — raw commits not on main.
+3. `git cherry origin/main origin/<b>` — commits whose *patch* is not on main
+   (over-reports under squash-merge).
+4. `git merge-tree --write-tree` — does a merge change main's tree?
+5. Count of the branch's added lines absent from main's current files.
+6. Cross-check against the PR list. **Caveat:** the PR-list tool used here
+   reported `merged: false` for every PR, and main's log only contains `(#N)`
+   for some merges (e.g. #211 landed as commit `00e5ed9` with no number). Use
+   GitHub's per-PR `merged_at` for authority, not these shortcuts.
 
-### 2. PR #211 — `fix/lead-contact-picker-help` (CLOSED, never merged)
+## Work genuinely not on main
 
-Five commits: contact picker on lead creation plus "what is this field?" help
-tooltips in `crm/LeadsTab.tsx`, with tests. Main later gained a separate
-`crm/CreateLeadDialog.tsx` (via #212) that does contact search but has no
-field-help tooltips. Low-risk UX polish; revive only if wanted.
+### PR #272 — `claude/agencybridge-compliance-review-s3nc6l` (open, merges cleanly)
+
+Three commits, 7 files, +282/−31: call-recording hardening (bounded crash
+retries, one rescore per checklist, refused audio deleted) with a 152-line
+integration test; the `GHSA-vfj7-8cjw-p6xm` audit suppression; a small
+`scripts/deploy/gcp-bootstrap.sh` change.
+
+Why it matters: the `pnpm audit (moderate)` CI job is red on `main` solely
+because of that advisory (`braces`, no patch, not reachable). Typecheck and
+tests are green. Note the same suppression is also carried by #274 and #276
+(identical lines; they merge cleanly together).
 
 ## Branches that look unlanded but are not
 
-These raised false alarms and were checked individually.
-
 | Branch | Appears to be | Reality |
 | --- | --- | --- |
-| `claude/mediflow-audit-growth-vujlxd` (26 commits, PRs #191–#207) | Large unlanded Bedrock/audit/Cloud SQL batch | Every commit is patch-equivalent to something on main. Bedrock adapter, advisory fixes and Cloud SQL edition pin are all on main. |
-| `claude/mediflow-could-not-start-error`, `claude/medi-flow-could-not-start-error`, `claude/add-new-feature` | Stale-asset auto-reload fix missing | Present on main (`web-app/public/boot-diagnostics.js`, `App.tsx`, `ErrorBoundary.tsx`, and the 404-for-missing-hashed-asset behaviour in `api-server/src/app.ts`). |
-| `claudemoogs/agencybridge-reskin` (100 commits, 231 files) | Huge unlanded reskin | Landed as #235. Only ~131 of 30,677 added lines differ, because main kept evolving (Dialer, softphone). |
-| June 2026 feature branches (`aep-cockpit`, `churn-risk-scoring`, `clawback-exposure`, `ctm-complaint-tracker`, `marketing-approval`, `agent-readiness-board`, `admin-live-queue`, `queue-wallboard`, `agent-leaderboard`, …) | Dozens of features missing | Every page and route exists on main. Differences are later edits. |
-| `claude/google-cloud-deployment-ml41c2` (#201) | Unlanded GCP path | GCP path is on main (ADR 0004, `scripts/deploy/gcp-*.sh`, `deploy-mediflow-gcp.yml`). One leftover docs commit (`4536d8c`, repo-name casing for Workload Identity Federation) had been dropped and main still told operators to use the wrong, lowercase name. **Restored in this change**; the branch can now be deleted. |
+| `fix/lead-contact-picker-help` (#211) | Unlanded lead-form help | **Merged** (GitHub: merged 2026-09-24, commit `00e5ed9`). Contact picker and `FieldHelp` tooltips are on main in `crm/LeadsTab.tsx`. An earlier draft of this audit wrongly called it closed-unmerged — that came from diffing against a bad merge base while the clone was shallow. |
+| `claude/mediflow-audit-growth-vujlxd` (26 commits, PRs #191–#207) | Large unlanded Bedrock/audit/Cloud SQL batch | Every commit is patch-equivalent to something on main. Bedrock adapter, advisory fixes and Cloud SQL edition pin are on main. |
+| `claude/mediflow-could-not-start-error`, `claude/medi-flow-could-not-start-error`, `claude/add-new-feature` | Stale-asset auto-reload fix missing | Present on main (`web-app/public/boot-diagnostics.js`, `App.tsx`, `ErrorBoundary.tsx`; 404 for missing hashed assets in `api-server/src/app.ts`). |
+| `claudemoogs/agencybridge-reskin` (100 commits, 231 files) | Huge unlanded reskin | Landed as #235; ~131 of 30,677 added lines differ because main kept evolving. |
+| June 2026 feature branches (`aep-cockpit`, `churn-risk-scoring`, `clawback-exposure`, `ctm-complaint-tracker`, `marketing-approval`, `agent-readiness-board`, `admin-live-queue`, `queue-wallboard`, `agent-leaderboard`, …) | Dozens of features missing | Every page and route exists on main; differences are later edits. |
+| `claude/google-cloud-deployment-ml41c2` (#201) | Unlanded GCP path | GCP path is on main (ADR 0004, `scripts/deploy/gcp-*.sh`, `deploy-mediflow-gcp.yml`). One docs commit (`4536d8c`, repo-name casing for Workload Identity Federation) had been dropped; main still told operators to use the lowercase name. **Restored in this change.** |
 
 ## Obsolete by decision
 
-- `copilot/copperlang2007mediflow` — one commit that fixes the **Render**
-  bootstrap. Render production deploy was deliberately disabled (#261: no BAA
-  with Render). Do not revive.
-- `claude/live-docker-instance-zykrpa` / demo-mode branches — local/demo
-  tooling; landed.
+- `copilot/copperlang2007mediflow` — one commit fixing the **Render** bootstrap.
+  Render production deploy was deliberately disabled (#261: no BAA). Do not revive.
 
-## Why the drift happened (root causes)
+## Why the drift happened
 
-1. **Squash-merge + never deleting branches.** The main cause of the scary
-   numbers. 140+ branches survived their own merge.
+1. **Squash-merge + never deleting branches.** The main cause of the scary numbers.
 2. **Many parallel agent sessions** (`claude/*`, `claudemoogs/*`, `codex/*`,
-   `copilot/*`, `cursor/*`) each opening PRs from auto-named branches, with no
-   shared record of what the others were doing. Migration numbers collided
-   repeatedly (renumbered to 0050/0051, 0061/0062/0063 — visible in main's
-   history).
-3. **Intentional direction changes that left old docs behind:** Replit-era
-   OpenAI/Azure assumptions → Bedrock (ADR 0005); Railway/Render → GCP Cloud
-   Run (ADR 0003/0004, #261); Clerk → Identity Platform (ADR 0006, proposed);
-   "Mediflow" → "agencyBRIDGE" naming (#235).
-4. **Shallow clones.** The checked-out repo was shallow, hiding real history.
-5. **Status docs written once and never refreshed** (see root-level markdown
-   files; `PRODUCTION_READINESS.md` was already corrected once for over-claiming).
+   `copilot/*`, `cursor/*`) opening PRs from auto-named branches with no shared
+   record of each other's work. Migration numbers collided repeatedly
+   (renumbered to 0050/0051, 0061–0063; two `0064`s still exist).
+3. **Intentional direction changes that left old docs behind:** OpenAI/Azure →
+   Bedrock (ADR 0005); Railway/Render → GCP Cloud Run (ADR 0003/0004, #261);
+   Clerk → Identity Platform (ADR 0006, proposed); "Mediflow" → "agencyBRIDGE" (#216/#235).
+4. **Shallow clones** hid real history.
+5. **Status docs written once and never refreshed** (`PRODUCTION_READINESS.md`
+   was already corrected once for over-claiming).
 
-## Recommended cleanup (needs the repo owner — not done in this change)
+## Recommended cleanup (owner decision — nothing was deleted)
 
-1. Merge PR #272 (turns CI green).
-2. Delete the 72 fully-merged branches and the ~75 landed/obsolete ones. Rule:
-   delete when `git rev-list --count origin/main..origin/<b>` is 0, or when its
-   PR number appears in main's log and the branch has no newer PR. The existing
-   `.github/scripts/nuke-branches.sh` has escaped quotes in its list and is
-   untested — do not run it as-is.
-3. Turn on GitHub's **Automatically delete head branches** repo setting so this
-   cannot recur.
-4. Decide on #211 (revive or close for good).
+1. Merge PR #272 (or #276, which carries the same suppression plus ADR 0007).
+2. Delete buckets A and B (93 branches) using the rule above.
+3. For bucket C, spot-check with the rule, then delete; or approve in bulk.
+4. Turn on GitHub's **Automatically delete head branches**.
+5. The existing `.github/scripts/nuke-branches.sh` has escaped quotes in its
+   list and is untested — do not run it as-is.

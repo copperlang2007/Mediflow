@@ -21,9 +21,9 @@ _Last updated: 2026-10-04 — by the audit session below._
 | Production deploy (GCP Cloud Run) | **Red** since 2026-10-02 | Step "Deploy to Cloud Run": `PERMISSION_DENIED secretmanager.versions.add` on `mediflow-twilio-api-key-secret`. Image build and push succeed. |
 | Production ever verified live? | **Unknown / no evidence** | ADR 0004 still "Proposed"; `PRODUCTION_READINESS.md` says not deployed. |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. |
-| Open PRs | #272 | Call-recording hardening + the audit suppression. Merges cleanly. |
+| Open PRs | Query GitHub live | At 2026-10-04 19:18 UTC: #272 (call-recording fixes + audit suppression), #273 (platform revenue overview), #274 (this docs PR), #275 (add-policy form), #276 (audit exception + ADR 0007). #273/#275 came from other sessions after the audit began and were not reviewed here. |
 | Migration high-water mark | `0066_kb_library_statement_upload_guide` | Two files share `0064`. 69 SQL files. |
-| Remote branches | 156 (excl. main) | 72 fully merged, ~75 landed-but-undeleted, 1 open PR. See branch audit. |
+| Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156. See branch audit and its `.tsv`. |
 
 ### Owner-only actions blocking progress
 
@@ -37,7 +37,7 @@ _Last updated: 2026-10-04 — by the audit session below._
 3. **Confirm BAAs** (Google Cloud, AWS Bedrock, HighLevel, EnrollHere,
    DocuSign; check Twilio/Resend/Stripe) and record the outcome here.
 4. **Turn on** GitHub setting "Automatically delete head branches".
-5. Approve a branch cleanup (see audit). Existing
+5. Approve a branch cleanup (see audit: delete the 93 in buckets A+B; spot-check the 62 in C). Existing
    `.github/scripts/nuke-branches.sh` embeds escaped quotes in its branch list
    and was not tested; do not run it as-is.
 
@@ -53,7 +53,7 @@ Scope of Appointment captured on call recording (no 48-hour wait enforced).
 - Is the GCP project actually provisioned, and has any deploy ever succeeded?
 - Clerk → Identity Platform: go or no-go? (ADR 0006, proposed). Production
   currently reportedly uses a Clerk **development-mode** key — verify before PHI.
-- Revive PR #211 (lead field-help tooltips) or drop it?
+- Three PRs (#272, #274, #276) carry the same `braces` audit suppression; #276 adds ADR 0007 with the reachability analysis. Merge one, close the rest.
 
 ### Known gaps
 
@@ -94,7 +94,7 @@ Newest first. Template in `AGENTS.md` §7.
   unmerged commit `4536d8c`).
 - **Verified:** Branch findings from full-history git analysis (`git fetch
   --unshallow`, `git cherry`, `git merge-tree`, PR-number cross-check against
-  main's log) — 156 branches classified. CI and deploy failure causes read from
+  main's log) — 156 branches classified; corrected after review (#211 was merged and its help text is on main). CI and deploy failure causes read from
   the GitHub Actions job logs of runs `37174335043` and `37174335059`. Codebase
   facts from a read-only inventory of the repo at `f0195e0`; spot-checked
   migration count (69, duplicate `0064`) and script names. Shell syntax of

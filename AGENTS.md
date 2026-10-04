@@ -60,7 +60,7 @@ git log origin/main --oneline -15          # what landed since the last STATE.md
 ```
 
 1. Read `docs/STATE.md` — the "Current state" block and the last three log entries.
-2. Check open PRs and whether someone else is touching your area. Do not start
+2. List open PRs on GitHub (the list changes daily; parallel sessions are active) and check whether someone else is touching your area. Do not start
    duplicate work; extend the existing branch/PR instead.
 3. Check CI status of `main`. If it is red, say so in your first message and do
    not treat that as caused by you.
@@ -92,8 +92,13 @@ Demo with no accounts: `docker compose up --build`.
 
 **Security and PHI**
 - Never log, return, or send to Sentry/AI/analytics a Medicare ID, SSN, DOB,
-  diagnosis, or recording content. Use the existing masking
-  (`serializeContact`, `lib/phiAccess.ts`) and `sentryPhiScrubber`.
+  diagnosis, or recording content. **Remove these fields structurally before
+  they reach a log line, error message or prompt** (pick the safe fields; do not
+  interpolate records into messages). Use the existing masking
+  (`serializeContact`, `lib/phiAccess.ts`). `sentryPhiScrubber` is only a last
+  line of defense: it regex-scrubs high-signal patterns (MBI, SSN, phone,
+  email), does **not** scrub dates/DOB, and cannot recognise free-text
+  diagnoses or recording content.
 - Every org-scoped query/handler must filter by the caller's `orgId`. The static
   guard `tenant-isolation.test.ts` must stay green; do not add an allow-list
   entry to silence it without explaining why in the PR.
@@ -175,7 +180,10 @@ continue. An interrupted session with a state note beats a perfect one without.
   soon as you push; link related PRs.
 - This repo **squash-merges**, so a merged branch still looks "ahead" of main.
   Do not treat that as unmerged work; see `docs/BRANCH_AUDIT_2026-10-04.md` for
-  how to check properly (`git cherry`, `git merge-tree`, PR number in main's log).
+  how to check properly and for the safe-deletion rule (0 commits ahead, or a
+  `git merge-tree` result identical to main's tree). A PR number in main's log
+  is not proof the branch has no later commits.
+- Merged branch names get reused by other sessions; fetch before judging a branch.
 - After your PR merges, delete your branch. (Owner action pending: enable
   GitHub's "Automatically delete head branches".) Existing cleanup scripts:
   `.github/scripts/delete-stale-branches.sh`, `nuke-branches.sh` — read them and
