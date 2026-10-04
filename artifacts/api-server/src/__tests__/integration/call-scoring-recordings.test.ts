@@ -444,6 +444,66 @@ describe("review fixes", () => {
     expect(b.error).toBeNull();
   });
 
+  it("a duplicate uploaded under another checklist gets a score under that checklist", async () => {
+    const results = stereoResults();
+    const first = await uploadAndConfirm(admin.id);
+    fakeGoogle({ poll: "done", results });
+    await recordings.processRecording(first);
+    await recordings.processRecording(first);
+    const second = await uploadAndConfirm(admin.id, { rubricId: "general-sales" });
+    await recordings.processRecording(second);
+    await recordings.processRecording(second);
+    const b = await rowOf(second);
+    expect(b.status, b.error ?? "").toBe("scored");
+    expect(b.transcriptId).toBe((await rowOf(first)).transcriptId);
+    const scores = await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, b.transcriptId!));
+    expect(scores.map((x) => x.rubricId).sort()).toEqual(["general-sales", "medicare-tpmo"].sort());
+  });
+
+  it("keeps the uploader's source on the transcript", async () => {
+    const id = await uploadAndConfirm(admin.id, { source: "enrollhere_download" });
+    fakeGoogle({ poll: "done" });
+    await recordings.processRecording(id);
+    await recordings.processRecording(id);
+    const row = await rowOf(id);
+    const [t] = await handle.db.select().from(schema.callTranscriptsTable).where(eq(schema.callTranscriptsTable.id, row.transcriptId!));
+    expect(t!.source).toBe("enrollhere_download");
+  });
+
+  it("a stale job cannot turn a scored recording into a failure", async () => {
+    const id = await uploadAndConfirm(admin.id);
+    fakeGoogle({ poll: "running" });
+    await recordings.processRecording(id);
+    await handle.db
+      .update(schema.callRecordingsTable)
+      .set({ updatedAt: new Date(Date.now() - recordings.TRANSCRIBE_TIMEOUT_MS - 1000) })
+      .where(eq(schema.callRecordingsTable.id, id));
+    // While this job polls (and is about to time out), another job finishes scoring.
+    speech.setSpeechHttpForTests(async (req) => {
+      if (req.method === "GET") {
+        await handle.db.update(schema.callRecordingsTable).set({ status: "scored", error: null }).where(eq(schema.callRecordingsTable.id, id));
+        return { done: false };
+      }
+      return {};
+    });
+    expect(await recordings.processRecording(id)).toBe("finished");
+    const row = await rowOf(id);
+    expect(row.status).toBe("scored");
+    expect(row.error).toBeNull();
+  });
+
+  it("an interrupted start does not use up an attempt", async () => {
+    const id = await uploadAndConfirm(admin.id);
+    await handle.db
+      .update(schema.callRecordingsTable)
+      .set({ status: "transcribing", operationName: null, attempts: 1, updatedAt: new Date(Date.now() - 11 * 60 * 1000) })
+      .where(eq(schema.callRecordingsTable.id, id));
+    expect(await recordings.processRecording(id)).toBe("retry_start");
+    const row = await rowOf(id);
+    expect(row.status).toBe("queued");
+    expect(row.attempts).toBe(0);
+  });
+
   it("logs only the kind of Google failure, never the bucket path", () => {
     expect(safeReason("could not read object gs://test-bucket/private/call-recordings/x")).not.toContain("gs://");
     expect(safeReason("Audio duration exceeds the limit")).toMatch(/too long/);
@@ -473,6 +533,46 @@ describe("review fixes", () => {
       );
       expect(burst.filter((r) => r.status === 201)).toHaveLength(3);
       expect(burst.filter((r) => r.status === 429)).toHaveLength(3);
+    } finally {
+      delete process.env.CALL_RECORDINGS_DAILY_LIMIT;
+    }
+  });
+
+  it("counts billed failures, frees expired upload links, and enforces the cap again at confirm", async () => {
+    process.env.CALL_RECORDINGS_DAILY_LIMIT = "1";
+    try {
+      const org4 = await seedOrg(handle.db, { id: `rec-cap2-${Date.now()}` });
+      const capAdmin = await seedUser(handle.db, { orgId: org4.id, role: "agency_admin" });
+      const post = () => request(app).post("/api/call-scoring/recordings/upload-url").set(withAuth(capAdmin.id)).send(startBody());
+      const rows = () => handle.db.select().from(schema.callRecordingsTable).where(eq(schema.callRecordingsTable.orgId, org4.id));
+
+      // A link nobody used stops counting once it has expired (15 minutes).
+      const first = await post();
+      expect(first.status).toBe(201);
+      await handle.db
+        .update(schema.callRecordingsTable)
+        .set({ createdAt: new Date(Date.now() - 16 * 60 * 1000) })
+        .where(eq(schema.callRecordingsTable.id, first.body.recordingId));
+      const second = await post();
+      expect(second.status).toBe(201);
+
+      // A failure after Google was called still counts.
+      await handle.db.update(schema.callRecordingsTable).set({ status: "failed", attempts: 1 }).where(eq(schema.callRecordingsTable.id, second.body.recordingId));
+      expect((await post()).status).toBe(429);
+      await handle.db.delete(schema.callRecordingsTable).where(eq(schema.callRecordingsTable.orgId, org4.id));
+
+      // Two links issued while under the cap: only one can be confirmed.
+      const a = await post();
+      await handle.db
+        .update(schema.callRecordingsTable)
+        .set({ createdAt: new Date(Date.now() - 16 * 60 * 1000) })
+        .where(eq(schema.callRecordingsTable.id, a.body.recordingId));
+      const b = await post();
+      for (const r of [a, b]) objects().set(`call-recordings/${org4.id}/${r.body.recordingId}`, { size: 10, contentType: "audio/mpeg" });
+      await request(app).post(`/api/call-scoring/recordings/${a.body.recordingId}/uploaded`).set(withAuth(capAdmin.id)).send({}).expect(202);
+      const over = await request(app).post(`/api/call-scoring/recordings/${b.body.recordingId}/uploaded`).set(withAuth(capAdmin.id)).send({});
+      expect(over.status).toBe(429);
+      expect((await rows()).find((r) => r.id === b.body.recordingId)!.status).toBe("uploading");
     } finally {
       delete process.env.CALL_RECORDINGS_DAILY_LIMIT;
     }

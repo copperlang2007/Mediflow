@@ -19,12 +19,12 @@
  * (ingestTranscript also dedupes by content). `checked_at` records each look;
  * the sweeper (workers/recordingsSweep.ts) re-queues rows whose job chain died.
  */
-import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
-import { db, callRecordingsTable, type CallRecordingLayout } from "@workspace/db";
+import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { db, callRecordingsTable, callScoresTable, type CallRecordingLayout, type CallTranscriptSource } from "@workspace/db";
 import { logger } from "../logger";
 import { open } from "./seal";
 import { DEFAULT_RUBRIC_ID, getRubric } from "./rubrics";
-import { ingestTranscript, resolveRubric } from "./ingest";
+import { ingestTranscript, rescoreTranscript, resolveRubric } from "./ingest";
 import type { Rubric } from "./types";
 import { cancelTranscription, gsUri, pollTranscription, resultsToTurns, safeReason, speechSetup, startTranscription } from "./speech";
 
@@ -43,10 +43,11 @@ export interface RecordingDetails {
 
 export type StepOutcome = "poll" | "retry_start" | "finished";
 
+/** Only a recording still in flight can fail: a stale job never overwrites one another job scored. */
 async function fail(id: string, reason: string): Promise<StepOutcome> {
   await db.update(callRecordingsTable)
     .set({ status: "failed", error: reason, updatedAt: new Date() })
-    .where(eq(callRecordingsTable.id, id));
+    .where(and(eq(callRecordingsTable.id, id), inArray(callRecordingsTable.status, ["queued", "transcribing"])));
   return "finished";
 }
 
@@ -80,7 +81,9 @@ export async function processRecording(recordingId: string, deps: { privateObjec
       return "poll";
     } catch (err) {
       logger.warn({ reason: safeReason((err as Error).message), recordingId: row.id }, "Speech-to-Text: could not start transcription");
-      if (attempts >= MAX_START_ATTEMPTS) return fail(row.id, "Speech-to-Text could not start transcribing this recording. Check the Speech-to-Text setup, then upload it again.");
+      if (attempts >= MAX_START_ATTEMPTS) {
+        return fail(row.id, "Speech-to-Text could not start transcribing this recording after several tries. Upload it again later; if it keeps failing, ask the administrator to check the Speech-to-Text setup.");
+      }
       await db.update(callRecordingsTable)
         .set({ status: "queued", updatedAt: new Date() })
         .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "transcribing")));
@@ -92,8 +95,9 @@ export async function processRecording(recordingId: string, deps: { privateObjec
   if (!row.operationName) {
     // Another job is starting it right now, or that job died before saving the operation.
     if (now.getTime() - row.updatedAt.getTime() < START_STALL_MS) return "poll";
+    // The interrupted start never reached a verdict from Google, so it does not use up an attempt.
     await db.update(callRecordingsTable)
-      .set({ status: "queued", updatedAt: now })
+      .set({ status: "queued", attempts: Math.max(0, row.attempts - 1), updatedAt: now })
       .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "transcribing"), isNull(callRecordingsTable.operationName)));
     return "retry_start";
   }
@@ -134,7 +138,8 @@ export async function processRecording(recordingId: string, deps: { privateObjec
     filename: details.filename,
     format: "json",
     rubric,
-    source: "recording",
+    // The uploader's source (e.g. an ENROLLHERE download) is kept; a plain upload is a "recording".
+    source: row.source === "upload" ? "recording" : (row.source as CallTranscriptSource),
     externalRef: details.externalRef,
     callDate: row.callDate,
     phone: details.phone,
@@ -146,6 +151,27 @@ export async function processRecording(recordingId: string, deps: { privateObjec
 
   if (result.kind === "error") return fail(row.id, result.message);
   const transcriptId = result.kind === "ok" ? result.summary.transcriptId : result.transcriptId;
+  if (result.kind === "duplicate") {
+    // Same speech as an earlier call. If it was scored under another checklist,
+    // add a score under the one chosen for this upload (history is kept).
+    const [latest] = await db
+      .select({ rubricId: callScoresTable.rubricId })
+      .from(callScoresTable)
+      .where(eq(callScoresTable.transcriptId, transcriptId))
+      .orderBy(desc(callScoresTable.createdAt))
+      .limit(1);
+    if (latest?.rubricId !== rubric.id) {
+      const rescored = await rescoreTranscript({
+        orgId: row.orgId,
+        userId: row.createdBy,
+        userRole: details.uploaderRole,
+        transcriptId,
+        rubric,
+        aiMode: row.aiMode === "off" ? "off" : "auto",
+      });
+      if (rescored.kind === "error") return fail(row.id, rescored.message);
+    }
+  }
   await db.update(callRecordingsTable)
     .set({
       status: "scored",

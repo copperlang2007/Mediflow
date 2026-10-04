@@ -200,7 +200,8 @@ for the project before turning this on.
    (`roles/speech.client`), and the Speech-to-Text service agent
    (`service-PROJECT_NUMBER@gcp-sa-speech.iam.gserviceaccount.com`) **Storage
    Object Viewer** on the private bucket, since Google reads the recording as
-   that agent.
+   that agent. The runtime service account also needs **Service Account Token
+   Creator** on itself, because upload links are signed through IAM.
 3. Allow the browser to upload to the bucket (CORS). Without this every upload
    fails. `scripts/deploy/gcp-bootstrap.sh` does steps 1-3 when you run it with
    `APP_ORIGIN=https://your-app-address`. To do it by hand, save this as
