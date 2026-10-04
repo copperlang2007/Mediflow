@@ -14,7 +14,7 @@
  *     race/ethnicity exist only inside the encrypted payload.
  */
 import { randomUUID } from "crypto";
-import { and, eq, inArray, isNull, max, ne, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, max, ne, sql } from "drizzle-orm";
 import {
   contactsTable,
   enrollmentsTable,
@@ -187,12 +187,16 @@ export async function applyCoverageLifecycle(
     await tx.update(contactsTable).set({ status: "enrolled" })
       .where(and(eq(contactsTable.id, contactId), inArray(contactsTable.status, ["lead", "prospect"])));
   } else if (isEndedStatus(policyStatus)) {
-    // In-force coverage is "effectuated" OR "active": imports create active rows
-    // that stay un-effectuated until a carrier statement confirms them.
+    // Coverage in force = a policy whose status is Active ("effectuated and in
+    // force"). Not the effectuated flag alone: imports create Active rows that stay
+    // un-effectuated until a carrier statement confirms them, and an ended policy can
+    // still carry effectuated = true (it took effect before it ended). The row just
+    // recorded needs no special case: if it ended, its status is not Active; if it was
+    // kept in force (a manual entry an ended event may not undo), it correctly counts.
     const [stillCovered] = await tx.select({ id: enrollmentsTable.id }).from(enrollmentsTable)
       .where(and(
         eq(enrollmentsTable.contactId, contactId),
-        or(eq(enrollmentsTable.effectuated, true), eq(enrollmentsTable.status, "active")),
+        eq(enrollmentsTable.status, "active"),
       )).limit(1);
     if (!stillCovered) {
       await tx.update(contactsTable).set({ status: "lost" })

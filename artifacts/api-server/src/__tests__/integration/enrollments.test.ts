@@ -489,4 +489,20 @@ describe("client status follows coverage (same rule as EnrollHere)", () => {
     expect(res.body.effectuated).toBe(true);
     expect(res.body.status).toBe("terminated");
   });
+
+  it("a Terminated policy recorded as having taken effect still marks an enrolled client with nothing else in force as lost", async () => {
+    // This is exactly what the Add policy form sends for Terminated.
+    const client = await seedContact(testDb, { orgId: orgA.id, firstName: "Only", lastName: "Policy", status: "enrolled" });
+    await post(client.id, { status: "terminated", effectuated: true, planYear: 2025, effectiveDate: "2025-01-01" });
+    expect(await statusOf(client.id)).toBe("lost");
+  });
+
+  it("an older ended policy that had taken effect does not count as coverage still in force", async () => {
+    const client = await seedContact(testDb, { orgId: orgA.id, firstName: "Two", lastName: "Ended", status: "enrolled" });
+    await post(client.id, { status: "terminated", effectuated: true, planYear: 2024, effectiveDate: "2024-01-01" });
+    // First one already marked them lost; put them back to enrolled to test the second in isolation.
+    await testDb.update(contactsTable).set({ status: "enrolled" }).where(eq(contactsTable.id, client.id));
+    await post(client.id, { status: "terminated", effectuated: true, planYear: 2025, effectiveDate: "2025-01-01" });
+    expect(await statusOf(client.id)).toBe("lost");
+  });
 });
