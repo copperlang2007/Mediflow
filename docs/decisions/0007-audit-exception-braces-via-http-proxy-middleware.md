@@ -51,9 +51,13 @@ Add `GHSA-vfj7-8cjw-p6xm` to `pnpm.auditConfig.ignoreGhsas` in the root
 ## Tripwire
 
 This exception is invalid the moment `clerkProxyMiddleware` passes a glob
-`pathFilter`, or any other runtime dependency on `micromatch`/`braces` appears
-in `pnpm audit` paths. Remove the entry from `ignoreGhsas` when either happens
-or when a fixed `braces` is published.
+`pathFilter`, or another runtime dependency path to `micromatch`/`braces`
+is introduced. Review middleware configuration and dependency changes
+independently of the configured CI audit. To revalidate advisory paths and
+patched-version availability, run the audit with this GHSA entry temporarily
+removed from `ignoreGhsas`; the configured audit suppresses this advisory
+across all dependency paths. Remove the entry when either condition occurs
+or when a fixed `braces` release is published.
 
 ## Reversibility
 
