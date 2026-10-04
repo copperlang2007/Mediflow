@@ -47,6 +47,7 @@ let growthOrg: { id: string };
 let trialOrg: { id: string };
 let lateOrg: { id: string };
 let canceledOrg: { id: string };
+let freshOrg: { id: string };
 let lastTwelveMonths: () => string[];
 let superAdmin: { id: string };
 let agencyAdmin: { id: string };
@@ -116,6 +117,8 @@ beforeAll(async () => {
   trialOrg = await seedOrg(testDb, { name: "Trial Agency", slug: `trial-${stamp}` });
   lateOrg = await seedOrg(testDb, { name: "Late Agency", slug: `late-${stamp}` });
   canceledOrg = await seedOrg(testDb, { name: "Canceled Agency", slug: `canceled-${stamp}` });
+  // Just created: no subscription row and no commission lines yet.
+  freshOrg = await seedOrg(testDb, { name: "Fresh Agency", slug: `fresh-${stamp}` });
   superAdmin = await seedUser(testDb, { orgId: growthOrg.id, role: "super_admin" });
   agencyAdmin = await seedUser(testDb, { orgId: growthOrg.id, role: "agency_admin", email: "ag@example.test" });
   await seedContact(testDb, { orgId: growthOrg.id });
@@ -190,13 +193,27 @@ describe("GET /api/admin/platform/metrics", () => {
     expect(res.body.months).toEqual(months);
     expect(res.body.growth.map((g: { month: string }) => g.month)).toEqual(months);
     const last = res.body.growth[11];
-    expect(last.newAgencies).toBe(4); // all four seeded just now
-    expect(last.totalAgencies).toBe(4);
+    expect(last.newAgencies).toBe(5); // all five seeded just now
+    expect(last.totalAgencies).toBe(5);
     expect(last.newClients).toBe(2);
     expect(last.totalClients).toBe(2);
     expect(last.commissionsCents).toBe(10_050 + 5_025);
     expect(res.body.growth[10].commissionsCents).toBe(20_000);
     expect(res.body.growth[0].totalAgencies).toBe(0);
+  });
+
+  it("lists an agency with no subscription or commissions as none, with zero amounts", async () => {
+    const res = await request(app).get("/api/admin/platform/metrics").set(withAuth(superAdmin.id));
+    const fresh = res.body.agencies.find((a: { orgId: string }) => a.orgId === freshOrg.id);
+    expect(fresh).toEqual({
+      orgId: freshOrg.id,
+      subscriptionStatus: "none",
+      planTier: null,
+      mrrCents: 0,
+      commissionsLast12MonthsCents: 0,
+      commissionsAllTimeCents: 0,
+    });
+    expect(res.body.agencies).toHaveLength(5);
   });
 
   it("uses the statement's period when a line item has none", async () => {

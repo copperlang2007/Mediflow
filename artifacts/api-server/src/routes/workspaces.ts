@@ -164,38 +164,44 @@ router.get(
     // when it was recorded (a carrier row can omit its period columns).
     const commissionMonth = sql<string>`to_char(coalesce(${commissionLineItemsTable.periodStart}::timestamp, ${commissionStatementsTable.periodStart}::timestamp, ${commissionLineItemsTable.createdAt} AT TIME ZONE 'UTC'), 'YYYY-MM')`;
 
-    const [subs, orgGrowth, clientGrowth, clientDeleted, orgBase, clientBase, commissionTotals, commissionByMonth] =
-      await Promise.all([
-        db
+    // One repeatable-read, read-only snapshot: a write landing mid-request
+    // (a statement upload, a client deletion) must not make the headline
+    // totals disagree with the monthly series in the same response.
+    const [orgIds, subs, orgGrowth, clientGrowth, clientDeleted, orgBase, clientBase, commissionTotals, commissionByMonth] =
+      await db.transaction(
+        async (tx) =>
+          Promise.all([
+        tx.select({ id: organizationsTable.id }).from(organizationsTable),
+        tx
           .select({
             orgId: subscriptionsTable.orgId,
             planTier: subscriptionsTable.planTier,
             status: subscriptionsTable.status,
           })
           .from(subscriptionsTable),
-        db
+        tx
           .select({ month: monthOf(sql`${organizationsTable.createdAt}`), n: sql<number>`count(*)::int` })
           .from(organizationsTable)
           .where(sql`${organizationsTable.createdAt} >= ${windowStart}::timestamptz`)
           .groupBy(sql`1`),
         // Clients added in each month, including ones deleted since: history
         // must not be rewritten by a later soft-delete.
-        db
+        tx
           .select({ month: monthOf(sql`${contactsTable.createdAt}`), n: sql<number>`count(*)::int` })
           .from(contactsTable)
           .where(sql`${contactsTable.createdAt} >= ${windowStart}::timestamptz`)
           .groupBy(sql`1`),
         // Clients removed in each month of the window.
-        db
+        tx
           .select({ month: monthOf(sql`${contactsTable.deletedAt}`), n: sql<number>`count(*)::int` })
           .from(contactsTable)
           .where(sql`${contactsTable.deletedAt} >= ${windowStart}::timestamptz`)
           .groupBy(sql`1`),
-        db
+        tx
           .select({ n: sql<number>`count(*)::int` })
           .from(organizationsTable)
           .where(sql`${organizationsTable.createdAt} < ${windowStart}::timestamptz`),
-        db
+        tx
           .select({ n: sql<number>`count(*)::int` })
           .from(contactsTable)
           // Alive at the start of the window: created before it and not yet deleted.
@@ -205,7 +211,7 @@ router.get(
               sql`(${contactsTable.deletedAt} is null or ${contactsTable.deletedAt} >= ${windowStart}::timestamptz)`,
             ),
           ),
-        db
+        tx
           .select({
             orgId: commissionLineItemsTable.orgId,
             allTime: sql<string>`coalesce(sum(${commissionLineItemsTable.commissionAmount}), 0)::text`,
@@ -217,7 +223,7 @@ router.get(
           // mistyped or far-future period must not inflate any total).
           .where(sql`${commissionMonth} <= ${months[11]}`)
           .groupBy(commissionLineItemsTable.orgId),
-        db
+        tx
           .select({
             month: commissionMonth,
             amount: sql<string>`coalesce(sum(${commissionLineItemsTable.commissionAmount}), 0)::text`,
@@ -226,7 +232,9 @@ router.get(
           .innerJoin(commissionStatementsTable, eq(commissionLineItemsTable.statementId, commissionStatementsTable.id))
           .where(sql`${commissionMonth} <= ${months[11]}`)
           .groupBy(sql`1`),
-      ]);
+                ]),
+        { isolationLevel: "repeatable read", accessMode: "read only" },
+      );
 
     // Revenue: list price of each ACTIVE paid subscription. Stripe is the
     // system of record, so this is an estimate (no seat overage, discounts or
@@ -283,7 +291,7 @@ router.get(
       };
     });
 
-    const allOrgIds = new Set<string>([...perOrg.keys(), ...commissionsByOrg.keys()]);
+    const allOrgIds = new Set<string>([...orgIds.map((o) => o.id), ...perOrg.keys(), ...commissionsByOrg.keys()]);
     res.json({
       generatedAt: new Date().toISOString(),
       months,
