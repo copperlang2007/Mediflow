@@ -1,0 +1,157 @@
+class	branch	last_commit	ahead_of_main	patch_unique	merge_result	note
+A_FULLY_MERGED	claude/add-new-feature	2026-09-23	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/agent-my-clients	2026-09-30	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/batch-2-issues-13-1-17	2026-05-07	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/batch-3-issues-2-9-16	2026-05-08	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/batch-4-issues-4-18-15	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/carrier-template-scaffolding	2026-05-23	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/chore-fix-orval-codegen	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/chore-gitignore-claude-dir	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/ci-github-actions	2026-05-11	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/cleanup-dead-ai-panel-and-tsconfig	2026-05-12	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/compliance-hardening	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/contracting-email-worker	2026-05-22	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/drop-plaintext-medicare-id	2026-05-19	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/esign-backend	2026-05-22	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/esign-frontend	2026-05-22	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/esign-immutability-and-completion-email	2026-05-24	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/feat-commissions-backend	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/feat-commissions-ui	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/feat-feature-builder-backend	2026-05-11	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/feat-feature-builder-ui	2026-05-11	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/fix-bulk-export-phi-gap	2026-05-15	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/fix-commissions-bugs-and-drift	2026-05-12	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/fix-contacts-pagination-guards	2026-05-11	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/hipaa-azure-openai	2026-05-12	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/hipaa-azure-openai-required-in-prod	2026-05-15	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/hipaa-export-anomaly-cron	2026-05-12	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/hipaa-session-and-mfa	2026-05-12	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/hotfix-commissions-schema-export	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/hotfix-migration-idempotency	2026-05-11	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/insureitall-demo-prep	2026-05-23	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/issue-10-automations-engine-ui	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/issue-11-crm-contacts-leads	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/issue-15-test-framework-setup	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/issue-5-two-way-thread-view	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/issue-6-sequence-step-builder	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/issue-7-documents-upload	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/load-test-infra	2026-05-15	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/onboarding-day1	2026-05-21	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/onboarding-day3-tasks	2026-05-21	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/onboarding-writing-number-and-e2e	2026-05-21	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/openapi-regen-and-phi-roles-extract	2026-05-24	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/ops-pagination-and-concurrency	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/ops-sentry-worker-errors	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/perf-reports-and-indexes	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/refactor-agent-profile-decompose	2026-05-10	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/refactor-crm-page-decompose	2026-05-10	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/refactor-reports-route-decompose	2026-05-10	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/resolve-issues-merge-prs-TlQ9J	2026-05-06	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/retention-sweep-concurrent-lock	2026-05-15	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/scale-indexes-and-pool-config	2026-05-15	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/sec-ai-hardening	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/sec-dependabot-sweep	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/sec-doc-acl-fix	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/sec-phi-mask-contacts	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/stabilize-flaky-tests	2026-05-15	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/test-integration-suite	2026-05-09	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/tests-fix-migration-drift	2026-05-11	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/tests-t1-ai-hardening	2026-05-11	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/tests-t1-commissions	2026-05-11	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/tests-t1-compliance-and-pagination	2026-05-11	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/tests-t1-documents	2026-05-10	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/tests-t2-react-component	2026-05-11	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/tests-t3-playwright-smoke	2026-05-11	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/twilio-voice-env	2026-10-02	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/weekly-sweep-replay-guard	2026-05-15	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claude/worker-liveness-and-job-retries	2026-05-15	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claudemoogs/call-scoring	2026-09-30	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claudemoogs/enrollhere-webhook	2026-09-26	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	claudemoogs/intelligent-babbage-gaiam2	2026-09-27	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	codex/repo-quality-batch4-20260522	2026-05-22	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	feat/super-admin-view-as	2026-09-26	0	0	NOOP_MERGE	0 commits ahead of main
+A_FULLY_MERGED	fix/twilio-sms-hardening	2026-09-30	0	0	NOOP_MERGE	0 commits ahead of main
+B_CONTENT_IN_MAIN	claude/account-security-layout	2026-09-28	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	claude/aep-renewal-sourcery-cleanup	2026-06-08	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	claude/ahip-plan-year	2026-10-02	2	2	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	claude/demo-superadmin-persona	2026-06-02	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	claude/gallant-franklin-fn6v9z	2026-10-04	2	2	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	claude/ghl-sync-throughput	2026-09-30	3	2	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	claude/medi-flow-could-not-start-error	2026-09-23	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	claude/node-forge-advisory	2026-10-02	1	1	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	claude/remove-render-deploy	2026-10-02	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	claudemoogs/agent-softphone-access	2026-09-29	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+E_REUSED_OPEN_PR	claudemoogs/dreamy-ptolemy-2ho4s0	2026-10-02	3	3	NOOP_MERGE	REUSED after snapshot: now head of an open PR (#273/#275). DO NOT DELETE.
+B_CONTENT_IN_MAIN	claudemoogs/fix-aep-cockpit-test-clock	2026-09-30	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	claudemoogs/fix-audit-markdown-it	2026-09-29	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	claudemoogs/ghl-feed	2026-09-26	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	claudemoogs/gracious-maxwell-vcqxxo	2026-10-01	26	26	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+E_REUSED_OPEN_PR	claudemoogs/practical-thompson-09n6cr	2026-10-02	16	16	NOOP_MERGE	REUSED after snapshot: now head of an open PR (#273/#275). DO NOT DELETE.
+B_CONTENT_IN_MAIN	copilot/fix-build-deploy-cloud-run	2026-09-14	2	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	copilot/fix-code-comments-review-201	2026-09-08	2	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	copperlang2007-patch-1	2026-10-02	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	feature/gcp-identity-platform-auth	2026-09-26	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+B_CONTENT_IN_MAIN	fix/client-csv-upload	2026-09-24	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+C_REVIEWED_LANDED	claude/account-security-mfa	2026-09-27	2	2	CONFLICT	added lines missing from main: 7/90 (main evolved since)
+C_REVIEWED_LANDED	claude/admin-live-queue	2026-06-05	1	0	CONFLICT	added lines missing from main: 47/489 (main evolved since)
+C_REVIEWED_LANDED	claude/aep-cockpit	2026-06-09	1	0	CONFLICT	added lines missing from main: 108/554 (main evolved since)
+C_REVIEWED_LANDED	claude/aep-renewal-tasks	2026-06-08	1	0	CONFLICT	added lines missing from main: 6/395 (main evolved since)
+C_REVIEWED_LANDED	claude/agent-leaderboard	2026-06-08	2	2	CONFLICT	added lines missing from main: 39/659 (main evolved since)
+C_REVIEWED_LANDED	claude/agent-presence-toggle	2026-06-05	1	0	CONFLICT	added lines missing from main: 2/227 (main evolved since)
+C_REVIEWED_LANDED	claude/agent-readiness-board	2026-06-08	1	0	CONFLICT	added lines missing from main: 71/712 (main evolved since)
+C_REVIEWED_LANDED	claude/audit-ignore-vitest-ghsa	2026-06-01	2	2	CLEAN	added lines missing from main: 18/18 (main evolved since)
+C_REVIEWED_LANDED	claude/beautiful-sagan-KX85y	2026-06-03	4	3	CONFLICT	added lines missing from main: 19/1047 (main evolved since)
+C_REVIEWED_LANDED	claude/bedrock-auth-fix	2026-10-02	7	7	CONFLICT	added lines missing from main: 1/158 (main evolved since)
+C_REVIEWED_LANDED	claude/churn-risk-scoring	2026-06-09	1	0	CONFLICT	added lines missing from main: 66/486 (main evolved since)
+C_REVIEWED_LANDED	claude/clawback-exposure	2026-06-09	1	0	CONFLICT	added lines missing from main: 51/433 (main evolved since)
+C_REVIEWED_LANDED	claude/contact-call-summaries	2026-06-08	1	0	CONFLICT	added lines missing from main: 6/401 (main evolved since)
+C_REVIEWED_LANDED	claude/cool-gauss-XEQg9	2026-06-03	2	2	CONFLICT	added lines missing from main: 2/474 (main evolved since)
+C_REVIEWED_LANDED	claude/credential-expiry	2026-06-08	1	0	CONFLICT	added lines missing from main: 32/569 (main evolved since)
+C_REVIEWED_LANDED	claude/ctm-complaint-tracker	2026-06-09	1	0	CONFLICT	added lines missing from main: 60/1095 (main evolved since)
+C_REVIEWED_LANDED	claude/demo-no-auth-mode	2026-06-01	3	2	CONFLICT	added lines missing from main: 30/316 (main evolved since)
+C_REVIEWED_LANDED	claude/dialer-phase4-eligibility	2026-06-02	4	3	CONFLICT	added lines missing from main: 23/923 (main evolved since)
+C_REVIEWED_LANDED	claude/dialer-phase6-hardening	2026-06-02	1	0	CONFLICT	added lines missing from main: 5/1203 (main evolved since)
+C_REVIEWED_LANDED	claude/feat-dev-console-db-env	2026-05-11	1	0	CONFLICT	added lines missing from main: 50/1248 (main evolved since)
+C_REVIEWED_LANDED	claude/ghl-custom-fields	2026-09-29	2	2	CONFLICT	added lines missing from main: 9/329 (main evolved since)
+C_REVIEWED_LANDED	claude/google-cloud-deployment-ml41c2	2026-09-08	4	1	CONFLICT	added lines missing from main: 53/817 (main evolved since)
+C_REVIEWED_LANDED	claude/hopeful-franklin-rihg25	2026-10-02	7	6	CONFLICT	added lines missing from main: 0/410 (main evolved since)
+C_REVIEWED_LANDED	claude/integration-runbook	2026-06-07	2	2	CONFLICT	added lines missing from main: 15/135 (main evolved since)
+C_REVIEWED_LANDED	claude/lead-callback-queue	2026-06-08	1	0	CONFLICT	added lines missing from main: 16/1149 (main evolved since)
+C_REVIEWED_LANDED	claude/lead-queue-signer	2026-06-06	1	0	CONFLICT	added lines missing from main: 2/171 (main evolved since)
+C_REVIEWED_LANDED	claude/live-docker-instance-zykrpa	2026-07-02	2	2	CONFLICT	added lines missing from main: 2/87 (main evolved since)
+C_REVIEWED_LANDED	claude/marketing-approval	2026-06-09	1	0	CONFLICT	added lines missing from main: 62/932 (main evolved since)
+C_REVIEWED_LANDED	claude/mediflow-audit-growth-vujlxd	2026-09-14	26	0	CONFLICT	added lines missing from main: 79/2224 (main evolved since)
+C_REVIEWED_LANDED	claude/mediflow-could-not-start-error	2026-09-23	3	0	CONFLICT	added lines missing from main: 8/99 (main evolved since)
+C_REVIEWED_LANDED	claude/nice-hawking-v15baa	2026-10-02	5	5	CONFLICT	added lines missing from main: 2/154 (main evolved since)
+C_REVIEWED_LANDED	claude/odyssey-sunfire-policies	2026-09-29	3	3	CONFLICT	added lines missing from main: 18/637 (main evolved since)
+C_REVIEWED_LANDED	claude/product-market-launch-selection-iw23qv	2026-08-09	42	41	CONFLICT	added lines missing from main: 86/2603 (main evolved since)
+C_REVIEWED_LANDED	claude/queue-oversight-hardening	2026-06-05	1	0	CONFLICT	added lines missing from main: 2/37 (main evolved since)
+C_REVIEWED_LANDED	claude/queue-routing-analytics	2026-06-08	1	0	CONFLICT	added lines missing from main: 25/659 (main evolved since)
+C_REVIEWED_LANDED	claude/queue-wallboard	2026-06-08	1	0	CONFLICT	added lines missing from main: 28/390 (main evolved since)
+C_REVIEWED_LANDED	claude/railway-api-deploy	2026-06-08	1	0	CONFLICT	added lines missing from main: 5/84 (main evolved since)
+C_REVIEWED_LANDED	claude/routing-overflow-fallback	2026-06-08	1	0	CONFLICT	added lines missing from main: 0/253 (main evolved since)
+C_REVIEWED_LANDED	claude/scope-gap-flag	2026-06-08	1	0	CONFLICT	added lines missing from main: 1/161 (main evolved since)
+C_REVIEWED_LANDED	claude/transcript-compliance-flagging	2026-06-08	1	0	CONFLICT	added lines missing from main: 6/200 (main evolved since)
+C_REVIEWED_LANDED	claude/upgrade-vitest-4	2026-06-01	1	0	CONFLICT	added lines missing from main: 58/106 (main evolved since)
+C_REVIEWED_LANDED	claudemoogs/agencybridge-reskin	2026-09-28	100	77	CONFLICT	added lines missing from main: 131/30677 (main evolved since)
+C_REVIEWED_LANDED	claudemoogs/blissful-galileo-yd25bp	2026-09-27	1	0	CONFLICT	added lines missing from main: 2/284 (main evolved since)
+C_REVIEWED_LANDED	claudemoogs/compassionate-curie-zpyedz	2026-09-25	1	0	CONFLICT	added lines missing from main: 10/312 (main evolved since)
+C_REVIEWED_LANDED	claudemoogs/export-no-medicare-agent-self-access	2026-09-29	3	3	CONFLICT	added lines missing from main: 0/767 (main evolved since)
+C_REVIEWED_LANDED	claudemoogs/fervent-hopper-u3m14e	2026-09-27	2	2	CONFLICT	added lines missing from main: 0/243 (main evolved since)
+C_REVIEWED_LANDED	claudemoogs/fix-audit-multer-ip-address	2026-09-29	1	0	CONFLICT	added lines missing from main: 0/14 (main evolved since)
+C_REVIEWED_LANDED	claudemoogs/imported-client-consent-basis	2026-09-29	5	5	CONFLICT	added lines missing from main: 0/809 (main evolved since)
+C_REVIEWED_LANDED	claudemoogs/jolly-pascal-55nzli	2026-09-27	1	0	CONFLICT	added lines missing from main: 12/91 (main evolved since)
+C_REVIEWED_LANDED	claudemoogs/laughing-meitner-tqsjjy	2026-09-27	26	20	CONFLICT	added lines missing from main: 36/1069 (main evolved since)
+C_REVIEWED_LANDED	claudemoogs/twilio-voice-calling	2026-09-29	14	14	CONFLICT	added lines missing from main: 21/4871 (main evolved since)
+C_REVIEWED_LANDED	claudemoogs/wizardly-wozniak-srif4q	2026-09-27	1	0	CONFLICT	added lines missing from main: 0/47 (main evolved since)
+C_REVIEWED_LANDED	codex/render-for-early-access-walkthrough-demo	2026-06-01	1	1	CONFLICT	added lines missing from main: 21/89 (main evolved since)
+C_REVIEWED_LANDED	copilot/copperlang2007mediflow	2026-09-08	1	1	CLEAN	added lines missing from main: 5/5 (main evolved since)
+C_REVIEWED_LANDED	copperlang2007-patch-2	2026-10-02	2	2	CONFLICT	added lines missing from main: 0/9 (main evolved since)
+C_REVIEWED_LANDED	cursor/fix-verified-bugs-0c5e	2026-06-15	4	4	CONFLICT	added lines missing from main: 2/108 (main evolved since)
+C_REVIEWED_LANDED	feat/audited-agency-support-edit	2026-09-29	13	13	CONFLICT	added lines missing from main: 3/141 (main evolved since)
+C_REVIEWED_LANDED	feat/contact-create-lead	2026-09-24	6	5	CONFLICT	added lines missing from main: 8/316 (main evolved since)
+C_REVIEWED_LANDED	fix/client-import-start	2026-09-24	3	3	CONFLICT	added lines missing from main: 10/67 (main evolved since)
+C_REVIEWED_LANDED	fix/contact-details-edit	2026-09-26	2	2	CONFLICT	added lines missing from main: 8/124 (main evolved since)
+C_REVIEWED_LANDED	fix/lead-contact-picker-help	2026-09-24	5	5	CONFLICT	added lines missing from main: 7/180 (main evolved since)
+C_REVIEWED_LANDED	fix/task-status-refresh	2026-09-24	8	8	CONFLICT	added lines missing from main: 1/97 (main evolved since)
+E_OPEN_PR_UNLANDED	claude/agencybridge-compliance-review-s3nc6l	2026-10-04	3	3	CLEAN	PR #272

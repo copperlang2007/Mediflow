@@ -29,7 +29,7 @@
 # Required env (export before running, or edit the defaults below):
 #   PROJECT_ID           GCP project to deploy into (created if it doesn't
 #                         exist AND BILLING_ACCOUNT_ID is set).
-#   GITHUB_REPO           "owner/repo", e.g. copperlang2007/mediflow
+#   GITHUB_REPO           "owner/repo", e.g. copperlang2007/Mediflow (case-sensitive: WIF compares it exactly)
 # Optional env:
 #   REGION                Default: us-central1
 #   BILLING_ACCOUNT_ID    Only needed if PROJECT_ID doesn't exist yet.
@@ -44,7 +44,7 @@
 set -euo pipefail
 
 : "${PROJECT_ID:?Set PROJECT_ID to the target GCP project id}"
-: "${GITHUB_REPO:?Set GITHUB_REPO to owner/repo, e.g. copperlang2007/mediflow}"
+: "${GITHUB_REPO:?Set GITHUB_REPO to owner/repo, e.g. copperlang2007/Mediflow (case-sensitive: WIF compares it exactly)}"
 REGION="${REGION:-us-central1}"
 DB_TIER="${DB_TIER:-db-custom-2-8192}"
 DB_EDITION="${DB_EDITION:-ENTERPRISE}"
@@ -347,6 +347,14 @@ if ! gcloud iam workload-identity-pools providers describe "${WIF_PROVIDER}" \
     --location=global --workload-identity-pool="${WIF_POOL}" \
     --issuer-uri="https://token.actions.githubusercontent.com" \
     --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
+    --attribute-condition="assertion.repository == '${GITHUB_REPO}'"
+else
+  # Re-runs must repair an existing provider: the condition is case-sensitive,
+  # so a provider created with the wrong repo casing would otherwise keep
+  # rejecting GitHub Actions even though the IAM binding below is correct.
+  log "Updating Workload Identity Provider ${WIF_PROVIDER} condition to ${GITHUB_REPO}…"
+  gcloud iam workload-identity-pools providers update-oidc "${WIF_PROVIDER}" \
+    --location=global --workload-identity-pool="${WIF_POOL}" \
     --attribute-condition="assertion.repository == '${GITHUB_REPO}'"
 fi
 WIF_PROVIDER_RESOURCE="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WIF_POOL}/providers/${WIF_PROVIDER}"
