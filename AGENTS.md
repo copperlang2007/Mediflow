@@ -122,7 +122,7 @@ Demo with no accounts: `docker compose up --build`.
   Never hand-edit `generated/`. `lib/api-zod/src/index.ts` must remain exactly
   `export * from "./generated/api"`.
 - **Authorization lives on the server.** Hiding a nav item is not access control.
-  New routes need `requirePermission` and, for PHI, audit logging.
+  New routes need `requirePermission` and, for PHI, explicit audit logging — do not assume reads are audited (contacts reads are currently not; see `docs/STATE.md`).
 - Match surrounding style. No drive-by refactors in a feature PR.
 - Tests: bug fix → a test that fails before the fix. New route → integration
   test including a cross-org denial case.

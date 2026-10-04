@@ -27,13 +27,15 @@ authoritative, dated version lives in [`docs/STATE.md`](docs/STATE.md).
 | --- | --- |
 | Application code | Feature-rich and tested: 86 API route modules, ~63 web pages, 69 database migrations, 164 API test files and 58 web test files. |
 | `main` CI | **Red.** Typecheck and tests pass; the `pnpm audit (moderate)` job fails on advisory `GHSA-vfj7-8cjw-p6xm` (`braces`, no upstream patch). The suppression is in open **PR #272**. |
-| Production deploy | **Failing on every push to `main`.** The GCP deploy service account lacks `secretmanager.versions.add` on `mediflow-twilio-api-key-secret`. Fix: a human with `gcloud` access re-runs `scripts/deploy/gcp-bootstrap.sh`. |
+| Production deploy | **Failing on every push to `main`.** The GCP deploy service account lacks `secretmanager.versions.add` on `mediflow-twilio-api-key-secret`. Fix for that error: a human with `gcloud` access re-runs `scripts/deploy/gcp-bootstrap.sh`. **Not verified** that the deploy then succeeds: the deploy always mounts the e-sign signing secrets, which must hold real production PEMs (a placeholder may abort startup). |
 | PHI readiness | **Not cleared.** ADR 0004 (GCP production) is still "Proposed"; nothing in the repo proves a successful production deploy. Several vendor BAAs are unconfirmed (see [Compliance](#compliance-and-phi)). |
 | Auth | **Clerk** in production, MFA mandatory for everyone. Migration to GCP Identity Platform is *proposed only* (ADR 0006). |
 | AI | **Claude on AWS Bedrock** (Anthropic Messages API). Azure OpenAI is a supported alternate. Plain OpenAI is dev/test only. |
-| Unmerged work | Open PRs change daily (list them on GitHub; do not trust a snapshot). On 2026-10-04 the only *branch* with unlanded work was PR #272; the other ~155 branches had already landed or add nothing — see [`docs/BRANCH_AUDIT_2026-10-04.md`](docs/BRANCH_AUDIT_2026-10-04.md). |
+| Unmerged work | Open PRs change daily (list them on GitHub; do not trust a snapshot). At the 2026-10-04 snapshot the only branch with unlanded work was PR #272; the other ~155 had landed or add nothing, **but** two of them (`claudemoogs/practical-thompson-09n6cr`, `claudemoogs/dreamy-ptolemy-2ho4s0`) were reused for new open PRs #273 and #275 right afterwards and must not be deleted — see [`docs/BRANCH_AUDIT_2026-10-04.md`](docs/BRANCH_AUDIT_2026-10-04.md). |
 
 ### Known gaps (intentional, not bugs)
+
+- **Not every PHI read is audited.** Contact list/detail responses decrypt Medicare ID, DOB and health conditions for privileged roles, but the contacts router runs with `includeReads: false`, so those disclosures write no audit row (only view-as-agency reads are logged). Treat this as a compliance gap to close before PHI launch.
 
 - **E-signature is Beta.** The built-in provider has no KBA or sealed identity
   guarantees; production refuses it unless `ESIGN_PROVIDER=docusign` or
@@ -55,7 +57,7 @@ authoritative, dated version lives in [`docs/STATE.md`](docs/STATE.md).
 | --- | --- |
 | **CRM & sales** | Contacts, leads, pipelines, two-way SMS, outbound email with delivery tracking (inbound email replies are not yet ingested), sequences, omnichannel campaigns, quoting, appointments, enrollment applications, retention and churn-risk scoring, AEP (annual enrollment) command center. |
 | **Agents** | Onboarding checklists, state licenses, carrier certifications, AHIP records, e-signed contracting packets, "Ready to Sell" readiness board, leaderboard. |
-| **Compliance** | Audit log of PHI access, BAA checklist, complaint (CTM) tracker with SLA, marketing-material approval, call recording and AI-assisted call scoring, mandatory MFA, org-level session timeout. |
+| **Compliance** | Audit log (PHI writes, admin actions and view-as-agency activity; see Known gaps for unaudited reads), BAA checklist, complaint (CTM) tracker with SLA, marketing-material approval, call recording and AI-assisted call scoring, mandatory MFA, org-level session timeout. |
 | **Commissions** | AgencyBloc-style commission tracking, carrier statement upload and **automatic intake from a watched Google Drive folder**, reconciliation, clawback exposure. |
 | **Calls** | Inbound lead queue with routing and callbacks, Twilio Voice browser softphone, supervisor wallboard, masterBRIDGE dialer events. |
 | **Platform** | Multi-agency workspaces, super-admin "view as agency" (view-only, audited), per-agency white-label branding, Stripe plans (Starter / Growth / Agency), import wizards (Monday.com, GoHighLevel, CSV), GoHighLevel contact sync. |
@@ -131,7 +133,7 @@ clients, and keep `lib/api-zod/src/index.ts` as the single line
   mode paired with live credentials.
 - **Auth:** Clerk, MFA required for all users (cannot be disabled in
   production), per-org inactivity timeout (default 30 min), rate limits on auth.
-- **Auditing:** automatic audit-log rows for PHI reads and writes; super-admin
+- **Auditing:** automatic audit-log rows for writes and admin actions; super-admin
   view-as-agency is read-only by default and always logged; the narrow audited
   exceptions are invitation create/resend/revoke and support edits of basic
   contact/agent profile fields (these need MFA, support-edit headers and a reason).

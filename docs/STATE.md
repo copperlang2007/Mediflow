@@ -27,7 +27,7 @@ _Last updated: 2026-10-04 — by the audit session below._
 
 ### Owner-only actions blocking progress
 
-1. **Fix the deploy.** Someone with Google Cloud admin rights re-runs
+1. **Fix the deploy.** Make sure the e-sign PEM secrets are real, then someone with Google Cloud admin rights re-runs
    `scripts/deploy/gcp-bootstrap.sh` (it re-applies the IAM binding that lets
    the deploy account add secret versions). Use
    `GITHUB_REPO=copperlang2007/Mediflow` — exact casing.
@@ -64,7 +64,11 @@ Scope of Appointment captured on call recording (no 48-hour wait enforced).
 
 ### Known gaps
 
-E-sign provider is Beta · contracting POA PDF is a placeholder · per-carrier
+**Compliance:** contact reads that decrypt PHI (`GET /contacts`, `GET /contacts/:id` via `serializeContact`) are not audit-logged (`routes/contacts.ts` sets `includeReads: false`). Decide: audit them, or document the exception. Do this before PHI launch.
+
+**Deploy:** after the IAM fix, a further boot failure is possible if the `ESIGN_SIGNING_CERT_PEM` / `ESIGN_SIGNING_KEY_PEM` GitHub secrets are unset (the deploy mounts the Secret Manager placeholders unconditionally and `assertEsignSigningCredsAreProd` runs at boot). Unverified — confirm real PEMs are set.
+
+**Other:** E-sign provider is Beta · contracting POA PDF is a placeholder · per-carrier
 paperwork templates pending · client portal is staff-preview only · no
 Postgres RLS · dialer Phase 4+ TODOs and auto-dial deferred · some Billing and
 Reconciliation panels "Coming soon" · Dropbox Sign endpoints are dead 501 stubs
