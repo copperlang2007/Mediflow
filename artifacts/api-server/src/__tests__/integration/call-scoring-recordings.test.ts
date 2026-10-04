@@ -554,6 +554,30 @@ describe("review fixes", () => {
     expect(await handle.db.select().from(schema.callScoreClaimsTable).where(eq(schema.callScoreClaimsTable.transcriptId, transcriptId))).toHaveLength(0);
   });
 
+  it("a job whose claim was taken over does not save its score", async () => {
+    const results = stereoResults();
+    fakeGoogle({ poll: "done", results });
+    const first = await uploadAndConfirm(admin.id);
+    await recordings.processRecording(first);
+    await recordings.processRecording(first);
+    const transcriptId = (await rowOf(first)).transcriptId!;
+    const before = await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, transcriptId));
+    const { rescoreTranscript } = await import("../../lib/callScoring/ingest");
+    const { getRubric } = await import("../../lib/callScoring/rubrics");
+    const out = await rescoreTranscript({
+      orgId: org.id,
+      userId: admin.id,
+      userRole: "agency_admin",
+      transcriptId,
+      rubric: getRubric("general-sales")!,
+      aiMode: "off",
+      stillOwned: async () => false,
+    });
+    expect(out.kind).toBe("duplicate");
+    const after = await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, transcriptId));
+    expect(after).toHaveLength(before.length);
+  });
+
   it("two confirms racing at the daily limit never delete accepted audio", async () => {
     process.env.CALL_RECORDINGS_DAILY_LIMIT = "1";
     try {
@@ -605,13 +629,22 @@ describe("review fixes", () => {
 
       // Due: a failing delete keeps it pending; the next run deletes it.
       const later = new Date(refused.purgeAfter!.getTime() + 1000);
-      await recordings.sweepStalledRecordings(async () => true, later, async () => {
+      const failing = async () => {
         throw new Error("503");
-      });
-      expect((await rowOf(b.body.recordingId)).purgeAfter).not.toBeNull();
+      };
+      await recordings.sweepStalledRecordings(async () => true, later, failing);
+      const backedOff = await rowOf(b.body.recordingId);
+      expect(backedOff.purgeAttempts).toBe(1);
+      expect(backedOff.purgeAfter!.getTime()).toBe(later.getTime() + recordings.purgeBackoffMs(1));
+      // Backed off: not retried before its next time, so stuck deletes do not crowd out new ones.
       await recordings.sweepStalledRecordings(async () => true, later, sweepDelete);
+      expect(objects().has(keyB)).toBe(true);
+      const retryAt = new Date(backedOff.purgeAfter!.getTime() + 1000);
+      await recordings.sweepStalledRecordings(async () => true, retryAt, sweepDelete);
       expect(objects().has(keyB)).toBe(false);
-      expect((await rowOf(b.body.recordingId)).purgeAfter).toBeNull();
+      const done = await rowOf(b.body.recordingId);
+      expect(done.purgeAfter).toBeNull();
+      expect(done.purgeAttempts).toBe(0);
     } finally {
       delete process.env.CALL_RECORDINGS_DAILY_LIMIT;
     }

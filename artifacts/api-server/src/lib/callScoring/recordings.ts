@@ -51,7 +51,12 @@ async function fail(id: string, reason: string): Promise<StepOutcome> {
   return "finished";
 }
 
-/** A claim older than this belongs to a job that died mid-score and is taken over. */
+/**
+ * A claim older than this belongs to a job that died mid-score and is taken
+ * over. Scoring is bounded (AI review 90 s, each statement 30 s), so a live
+ * job is far inside this; one that stalls anyway cannot save its score after
+ * a takeover (rescoreTranscript's stillOwned check).
+ */
 const RESCORE_CLAIM_STALE_MS = 15 * 60 * 1000;
 
 /** Claim the right to add a score to a call; returns the claim's timestamp (its token) or null if another job holds it. */
@@ -195,6 +200,14 @@ export async function processRecording(recordingId: string, deps: { privateObjec
           transcriptId,
           rubric,
           aiMode: row.aiMode === "off" ? "off" : "auto",
+          stillOwned: async (tx) =>
+            (
+              await tx
+                .select({ transcriptId: callScoreClaimsTable.transcriptId })
+                .from(callScoreClaimsTable)
+                .where(and(eq(callScoreClaimsTable.transcriptId, transcriptId), eq(callScoreClaimsTable.claimedAt, claimedAt)))
+                .for("update")
+            ).length > 0,
         });
         if (rescored.kind === "error") return fail(row.id, rescored.message);
       }
@@ -234,6 +247,13 @@ export function purgeTime(createdAt: Date, now: Date = new Date()): Date {
 
 /** Most audio deletes one sweep attempts; the rest wait for the next run. */
 const PURGE_BATCH = 200;
+/** After this many failed deletes in a row the failure is logged as an error (retries continue, at most daily). */
+export const PURGE_ALERT_AFTER = 5;
+
+/** Wait before retrying a failed delete: 2, 4, 8 … minutes, capped at a day. Audio is never given up on. */
+export function purgeBackoffMs(attempts: number): number {
+  return Math.min(24 * 60 * 60 * 1000, 2 ** Math.min(attempts, 20) * 60_000);
+}
 
 /**
  * Recover recordings whose job chain died (a failed re-enqueue, a lost job,
@@ -241,7 +261,7 @@ const PURGE_BATCH = 200;
  * uploads that were never confirmed, and delete audio that will not be
  * transcribed. Each stalled row is claimed by bumping `checked_at` first, so
  * overlapping sweeps queue it once. A delete that fails keeps `purge_after`
- * set and is retried on the next run.
+ * set, pushed back with exponential backoff, and is retried.
  */
 export async function sweepStalledRecordings(
   requeue: (recordingId: string) => Promise<boolean>,
@@ -275,7 +295,7 @@ export async function sweepStalledRecordings(
     .returning({ id: callRecordingsTable.id });
 
   const due = await db
-    .select({ id: callRecordingsTable.id, objectKey: callRecordingsTable.objectKey })
+    .select({ id: callRecordingsTable.id, objectKey: callRecordingsTable.objectKey, purgeAttempts: callRecordingsTable.purgeAttempts })
     .from(callRecordingsTable)
     .where(and(eq(callRecordingsTable.status, "failed"), lte(callRecordingsTable.purgeAfter, now)))
     .orderBy(callRecordingsTable.purgeAfter)
@@ -285,10 +305,17 @@ export async function sweepStalledRecordings(
     try {
       await deleteObject(r.objectKey);
     } catch (err) {
-      logger.warn({ err: (err as Error).message, recordingId: r.id }, "Call recording sweep: could not delete unused audio; will retry");
+      // Back off so stuck deletes do not crowd out new ones; keep retrying.
+      const attempts = r.purgeAttempts + 1;
+      await db.update(callRecordingsTable)
+        .set({ purgeAttempts: attempts, purgeAfter: new Date(now.getTime() + purgeBackoffMs(attempts)) })
+        .where(eq(callRecordingsTable.id, r.id));
+      const log = { err: (err as Error).message, recordingId: r.id, attempts };
+      if (attempts >= PURGE_ALERT_AFTER) logger.error(log, "Call recording sweep: unused audio still cannot be deleted; check bucket access");
+      else logger.warn(log, "Call recording sweep: could not delete unused audio; will retry");
       continue;
     }
-    await db.update(callRecordingsTable).set({ purgeAfter: null }).where(eq(callRecordingsTable.id, r.id));
+    await db.update(callRecordingsTable).set({ purgeAfter: null, purgeAttempts: 0 }).where(eq(callRecordingsTable.id, r.id));
     purged++;
   }
   return { requeued, abandoned: abandoned.length, purged };

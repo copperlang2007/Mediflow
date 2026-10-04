@@ -293,6 +293,8 @@ export const callRecordingsTable = pgTable(
     committedAt: timestamp("committed_at", { withTimezone: true }),
     /** Audio to delete once the upload link has expired; cleared only after the delete succeeds. */
     purgeAfter: timestamp("purge_after", { withTimezone: true }),
+    /** Failed deletes in a row; drives the sweep's backoff. */
+    purgeAttempts: integer("purge_attempts").notNull().default(0),
     durationSeconds: integer("duration_seconds"),
     createdBy: text("created_by").references(() => usersTable.id, { onDelete: "set null" }),
     retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
