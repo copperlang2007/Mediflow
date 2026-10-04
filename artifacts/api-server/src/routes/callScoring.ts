@@ -25,7 +25,7 @@ import { Router, type IRouter, type NextFunction, type Request, type Response } 
 import multer from "multer";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import {
   CALL_RECORDING_LAYOUTS,
   CALL_TRANSCRIPT_FORMATS,
@@ -871,6 +871,40 @@ router.post(
 
 // ---- recordings (phase 2b) ---------------------------------------------------
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Recordings that count against the agency's daily cap: everything that
+ * reached (or is about to reach) Speech-to-Text in the last 24 hours. A
+ * failure after Google was called (attempts > 0) still cost money and counts;
+ * an upload rejected before transcription does not. With `includeOpenUploads`,
+ * upload links issued in the last 15 minutes count too. Call it under the
+ * per-agency advisory lock.
+ */
+async function recordingsToday(tx: Tx, orgId: string, now: Date, opts: { includeOpenUploads?: boolean } = {}): Promise<number> {
+  const committed = or(
+    inArray(callRecordingsTable.status, ["queued", "transcribing", "scored"]),
+    and(eq(callRecordingsTable.status, "failed"), gt(callRecordingsTable.attempts, 0)),
+  );
+  const openUpload = and(eq(callRecordingsTable.status, "uploading"), gt(callRecordingsTable.createdAt, new Date(now.getTime() - 15 * 60 * 1000)));
+  const [{ n }] = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(callRecordingsTable)
+    .where(
+      and(
+        eq(callRecordingsTable.orgId, orgId),
+        gt(callRecordingsTable.createdAt, new Date(now.getTime() - 24 * 60 * 60 * 1000)),
+        opts.includeOpenUploads ? or(committed, openUpload) : committed,
+      ),
+    );
+  return Number(n);
+}
+
+const lockRecordings = (tx: Tx, orgId: string) => tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`call-recordings:${orgId}`}))`);
+
+const dailyLimitMessage = (limit: number) =>
+  `Your agency has started ${limit} recordings in the last 24 hours, the daily limit. Try again later, or ask the administrator to raise it.`;
+
 const RecordingStart = IngestFields.omit({ source: true }).extend({
   filename: z.string().trim().min(1).max(200),
   contentType: z.string().trim().toLowerCase().max(100),
@@ -954,19 +988,11 @@ router.post(
     const limit = dailyRecordingLimit();
     const now = new Date();
     const inserted = await db.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`call-recordings:${authReq.orgId}`}))`);
-      const [{ started }] = await tx
-        .select({ started: sql<number>`count(*)::int` })
-        .from(callRecordingsTable)
-        .where(
-          and(
-            eq(callRecordingsTable.orgId, authReq.orgId),
-            gt(callRecordingsTable.createdAt, new Date(now.getTime() - 24 * 60 * 60 * 1000)),
-            // A rejected upload (too large, never finished) was never transcribed: it costs nothing.
-            ne(callRecordingsTable.status, "failed"),
-          ),
-        );
-      if (Number(started) >= limit) return false;
+      await lockRecordings(tx, authReq.orgId);
+      // Committed recordings plus links handed out in the last 15 minutes (a
+      // link that was never used stops counting once it has expired).
+      const started = await recordingsToday(tx, authReq.orgId, now, { includeOpenUploads: true });
+      if (started >= limit) return false;
       await tx.insert(callRecordingsTable).values({
       id,
       orgId: authReq.orgId,
@@ -992,7 +1018,7 @@ router.post(
     });
     if (!inserted) {
       logger.warn({ orgId: authReq.orgId, limit }, "Call recording: daily limit reached");
-      res.status(429).json({ error: `Your agency has started ${limit} recordings in the last 24 hours, the daily limit. Try again later, or ask the administrator to raise it.`, code: "daily_limit" });
+      res.status(429).json({ error: dailyLimitMessage(limit), code: "daily_limit" });
       return;
     }
     // Both headers are part of the signature; the second makes the URL create-only.
@@ -1054,11 +1080,33 @@ router.post(
       res.status(413).json({ error: `Recordings are limited to ${MAX_RECORDING_BYTES / 1024 / 1024} MB.`, code: "file_too_large" });
       return;
     }
-    const moved = await db.update(callRecordingsTable)
-      .set({ status: "queued", sizeBytes: meta.size, updatedAt: new Date() })
-      .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "uploading")))
-      .returning({ id: callRecordingsTable.id });
-    if (moved.length) {
+    // The cap is enforced again here, where transcription is committed: links
+    // handed out in a burst cannot all be confirmed past it.
+    const limit = dailyRecordingLimit();
+    const outcome = await db.transaction(async (tx) => {
+      await lockRecordings(tx, authReq.orgId);
+      if ((await recordingsToday(tx, authReq.orgId, new Date())) >= limit) return "over_limit" as const;
+      const moved = await tx.update(callRecordingsTable)
+        .set({ status: "queued", sizeBytes: meta.size, updatedAt: new Date() })
+        .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "uploading")))
+        .returning({ id: callRecordingsTable.id });
+      return moved.length ? ("queued" as const) : ("unchanged" as const);
+    });
+    if (outcome === "over_limit") {
+      logger.warn({ orgId: authReq.orgId, limit }, "Call recording: daily limit reached at confirm");
+      // Not transcribed, so the uploaded audio is not kept; the user uploads it again later.
+      try {
+        await storage.deleteCallRecording(row.objectKey);
+      } catch (err) {
+        logger.error({ err: (err as Error).message, recordingId: row.id }, "Call recording: could not delete an upload refused at the daily limit");
+      }
+      await db.update(callRecordingsTable)
+        .set({ status: "failed", error: "The daily recording limit was reached. Upload this recording again tomorrow.", updatedAt: new Date() })
+        .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "uploading")));
+      res.status(429).json({ error: dailyLimitMessage(limit), code: "daily_limit" });
+      return;
+    }
+    if (outcome === "queued") {
       const jobId = await enqueue(JOB_NAMES.TRANSCRIBE_RECORDING, { recordingId: row.id }, { singletonKey: transcribeJobKey(row.id) });
       if (!jobId) logger.error({ recordingId: row.id }, "Call recording: could not queue transcription");
     }

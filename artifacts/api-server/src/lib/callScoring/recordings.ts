@@ -19,12 +19,12 @@
  * (ingestTranscript also dedupes by content). `checked_at` records each look;
  * the sweeper (workers/recordingsSweep.ts) re-queues rows whose job chain died.
  */
-import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
-import { db, callRecordingsTable, type CallRecordingLayout } from "@workspace/db";
+import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { db, callRecordingsTable, callScoresTable, type CallRecordingLayout, type CallTranscriptSource } from "@workspace/db";
 import { logger } from "../logger";
 import { open } from "./seal";
 import { DEFAULT_RUBRIC_ID, getRubric } from "./rubrics";
-import { ingestTranscript, resolveRubric } from "./ingest";
+import { ingestTranscript, rescoreTranscript, resolveRubric } from "./ingest";
 import type { Rubric } from "./types";
 import { cancelTranscription, gsUri, pollTranscription, resultsToTurns, safeReason, speechSetup, startTranscription } from "./speech";
 
@@ -43,10 +43,11 @@ export interface RecordingDetails {
 
 export type StepOutcome = "poll" | "retry_start" | "finished";
 
+/** Only a recording still in flight can fail: a stale job never overwrites one another job scored. */
 async function fail(id: string, reason: string): Promise<StepOutcome> {
   await db.update(callRecordingsTable)
     .set({ status: "failed", error: reason, updatedAt: new Date() })
-    .where(eq(callRecordingsTable.id, id));
+    .where(and(eq(callRecordingsTable.id, id), inArray(callRecordingsTable.status, ["queued", "transcribing"])));
   return "finished";
 }
 
@@ -80,7 +81,9 @@ export async function processRecording(recordingId: string, deps: { privateObjec
       return "poll";
     } catch (err) {
       logger.warn({ reason: safeReason((err as Error).message), recordingId: row.id }, "Speech-to-Text: could not start transcription");
-      if (attempts >= MAX_START_ATTEMPTS) return fail(row.id, "Speech-to-Text could not start transcribing this recording. Check the Speech-to-Text setup, then upload it again.");
+      if (attempts >= MAX_START_ATTEMPTS) {
+        return fail(row.id, "Speech-to-Text could not start transcribing this recording after several tries. Upload it again later; if it keeps failing, ask the administrator to check the Speech-to-Text setup.");
+      }
       await db.update(callRecordingsTable)
         .set({ status: "queued", updatedAt: new Date() })
         .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "transcribing")));
@@ -92,6 +95,11 @@ export async function processRecording(recordingId: string, deps: { privateObjec
   if (!row.operationName) {
     // Another job is starting it right now, or that job died before saving the operation.
     if (now.getTime() - row.updatedAt.getTime() < START_STALL_MS) return "poll";
+    if (row.attempts >= MAX_START_ATTEMPTS) {
+      return fail(row.id, "Speech-to-Text could not start transcribing this recording after several tries. Upload it again later; if it keeps failing, ask the administrator to check the Speech-to-Text setup.");
+    }
+    // The interrupted start still counts as an attempt, so a start that keeps
+    // crashing gives up after MAX_START_ATTEMPTS instead of looping forever.
     await db.update(callRecordingsTable)
       .set({ status: "queued", updatedAt: now })
       .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "transcribing"), isNull(callRecordingsTable.operationName)));
@@ -134,7 +142,8 @@ export async function processRecording(recordingId: string, deps: { privateObjec
     filename: details.filename,
     format: "json",
     rubric,
-    source: "recording",
+    // The uploader's source (e.g. an ENROLLHERE download) is kept; a plain upload is a "recording".
+    source: row.source === "upload" ? "recording" : (row.source as CallTranscriptSource),
     externalRef: details.externalRef,
     callDate: row.callDate,
     phone: details.phone,
@@ -146,6 +155,28 @@ export async function processRecording(recordingId: string, deps: { privateObjec
 
   if (result.kind === "error") return fail(row.id, result.message);
   const transcriptId = result.kind === "ok" ? result.summary.transcriptId : result.transcriptId;
+  if (result.kind === "duplicate") {
+    // Same speech as an earlier call. If it was scored under another checklist,
+    // add a score under the one chosen for this upload (history is kept).
+    // Only when no score under this checklist exists yet: alternating checklists
+    // across re-uploads must not re-run scoring every time.
+    const [existing] = await db
+      .select({ id: callScoresTable.id })
+      .from(callScoresTable)
+      .where(and(eq(callScoresTable.transcriptId, transcriptId), eq(callScoresTable.rubricId, rubric.id)))
+      .limit(1);
+    if (!existing) {
+      const rescored = await rescoreTranscript({
+        orgId: row.orgId,
+        userId: row.createdBy,
+        userRole: details.uploaderRole,
+        transcriptId,
+        rubric,
+        aiMode: row.aiMode === "off" ? "off" : "auto",
+      });
+      if (rescored.kind === "error") return fail(row.id, rescored.message);
+    }
+  }
   await db.update(callRecordingsTable)
     .set({
       status: "scored",
@@ -172,6 +203,7 @@ export const UPLOAD_ABANDONED_AFTER_MS = 24 * 60 * 60 * 1000;
 export async function sweepStalledRecordings(
   requeue: (recordingId: string) => Promise<boolean>,
   now: Date = new Date(),
+  deleteObject: (objectKey: string) => Promise<void> = async () => undefined,
 ): Promise<{ requeued: number; abandoned: number }> {
   const stalledBefore = new Date(now.getTime() - STALLED_AFTER_MS);
   const stalled = await db
@@ -196,6 +228,14 @@ export async function sweepStalledRecordings(
         lt(callRecordingsTable.createdAt, new Date(now.getTime() - UPLOAD_ABANDONED_AFTER_MS)),
       ),
     )
-    .returning({ id: callRecordingsTable.id });
+    .returning({ id: callRecordingsTable.id, objectKey: callRecordingsTable.objectKey });
+  // Whatever was uploaded for an unfinished recording is PHI nobody will use: remove it.
+  for (const r of abandoned) {
+    try {
+      await deleteObject(r.objectKey);
+    } catch (err) {
+      logger.warn({ err: (err as Error).message, recordingId: r.id }, "Call recording sweep: could not delete an abandoned upload");
+    }
+  }
   return { requeued, abandoned: abandoned.length };
 }

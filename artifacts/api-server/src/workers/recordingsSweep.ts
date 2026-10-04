@@ -11,8 +11,13 @@ import { sweepStalledRecordings } from "../lib/callScoring/recordings";
 import { logger } from "../lib/logger";
 
 export async function recordingsSweepWorker(): Promise<void> {
-  const summary = await sweepStalledRecordings(async (recordingId) =>
-    Boolean(await enqueue(JOB_NAMES.TRANSCRIBE_RECORDING, { recordingId }, { singletonKey: transcribeJobKey(recordingId) })),
+  const { ObjectStorageService } = await import("../lib/objectStorage");
+  const storage = new ObjectStorageService();
+  const summary = await sweepStalledRecordings(
+    async (recordingId) =>
+      Boolean(await enqueue(JOB_NAMES.TRANSCRIBE_RECORDING, { recordingId }, { singletonKey: transcribeJobKey(recordingId) })),
+    new Date(),
+    (objectKey) => storage.deleteCallRecording(objectKey),
   );
   if (summary.requeued || summary.abandoned) logger.info({ ...summary }, "Call recording sweep finished");
 }
