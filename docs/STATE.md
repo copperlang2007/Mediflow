@@ -14,32 +14,26 @@ _Last updated: 2026-10-04 — by the audit session below._
 
 | Item | Status | Detail |
 | --- | --- | --- |
-| `main` HEAD | `f0195e0` (2026-10-03) | "Statement ingest: fix four post-merge review findings (#271)". |
+| `main` HEAD | `4911b43` (2026-10-04) | "Call recordings: post-merge review fixes (#272)". Re-check: this row goes stale within hours. |
 | CI: typecheck + test | Green | |
-| CI: `pnpm audit (moderate)` | **Red** | `braces` advisory `GHSA-vfj7-8cjw-p6xm`, no patch. Suppression is in PR #272. Red on the last two `main` commits. |
+| CI: `pnpm audit (moderate)` | Green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
 | CI: migration journal | Green | |
-| Production deploy (GCP Cloud Run) | **Red** since 2026-10-02 | Step "Deploy to Cloud Run": `PERMISSION_DENIED secretmanager.versions.add` on `mediflow-twilio-api-key-secret`. Image build and push succeed. |
-| Production ever verified live? | **Unknown / no evidence** | ADR 0004 still "Proposed"; `PRODUCTION_READINESS.md` says not deployed. |
+| Production deploy (GCP Cloud Run) | **Green** at `4911b43` (run 37227958593) | Deploy step and the Chromium check of the deployed page both passed. Previously red 2026-10-02 → 2026-10-04 (`PERMISSION_DENIED secretmanager.versions.add` on `mediflow-twilio-api-key-secret`); presumably fixed by an out-of-band bootstrap re-run — **not recorded anywhere; owner please confirm what changed.** |
+| Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. |
-| Open PRs | Query GitHub live | At 2026-10-04 19:18 UTC: #272 (call-recording fixes + audit suppression), #273 (platform revenue overview), #274 (this docs PR), #275 (add-policy form), #276 (audit exception + ADR 0007). #273/#275 came from other sessions after the audit began and were not reviewed here. |
+| Open PRs | Query GitHub live | At 2026-10-04 ~19:45 UTC: #273 (platform revenue overview), #274 (this docs PR), #275 (add-policy form), #276 (audit exception + ADR 0007 — now redundant with #272). #272 merged. #273/#275 came from other sessions after the audit began and were not reviewed here. |
 | Migration high-water mark | `0066_kb_library_statement_upload_guide` | Two files share `0064`. 69 SQL files. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
-### Owner-only actions blocking progress
+### Owner-only actions
 
-1. **Fix the deploy.** Make sure the e-sign PEM secrets are real, then someone with Google Cloud admin rights re-runs
-   `scripts/deploy/gcp-bootstrap.sh` (it re-applies the IAM binding that lets
-   the deploy account add secret versions). Use
-   `GITHUB_REPO=copperlang2007/Mediflow` — exact casing.
-2. **Merge PR #272** (turns CI green). Note it also edits
-   `scripts/deploy/gcp-bootstrap.sh`; a small merge conflict with the casing
-   fix from the 2026-10-04 audit PR is possible — resolve by keeping both.
-3. **Confirm BAAs** (Google Cloud, AWS Bedrock, HighLevel, EnrollHere,
-   DocuSign; check Twilio/Resend/Stripe) and record the outcome here.
-4. **Turn on** GitHub setting "Automatically delete head branches".
-5. Approve a branch cleanup (see audit: delete the 93 in buckets A+B; spot-check the 62 in C). Existing
-   `.github/scripts/nuke-branches.sh` embeds escaped quotes in its branch list
-   and was not tested; do not run it as-is.
+1. **Record how the deploy was fixed** (what was re-run or changed in Google Cloud) in a session note, and confirm the e-sign signing secrets hold real production PEMs.
+2. **Promote ADR 0004** to Accepted if you consider the production deploy proven; otherwise say what is still missing.
+3. **Confirm BAAs** (Google Cloud, AWS Bedrock, HighLevel, EnrollHere, DocuSign; check Twilio/Resend/Stripe) and record the outcome here.
+4. **Verify Clerk is on production keys**, not a development-mode key, before any PHI.
+5. **Turn on** GitHub setting "Automatically delete head branches".
+6. Approve a branch cleanup (see audit: delete the 93 in buckets A+B, excluding any head of an open PR; spot-check the 62 in C). Existing `.github/scripts/nuke-branches.sh` embeds escaped quotes in its branch list and was not tested; do not run it as-is.
+7. Close #276 (its audit suppression and ADR 0007 duplicate #272; keep ADR 0007 if the reachability write-up is wanted).
 
 ### Security audit exceptions (`pnpm.auditConfig.ignoreGhsas` in `package.json`)
 
@@ -60,13 +54,13 @@ Scope of Appointment captured on call recording (no 48-hour wait enforced).
 - Is the GCP project actually provisioned, and has any deploy ever succeeded?
 - Clerk → Identity Platform: go or no-go? (ADR 0006, proposed). Production
   currently reportedly uses a Clerk **development-mode** key — verify before PHI.
-- Three PRs (#272, #274, #276) carry the same `braces` audit suppression; #276 adds ADR 0007 with the reachability analysis. Merge one, close the rest.
+- #276 duplicates the suppression now on main and adds ADR 0007 (reachability analysis). Keep the ADR, close or rebase the PR.
 
 ### Known gaps
 
 **Compliance:** contact reads that decrypt PHI (`GET /contacts`, `GET /contacts/:id` via `serializeContact`) are not audit-logged (`routes/contacts.ts` sets `includeReads: false`). Decide: audit them, or document the exception. Do this before PHI launch.
 
-**Deploy:** after the IAM fix, a further boot failure is possible if the `ESIGN_SIGNING_CERT_PEM` / `ESIGN_SIGNING_KEY_PEM` GitHub secrets are unset (the deploy mounts the Secret Manager placeholders unconditionally and `assertEsignSigningCredsAreProd` runs at boot). Unverified — confirm real PEMs are set.
+**Deploy:** the earlier worry that unset `ESIGN_SIGNING_*` placeholders could abort boot did not materialise — the deploy and live-page check passed at `4911b43`. Still confirm the PEMs are real production credentials (a dev sentinel is refused only by the boot guard, and a passing smoke test does not prove e-sign signing works).
 
 **Other:** E-sign provider is Beta · contracting POA PDF is a placeholder · per-carrier
 paperwork templates pending · client portal is staff-preview only · no
@@ -112,10 +106,7 @@ Newest first. Template in `AGENTS.md` §7.
   `gcp-bootstrap.sh` checked with `bash -n`. **NOT verified:** that the app
   builds/tests pass on this branch (no code changed); BAA statuses (claims in
   docs only); whether the live GCP project exists.
-- **Left undone / broken:** `main` CI red (audit job) and GCP deploy red (IAM) —
-  neither fixed here; both need the owner/PR #272. No branches were deleted.
+- **Left undone / broken:** At the time of writing `main` CI and the GCP deploy were red; both turned green later the same day (#272 merged; deploy fixed out of band) and the ledger above was refreshed in follow-up commits. No branches were deleted.
 - **Decisions made:** none new.
-- **Next agent should:** after the owner merges #272 and re-runs the bootstrap,
-  confirm CI and one deploy go green, then promote ADR 0004 to Accepted and
-  update the dashboard above.
-- **Needs a human:** the five owner-only actions listed under "Current state".
+- **Next agent should:** help the owner close the "Owner-only actions" list above (Clerk production keys, BAAs, ADR 0004 promotion), then clean up branches per the audit.
+- **Needs a human:** the owner-only actions listed under "Current state".

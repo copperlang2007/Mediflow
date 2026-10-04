@@ -11,8 +11,8 @@ GoHighLevel and spreadsheets that agencies run on today.
 
 | | |
 | --- | --- |
-| **Status** | Code-complete for a large feature set; **production deploy is currently blocked** (see [Current state](#current-state)). Not yet cleared for real PHI. |
-| **Last verified** | 2026-10-04, `main` @ `f0195e0` |
+| **Status** | Code-complete for a large feature set; CI and the Google Cloud deploy were green on `main` at `4911b43` (2026-10-04), but that is not yet proof of PHI readiness (see [Current state](#current-state)). **Not cleared for real PHI.** |
+| **Last verified** | 2026-10-04, `main` @ `4911b43` |
 | **Living status** | [`docs/STATE.md`](docs/STATE.md) — always newer than this file |
 | **Working on this repo as an AI agent?** | Read [`AGENTS.md`](AGENTS.md) first |
 
@@ -26,9 +26,9 @@ authoritative, dated version lives in [`docs/STATE.md`](docs/STATE.md).
 | Area | State |
 | --- | --- |
 | Application code | Feature-rich and tested: 86 API route modules, ~63 web pages, 69 database migrations, 164 API test files and 58 web test files. |
-| `main` CI | **Red.** Typecheck and tests pass; the `pnpm audit (moderate)` job fails on advisory `GHSA-vfj7-8cjw-p6xm` (`braces`, no upstream patch). The suppression is in open **PR #272**. |
-| Production deploy | **Failing on every push to `main`.** The GCP deploy service account lacks `secretmanager.versions.add` on `mediflow-twilio-api-key-secret`. Fix for that error: a human with `gcloud` access re-runs `scripts/deploy/gcp-bootstrap.sh`. **Not verified** that the deploy then succeeds: the deploy always mounts the e-sign signing secrets, which must hold real production PEMs (a placeholder may abort startup). |
-| PHI readiness | **Not cleared.** ADR 0004 (GCP production) is still "Proposed"; nothing in the repo proves a successful production deploy. Several vendor BAAs are unconfirmed (see [Compliance](#compliance-and-phi)). |
+| `main` CI | **Green** at `4911b43` (typecheck, tests, migration journal, `pnpm audit`). It had been red on `pnpm audit` over advisory `GHSA-vfj7-8cjw-p6xm` (`braces`, no upstream patch) until the documented suppression landed in #272. |
+| Production deploy | **Green** at `4911b43`: the Cloud Run deploy ran and the post-deploy Chromium check of the live page passed. It had failed on every push since 2026-10-02 (Secret Manager IAM gap). Passing a deploy does not by itself clear PHI — see next row. |
+| PHI readiness | **Not cleared.** ADR 0004 (GCP production) is still "Proposed" and should be promoted by the owner now that a deploy has succeeded. Production reportedly uses a Clerk development-mode key (verify), several vendor BAAs are unconfirmed (see [Compliance](#compliance-and-phi)), and contact PHI reads are not audit-logged (see Known gaps). |
 | Auth | **Clerk** in production, MFA mandatory for everyone. Migration to GCP Identity Platform is *proposed only* (ADR 0006). |
 | AI | **Claude on AWS Bedrock** (Anthropic Messages API). Azure OpenAI is a supported alternate. Plain OpenAI is dev/test only. |
 | Unmerged work | Open PRs change daily (list them on GitHub; do not trust a snapshot). At the 2026-10-04 snapshot the only branch with unlanded work was PR #272; the other ~155 had landed or add nothing, **but** two of them (`claudemoogs/practical-thompson-09n6cr`, `claudemoogs/dreamy-ptolemy-2ho4s0`) were reused for new open PRs #273 and #275 right afterwards and must not be deleted — see [`docs/BRANCH_AUDIT_2026-10-04.md`](docs/BRANCH_AUDIT_2026-10-04.md). |

@@ -8,6 +8,11 @@ never deleted (this repo squash-merges, so Git still shows their original
 commits as "not on main"). One branch carries genuinely unlanded work: the
 open PR #272.
 
+> **Addendum (same day, ~19:20 UTC):** PR #272 — the one branch with unlanded
+> work — merged into main as `4911b43`. Bucket E is now empty; its branch
+> (`claude/agencybridge-compliance-review-s3nc6l`) is deletable. The sections
+> below describe the earlier snapshot.
+
 Snapshot: `origin/main` @ `f0195e0` (#271), taken 2026-10-04 ~15:00 UTC.
 **It goes stale fast** — parallel agent sessions keep opening PRs and even
 reuse merged branch names (during this audit `practical-thompson-09n6cr` and
@@ -104,7 +109,7 @@ tests are green. Note the same suppression is also carried by #274 and #276
 
 ## Recommended cleanup (owner decision — nothing was deleted)
 
-1. Merge PR #272 (or #276, which carries the same suppression plus ADR 0007).
+1. ~~Merge PR #272~~ — done (`4911b43`). #276 duplicates its suppression; keep its ADR 0007 write-up if wanted, close the PR.
 2. Delete buckets A and B (93 branches) using the rule above.
 3. For bucket C, spot-check with the rule, then delete; or approve in bulk.
 4. Turn on GitHub's **Automatically delete head branches**.

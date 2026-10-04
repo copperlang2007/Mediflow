@@ -34,8 +34,9 @@ clients). Node 24, pnpm 10 only.
 
 In priority order. If your task conflicts with this list, stop and ask.
 
-1. **Get production green and proven.** Merge PR #272, fix the GCP deploy IAM
-   gap, run one successful deploy, then promote ADR 0004 to Accepted.
+1. **Make production trustworthy.** CI and the GCP deploy are green (as of
+   2026-10-04); now prove it for real use: Clerk production keys, confirmed
+   BAAs, working login, then promote ADR 0004 to Accepted. Check `docs/STATE.md`.
 2. **Be HIPAA-defensible before adding features.** Confirm BAAs, keep PHI out of
    logs/Sentry/AI prompts, never weaken a boot guard.
 3. **Harden the tenant boundary.** Row-level security is the planned follow-up
@@ -91,8 +92,11 @@ Demo with no accounts: `docker compose up --build`.
 ## 5. Hard rules (violating any of these is a defect)
 
 **Security and PHI**
-- Never log, return, or send to Sentry/AI/analytics a Medicare ID, SSN, DOB,
-  diagnosis, or recording content. **Remove these fields structurally before
+- Never log, or send to Sentry/AI/analytics, a Medicare ID, SSN, DOB,
+  diagnosis, or recording content. (Authorized API responses to PHI-privileged
+  roles and servicing agents legitimately return decrypted PHI through
+  `serializeContact` — do not remove that; the ban is on logs, error messages,
+  prompts, telemetry and unprivileged responses.) **Remove these fields structurally before
   they reach a log line, error message or prompt** (pick the safe fields; do not
   interpolate records into messages). Use the existing masking
   (`serializeContact`, `lib/phiAccess.ts`). `sentryPhiScrubber` is only a last
@@ -186,9 +190,9 @@ continue. An interrupted session with a state note beats a perfect one without.
 - Merged branch names get reused by other sessions; fetch before judging a branch.
 - After your PR merges, delete your branch. (Owner action pending: enable
   GitHub's "Automatically delete head branches".) Existing cleanup scripts:
-  `.github/scripts/delete-stale-branches.sh`, `nuke-branches.sh` — read them and
-  get the owner's explicit approval before running either; `nuke-branches.sh`
-  is destructive.
+  `.github/scripts/delete-stale-branches.sh` and `.github/scripts/nuke-branches.sh`
+  — read them and get the owner's explicit approval before running either;
+  `.github/scripts/nuke-branches.sh` is destructive.
 - Merge conflicts: merge `main` into your branch; do not rewrite shared history.
 - Keep commits meaningful; the PR description says what and why, and states
   what was verified.
