@@ -72,7 +72,7 @@ These raised false alarms and were checked individually.
 | `claude/mediflow-could-not-start-error`, `claude/medi-flow-could-not-start-error`, `claude/add-new-feature` | Stale-asset auto-reload fix missing | Present on main (`web-app/public/boot-diagnostics.js`, `App.tsx`, `ErrorBoundary.tsx`, and the 404-for-missing-hashed-asset behaviour in `api-server/src/app.ts`). |
 | `claudemoogs/agencybridge-reskin` (100 commits, 231 files) | Huge unlanded reskin | Landed as #235. Only ~131 of 30,677 added lines differ, because main kept evolving (Dialer, softphone). |
 | June 2026 feature branches (`aep-cockpit`, `churn-risk-scoring`, `clawback-exposure`, `ctm-complaint-tracker`, `marketing-approval`, `agent-readiness-board`, `admin-live-queue`, `queue-wallboard`, `agent-leaderboard`, …) | Dozens of features missing | Every page and route exists on main. Differences are later edits. |
-| `claude/google-cloud-deployment-ml41c2` (#201) | Unlanded GCP path | GCP path is on main (ADR 0004, `scripts/deploy/gcp-*.sh`, `deploy-mediflow-gcp.yml`). One leftover docs commit (`4536d8c`, repo-name casing for Workload Identity Federation) — verify the casing in `docs/DEPLOY_GCP_PRODUCTION.md` and the workflow, then drop. |
+| `claude/google-cloud-deployment-ml41c2` (#201) | Unlanded GCP path | GCP path is on main (ADR 0004, `scripts/deploy/gcp-*.sh`, `deploy-mediflow-gcp.yml`). One leftover docs commit (`4536d8c`, repo-name casing for Workload Identity Federation) had been dropped and main still told operators to use the wrong, lowercase name. **Restored in this change**; the branch can now be deleted. |
 
 ## Obsolete by decision
 
@@ -102,10 +102,11 @@ These raised false alarms and were checked individually.
 ## Recommended cleanup (needs the repo owner — not done in this change)
 
 1. Merge PR #272 (turns CI green).
-2. Delete the 72 fully-merged branches and the ~75 landed/obsolete ones. A
-   script for the safe set is in `scripts/` guidance in `AGENTS.md` §Branch hygiene;
-   the rule is: delete when `git rev-list --count origin/main..origin/<b>` is 0,
-   or when its PR number is in main's log and the branch has no newer PR.
+2. Delete the 72 fully-merged branches and the ~75 landed/obsolete ones. Rule:
+   delete when `git rev-list --count origin/main..origin/<b>` is 0, or when its
+   PR number appears in main's log and the branch has no newer PR. The existing
+   `.github/scripts/nuke-branches.sh` has escaped quotes in its list and is
+   untested — do not run it as-is.
 3. Turn on GitHub's **Automatically delete head branches** repo setting so this
    cannot recur.
 4. Decide on #211 (revive or close for good).
