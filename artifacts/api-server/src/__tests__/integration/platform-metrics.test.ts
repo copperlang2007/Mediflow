@@ -32,8 +32,10 @@ import {
   carriersTable,
   commissionLineItemsTable,
   commissionStatementsTable,
+  contactsTable,
   subscriptionsTable,
 } from "@workspace/db/schema";
+import { eq } from "drizzle-orm";
 import { bootTestDb, shutdownTestDb, withAuth } from "../helpers/testApp";
 import { seedContact, seedOrg, seedUser, type TestDb } from "../helpers/testDb";
 import type { Express } from "express";
@@ -58,7 +60,13 @@ async function subscribe(orgId: string, planTier: "starter" | "growth" | "agency
   });
 }
 
-async function commission(orgId: string, amount: string, periodStart: string) {
+async function commission(
+  orgId: string,
+  amount: string,
+  periodStart: string,
+  // null = the carrier row had no period columns; the statement's period applies.
+  linePeriodStart: string | null = periodStart,
+) {
   const [carrierId, statementId] = [`carrier-${randomUUID()}`, `stmt-${randomUUID()}`];
   await testDb.insert(carriersTable).values({ id: carrierId, orgId, name: "Aetna", isActive: true });
   await testDb.insert(commissionStatementsTable).values({
@@ -84,8 +92,8 @@ async function commission(orgId: string, amount: string, periodStart: string) {
     policyNumber: "POL-1",
     planType: "MAPD",
     planYear: 2026,
-    periodStart,
-    periodEnd: periodStart,
+    periodStart: linePeriodStart,
+    periodEnd: linePeriodStart,
     premium: "120.00",
     commissionAmount: amount,
     type: "initial",
@@ -124,6 +132,16 @@ beforeAll(async () => {
   await commission(lateOrg.id, "50.25", `${months[11]}-12`);
   await commission(lateOrg.id, "999.00", "2019-01-15"); // far outside the 12-month window
   await commission(growthOrg.id, "7777.00", "2099-01-15"); // future period: counted nowhere
+  // No period on the line itself: the statement's period (two months ago) applies, not "now".
+  await commission(growthOrg.id, "40.00", `${months[9]}-05`, null);
+
+  // A client added three months ago and deleted since: history keeps them.
+  const old = await seedContact(testDb, { orgId: growthOrg.id });
+  const threeMonthsAgo = new Date(Date.UTC(Number(months[8].slice(0, 4)), Number(months[8].slice(5)) - 1, 15));
+  await testDb
+    .update(contactsTable)
+    .set({ createdAt: threeMonthsAgo, deletedAt: new Date() })
+    .where(eq(contactsTable.id, old.id));
 });
 
 afterAll(async () => {
@@ -152,12 +170,12 @@ describe("GET /api/admin/platform/metrics", () => {
 
   it("sums commissions across agencies, separating the last 12 months", async () => {
     const res = await request(app).get("/api/admin/platform/metrics").set(withAuth(superAdmin.id));
-    expect(res.body.commissions.last12MonthsCents).toBe(10_050 + 20_000 + 5_025);
-    expect(res.body.commissions.allTimeCents).toBe(10_050 + 20_000 + 5_025 + 99_900);
+    expect(res.body.commissions.last12MonthsCents).toBe(10_050 + 20_000 + 5_025 + 4_000);
+    expect(res.body.commissions.allTimeCents).toBe(10_050 + 20_000 + 5_025 + 4_000 + 99_900);
     const growth = res.body.agencies.find((a: { orgId: string }) => a.orgId === growthOrg.id);
-    expect(growth.commissionsLast12MonthsCents).toBe(30_050);
+    expect(growth.commissionsLast12MonthsCents).toBe(34_050);
     // The 2099-dated line item is excluded from every total, not just the chart.
-    expect(growth.commissionsAllTimeCents).toBe(30_050);
+    expect(growth.commissionsAllTimeCents).toBe(34_050);
     expect(growth.mrrCents).toBe(29_700);
     expect(growth.subscriptionStatus).toBe("active");
     const late = res.body.agencies.find((a: { orgId: string }) => a.orgId === lateOrg.id);
@@ -179,5 +197,24 @@ describe("GET /api/admin/platform/metrics", () => {
     expect(last.commissionsCents).toBe(10_050 + 5_025);
     expect(res.body.growth[10].commissionsCents).toBe(20_000);
     expect(res.body.growth[0].totalAgencies).toBe(0);
+  });
+
+  it("uses the statement's period when a line item has none", async () => {
+    const res = await request(app).get("/api/admin/platform/metrics").set(withAuth(superAdmin.id));
+    const months = lastTwelveMonths();
+    expect(res.body.growth[9].month).toBe(months[9]);
+    expect(res.body.growth[9].commissionsCents).toBe(4_000);
+    // Not misfiled under the month the row was uploaded.
+    expect(res.body.growth[11].commissionsCents).toBe(10_050 + 5_025);
+  });
+
+  it("keeps a since-deleted client in the months it existed", async () => {
+    const res = await request(app).get("/api/admin/platform/metrics").set(withAuth(superAdmin.id));
+    const g = res.body.growth;
+    expect(g[8].newClients).toBe(1); // added then, though deleted since
+    expect(g[8].totalClients).toBe(1);
+    expect(g[10].totalClients).toBe(1);
+    expect(g[11].totalClients).toBe(2); // the two live clients; the deleted one is gone only from now on
+    expect(g[11].newClients).toBe(2);
   });
 });
