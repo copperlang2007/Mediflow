@@ -87,7 +87,7 @@ Newest first. Template in `AGENTS.md` §7.
 
 ### 2026-10-04 — Branch audit, README, AGENTS.md, state ledger — Claude Code — branch `claudemoogs/focused-feynman-01k79k`
 - **Outcome:** done (documentation only; no application code changed).
-- **Changed:** Added `docs/BRANCH_AUDIT_2026-10-04.md`; rewrote `README.md` to
+- **Changed:** Ported the one-line `GHSA-vfj7-8cjw-p6xm` audit suppression from PR #272 into `package.json` (identical lines) so this PR's audit job passes; `pnpm audit` locally: 2 high, 2 ignored. Added `docs/BRANCH_AUDIT_2026-10-04.md`; rewrote `README.md` to
   reflect verified state; added `AGENTS.md`, `CLAUDE.md` and this file. Restored
   the dropped repo-name casing fix (`copperlang2007/Mediflow`) in
   `docs/DEPLOY_GCP_PRODUCTION.md` and `scripts/deploy/gcp-bootstrap.sh` (from
