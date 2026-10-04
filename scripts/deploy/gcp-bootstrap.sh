@@ -301,6 +301,10 @@ gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
 # Call recordings are transcribed with Speech-to-Text (SPEECH_TO_TEXT_PROVIDER=google).
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/speech.client" >/dev/null
+# Signed upload URLs (call recordings) are signed as the runtime SA through the
+# IAM signBlob API, which needs Token Creator on itself.
+gcloud iam service-accounts add-iam-policy-binding "${RUN_SA_EMAIL}" \
+  --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/iam.serviceAccountTokenCreator" >/dev/null
 # Speech-to-Text reads the gs:// recording as its own service agent; give it
 # read access to the PHI bucket (created on first use of the API, hence the identity call).
 PROJECT_NUMBER="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
