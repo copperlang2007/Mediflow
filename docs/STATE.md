@@ -19,7 +19,7 @@ _Last updated: 2026-10-04 — by the audit session below._
 | CI: `pnpm audit (moderate)` | Green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
 | CI: migration journal | Green | |
 | Production deploy (GCP Cloud Run) | **Green** at `4911b43` (run 37227958593) | Deploy step and the Chromium check of the deployed page both passed. Previously red 2026-10-02 → 2026-10-04 (`PERMISSION_DENIED secretmanager.versions.add` on `mediflow-twilio-api-key-secret`); presumably fixed by an out-of-band bootstrap re-run — **not recorded anywhere; owner please confirm what changed.** |
-| Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, BAAs. ADR 0004 still "Proposed". |
+| Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. |
 | Open PRs | Query GitHub live | At 2026-10-04 ~19:45 UTC: #273 (platform revenue overview), #274 (this docs PR), #275 (add-policy form), #276 (audit exception + ADR 0007 — now redundant with #272). #272 merged. #273/#275 came from other sessions after the audit began and were not reviewed here. |
 | Migration high-water mark | `0066_kb_library_statement_upload_guide` | Two files share `0064`. 69 SQL files. |
@@ -29,7 +29,7 @@ _Last updated: 2026-10-04 — by the audit session below._
 
 1. **Record how the deploy was fixed** (what was re-run or changed in Google Cloud) in a session note, and confirm the e-sign signing secrets hold real production PEMs.
 2. **Promote ADR 0004** to Accepted if you consider the production deploy proven; otherwise say what is still missing.
-3. **Confirm BAAs** (Google Cloud, AWS Bedrock, HighLevel, EnrollHere, DocuSign; check Twilio/Resend/Stripe) and record the outcome here.
+3. **Confirm the BAAs that are actually needed:** Google Cloud and AWS Bedrock (both receive PHI as built). Not needed for Stripe, and probably not DocuSign (agent paperwork only). HighLevel/EnrollHere are the agency's own existing relationships. Twilio/Resend depend on whether message bodies contain PHI — decide with a compliance advisor. Record the outcome here.
 4. **Verify Clerk is on production keys**, not a development-mode key, before any PHI.
 5. **Turn on** GitHub setting "Automatically delete head branches".
 6. Approve a branch cleanup (see audit: delete the 93 in buckets A+B, excluding any head of an open PR; spot-check the 62 in C). Existing `.github/scripts/nuke-branches.sh` embeds escaped quotes in its branch list and was not tested; do not run it as-is.
@@ -89,6 +89,15 @@ ones with no inbound references.
 ## Session log
 
 Newest first. Template in `AGENTS.md` §7.
+
+### 2026-10-04 — Correct the BAA list (owner feedback) — Claude Code — branch `claudemoogs/focused-feynman-01k79k`
+- **Outcome:** done (documentation only).
+- **Changed:** README vendor table and the STATE owner action now say which vendors actually need a BAA: Google Cloud and AWS Bedrock (they receive PHI as built). Stripe: no. DocuSign: probably not (agent paperwork). HighLevel/EnrollHere: the agency's own existing relationships. Twilio/Resend: depends on message content. Earlier text over-listed all of them.
+- **Verified:** NOT verified: this is a reading of what the code sends where, not legal advice or a contract review. Based on code behaviour (AI prompts include live client data; DocuSign is used for agent contracting) and the owner's correction.
+- **Left undone / broken:** The code's DocuSign boot guard still demands a HIPAA-eligible plan; it may be stricter than needed. Not changed.
+- **Decisions made:** none.
+- **Next agent should:** keep message bodies free of PHI if Twilio/Resend are not to be covered; revisit the DocuSign guard only if the owner asks.
+- **Needs a human:** confirm the Google Cloud and AWS BAAs; decide the Twilio/Resend content policy with a compliance advisor.
 
 ### 2026-10-04 — Branch audit, README, AGENTS.md, state ledger — Claude Code — branch `claudemoogs/focused-feynman-01k79k`
 - **Outcome:** done (documentation only; no application code changed).
