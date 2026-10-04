@@ -389,6 +389,49 @@ describe("review findings (regressions)", () => {
   });
 });
 
+describe("poll worker follow-ups", () => {
+  it("an interrupted (stale processing) file becomes failed and alerts reviewers", async () => {
+    const { db } = await bootTestDb();
+    const source = await newSource("hold");
+    const id = randomUUID();
+    await db.insert(statementIngestFilesTable).values({
+      id, orgId, sourceId: source.id, externalId: `ext-${id}`, checksum: "c", fileName: "x.csv",
+      status: "processing", updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    });
+    await pollWorker({ sourceId: source.id }, { makeSource: () => new FakeSource(), ingest: deps() });
+
+    const [row] = await ledger(source.id);
+    expect(row.status).toBe("failed");
+    expect(row.reason).toMatch(/Interrupted/);
+    const notes = await db.select().from(notificationsTable).where(eq(notificationsTable.resourceId, source.id));
+    expect(notes).toHaveLength(1);
+  });
+
+  it("a recent processing claim is left alone", async () => {
+    const { db } = await bootTestDb();
+    const source = await newSource("hold");
+    const id = randomUUID();
+    await db.insert(statementIngestFilesTable).values({
+      id, orgId, sourceId: source.id, externalId: `ext-${id}`, checksum: "c", fileName: "x.csv", status: "processing",
+    });
+    await pollWorker({ sourceId: source.id }, { makeSource: () => new FakeSource(), ingest: deps() });
+    expect((await ledger(source.id))[0].status).toBe("processing");
+  });
+
+  it("dedupes against the ledger when the folder has more files than one lookup chunk", async () => {
+    const source = await newSource("hold");
+    const from = new FakeSource();
+    // 510 unsupported files (cheap: they never download) crosses the 500-id lookup chunk.
+    for (let i = 0; i < 510; i++) from.add(`n-${i}.pdf`, Buffer.from("x"));
+    // First run handles 25 and leaves the rest; run enough times to drain, then once more.
+    for (let i = 0; i < 22; i++) await pollWorker({ sourceId: source.id }, { makeSource: () => from, ingest: deps() });
+    expect(await ledger(source.id)).toHaveLength(510);
+    await pollWorker({ sourceId: source.id }, { makeSource: () => from, ingest: deps() });
+    expect(await ledger(source.id)).toHaveLength(510);
+    expect(from.downloads).toBe(0);
+  });
+});
+
 describe("statementIngestPollWorker", () => {
   it("processes new files once across repeated polls and notifies reviewers about flagged ones", async () => {
     const { db } = await bootTestDb();

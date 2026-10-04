@@ -131,6 +131,19 @@ describe("GET /api/commissions/ingest", () => {
   });
 });
 
+describe("GET /api/commissions/ingest status filter", () => {
+  it.each(["bogus", "held,bogus", ",,"])("rejects an invalid status filter (%s) instead of returning everything", async (bad) => {
+    const res = await request(app).get(`/api/commissions/ingest?status=${bad}`).set(withAuth(support.id));
+    expect(res.status).toBe(400);
+    expect(res.body.validStatuses).toContain("needs_review");
+  });
+
+  it("accepts a valid list", async () => {
+    const res = await request(app).get("/api/commissions/ingest?status=held,needs_review").set(withAuth(support.id));
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("file actions", () => {
   let sourceId: string;
   beforeAll(async () => {

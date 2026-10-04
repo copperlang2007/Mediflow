@@ -33,6 +33,8 @@ export interface StatementIngestPollPayload {
 
 /** Files handled per source per run; the rest are picked up by a continuation job. */
 export const MAX_FILES_PER_RUN = 25;
+/** Ids per ledger lookup, keeping the IN list well under the bound-parameter limit. */
+const SEEN_LOOKUP_CHUNK = 500;
 /** At most one Sentry event per source per hour for a failure that repeats every tick. */
 const CAPTURE_COOLDOWN_MS = 60 * 60 * 1000;
 const lastCapturedAt = new Map<string, number>();
@@ -90,7 +92,8 @@ async function pollSource(
   deps: PollDeps,
 ): Promise<{ more: boolean; flagged: number }> {
   // A file claimed by a run that then died would otherwise stay 'processing' forever.
-  await db
+  // These count as flagged: nothing else would ever tell a reviewer about them.
+  const interrupted = await db
     .update(statementIngestFilesTable)
     .set({ status: "failed", reason: "Interrupted before finishing; use Retry to process it again" })
     .where(
@@ -99,22 +102,29 @@ async function pollSource(
         eq(statementIngestFilesTable.status, "processing"),
         lt(statementIngestFilesTable.updatedAt, new Date(Date.now() - STALE_PROCESSING_MS)),
       ),
-    );
+    )
+    .returning({ id: statementIngestFilesTable.id });
 
   const from = deps.makeSource(source);
   const listed = await from.list();
 
-  const seen = await db
-    .select({ externalId: statementIngestFilesTable.externalId, checksum: statementIngestFilesTable.checksum })
-    .from(statementIngestFilesTable)
-    .where(eq(statementIngestFilesTable.sourceId, source.id));
-  const seenKeys = new Set(seen.map((r) => `${r.externalId}|${r.checksum}`));
+  // Look up only the files this listing contains, not the source's whole history: the ledger
+  // grows forever while the folder usually holds a handful of files.
+  const seenKeys = new Set<string>();
+  for (let i = 0; i < listed.length; i += SEEN_LOOKUP_CHUNK) {
+    const ids = listed.slice(i, i + SEEN_LOOKUP_CHUNK).map((f) => f.externalId);
+    const seen = await db
+      .select({ externalId: statementIngestFilesTable.externalId, checksum: statementIngestFilesTable.checksum })
+      .from(statementIngestFilesTable)
+      .where(and(eq(statementIngestFilesTable.sourceId, source.id), inArray(statementIngestFilesTable.externalId, ids)));
+    for (const r of seen) seenKeys.add(`${r.externalId}|${r.checksum}`);
+  }
   const fresh = listed
     .filter((f) => !seenKeys.has(`${f.externalId}|${f.checksum}`))
     // Oldest first, so statements post in the order they were dropped.
     .sort((a, b) => (a.modifiedTime?.getTime() ?? 0) - (b.modifiedTime?.getTime() ?? 0));
 
-  let flagged = 0;
+  let flagged = interrupted.length;
   for (const file of fresh.slice(0, MAX_FILES_PER_RUN)) {
     const outcome: IngestOutcome = await ingestFile(source, file, from, deps.ingest);
     if (outcome === "needs_review" || outcome === "failed") flagged += 1;
