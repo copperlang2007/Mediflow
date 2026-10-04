@@ -38,7 +38,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useGetMe } from "@workspace/api-client-react";
+import { useGetMe, type PlatformMetrics } from "@workspace/api-client-react";
 import { KpiCard, PageHeader, SectionCard, EmptyState } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -55,41 +55,6 @@ interface AgencyRow {
   agents: number;
   clients: number;
   pendingInvitations: number;
-}
-
-interface GrowthMonth {
-  month: string;
-  newAgencies: number;
-  totalAgencies: number;
-  newClients: number;
-  totalClients: number;
-  commissionsCents: number;
-}
-
-interface AgencyMetrics {
-  orgId: string;
-  subscriptionStatus: string;
-  planTier: string | null;
-  mrrCents: number;
-  commissionsLast12MonthsCents: number;
-  commissionsAllTimeCents: number;
-}
-
-interface PlatformMetrics {
-  months: string[];
-  revenue: {
-    basis: "list_price";
-    mrrCents: number;
-    arrCents: number;
-    payingAgencies: number;
-    trialingAgencies: number;
-    pastDueAgencies: number;
-    atRiskCents: number;
-    byPlan: { tier: string; agencies: number; mrrCents: number }[];
-  };
-  commissions: { allTimeCents: number; last12MonthsCents: number };
-  growth: GrowthMonth[];
-  agencies: AgencyMetrics[];
 }
 
 const OVERVIEW_KEY = ["/api/admin/agencies/overview"] as const;
@@ -153,7 +118,9 @@ export default function SuperAdminDashboard() {
   const agencies = overview.data?.agencies;
   const ready = overview.isSuccess;
   const dash = (n: number) => (ready ? n : "–");
-  const m = metrics.data;
+  // After a failed refresh React Query still holds the previous data; show
+  // "unavailable" rather than numbers that may be out of date.
+  const m = metrics.isError ? undefined : metrics.data;
   const moneyOrDash = (cents: number | undefined) => (m && cents !== undefined ? money(cents) : "–");
   const [growthView, setGrowthView] = useState<"agencies" | "clients">("agencies");
   const metricsByOrg = useMemo(() => new Map((m?.agencies ?? []).map((a) => [a.orgId, a])), [m]);

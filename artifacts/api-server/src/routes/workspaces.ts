@@ -188,6 +188,9 @@ router.get(
             last12: sql<string>`coalesce(sum(${commissionLineItemsTable.commissionAmount}) filter (where ${commissionMonth} >= ${months[0]}), 0)::text`,
           })
           .from(commissionLineItemsTable)
+          // Nothing dated after the current month counts as earned yet (a
+          // mistyped or far-future period must not inflate any total).
+          .where(sql`${commissionMonth} <= ${months[11]}`)
           .groupBy(commissionLineItemsTable.orgId),
         db
           .select({

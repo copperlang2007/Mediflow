@@ -6478,10 +6478,56 @@ export const ListAgenciesOverviewResponse = zod.record(
 /**
  * @summary Platform revenue (estimated from list prices), agency commissions and a 12-month growth series across every agency (super_admin)
  */
-export const GetPlatformMetricsResponse = zod.record(
-  zod.string(),
-  zod.unknown(),
-);
+export const GetPlatformMetricsResponse = zod
+  .object({
+    generatedAt: zod.coerce.date(),
+    months: zod
+      .array(zod.string())
+      .describe("The last 12 months, oldest first, as YYYY-MM (UTC)."),
+    revenue: zod.object({
+      basis: zod.enum(["list_price"]),
+      mrrCents: zod.number().int(),
+      arrCents: zod.number().int(),
+      payingAgencies: zod.number().int(),
+      trialingAgencies: zod.number().int(),
+      pastDueAgencies: zod.number().int(),
+      atRiskCents: zod.number().int(),
+      byPlan: zod.array(
+        zod.object({
+          tier: zod.string(),
+          agencies: zod.number().int(),
+          mrrCents: zod.number().int(),
+        }),
+      ),
+    }),
+    commissions: zod.object({
+      allTimeCents: zod.number().int(),
+      last12MonthsCents: zod.number().int(),
+    }),
+    growth: zod.array(
+      zod.object({
+        month: zod.string(),
+        newAgencies: zod.number().int(),
+        totalAgencies: zod.number().int(),
+        newClients: zod.number().int(),
+        totalClients: zod.number().int(),
+        commissionsCents: zod.number().int(),
+      }),
+    ),
+    agencies: zod.array(
+      zod.object({
+        orgId: zod.string(),
+        subscriptionStatus: zod.string(),
+        planTier: zod.string().nullable(),
+        mrrCents: zod.number().int(),
+        commissionsLast12MonthsCents: zod.number().int(),
+        commissionsAllTimeCents: zod.number().int(),
+      }),
+    ),
+  })
+  .describe(
+    "Super-admin rollup across every agency. Money is in integer US cents. Revenue is ESTIMATED from active paid subscriptions at plan list price (Stripe is the source of truth); commissions are what agencies earned from carriers, not platform revenue. Nothing dated after the current month is counted.",
+  );
 
 /**
  * @summary Create an agency and invite its first admin via the invitation flow (super_admin)

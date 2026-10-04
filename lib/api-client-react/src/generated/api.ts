@@ -148,7 +148,6 @@ import type {
   GetNotificationsParams,
   GetOrgBranding200,
   GetPipelineReportParams,
-  GetPlatformMetrics200,
   GetReconciliationOverview200,
   GetRenewalsParams,
   GetRetentionAepParams,
@@ -212,6 +211,7 @@ import type {
   PipelineReportRow,
   PipelineStage,
   PipelineWithStages,
+  PlatformMetrics,
   PlatformRequirement,
   PoaDecisionBody,
   PoaDecisionResponse,
@@ -21897,8 +21897,8 @@ export const getGetPlatformMetricsUrl = () => {
  */
 export const getPlatformMetrics = async (
   options?: Parameters<typeof customFetch>[1],
-): Promise<GetPlatformMetrics200> => {
-  return customFetch<GetPlatformMetrics200>(getGetPlatformMetricsUrl(), {
+): Promise<PlatformMetrics> => {
+  return customFetch<PlatformMetrics>(getGetPlatformMetricsUrl(), {
     ...options,
     method: "GET",
   });

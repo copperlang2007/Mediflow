@@ -123,6 +123,7 @@ beforeAll(async () => {
   await commission(growthOrg.id, "200.00", `${months[10]}-10`); // last month
   await commission(lateOrg.id, "50.25", `${months[11]}-12`);
   await commission(lateOrg.id, "999.00", "2019-01-15"); // far outside the 12-month window
+  await commission(growthOrg.id, "7777.00", "2099-01-15"); // future period: counted nowhere
 });
 
 afterAll(async () => {
@@ -155,6 +156,8 @@ describe("GET /api/admin/platform/metrics", () => {
     expect(res.body.commissions.allTimeCents).toBe(10_050 + 20_000 + 5_025 + 99_900);
     const growth = res.body.agencies.find((a: { orgId: string }) => a.orgId === growthOrg.id);
     expect(growth.commissionsLast12MonthsCents).toBe(30_050);
+    // The 2099-dated line item is excluded from every total, not just the chart.
+    expect(growth.commissionsAllTimeCents).toBe(30_050);
     expect(growth.mrrCents).toBe(29_700);
     expect(growth.subscriptionStatus).toBe("active");
     const late = res.body.agencies.find((a: { orgId: string }) => a.orgId === lateOrg.id);
