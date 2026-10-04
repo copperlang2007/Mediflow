@@ -19,6 +19,7 @@ import {
   Download,
   FileText,
   Hourglass,
+  Plus,
   Scale,
   Search,
   X,
@@ -50,6 +51,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { EmptyState, KpiCard, PageHeader, SectionCard, StatusPill } from "@/components/shared";
 import { downloadExport } from "@/lib/exports";
+import { AddPolicyDialog, POLICY_CREATE_ROLES } from "@/components/policies/AddPolicyDialog";
 
 export type PolicyRow = {
   id: string;
@@ -137,6 +139,7 @@ export default function PoliciesPage() {
   const [effectiveTo, setEffectiveTo] = useState("");
   const [page, setPage] = useState(0);
   const [exporting, setExporting] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   // Debounce the free-text search so every keystroke isn't a request.
   useEffect(() => {
@@ -227,10 +230,14 @@ export default function PoliciesPage() {
             </Link>
           </Button>
         )}
-        <Button size="sm" asChild>
-          <Link href="/crm">Add from a client</Link>
-        </Button>
+        {POLICY_CREATE_ROLES.includes(role) && (
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            <Plus className="mr-1.5 h-4 w-4" />
+            Add policy
+          </Button>
+        )}
       </PageHeader>
+      <AddPolicyDialog open={addOpen} onOpenChange={setAddOpen} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <KpiCard label="Active policies" value={book?.active ?? 0} icon={FileText} color="navy" loading={bookQuery.isLoading}
@@ -300,7 +307,7 @@ export default function PoliciesPage() {
             <EmptyState
               icon={FileText}
               title="No policies yet"
-              description="Policies appear here when you record a plan on a client's page, or import them from a spreadsheet."
+              description="Policies appear here when you add one with the Add policy button, or import them from a spreadsheet."
               action={{ label: "Go to Clients & Leads", href: "/crm" }}
             />
           )

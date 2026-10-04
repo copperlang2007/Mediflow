@@ -477,6 +477,13 @@
       "when": 1792900000000,
       "tag": "0066_kb_library_statement_upload_guide",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1793000000000,
+      "tag": "0067_kb_library_policies_guide",
+      "breakpoints": true
     }
   ]
 }
