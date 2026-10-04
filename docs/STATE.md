@@ -8,20 +8,20 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-04 — by the audit session below._
+_Last updated: 2026-10-04 — by the super-admin dashboard session below._
 
 ### Health dashboard
 
 | Item | Status | Detail |
 | --- | --- | --- |
-| `main` HEAD | `4911b43` (2026-10-04) | "Call recordings: post-merge review fixes (#272)". Re-check: this row goes stale within hours. |
+| `main` HEAD | `2a29f04` (2026-10-04) | "Add policy: record a client's plan from the Policies page and the client page (#275)". Re-check: this row goes stale within hours. |
 | CI: typecheck + test | Green | |
 | CI: `pnpm audit (moderate)` | Green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
 | CI: migration journal | Green | |
 | Production deploy (GCP Cloud Run) | **Green** at `4911b43` (run 37227958593) | Deploy step and the Chromium check of the deployed page both passed. Previously red 2026-10-02 → 2026-10-04 (`PERMISSION_DENIED secretmanager.versions.add` on `mediflow-twilio-api-key-secret`); presumably fixed by an out-of-band bootstrap re-run — **not recorded anywhere; owner please confirm what changed.** |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. |
-| Open PRs | Query GitHub live | At 2026-10-04 ~19:45 UTC: #273 (platform revenue overview), #274 (this docs PR), #275 (add-policy form), #276 (audit exception + ADR 0007 — now redundant with #272). #272 merged. #273/#275 came from other sessions after the audit began and were not reviewed here. |
+| Open PRs | Query GitHub live | At 2026-10-04 ~20:50 UTC: #279 (follow-up: platform metrics reads run sequentially inside the snapshot transaction). Merged since the last entry: #273 (platform revenue overview), #274 (audit docs), #275 (add-policy form), #276 (braces audit exception). |
 | Migration high-water mark | `0066_kb_library_statement_upload_guide` | Two files share `0064`. 69 SQL files. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
@@ -62,6 +62,8 @@ Scope of Appointment captured on call recording (no 48-hour wait enforced).
 
 **Deploy:** the earlier worry that unset `ESIGN_SIGNING_*` placeholders could abort boot did not materialise — the deploy and live-page check passed at `4911b43`. Still confirm the PEMs are real production credentials (a dev sentinel is refused only by the boot guard, and a passing smoke test does not prove e-sign signing works).
 
+**Platform overview (super admin):** revenue figures are an estimate (active plans at list price from the local `subscriptions` mirror; no seat overage, discounts or proration; Stripe is the source of truth). The 12-month client history is derived from live `contacts` rows (soft-deletes handled via `deleted_at`); a permanent retention purge (`routes/admin.ts` hard-delete) shrinks past months. Fixing that needs a separate store of aggregate lifecycle events (new table, backfill) — a design decision, not done. `commission_line_items` has no index serving the platform-wide GROUP BYs; fine until the table is large, then add a migration or a monthly rollup.
+
 **Other:** E-sign provider is Beta · contracting POA PDF is a placeholder · per-carrier
 paperwork templates pending · client portal is staff-preview only · no
 Postgres RLS · dialer Phase 4+ TODOs and auto-dial deferred · some Billing and
@@ -98,6 +100,15 @@ Newest first. Template in `AGENTS.md` §7.
 - **Decisions made:** none.
 - **Next agent should:** keep email bodies and texts free of PHI; calls cannot be kept PHI-free, so Twilio voice needs a BAA or a different approach; revisit the DocuSign guard only if the owner asks.
 - **Needs a human:** confirm the Google Cloud, AWS and Twilio (voice) BAAs; decide the Resend email content policy with a compliance advisor.
+
+### 2026-10-04 — Super admin platform dashboard, revenue/commissions/growth — Claude Code — branch `claudemoogs/practical-thompson-09n6cr`
+- **Outcome:** done (PRs #270 and #273 merged; follow-up #279 open, awaiting owner approval).
+- **Changed:** #270: a `super_admin` now lands on a platform overview (counts per agency, plan mix, "needs a nudge") with a platform-only sidebar; agency pages, search, notifications, AI assistant, branding and stats polling are off in that view, agency URLs redirect to `/dashboard`, the signed-in area waits for the user's role (`RoleGate`), and viewing your own agency is never offered. #273: new `GET /api/admin/platform/metrics` (super_admin + MFA; OpenAPI + generated clients updated) and dashboard money tiles, two charts with a table view, per-agency revenue and commissions columns. #279: the endpoint's nine snapshot reads now run sequentially inside the repeatable-read transaction (no `Promise.all` on one connection; avoids the node-postgres pg@9 deprecation) plus Prettier formatting of the touched files.
+- **Verified:** `pnpm run typecheck` and `pnpm exec vitest run` (225 files, 2,475 tests) pass on the #279 branch; new integration tests in `artifacts/api-server/src/__tests__/integration/platform-metrics.test.ts` (auth, list-price revenue, commissions window incl. future periods and statement-period fallback, deleted-client history, agencies with no subscription) and UI tests in `artifacts/web-app/src/__tests__/super-admin-dashboard.test.tsx`; the page was rendered with sample data in a browser (light, dark, phone width). CI on #273's head: all green. #279: CI pending at time of writing. **NOT verified:** the deployed app (no live sign-in as a super admin was done).
+- **Left undone / broken:** After a permanent retention purge, past months of the client chart show only surviving clients (needs an aggregate-events store; see Known gaps). No index for the platform-wide commission aggregations (declined as premature). My earlier note in the PR thread that the `braces` audit failure "went away on its own" was wrong: it was suppressed by #272/#276 (see exceptions register).
+- **Decisions made:** none needing an ADR. Revenue is explicitly an estimate from list prices, not Stripe payments; commissions are agencies' carrier commissions, not platform revenue.
+- **Next agent should:** confirm #279 CI is green and the owner approved it; if exact revenue is wanted, scope reading real payments from Stripe.
+- **Needs a human:** approve #279; after it deploys, sign in as the super admin and check the Platform overview (not verified live); decide whether permanent client history is worth building.
 
 ### 2026-10-04 — Branch audit, README, AGENTS.md, state ledger — Claude Code — branch `claudemoogs/focused-feynman-01k79k`
 - **Outcome:** done (documentation only; no application code changed).
