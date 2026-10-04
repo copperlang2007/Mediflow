@@ -53,7 +53,7 @@ authoritative, dated version lives in [`docs/STATE.md`](docs/STATE.md).
 
 | Domain | Capabilities |
 | --- | --- |
-| **CRM & sales** | Contacts, leads, pipelines, two-way SMS/email, sequences, omnichannel campaigns, quoting, appointments, enrollment applications, retention and churn-risk scoring, AEP (annual enrollment) command center. |
+| **CRM & sales** | Contacts, leads, pipelines, two-way SMS, outbound email with delivery tracking (inbound email replies are not yet ingested), sequences, omnichannel campaigns, quoting, appointments, enrollment applications, retention and churn-risk scoring, AEP (annual enrollment) command center. |
 | **Agents** | Onboarding checklists, state licenses, carrier certifications, AHIP records, e-signed contracting packets, "Ready to Sell" readiness board, leaderboard. |
 | **Compliance** | Audit log of PHI access, BAA checklist, complaint (CTM) tracker with SLA, marketing-material approval, call recording and AI-assisted call scoring, mandatory MFA, org-level session timeout. |
 | **Commissions** | AgencyBloc-style commission tracking, carrier statement upload and **automatic intake from a watched Google Drive folder**, reconciliation, clawback exposure. |
@@ -132,7 +132,9 @@ clients, and keep `lib/api-zod/src/index.ts` as the single line
 - **Auth:** Clerk, MFA required for all users (cannot be disabled in
   production), per-org inactivity timeout (default 30 min), rate limits on auth.
 - **Auditing:** automatic audit-log rows for PHI reads and writes; super-admin
-  view-as-agency is read-only and logged.
+  view-as-agency is read-only by default and always logged; the narrow audited
+  exceptions are invitation create/resend/revoke and support edits of basic
+  contact/agent profile fields (these need MFA, support-edit headers and a reason).
 
 ---
 
@@ -147,7 +149,7 @@ docker compose up --build        # → http://localhost:3000
 ```
 
 Starts Postgres 16, runs migrations, seeds the "INSUREitALL Demo" agency and
-runs in no-auth **demo mode**. Demo mode is ignored under `NODE_ENV=production`.
+runs in no-auth **demo mode**. Demo mode bypasses authentication, so the server **refuses to start** if `DEMO_MODE=true` is combined with `NODE_ENV=production` or production-looking credentials.
 
 ### Develop locally
 

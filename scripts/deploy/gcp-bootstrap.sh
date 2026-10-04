@@ -344,6 +344,14 @@ if ! gcloud iam workload-identity-pools providers describe "${WIF_PROVIDER}" \
     --issuer-uri="https://token.actions.githubusercontent.com" \
     --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
     --attribute-condition="assertion.repository == '${GITHUB_REPO}'"
+else
+  # Re-runs must repair an existing provider: the condition is case-sensitive,
+  # so a provider created with the wrong repo casing would otherwise keep
+  # rejecting GitHub Actions even though the IAM binding below is correct.
+  log "Updating Workload Identity Provider ${WIF_PROVIDER} condition to ${GITHUB_REPO}…"
+  gcloud iam workload-identity-pools providers update-oidc "${WIF_PROVIDER}" \
+    --location=global --workload-identity-pool="${WIF_POOL}" \
+    --attribute-condition="assertion.repository == '${GITHUB_REPO}'"
 fi
 WIF_PROVIDER_RESOURCE="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WIF_POOL}/providers/${WIF_PROVIDER}"
 
