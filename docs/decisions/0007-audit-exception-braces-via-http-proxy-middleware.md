@@ -59,6 +59,12 @@ removed from `ignoreGhsas`; the configured audit suppresses this advisory
 across all dependency paths. Remove the entry when either condition occurs
 or when a fixed `braces` release is published.
 
+`tests/audit-exceptions.test.mjs` (run by Quality Smoke via
+`node --test tests/*.test.mjs`) enforces both invalidation conditions
+automatically: it fails if any package outside the reviewed set gains a
+`micromatch`/`braces` dependency in `pnpm-lock.yaml`, or if any
+`http-proxy-middleware` caller under `artifacts/` passes a `pathFilter`.
+
 ## Reversibility
 
 Easy — one array entry.
