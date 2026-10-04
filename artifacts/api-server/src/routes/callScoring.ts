@@ -1094,6 +1094,15 @@ router.post(
     });
     if (outcome === "over_limit") {
       logger.warn({ orgId: authReq.orgId, limit }, "Call recording: daily limit reached at confirm");
+      // Not transcribed, so the uploaded audio is not kept; the user uploads it again later.
+      try {
+        await storage.deleteCallRecording(row.objectKey);
+      } catch (err) {
+        logger.error({ err: (err as Error).message, recordingId: row.id }, "Call recording: could not delete an upload refused at the daily limit");
+      }
+      await db.update(callRecordingsTable)
+        .set({ status: "failed", error: "The daily recording limit was reached. Upload this recording again tomorrow.", updatedAt: new Date() })
+        .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "uploading")));
       res.status(429).json({ error: dailyLimitMessage(limit), code: "daily_limit" });
       return;
     }

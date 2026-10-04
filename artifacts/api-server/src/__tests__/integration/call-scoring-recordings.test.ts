@@ -492,16 +492,67 @@ describe("review fixes", () => {
     expect(row.error).toBeNull();
   });
 
-  it("an interrupted start does not use up an attempt", async () => {
+  it("an interrupted start is retried, and gives up after the attempt limit", async () => {
     const id = await uploadAndConfirm(admin.id);
+    const stall = (attempts: number) =>
+      handle.db
+        .update(schema.callRecordingsTable)
+        .set({ status: "transcribing", operationName: null, attempts, updatedAt: new Date(Date.now() - 11 * 60 * 1000) })
+        .where(eq(schema.callRecordingsTable.id, id));
+    await stall(1);
+    expect(await recordings.processRecording(id)).toBe("retry_start");
+    expect((await rowOf(id)).status).toBe("queued");
+    expect((await rowOf(id)).attempts).toBe(1);
+    await stall(3);
+    expect(await recordings.processRecording(id)).toBe("finished");
+    expect((await rowOf(id)).status).toBe("failed");
+  });
+
+  it("rescores a duplicate only once per checklist", async () => {
+    const results = stereoResults();
+    fakeGoogle({ poll: "done", results });
+    const run = async (rubricId?: string) => {
+      const id = await uploadAndConfirm(admin.id, rubricId ? { rubricId } : {});
+      await recordings.processRecording(id);
+      await recordings.processRecording(id);
+      return rowOf(id);
+    };
+    const first = await run();
+    await run("general-sales");
+    await run();
+    await run("general-sales");
+    const scores = await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, first.transcriptId!));
+    expect(scores).toHaveLength(2);
+  });
+
+  it("deletes the audio of uploads refused at the daily limit or abandoned", async () => {
+    process.env.CALL_RECORDINGS_DAILY_LIMIT = "1";
+    try {
+      const org5 = await seedOrg(handle.db, { id: `rec-del-${Date.now()}` });
+      const u = await seedUser(handle.db, { orgId: org5.id, role: "agency_admin" });
+      const post = () => request(app).post("/api/call-scoring/recordings/upload-url").set(withAuth(u.id)).send(startBody());
+      const a = await post();
+      await handle.db.update(schema.callRecordingsTable).set({ createdAt: new Date(Date.now() - 16 * 60 * 1000) }).where(eq(schema.callRecordingsTable.id, a.body.recordingId));
+      const b = await post();
+      const keyOf = (rid: string) => `call-recordings/${org5.id}/${rid}`;
+      for (const r of [a, b]) objects().set(keyOf(r.body.recordingId), { size: 10, contentType: "audio/mpeg" });
+      await request(app).post(`/api/call-scoring/recordings/${a.body.recordingId}/uploaded`).set(withAuth(u.id)).send({}).expect(202);
+      await request(app).post(`/api/call-scoring/recordings/${b.body.recordingId}/uploaded`).set(withAuth(u.id)).send({}).expect(429);
+      expect(objects().has(keyOf(b.body.recordingId))).toBe(false);
+      expect((await rowOf(b.body.recordingId)).status).toBe("failed");
+    } finally {
+      delete process.env.CALL_RECORDINGS_DAILY_LIMIT;
+    }
+
+    const start = await request(app).post("/api/call-scoring/recordings/upload-url").set(withAuth(admin.id)).send(startBody());
+    const rid = start.body.recordingId as string;
     await handle.db
       .update(schema.callRecordingsTable)
-      .set({ status: "transcribing", operationName: null, attempts: 1, updatedAt: new Date(Date.now() - 11 * 60 * 1000) })
-      .where(eq(schema.callRecordingsTable.id, id));
-    expect(await recordings.processRecording(id)).toBe("retry_start");
-    const row = await rowOf(id);
-    expect(row.status).toBe("queued");
-    expect(row.attempts).toBe(0);
+      .set({ createdAt: new Date(Date.now() - recordings.UPLOAD_ABANDONED_AFTER_MS - 60_000) })
+      .where(eq(schema.callRecordingsTable.id, rid));
+    const deleted: string[] = [];
+    await recordings.sweepStalledRecordings(async () => true, new Date(), async (key) => void deleted.push(key));
+    expect(deleted).toContain(`call-recordings/${org.id}/${rid}`);
   });
 
   it("logs only the kind of Google failure, never the bucket path", () => {
@@ -572,7 +623,8 @@ describe("review fixes", () => {
       await request(app).post(`/api/call-scoring/recordings/${a.body.recordingId}/uploaded`).set(withAuth(capAdmin.id)).send({}).expect(202);
       const over = await request(app).post(`/api/call-scoring/recordings/${b.body.recordingId}/uploaded`).set(withAuth(capAdmin.id)).send({});
       expect(over.status).toBe(429);
-      expect((await rows()).find((r) => r.id === b.body.recordingId)!.status).toBe("uploading");
+      // Refused uploads are not kept: the row fails and the audio is deleted.
+      expect((await rows()).find((r) => r.id === b.body.recordingId)!.status).toBe("failed");
     } finally {
       delete process.env.CALL_RECORDINGS_DAILY_LIMIT;
     }

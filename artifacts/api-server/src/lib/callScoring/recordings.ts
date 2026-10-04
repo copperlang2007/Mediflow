@@ -95,9 +95,13 @@ export async function processRecording(recordingId: string, deps: { privateObjec
   if (!row.operationName) {
     // Another job is starting it right now, or that job died before saving the operation.
     if (now.getTime() - row.updatedAt.getTime() < START_STALL_MS) return "poll";
-    // The interrupted start never reached a verdict from Google, so it does not use up an attempt.
+    if (row.attempts >= MAX_START_ATTEMPTS) {
+      return fail(row.id, "Speech-to-Text could not start transcribing this recording after several tries. Upload it again later; if it keeps failing, ask the administrator to check the Speech-to-Text setup.");
+    }
+    // The interrupted start still counts as an attempt, so a start that keeps
+    // crashing gives up after MAX_START_ATTEMPTS instead of looping forever.
     await db.update(callRecordingsTable)
-      .set({ status: "queued", attempts: Math.max(0, row.attempts - 1), updatedAt: now })
+      .set({ status: "queued", updatedAt: now })
       .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "transcribing"), isNull(callRecordingsTable.operationName)));
     return "retry_start";
   }
@@ -154,13 +158,14 @@ export async function processRecording(recordingId: string, deps: { privateObjec
   if (result.kind === "duplicate") {
     // Same speech as an earlier call. If it was scored under another checklist,
     // add a score under the one chosen for this upload (history is kept).
-    const [latest] = await db
-      .select({ rubricId: callScoresTable.rubricId })
+    // Only when no score under this checklist exists yet: alternating checklists
+    // across re-uploads must not re-run scoring every time.
+    const [existing] = await db
+      .select({ id: callScoresTable.id })
       .from(callScoresTable)
-      .where(eq(callScoresTable.transcriptId, transcriptId))
-      .orderBy(desc(callScoresTable.createdAt))
+      .where(and(eq(callScoresTable.transcriptId, transcriptId), eq(callScoresTable.rubricId, rubric.id)))
       .limit(1);
-    if (latest?.rubricId !== rubric.id) {
+    if (!existing) {
       const rescored = await rescoreTranscript({
         orgId: row.orgId,
         userId: row.createdBy,
@@ -198,6 +203,7 @@ export const UPLOAD_ABANDONED_AFTER_MS = 24 * 60 * 60 * 1000;
 export async function sweepStalledRecordings(
   requeue: (recordingId: string) => Promise<boolean>,
   now: Date = new Date(),
+  deleteObject: (objectKey: string) => Promise<void> = async () => undefined,
 ): Promise<{ requeued: number; abandoned: number }> {
   const stalledBefore = new Date(now.getTime() - STALLED_AFTER_MS);
   const stalled = await db
@@ -222,6 +228,14 @@ export async function sweepStalledRecordings(
         lt(callRecordingsTable.createdAt, new Date(now.getTime() - UPLOAD_ABANDONED_AFTER_MS)),
       ),
     )
-    .returning({ id: callRecordingsTable.id });
+    .returning({ id: callRecordingsTable.id, objectKey: callRecordingsTable.objectKey });
+  // Whatever was uploaded for an unfinished recording is PHI nobody will use: remove it.
+  for (const r of abandoned) {
+    try {
+      await deleteObject(r.objectKey);
+    } catch (err) {
+      logger.warn({ err: (err as Error).message, recordingId: r.id }, "Call recording sweep: could not delete an abandoned upload");
+    }
+  }
   return { requeued, abandoned: abandoned.length };
 }
