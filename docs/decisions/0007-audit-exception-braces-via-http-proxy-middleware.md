@@ -59,11 +59,15 @@ removed from `ignoreGhsas`; the configured audit suppresses this advisory
 across all dependency paths. Remove the entry when either condition occurs
 or when a fixed `braces` release is published.
 
-`tests/audit-exceptions.test.mjs` (run by Quality Smoke via
-`node --test tests/*.test.mjs`) enforces both invalidation conditions
-automatically: it fails if any package outside the reviewed set gains a
-`micromatch`/`braces` dependency in `pnpm-lock.yaml`, or if any
-`http-proxy-middleware` caller under `artifacts/` passes a `pathFilter`.
+`scripts/src/check-braces-audit-exception.ts` (CI step "Verify braces audit
+exception", `pnpm --filter @workspace/scripts check:braces-audit-exception`)
+enforces both invalidation conditions automatically. It fails if the
+production dependency path to `braces` from `@workspace/api-server` is
+anything other than
+`http-proxy-middleware@3.0.7 > micromatch@4.0.8 > braces@3.0.3` (so a version
+bump or a new path forces re-review), if `createProxyMiddleware` options are
+not an inline object literal it can inspect, if they set `pathFilter`, or if
+the number of `createProxyMiddleware` calls changes.
 
 ## Reversibility
 
