@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ContactDetailPage from "@/pages/crm-contact";
 
 const state = vi.hoisted(() => ({
+  role: "agency_admin",
   update: vi.fn(),
   contact: {
     id: "synthetic-contact", firstName: "QA", lastName: "Contact",
@@ -25,16 +26,27 @@ vi.mock("@workspace/api-client-react", () => ({
   useLogContactActivity: () => ({ mutateAsync: vi.fn() }),
   useSendContactSms: () => ({ mutateAsync: vi.fn() }),
   useSendContactEmail: () => ({ mutateAsync: vi.fn() }),
+  useGetMe: () => ({ data: { id: "u-1", role: state.role } }),
+  useGetCarriers: () => ({ data: [] }),
   customFetch: async () => ({ messages: [], total: 0 }),
   getGetContactQueryKey: (id: string) => ["contact", id],
   getGetContactActivitiesQueryKey: (id: string) => ["activities", id],
 }));
-beforeEach(() => { state.update.mockReset().mockResolvedValue({}); });
+beforeEach(() => { state.role = "agency_admin"; state.update.mockReset().mockResolvedValue({}); });
 afterEach(cleanup);
 function mount() {
   return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><ContactDetailPage /></QueryClientProvider>);
 }
 describe("contact details and editing", () => {
+  it("offers Add policy to roles that may record one, and not to the rest", () => {
+    mount();
+    expect(screen.getByRole("button", { name: "Add policy" })).toBeInTheDocument();
+    cleanup();
+    state.role = "viewer";
+    mount();
+    expect(screen.queryByRole("button", { name: "Add policy" })).not.toBeInTheDocument();
+  });
+
   it("shows saved details and opens the real plan dropdown without crashing", async () => {
     mount();
     expect(screen.getByText("75001")).toBeInTheDocument();

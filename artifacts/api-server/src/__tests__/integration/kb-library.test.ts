@@ -104,6 +104,15 @@ describe("KB library — starting content and defaults", () => {
     expect(guide.content.length).toBeLessThanOrEqual(1500);
   });
 
+  it("has the corrected Policies guide (Add policy exists)", async () => {
+    const res = await request(app).get("/api/kb/library?search=book%20of%20business").set(withAuth(admin.id));
+    const guide = res.body.articles.find((a: { id: string }) => a.id === "lib-mf-policies");
+    expect(guide).toBeDefined();
+    expect(guide.content).toContain("Add a policy");
+    expect(guide.content).not.toContain("I found no Add Policy button");
+    expect(guide.content.length).toBeLessThanOrEqual(1500);
+  });
+
   it("lets every staff role read", async () => {
     for (const id of [agentUser.id, viewer.id, admin.id]) {
       expect((await library(id)).status).toBe(200);

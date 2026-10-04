@@ -15,11 +15,13 @@ import {
   useSendContactSms, useSendContactEmail,
   useGetDeals, useCreateDeal,
   useGetPipelines,
+  useGetMe,
   customFetch,
   getGetContactQueryKey, getGetContactActivitiesQueryKey,
   getGetDealsQueryKey,
 } from "@workspace/api-client-react";
 import { useQuery } from "@tanstack/react-query";
+import { AddPolicyDialog, POLICY_CREATE_ROLES } from "@/components/policies/AddPolicyDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -807,6 +809,8 @@ export default function ContactDetailPage() {
   const [emailOpen, setEmailOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [leadOpen, setLeadOpen] = useState(false);
+  const [policyOpen, setPolicyOpen] = useState(false);
+  const { data: me } = useGetMe();
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<UpdateContactBody>({});
 
@@ -992,6 +996,9 @@ export default function ContactDetailPage() {
               <Button size="sm" variant="outline" onClick={() => setLogOpen(true)}><ActivityIcon className="h-4 w-4 mr-1.5" />Log</Button>
               <BookAppointmentButton contactId={id} contactName={contactName} />
               <Button size="sm" variant="outline" onClick={() => setLeadOpen(true)}><Plus className="h-4 w-4 mr-1.5" />Create Lead</Button>
+              {POLICY_CREATE_ROLES.includes(me?.role ?? "") && (
+                <Button size="sm" variant="outline" onClick={() => setPolicyOpen(true)}><Shield className="h-4 w-4 mr-1.5" />Add policy</Button>
+              )}
               <Button size="sm" variant="outline" onClick={openEdit}><Edit className="h-4 w-4 mr-1.5" />Edit</Button>
             </div>
           </div>
@@ -1050,6 +1057,7 @@ export default function ContactDetailPage() {
       {/* Modals */}
       <SendSmsModal contactId={id} contactName={contactName} open={smsOpen} onClose={() => setSmsOpen(false)} />
       <CreateLeadDialog contactId={id} contactName={contactName} open={leadOpen} onOpenChange={setLeadOpen} />
+      <AddPolicyDialog open={policyOpen} onOpenChange={setPolicyOpen} contact={{ id, name: contactName }} onSaved={() => void qc.invalidateQueries({ queryKey: getGetContactQueryKey(id) })} />
       <SendEmailModal contactId={id} contactName={contactName} open={emailOpen} onClose={() => setEmailOpen(false)} />
       <LogActivityModal contactId={id} open={logOpen} onClose={() => setLogOpen(false)} />
 

@@ -424,3 +424,85 @@ describe("GET /enrollments", () => {
     expect(withCarrier?.carrierName).toBe("Acme Health");
   });
 });
+
+describe("client status follows coverage (same rule as EnrollHere)", () => {
+  async function statusOf(id: string): Promise<string> {
+    const [row] = await testDb.select({ status: contactsTable.status }).from(contactsTable).where(eq(contactsTable.id, id));
+    return row!.status;
+  }
+  async function post(contactId: string, overrides: Record<string, unknown>) {
+    return request(app)
+      .post("/api/enrollments")
+      .set(withAuth(adminA.id))
+      .send(enrollment({ contactId, ...overrides }));
+  }
+
+  it("an Active policy turns a lead into an enrolled client", async () => {
+    const lead = await seedContact(testDb, { orgId: orgA.id, firstName: "Lead", lastName: "One", status: "lead" });
+    const prospect = await seedContact(testDb, { orgId: orgA.id, firstName: "Prospect", lastName: "One", status: "prospect" });
+    expect((await post(lead.id, { status: "active", effectuated: true })).status).toBe(201);
+    expect((await post(prospect.id, { status: "active", effectuated: true })).status).toBe(201);
+    expect(await statusOf(lead.id)).toBe("enrolled");
+    expect(await statusOf(prospect.id)).toBe("enrolled");
+  });
+
+  it("a Pending policy leaves the client's status alone", async () => {
+    const lead = await seedContact(testDb, { orgId: orgA.id, firstName: "Lead", lastName: "Pending", status: "lead" });
+    expect((await post(lead.id, { status: "pending" })).status).toBe(201);
+    expect(await statusOf(lead.id)).toBe("lead");
+  });
+
+  it("statuses the agency set by hand (retained, do_not_contact) are not overridden", async () => {
+    const retained = await seedContact(testDb, { orgId: orgA.id, firstName: "Kept", lastName: "Client", status: "retained" });
+    const dnc = await seedContact(testDb, { orgId: orgA.id, firstName: "No", lastName: "Contact", status: "do_not_contact" });
+    await post(retained.id, { status: "active", effectuated: true });
+    await post(dnc.id, { status: "active", effectuated: true });
+    expect(await statusOf(retained.id)).toBe("retained");
+    expect(await statusOf(dnc.id)).toBe("do_not_contact");
+  });
+
+  it("recording ended coverage for an enrolled client with nothing else in force marks them lost", async () => {
+    const enrolled = await seedContact(testDb, { orgId: orgA.id, firstName: "Ended", lastName: "Coverage", status: "enrolled" });
+    expect((await post(enrolled.id, { status: "terminated", planYear: 2025, effectiveDate: "2025-01-01" })).status).toBe(201);
+    expect(await statusOf(enrolled.id)).toBe("lost");
+  });
+
+  it("ended coverage does not mark a client lost while other coverage is in force", async () => {
+    const enrolled = await seedContact(testDb, { orgId: orgA.id, firstName: "Still", lastName: "Covered", status: "lead" });
+    await post(enrolled.id, { status: "active", effectuated: true, planType: "MAPD" });
+    await post(enrolled.id, { status: "terminated", planType: "PDP", planYear: 2025, effectiveDate: "2025-01-01" });
+    expect(await statusOf(enrolled.id)).toBe("enrolled");
+  });
+
+  it("ended coverage does not mark a client lost while an ACTIVE policy that is not yet effectuated is on file", async () => {
+    // Imports create active rows that stay un-effectuated until a carrier statement confirms them.
+    const client = await seedContact(testDb, { orgId: orgA.id, firstName: "Imported", lastName: "Active", status: "enrolled" });
+    await post(client.id, { status: "active", effectuated: false, planType: "MAPD" });
+    await post(client.id, { status: "terminated", planType: "PDP", planYear: 2025, effectiveDate: "2025-01-01" });
+    expect(await statusOf(client.id)).toBe("enrolled");
+  });
+
+  it("a Terminated policy can be recorded as having taken effect", async () => {
+    const client = await seedContact(testDb, { orgId: orgA.id, firstName: "Was", lastName: "Effective", status: "retained" });
+    const res = await post(client.id, { status: "terminated", effectuated: true, planYear: 2025, effectiveDate: "2025-01-01" });
+    expect(res.status).toBe(201);
+    expect(res.body.effectuated).toBe(true);
+    expect(res.body.status).toBe("terminated");
+  });
+
+  it("a Terminated policy recorded as having taken effect still marks an enrolled client with nothing else in force as lost", async () => {
+    // This is exactly what the Add policy form sends for Terminated.
+    const client = await seedContact(testDb, { orgId: orgA.id, firstName: "Only", lastName: "Policy", status: "enrolled" });
+    await post(client.id, { status: "terminated", effectuated: true, planYear: 2025, effectiveDate: "2025-01-01" });
+    expect(await statusOf(client.id)).toBe("lost");
+  });
+
+  it("an older ended policy that had taken effect does not count as coverage still in force", async () => {
+    const client = await seedContact(testDb, { orgId: orgA.id, firstName: "Two", lastName: "Ended", status: "enrolled" });
+    await post(client.id, { status: "terminated", effectuated: true, planYear: 2024, effectiveDate: "2024-01-01" });
+    // First one already marked them lost; put them back to enrolled to test the second in isolation.
+    await testDb.update(contactsTable).set({ status: "enrolled" }).where(eq(contactsTable.id, client.id));
+    await post(client.id, { status: "terminated", effectuated: true, planYear: 2025, effectiveDate: "2025-01-01" });
+    expect(await statusOf(client.id)).toBe("lost");
+  });
+});
