@@ -39,7 +39,12 @@ import {
   YAxis,
 } from "recharts";
 import { useGetMe, type PlatformMetrics } from "@workspace/api-client-react";
-import { KpiCard, PageHeader, SectionCard, EmptyState } from "@/components/shared";
+import {
+  KpiCard,
+  PageHeader,
+  SectionCard,
+  EmptyState,
+} from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api";
@@ -60,14 +65,40 @@ interface AgencyRow {
 const OVERVIEW_KEY = ["/api/admin/agencies/overview"] as const;
 const METRICS_KEY = ["/api/admin/platform/metrics"] as const;
 
-const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-const usdExact = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
-const usdCompact = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 });
+const usd = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+const usdExact = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+});
+const usdCompact = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
 const money = (cents: number) => usd.format(cents / 100);
 
 /** "2026-03" → "Mar 26" (UTC-safe: built from the parts, not a Date). */
-const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const monthLabel = (m: string) => `${MONTH_NAMES[Number(m.slice(5, 7)) - 1]} ${m.slice(2, 4)}`;
+const MONTH_NAMES = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+const monthLabel = (m: string) =>
+  `${MONTH_NAMES[Number(m.slice(5, 7)) - 1]} ${m.slice(2, 4)}`;
 
 const TOOLTIP_STYLE = {
   borderRadius: 12,
@@ -89,7 +120,9 @@ function viewAgency(id: string): boolean {
   } catch {
     return false;
   }
-  window.location.assign(`${import.meta.env.BASE_URL.replace(/\/$/, "")}/dashboard`);
+  window.location.assign(
+    `${import.meta.env.BASE_URL.replace(/\/$/, "")}/dashboard`,
+  );
   return true;
 }
 
@@ -102,14 +135,16 @@ export default function SuperAdminDashboard() {
     if (!viewAgency(id)) {
       toast({
         title: "Could not open this agency",
-        description: "Site storage is disabled or full. Turn off private browsing or clear site data, then try again.",
+        description:
+          "Site storage is disabled or full. Turn off private browsing or clear site data, then try again.",
         variant: "destructive",
       });
     }
   };
   const overview = useQuery({
     queryKey: OVERVIEW_KEY,
-    queryFn: () => apiFetch<{ agencies: AgencyRow[] }>("/api/admin/agencies/overview"),
+    queryFn: () =>
+      apiFetch<{ agencies: AgencyRow[] }>("/api/admin/agencies/overview"),
   });
   const metrics = useQuery({
     queryKey: METRICS_KEY,
@@ -121,14 +156,21 @@ export default function SuperAdminDashboard() {
   // After a failed refresh React Query still holds the previous data; show
   // "unavailable" rather than numbers that may be out of date.
   const m = metrics.isError ? undefined : metrics.data;
-  const moneyOrDash = (cents: number | undefined) => (m && cents !== undefined ? money(cents) : "–");
-  const [growthView, setGrowthView] = useState<"agencies" | "clients">("agencies");
-  const metricsByOrg = useMemo(() => new Map((m?.agencies ?? []).map((a) => [a.orgId, a])), [m]);
+  const moneyOrDash = (cents: number | undefined) =>
+    m && cents !== undefined ? money(cents) : "–";
+  const [growthView, setGrowthView] = useState<"agencies" | "clients">(
+    "agencies",
+  );
+  const metricsByOrg = useMemo(
+    () => new Map((m?.agencies ?? []).map((a) => [a.orgId, a])),
+    [m],
+  );
 
   const totals = useMemo(() => {
     const rows = agencies ?? [];
     const plans = new Map<string, number>();
-    for (const r of rows) plans.set(r.planTier, (plans.get(r.planTier) ?? 0) + 1);
+    for (const r of rows)
+      plans.set(r.planTier, (plans.get(r.planTier) ?? 0) + 1);
     return {
       agencies: rows.length,
       users: rows.reduce((s, r) => s + r.users, 0),
@@ -142,7 +184,8 @@ export default function SuperAdminDashboard() {
 
   const mfaNeeded =
     overview.isError &&
-    (overview.error as Error & { data?: { error?: string } }).data?.error === "mfa_required";
+    (overview.error as Error & { data?: { error?: string } }).data?.error ===
+      "mfa_required";
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
@@ -153,23 +196,39 @@ export default function SuperAdminDashboard() {
       >
         <Button
           variant="outline"
-          onClick={() => void Promise.all([overview.refetch(), metrics.refetch()])}
+          onClick={() =>
+            void Promise.all([overview.refetch(), metrics.refetch()])
+          }
           disabled={overview.isFetching || metrics.isFetching}
         >
-          {overview.isFetching || metrics.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+          {overview.isFetching || metrics.isFetching ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="mr-2 h-4 w-4" />
+          )}
           Refresh
         </Button>
         <Button asChild>
-          <Link href="/admin/workspaces"><MailPlus className="mr-2 h-4 w-4" /> New agency</Link>
+          <Link href="/admin/workspaces">
+            <MailPlus className="mr-2 h-4 w-4" /> New agency
+          </Link>
         </Button>
       </PageHeader>
 
       {overview.isError && (
-        <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <p
+          role="alert"
+          className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+        >
           {mfaNeeded ? (
             <>
               Turn on two-step verification to see platform data.{" "}
-              <Link href="/settings/security" className="underline underline-offset-2">Set it up</Link>
+              <Link
+                href="/settings/security"
+                className="underline underline-offset-2"
+              >
+                Set it up
+              </Link>
             </>
           ) : (
             "Could not load the platform overview. Refresh to try again."
@@ -178,10 +237,35 @@ export default function SuperAdminDashboard() {
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard label="Agencies" value={dash(totals.agencies)} icon={Building2} color="navy" loading={overview.isLoading} href="/admin/workspaces" />
-        <KpiCard label="Active accounts" value={dash(totals.users)} icon={Users} color="blue" loading={overview.isLoading} />
-        <KpiCard label="Agents" value={dash(totals.agents)} icon={UserCog} color="green" loading={overview.isLoading} />
-        <KpiCard label="Clients managed" value={dash(totals.clients)} icon={ShieldCheck} color="orange" loading={overview.isLoading} />
+        <KpiCard
+          label="Agencies"
+          value={dash(totals.agencies)}
+          icon={Building2}
+          color="navy"
+          loading={overview.isLoading}
+          href="/admin/workspaces"
+        />
+        <KpiCard
+          label="Active accounts"
+          value={dash(totals.users)}
+          icon={Users}
+          color="blue"
+          loading={overview.isLoading}
+        />
+        <KpiCard
+          label="Agents"
+          value={dash(totals.agents)}
+          icon={UserCog}
+          color="green"
+          loading={overview.isLoading}
+        />
+        <KpiCard
+          label="Clients managed"
+          value={dash(totals.clients)}
+          icon={ShieldCheck}
+          color="orange"
+          loading={overview.isLoading}
+        />
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -191,7 +275,11 @@ export default function SuperAdminDashboard() {
           icon={CircleDollarSign}
           label="Monthly revenue (est.)"
           value={moneyOrDash(m?.revenue.mrrCents)}
-          hint={m ? `${m.revenue.payingAgencies} paying · ${m.revenue.trialingAgencies} on trial` : undefined}
+          hint={
+            m
+              ? `${m.revenue.payingAgencies} paying · ${m.revenue.trialingAgencies} on trial`
+              : undefined
+          }
           loading={metrics.isLoading}
         />
         <KpiCard
@@ -209,7 +297,11 @@ export default function SuperAdminDashboard() {
           icon={AlertTriangle}
           label="Revenue at risk"
           value={moneyOrDash(m?.revenue.atRiskCents)}
-          hint={m ? `${m.revenue.pastDueAgencies} agenc${m.revenue.pastDueAgencies === 1 ? "y" : "ies"} past due` : undefined}
+          hint={
+            m
+              ? `${m.revenue.pastDueAgencies} agenc${m.revenue.pastDueAgencies === 1 ? "y" : "ies"} past due`
+              : undefined
+          }
           loading={metrics.isLoading}
         />
         <KpiCard
@@ -229,25 +321,63 @@ export default function SuperAdminDashboard() {
       </p>
 
       <div className="grid items-start gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-        <SectionCard title="Agency commissions by month" description="Carrier commissions earned across all agencies.">
+        <SectionCard
+          title="Agency commissions by month"
+          description="Carrier commissions earned across all agencies."
+        >
           {metrics.isLoading ? (
             <Skeleton className="h-56" />
           ) : !m ? (
-            <p className="text-sm text-muted-foreground">Unavailable right now.</p>
+            <p className="text-sm text-muted-foreground">
+              Unavailable right now.
+            </p>
           ) : (
-            <div className="h-56" role="img" aria-label="Bar chart of agency commissions per month for the last 12 months; the same figures are in the table below.">
+            <div
+              className="h-56"
+              role="img"
+              aria-label="Bar chart of agency commissions per month for the last 12 months; the same figures are in the table below."
+            >
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={m.growth} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                  <XAxis dataKey="month" tickFormatter={monthLabel} tick={AXIS_TICK} axisLine={false} tickLine={false} interval={1} />
-                  <YAxis tickFormatter={(v: number) => usdCompact.format(v / 100)} tick={AXIS_TICK} axisLine={false} tickLine={false} width={56} />
+                <BarChart
+                  data={m.growth}
+                  margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="hsl(var(--border))"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="month"
+                    tickFormatter={monthLabel}
+                    tick={AXIS_TICK}
+                    axisLine={false}
+                    tickLine={false}
+                    interval={1}
+                  />
+                  <YAxis
+                    tickFormatter={(v: number) => usdCompact.format(v / 100)}
+                    tick={AXIS_TICK}
+                    axisLine={false}
+                    tickLine={false}
+                    width={56}
+                  />
                   <Tooltip
                     contentStyle={TOOLTIP_STYLE}
                     labelFormatter={(l: string) => monthLabel(l)}
-                    formatter={(v: number) => [usdExact.format(v / 100), "Commissions"]}
+                    formatter={(v: number) => [
+                      usdExact.format(v / 100),
+                      "Commissions",
+                    ]}
                     cursor={{ fill: "hsl(var(--muted) / 0.5)" }}
                   />
-                  <Bar dataKey="commissionsCents" name="Commissions" fill="#3b6fa0" radius={[4, 4, 0, 0]} maxBarSize={28} />
+                  <Bar
+                    dataKey="commissionsCents"
+                    name="Commissions"
+                    fill="#3b6fa0"
+                    radius={[4, 4, 0, 0]}
+                    maxBarSize={28}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -255,10 +385,22 @@ export default function SuperAdminDashboard() {
         </SectionCard>
 
         <SectionCard
-          title={growthView === "agencies" ? "Agencies over time" : "Clients over time"}
-          description={growthView === "agencies" ? "Total agencies on the platform, month by month." : "Total clients managed across all agencies."}
+          title={
+            growthView === "agencies"
+              ? "Agencies over time"
+              : "Clients over time"
+          }
+          description={
+            growthView === "agencies"
+              ? "Total agencies on the platform, month by month."
+              : "Total clients managed across all agencies."
+          }
         >
-          <div className="mb-3 inline-flex rounded-md border border-border p-0.5 text-sm" role="group" aria-label="Choose what to chart">
+          <div
+            className="mb-3 inline-flex rounded-md border border-border p-0.5 text-sm"
+            role="group"
+            aria-label="Choose what to chart"
+          >
             {(["agencies", "clients"] as const).map((v) => (
               <button
                 key={v}
@@ -274,22 +416,55 @@ export default function SuperAdminDashboard() {
           {metrics.isLoading ? (
             <Skeleton className="h-48" />
           ) : !m ? (
-            <p className="text-sm text-muted-foreground">Unavailable right now.</p>
+            <p className="text-sm text-muted-foreground">
+              Unavailable right now.
+            </p>
           ) : (
-            <div className="h-48" role="img" aria-label={`Line chart of total ${growthView} per month for the last 12 months; the same figures are in the table below.`}>
+            <div
+              className="h-48"
+              role="img"
+              aria-label={`Line chart of total ${growthView} per month for the last 12 months; the same figures are in the table below.`}
+            >
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={m.growth} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                  <XAxis dataKey="month" tickFormatter={monthLabel} tick={AXIS_TICK} axisLine={false} tickLine={false} interval={1} />
-                  <YAxis allowDecimals={false} tick={AXIS_TICK} axisLine={false} tickLine={false} width={40} />
+                <LineChart
+                  data={m.growth}
+                  margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="hsl(var(--border))"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="month"
+                    tickFormatter={monthLabel}
+                    tick={AXIS_TICK}
+                    axisLine={false}
+                    tickLine={false}
+                    interval={1}
+                  />
+                  <YAxis
+                    allowDecimals={false}
+                    tick={AXIS_TICK}
+                    axisLine={false}
+                    tickLine={false}
+                    width={40}
+                  />
                   <Tooltip
                     contentStyle={TOOLTIP_STYLE}
                     labelFormatter={(l: string) => monthLabel(l)}
-                    formatter={(v: number) => [v, growthView === "agencies" ? "Agencies" : "Clients"]}
+                    formatter={(v: number) => [
+                      v,
+                      growthView === "agencies" ? "Agencies" : "Clients",
+                    ]}
                   />
                   <Line
                     type="monotone"
-                    dataKey={growthView === "agencies" ? "totalAgencies" : "totalClients"}
+                    dataKey={
+                      growthView === "agencies"
+                        ? "totalAgencies"
+                        : "totalClients"
+                    }
                     stroke="#22a05a"
                     strokeWidth={2}
                     dot={{ r: 3, strokeWidth: 2 }}
@@ -304,7 +479,9 @@ export default function SuperAdminDashboard() {
 
       {m && (
         <details className="rounded-xl border border-border bg-card px-4 py-3 text-sm">
-          <summary className="cursor-pointer font-medium">View the last 12 months as a table</summary>
+          <summary className="cursor-pointer font-medium">
+            View the last 12 months as a table
+          </summary>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -321,11 +498,21 @@ export default function SuperAdminDashboard() {
                 {m.growth.map((g) => (
                   <tr key={g.month} className="border-b border-border/50">
                     <td className="px-3 py-2">{monthLabel(g.month)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{g.newAgencies}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{g.totalAgencies}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{g.newClients}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{g.totalClients}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{usdExact.format(g.commissionsCents / 100)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {g.newAgencies}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {g.totalAgencies}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {g.newClients}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {g.totalClients}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {usdExact.format(g.commissionsCents / 100)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -335,13 +522,27 @@ export default function SuperAdminDashboard() {
       )}
 
       <div className="space-y-6">
-        <SectionCard title="Agencies" description="Live counts from each agency's records.">
+        <SectionCard
+          title="Agencies"
+          description="Live counts from each agency's records."
+        >
           {overview.isLoading ? (
-            <div className="space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-12" />)}</div>
+            <div className="space-y-2">
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-12" />
+              ))}
+            </div>
           ) : !ready ? (
-            <p className="text-sm text-muted-foreground">Agency data is unavailable right now.</p>
+            <p className="text-sm text-muted-foreground">
+              Agency data is unavailable right now.
+            </p>
           ) : agencies!.length === 0 ? (
-            <EmptyState icon={Building2} title="No agencies yet" description="Create the first one with “New agency”." compact />
+            <EmptyState
+              icon={Building2}
+              title="No agencies yet"
+              description="Create the first one with “New agency”."
+              compact
+            />
           ) : (
             <div className="relative overflow-x-auto">
               <table className="w-full text-sm">
@@ -353,19 +554,27 @@ export default function SuperAdminDashboard() {
                     <th className="px-3 py-2 text-right">Agents</th>
                     <th className="px-3 py-2 text-right">Clients</th>
                     <th className="px-3 py-2 text-right">Revenue / mo</th>
-                    <th className="px-3 py-2 text-right">Commissions (12 mo)</th>
-                    <th className="px-3 py-2"><span className="sr-only">Actions</span></th>
+                    <th className="px-3 py-2 text-right">
+                      Commissions (12 mo)
+                    </th>
+                    <th className="px-3 py-2">
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {agencies!.map((a) => (
-                    <tr key={a.id} className="border-b border-border/50 hover:bg-muted/30">
+                    <tr
+                      key={a.id}
+                      className="border-b border-border/50 hover:bg-muted/30"
+                    >
                       <td className="px-3 py-2.5 font-medium">
                         <div className="flex flex-col">
                           <span>{a.name}</span>
                           {a.pendingInvitations > 0 && (
                             <span className="text-[11px] font-normal text-muted-foreground">
-                              {a.pendingInvitations} pending invitation{a.pendingInvitations === 1 ? "" : "s"}
+                              {a.pendingInvitations} pending invitation
+                              {a.pendingInvitations === 1 ? "" : "s"}
                             </span>
                           )}
                         </div>
@@ -378,25 +587,45 @@ export default function SuperAdminDashboard() {
                           return (
                             <div className="flex flex-col">
                               <span>{titleCase(tier)}</span>
-                              {status && status !== "active" && status !== "none" && (
-                                <span className="text-[11px] capitalize">{status.replace(/_/g, " ")}</span>
-                              )}
+                              {status &&
+                                status !== "active" &&
+                                status !== "none" && (
+                                  <span className="text-[11px] capitalize">
+                                    {status.replace(/_/g, " ")}
+                                  </span>
+                                )}
                             </div>
                           );
                         })()}
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{a.users}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{a.agents}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{a.clients}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {a.users}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {a.agents}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {a.clients}
+                      </td>
                       <td className="px-3 py-2.5 text-right tabular-nums">
                         {m ? money(metricsByOrg.get(a.id)?.mrrCents ?? 0) : "–"}
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums">
-                        {m ? money(metricsByOrg.get(a.id)?.commissionsLast12MonthsCents ?? 0) : "–"}
+                        {m
+                          ? money(
+                              metricsByOrg.get(a.id)
+                                ?.commissionsLast12MonthsCents ?? 0,
+                            )
+                          : "–"}
                       </td>
                       <td className="px-3 py-2.5 text-right">
                         {me?.orgId && a.id !== me.orgId && (
-                          <Button size="sm" variant="ghost" onClick={() => openAgency(a.id)} title="Open this agency read-only">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => openAgency(a.id)}
+                            title="Open this agency read-only"
+                          >
                             <Eye className="mr-1 h-3.5 w-3.5" /> View
                           </Button>
                         )}
@@ -411,13 +640,25 @@ export default function SuperAdminDashboard() {
 
         <div className="grid items-start gap-6 md:grid-cols-2 lg:grid-cols-3 [&>*]:min-w-0">
           {totals.stalled.length > 0 && (
-            <SectionCard title="Needs a nudge" description="Invited, with no active accounts yet.">
+            <SectionCard
+              title="Needs a nudge"
+              description="Invited, with no active accounts yet."
+            >
               <ul className="space-y-2 text-sm">
                 {totals.stalled.map((a) => (
-                  <li key={a.id} className="flex items-center justify-between gap-2">
+                  <li
+                    key={a.id}
+                    className="flex items-center justify-between gap-2"
+                  >
                     <span className="truncate font-medium">{a.name}</span>
                     {me?.orgId && a.id !== me.orgId && (
-                      <Button size="sm" variant="ghost" onClick={() => openAgency(a.id)}>View</Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => openAgency(a.id)}
+                      >
+                        View
+                      </Button>
                     )}
                   </li>
                 ))}
@@ -425,11 +666,16 @@ export default function SuperAdminDashboard() {
             </SectionCard>
           )}
 
-          <SectionCard title="Plans" description="How agencies are subscribed today.">
+          <SectionCard
+            title="Plans"
+            description="How agencies are subscribed today."
+          >
             {overview.isLoading ? (
               <Skeleton className="h-16" />
             ) : !ready ? (
-              <p className="text-sm text-muted-foreground">Unavailable right now.</p>
+              <p className="text-sm text-muted-foreground">
+                Unavailable right now.
+              </p>
             ) : totals.plans.length === 0 ? (
               <p className="text-sm text-muted-foreground">No agencies yet.</p>
             ) : (
@@ -437,7 +683,9 @@ export default function SuperAdminDashboard() {
                 {totals.plans.map(([tier, n]) => (
                   <li key={tier} className="flex items-center justify-between">
                     <span>{titleCase(tier)}</span>
-                    <span className="tabular-nums text-muted-foreground">{n}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {n}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -447,13 +695,19 @@ export default function SuperAdminDashboard() {
           <SectionCard title="Platform tools">
             <div className="grid gap-2">
               <Button asChild variant="outline" className="justify-start">
-                <Link href="/admin/workspaces"><Boxes className="mr-2 h-4 w-4" /> Manage agencies</Link>
+                <Link href="/admin/workspaces">
+                  <Boxes className="mr-2 h-4 w-4" /> Manage agencies
+                </Link>
               </Button>
               <Button asChild variant="outline" className="justify-start">
-                <Link href="/admin/health"><Activity className="mr-2 h-4 w-4" /> System health</Link>
+                <Link href="/admin/health">
+                  <Activity className="mr-2 h-4 w-4" /> System health
+                </Link>
               </Button>
               <Button asChild variant="outline" className="justify-start">
-                <Link href="/settings/security"><ShieldCheck className="mr-2 h-4 w-4" /> Account security</Link>
+                <Link href="/settings/security">
+                  <ShieldCheck className="mr-2 h-4 w-4" /> Account security
+                </Link>
               </Button>
             </div>
           </SectionCard>
