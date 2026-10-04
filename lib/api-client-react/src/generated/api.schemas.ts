@@ -13,6 +13,67 @@ export interface Error {
   error: string;
 }
 
+export type PlatformMetricsRevenueBasis =
+  (typeof PlatformMetricsRevenueBasis)[keyof typeof PlatformMetricsRevenueBasis];
+
+export const PlatformMetricsRevenueBasis = {
+  list_price: "list_price",
+} as const;
+
+export type PlatformMetricsRevenueByPlanItem = {
+  tier: string;
+  agencies: number;
+  mrrCents: number;
+};
+
+export type PlatformMetricsRevenue = {
+  basis: PlatformMetricsRevenueBasis;
+  mrrCents: number;
+  arrCents: number;
+  payingAgencies: number;
+  trialingAgencies: number;
+  pastDueAgencies: number;
+  atRiskCents: number;
+  byPlan: PlatformMetricsRevenueByPlanItem[];
+};
+
+export type PlatformMetricsCommissions = {
+  allTimeCents: number;
+  last12MonthsCents: number;
+};
+
+export type PlatformMetricsGrowthItem = {
+  month: string;
+  newAgencies: number;
+  totalAgencies: number;
+  newClients: number;
+  totalClients: number;
+  commissionsCents: number;
+};
+
+export type PlatformMetricsAgenciesItem = {
+  orgId: string;
+  subscriptionStatus: string;
+  /** @nullable */
+  planTier: string | null;
+  mrrCents: number;
+  commissionsLast12MonthsCents: number;
+  commissionsAllTimeCents: number;
+};
+
+/**
+ * Super-admin rollup across every agency. Money is in integer US cents. Revenue is ESTIMATED from active paid subscriptions at plan list price (Stripe is the source of truth); commissions are what agencies earned from carriers, not platform revenue. Nothing dated after the current month is counted.
+ */
+export interface PlatformMetrics {
+  generatedAt: string;
+  /** The last 12 months, oldest first, as YYYY-MM (UTC). */
+  months: string[];
+  revenue: PlatformMetricsRevenue;
+  commissions: PlatformMetricsCommissions;
+  growth: PlatformMetricsGrowthItem[];
+  agencies: PlatformMetricsAgenciesItem[];
+}
+
 export interface SuccessResponse {
   success: boolean;
 }

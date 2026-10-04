@@ -5117,6 +5117,14 @@ paths:
       responses:
         "200": { description: Agencies, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
         "403": { description: Not super_admin, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /admin/platform/metrics:
+    get:
+      operationId: getPlatformMetrics
+      tags: [admin]
+      summary: Platform revenue (estimated from list prices), agency commissions and a 12-month growth series across every agency (super_admin)
+      responses:
+        "200": { description: Metrics, content: { application/json: { schema: { $ref: "#/components/schemas/PlatformMetrics" } } } }
+        "403": { description: Not super_admin, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   /admin/agencies:
     post:
       operationId: createAgency
@@ -5547,6 +5555,72 @@ components:
           type: string
       required:
         - error
+
+    PlatformMetrics:
+      type: object
+      description: >-
+        Super-admin rollup across every agency. Money is in integer US cents.
+        Revenue is ESTIMATED from active paid subscriptions at plan list price
+        (Stripe is the source of truth); commissions are what agencies earned
+        from carriers, not platform revenue. Nothing dated after the current
+        month is counted.
+      required: [generatedAt, months, revenue, commissions, growth, agencies]
+      properties:
+        generatedAt: { type: string, format: date-time }
+        months:
+          type: array
+          description: The last 12 months, oldest first, as YYYY-MM (UTC).
+          items: { type: string }
+        revenue:
+          type: object
+          required: [basis, mrrCents, arrCents, payingAgencies, trialingAgencies, pastDueAgencies, atRiskCents, byPlan]
+          properties:
+            basis: { type: string, enum: [list_price] }
+            mrrCents: { type: integer }
+            arrCents: { type: integer }
+            payingAgencies: { type: integer }
+            trialingAgencies: { type: integer }
+            pastDueAgencies: { type: integer }
+            atRiskCents: { type: integer }
+            byPlan:
+              type: array
+              items:
+                type: object
+                required: [tier, agencies, mrrCents]
+                properties:
+                  tier: { type: string }
+                  agencies: { type: integer }
+                  mrrCents: { type: integer }
+        commissions:
+          type: object
+          required: [allTimeCents, last12MonthsCents]
+          properties:
+            allTimeCents: { type: integer }
+            last12MonthsCents: { type: integer }
+        growth:
+          type: array
+          items:
+            type: object
+            required: [month, newAgencies, totalAgencies, newClients, totalClients, commissionsCents]
+            properties:
+              month: { type: string }
+              newAgencies: { type: integer }
+              totalAgencies: { type: integer }
+              newClients: { type: integer }
+              totalClients: { type: integer }
+              commissionsCents: { type: integer }
+        agencies:
+          type: array
+          items:
+            type: object
+            required: [orgId, subscriptionStatus, planTier, mrrCents, commissionsLast12MonthsCents, commissionsAllTimeCents]
+            properties:
+              orgId: { type: string }
+              subscriptionStatus: { type: string }
+              planTier: { type: [string, "null"] }
+              mrrCents: { type: integer }
+              commissionsLast12MonthsCents: { type: integer }
+              commissionsAllTimeCents: { type: integer }
 
     SuccessResponse:
       type: object
