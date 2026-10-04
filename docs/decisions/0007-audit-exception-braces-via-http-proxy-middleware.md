@@ -9,14 +9,15 @@ Accepted — 2026-10-04. Revisit when a patched `braces` release ships, or if
 
 `main` CI went red on the `pnpm audit (moderate)` job. The new finding is a
 high-severity stack-exhaustion DoS in `braces <=3.0.3` (GHSA-vfj7-8cjw-p6xm),
-reached only through:
-
-```
-artifacts__api-server > http-proxy-middleware@3.0.7 > micromatch > braces
-```
+reached in the production API runtime through
+`artifacts__api-server > http-proxy-middleware@3.0.7 > micromatch > braces`.
 
 The advisory lists **no patched version**, so a `pnpm.overrides` bump is not
-possible. Every other path to `braces` is dev-only and absent from the audit.
+possible. CI also audits development dependencies, including
+`artifacts/mockup-sandbox > fast-glob > micromatch > braces`.
+That development-only path uses fixed glob patterns in
+`artifacts/mockup-sandbox/mockupPreviewPlugin.ts` and does not introduce
+attacker-controlled patterns.
 
 ## Analysis — why the vulnerable code is unreachable
 
