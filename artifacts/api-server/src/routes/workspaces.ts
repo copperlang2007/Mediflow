@@ -2,6 +2,7 @@
  * Workspaces — platform-owner agency provisioning (stage2/calendar-branding).
  *
  *   GET  /admin/agencies/overview  — every agency with live member/agent/client counts
+ *   GET  /admin/platform/metrics   — revenue, commissions and 12-month growth across every agency
  *   POST /admin/agencies           — create an agency and invite its first admin
  *
  * super_admin only, MFA-gated like the existing GET /admin/agencies.
@@ -24,6 +25,7 @@ import {
   db,
   agentsTable,
   auditLogTable,
+  commissionLineItemsTable,
   contactsTable,
   organizationsTable,
   userInvitationsTable,
@@ -38,6 +40,7 @@ import {
 import { requireMfa } from "../middlewares/requireMfa";
 import { auditMiddleware } from "../middlewares/auditMiddleware";
 import { lockOrgSeats, requireSeat } from "../lib/billing/seats";
+import { PLANS, isPlanTier } from "../lib/billing/plans";
 import { PlanLimitError, deriveEntitlements, planLimitResponse } from "../lib/billing/entitlements";
 import { isEmailConfigured } from "../lib/email";
 import {
@@ -126,6 +129,157 @@ router.get(
         agents: a.get(o.id) ?? 0,
         clients: c.get(o.id) ?? 0,
         pendingInvitations: i.get(o.id) ?? 0,
+      })),
+    });
+  },
+);
+
+/** First day of each of the last 12 months (UTC), oldest first, as "YYYY-MM". */
+export function lastTwelveMonths(now: Date = new Date()): string[] {
+  const months: string[] = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    months.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
+  }
+  return months;
+}
+
+const toCents = (amount: string | number | null | undefined): number =>
+  Math.round(Number(amount ?? 0) * 100);
+
+router.get(
+  "/admin/platform/metrics",
+  requireAuth,
+  requireMfa,
+  requireRole("super_admin"),
+  // tenant-isolation-exempt: platform-owner rollup across every tenant, super_admin only.
+  async (_req: Request, res: Response): Promise<void> => {
+    const months = lastTwelveMonths();
+    const windowStart = `${months[0]}-01`;
+    const monthOf = (col: ReturnType<typeof sql>) => sql<string>`to_char(${col} AT TIME ZONE 'UTC', 'YYYY-MM')`;
+    // A line item's month is its statement period, falling back to when it was recorded.
+    const commissionMonth = sql<string>`to_char(coalesce(${commissionLineItemsTable.periodStart}::timestamp, ${commissionLineItemsTable.createdAt} AT TIME ZONE 'UTC'), 'YYYY-MM')`;
+
+    const [subs, orgGrowth, clientGrowth, orgBase, clientBase, commissionTotals, commissionByMonth] =
+      await Promise.all([
+        db.select().from(subscriptionsTable),
+        db
+          .select({ month: monthOf(sql`${organizationsTable.createdAt}`), n: sql<number>`count(*)::int` })
+          .from(organizationsTable)
+          .where(sql`${organizationsTable.createdAt} >= ${windowStart}::timestamptz`)
+          .groupBy(sql`1`),
+        db
+          .select({ month: monthOf(sql`${contactsTable.createdAt}`), n: sql<number>`count(*)::int` })
+          .from(contactsTable)
+          .where(and(isNull(contactsTable.deletedAt), sql`${contactsTable.createdAt} >= ${windowStart}::timestamptz`))
+          .groupBy(sql`1`),
+        db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(organizationsTable)
+          .where(sql`${organizationsTable.createdAt} < ${windowStart}::timestamptz`),
+        db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(contactsTable)
+          .where(and(isNull(contactsTable.deletedAt), sql`${contactsTable.createdAt} < ${windowStart}::timestamptz`)),
+        db
+          .select({
+            orgId: commissionLineItemsTable.orgId,
+            allTime: sql<string>`coalesce(sum(${commissionLineItemsTable.commissionAmount}), 0)::text`,
+            last12: sql<string>`coalesce(sum(${commissionLineItemsTable.commissionAmount}) filter (where ${commissionMonth} >= ${months[0]}), 0)::text`,
+          })
+          .from(commissionLineItemsTable)
+          .groupBy(commissionLineItemsTable.orgId),
+        db
+          .select({
+            month: commissionMonth,
+            amount: sql<string>`coalesce(sum(${commissionLineItemsTable.commissionAmount}), 0)::text`,
+          })
+          .from(commissionLineItemsTable)
+          .groupBy(sql`1`),
+      ]);
+
+    // Revenue: list price of each ACTIVE paid subscription. Stripe is the
+    // system of record, so this is an estimate (no seat overage, discounts or
+    // proration); it is labelled that way for the reader via `basis`.
+    const priceOf = (tier: string): number => (isPlanTier(tier) ? PLANS[tier].monthlyPriceCents : 0);
+    const byPlan = new Map<string, { agencies: number; mrrCents: number }>();
+    let mrrCents = 0;
+    let atRiskCents = 0;
+    let payingAgencies = 0;
+    let trialingAgencies = 0;
+    let pastDueAgencies = 0;
+    const perOrg = new Map<string, { status: string; planTier: string; mrrCents: number }>();
+    for (const sub of subs) {
+      const price = priceOf(sub.planTier);
+      const counted = sub.status === "active" && price > 0;
+      perOrg.set(sub.orgId, { status: sub.status, planTier: sub.planTier, mrrCents: counted ? price : 0 });
+      if (counted) {
+        payingAgencies += 1;
+        mrrCents += price;
+        const row = byPlan.get(sub.planTier) ?? { agencies: 0, mrrCents: 0 };
+        row.agencies += 1;
+        row.mrrCents += price;
+        byPlan.set(sub.planTier, row);
+      }
+      if (sub.status === "trialing") trialingAgencies += 1;
+      if (sub.status === "past_due") {
+        pastDueAgencies += 1;
+        atRiskCents += price;
+      }
+    }
+
+    const commissionsByOrg = new Map(
+      commissionTotals.map((r) => [r.orgId, { allTimeCents: toCents(r.allTime), last12Cents: toCents(r.last12) }]),
+    );
+    const commissionMonthCents = new Map(commissionByMonth.map((r) => [r.month, toCents(r.amount)]));
+    const orgByMonth = new Map(orgGrowth.map((r) => [r.month, Number(r.n)]));
+    const clientByMonth = new Map(clientGrowth.map((r) => [r.month, Number(r.n)]));
+
+    let totalAgencies = Number(orgBase[0]?.n ?? 0);
+    let totalClients = Number(clientBase[0]?.n ?? 0);
+    const growth = months.map((month) => {
+      const newAgencies = orgByMonth.get(month) ?? 0;
+      const newClients = clientByMonth.get(month) ?? 0;
+      totalAgencies += newAgencies;
+      totalClients += newClients;
+      return {
+        month,
+        newAgencies,
+        totalAgencies,
+        newClients,
+        totalClients,
+        commissionsCents: commissionMonthCents.get(month) ?? 0,
+      };
+    });
+
+    const allOrgIds = new Set<string>([...perOrg.keys(), ...commissionsByOrg.keys()]);
+    res.json({
+      generatedAt: new Date().toISOString(),
+      months,
+      revenue: {
+        basis: "list_price",
+        mrrCents,
+        arrCents: mrrCents * 12,
+        payingAgencies,
+        trialingAgencies,
+        pastDueAgencies,
+        atRiskCents,
+        byPlan: [...byPlan.entries()]
+          .map(([tier, v]) => ({ tier, ...v }))
+          .sort((a, b) => b.mrrCents - a.mrrCents),
+      },
+      commissions: {
+        allTimeCents: [...commissionsByOrg.values()].reduce((s, v) => s + v.allTimeCents, 0),
+        last12MonthsCents: [...commissionsByOrg.values()].reduce((s, v) => s + v.last12Cents, 0),
+      },
+      growth,
+      agencies: [...allOrgIds].map((orgId) => ({
+        orgId,
+        subscriptionStatus: perOrg.get(orgId)?.status ?? "none",
+        planTier: perOrg.get(orgId)?.planTier ?? null,
+        mrrCents: perOrg.get(orgId)?.mrrCents ?? 0,
+        commissionsLast12MonthsCents: commissionsByOrg.get(orgId)?.last12Cents ?? 0,
+        commissionsAllTimeCents: commissionsByOrg.get(orgId)?.allTimeCents ?? 0,
       })),
     });
   },

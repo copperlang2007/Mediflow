@@ -5117,6 +5117,14 @@ paths:
       responses:
         "200": { description: Agencies, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
         "403": { description: Not super_admin, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /admin/platform/metrics:
+    get:
+      operationId: getPlatformMetrics
+      tags: [admin]
+      summary: Platform revenue (estimated from list prices), agency commissions and a 12-month growth series across every agency (super_admin)
+      responses:
+        "200": { description: Metrics, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "403": { description: Not super_admin, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   /admin/agencies:
     post:
       operationId: createAgency

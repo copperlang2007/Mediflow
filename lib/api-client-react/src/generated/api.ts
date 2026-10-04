@@ -148,6 +148,7 @@ import type {
   GetNotificationsParams,
   GetOrgBranding200,
   GetPipelineReportParams,
+  GetPlatformMetrics200,
   GetReconciliationOverview200,
   GetRenewalsParams,
   GetRetentionAepParams,
@@ -21879,6 +21880,81 @@ export function useListAgenciesOverview<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getListAgenciesOverviewQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getGetPlatformMetricsUrl = () => {
+  return `/api/admin/platform/metrics`;
+};
+
+/**
+ * @summary Platform revenue (estimated from list prices), agency commissions and a 12-month growth series across every agency (super_admin)
+ */
+export const getPlatformMetrics = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<GetPlatformMetrics200> => {
+  return customFetch<GetPlatformMetrics200>(getGetPlatformMetricsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPlatformMetricsQueryKey = () => {
+  return [`/api/admin/platform/metrics`] as const;
+};
+
+export const getGetPlatformMetricsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPlatformMetrics>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPlatformMetrics>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetPlatformMetricsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPlatformMetrics>>
+  > = ({ signal }) => getPlatformMetrics({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPlatformMetrics>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPlatformMetricsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPlatformMetrics>>
+>;
+export type GetPlatformMetricsQueryError = ErrorType<Error>;
+
+/**
+ * @summary Platform revenue (estimated from list prices), agency commissions and a 12-month growth series across every agency (super_admin)
+ */
+
+export function useGetPlatformMetrics<
+  TData = Awaited<ReturnType<typeof getPlatformMetrics>>,
+  TError = ErrorType<Error>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPlatformMetrics>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPlatformMetricsQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

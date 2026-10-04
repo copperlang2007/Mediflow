@@ -6476,6 +6476,14 @@ export const ListAgenciesOverviewResponse = zod.record(
 );
 
 /**
+ * @summary Platform revenue (estimated from list prices), agency commissions and a 12-month growth series across every agency (super_admin)
+ */
+export const GetPlatformMetricsResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
  * @summary Create an agency and invite its first admin via the invitation flow (super_admin)
  */
 export const createAgencyBodyNameMin = 2;

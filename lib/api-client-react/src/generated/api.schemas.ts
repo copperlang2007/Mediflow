@@ -4035,6 +4035,8 @@ export type ResetOrgBranding200 = { [key: string]: unknown };
 
 export type ListAgenciesOverview200 = { [key: string]: unknown };
 
+export type GetPlatformMetrics200 = { [key: string]: unknown };
+
 export type CreateAgencyBody = {
   /**
    * @minLength 2
