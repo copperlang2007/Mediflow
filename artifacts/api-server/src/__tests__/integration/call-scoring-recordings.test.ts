@@ -33,6 +33,7 @@ const { dbF, clerkF, jobsF, storageF } = vi.hoisted(() => ({
         return `https://storage.example/${key}?signed=1`;
       }
       async deleteCallRecording(key: string): Promise<void> {
+        if ((globalThis as unknown as { __REC_DELETE_FAILS__?: boolean }).__REC_DELETE_FAILS__) throw new Error("storage unavailable");
         g.__REC_OBJECTS__.delete(key);
       }
       async getCallRecordingMetadata(key: string): Promise<{ size: number; contentType: string } | null> {
@@ -54,6 +55,8 @@ import { safeReason } from "../../lib/callScoring/speech";
 import { seedAgent, seedContact, seedOrg, seedUser } from "../helpers/testDb";
 import type { Express } from "express";
 
+const setDeleteFails = (on: boolean) => void ((globalThis as unknown as { __REC_DELETE_FAILS__?: boolean }).__REC_DELETE_FAILS__ = on);
+const sweepDelete = async (key: string) => void objects().delete(key);
 const objects = () => (globalThis as unknown as { __REC_OBJECTS__: Map<string, { size: number; contentType: string }> }).__REC_OBJECTS__;
 const signed = () => (globalThis as unknown as { __REC_SIGNED__: Array<{ key: string; contentType: string }> }).__REC_SIGNED__;
 
@@ -508,7 +511,7 @@ describe("review fixes", () => {
     expect((await rowOf(id)).status).toBe("failed");
   });
 
-  it("rescores a duplicate only once per checklist", async () => {
+  it("rescores a duplicate only when the call's current score uses another checklist", async () => {
     const results = stereoResults();
     fakeGoogle({ poll: "done", results });
     const run = async (rubricId?: string) => {
@@ -518,11 +521,118 @@ describe("review fixes", () => {
       return rowOf(id);
     };
     const first = await run();
-    await run("general-sales");
+    const scoresOf = () =>
+      handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, first.transcriptId!)).orderBy(schema.callScoresTable.createdAt);
     await run();
     await run("general-sales");
-    const scores = await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, first.transcriptId!));
-    expect(scores).toHaveLength(2);
+    await run("general-sales");
+    expect((await scoresOf()).map((x) => x.rubricId)).toEqual(["medicare-tpmo", "general-sales"]);
+    // Back to the first checklist: the call opens on its newest score, so that must be this checklist's.
+    await run();
+    expect((await scoresOf()).map((x) => x.rubricId)).toEqual(["medicare-tpmo", "general-sales", "medicare-tpmo"]);
+  });
+
+  it("a duplicate waits while another recording is scoring the same call", async () => {
+    const results = stereoResults();
+    fakeGoogle({ poll: "done", results });
+    const first = await uploadAndConfirm(admin.id);
+    await recordings.processRecording(first);
+    await recordings.processRecording(first);
+    const transcriptId = (await rowOf(first)).transcriptId!;
+    await handle.db.insert(schema.callScoreClaimsTable).values({ transcriptId, claimedAt: new Date() });
+    const second = await uploadAndConfirm(admin.id, { rubricId: "general-sales" });
+    await recordings.processRecording(second);
+    expect(await recordings.processRecording(second)).toBe("poll");
+    expect((await rowOf(second)).status).toBe("transcribing");
+    const count = async () => (await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, transcriptId))).length;
+    expect(await count()).toBe(1);
+    // A claim left by a job that died is taken over.
+    await handle.db.update(schema.callScoreClaimsTable).set({ claimedAt: new Date(Date.now() - 16 * 60 * 1000) }).where(eq(schema.callScoreClaimsTable.transcriptId, transcriptId));
+    expect(await recordings.processRecording(second)).toBe("finished");
+    expect((await rowOf(second)).status).toBe("scored");
+    expect(await count()).toBe(2);
+    expect(await handle.db.select().from(schema.callScoreClaimsTable).where(eq(schema.callScoreClaimsTable.transcriptId, transcriptId))).toHaveLength(0);
+  });
+
+  it("two confirms racing at the daily limit never delete accepted audio", async () => {
+    process.env.CALL_RECORDINGS_DAILY_LIMIT = "1";
+    try {
+      const orgR = await seedOrg(handle.db, { id: `rec-race-${Date.now()}` });
+      const u = await seedUser(handle.db, { orgId: orgR.id, role: "agency_admin" });
+      const start = await request(app).post("/api/call-scoring/recordings/upload-url").set(withAuth(u.id)).send(startBody());
+      const rid = start.body.recordingId as string;
+      const key = `call-recordings/${orgR.id}/${rid}`;
+      objects().set(key, { size: 10, contentType: "audio/mpeg" });
+      const confirm = () => request(app).post(`/api/call-scoring/recordings/${rid}/uploaded`).set(withAuth(u.id)).send({});
+      const out = await Promise.all([confirm(), confirm(), confirm()]);
+      expect(out.every((r) => r.status === 200 || r.status === 202)).toBe(true);
+      expect(out.every((r) => r.body.status === "queued")).toBe(true);
+      expect(objects().has(key)).toBe(true);
+      expect((await rowOf(rid)).status).toBe("queued");
+    } finally {
+      delete process.env.CALL_RECORDINGS_DAILY_LIMIT;
+    }
+  });
+
+  it("retries deleting refused audio until it succeeds, and deletes again after the upload link expires", async () => {
+    process.env.CALL_RECORDINGS_DAILY_LIMIT = "1";
+    try {
+      const orgP = await seedOrg(handle.db, { id: `rec-purge-${Date.now()}` });
+      const u = await seedUser(handle.db, { orgId: orgP.id, role: "agency_admin" });
+      const post = () => request(app).post("/api/call-scoring/recordings/upload-url").set(withAuth(u.id)).send(startBody());
+      const a = await post();
+      await handle.db.update(schema.callRecordingsTable).set({ createdAt: new Date(Date.now() - 16 * 60 * 1000) }).where(eq(schema.callRecordingsTable.id, a.body.recordingId));
+      const b = await post();
+      const keyB = `call-recordings/${orgP.id}/${b.body.recordingId}`;
+      objects().set(`call-recordings/${orgP.id}/${a.body.recordingId}`, { size: 10, contentType: "audio/mpeg" });
+      objects().set(keyB, { size: 10, contentType: "audio/mpeg" });
+      await request(app).post(`/api/call-scoring/recordings/${a.body.recordingId}/uploaded`).set(withAuth(u.id)).send({}).expect(202);
+      setDeleteFails(true);
+      try {
+        await request(app).post(`/api/call-scoring/recordings/${b.body.recordingId}/uploaded`).set(withAuth(u.id)).send({}).expect(429);
+      } finally {
+        setDeleteFails(false);
+      }
+      expect(objects().has(keyB)).toBe(true);
+      const refused = await rowOf(b.body.recordingId);
+      expect(refused.status).toBe("failed");
+      expect(refused.purgeAfter).not.toBeNull();
+
+      // Not due while the upload link is still valid.
+      const before = await recordings.sweepStalledRecordings(async () => true, new Date(), sweepDelete);
+      expect(objects().has(keyB)).toBe(true);
+      expect(before.purged).toBe(0);
+
+      // Due: a failing delete keeps it pending; the next run deletes it.
+      const later = new Date(refused.purgeAfter!.getTime() + 1000);
+      await recordings.sweepStalledRecordings(async () => true, later, async () => {
+        throw new Error("503");
+      });
+      expect((await rowOf(b.body.recordingId)).purgeAfter).not.toBeNull();
+      await recordings.sweepStalledRecordings(async () => true, later, sweepDelete);
+      expect(objects().has(keyB)).toBe(false);
+      expect((await rowOf(b.body.recordingId)).purgeAfter).toBeNull();
+    } finally {
+      delete process.env.CALL_RECORDINGS_DAILY_LIMIT;
+    }
+  });
+
+  it("a recording counts against the cap for 24 hours from when it was confirmed", async () => {
+    process.env.CALL_RECORDINGS_DAILY_LIMIT = "1";
+    try {
+      const orgW = await seedOrg(handle.db, { id: `rec-window-${Date.now()}` });
+      const u = await seedUser(handle.db, { orgId: orgW.id, role: "agency_admin" });
+      const post = () => request(app).post("/api/call-scoring/recordings/upload-url").set(withAuth(u.id)).send(startBody());
+      const a = await post();
+      objects().set(`call-recordings/${orgW.id}/${a.body.recordingId}`, { size: 10, contentType: "audio/mpeg" });
+      // Link issued 23 hours ago, confirmed now: still counts for the next 24 hours.
+      await handle.db.update(schema.callRecordingsTable).set({ createdAt: new Date(Date.now() - 23 * 60 * 60 * 1000) }).where(eq(schema.callRecordingsTable.id, a.body.recordingId));
+      await request(app).post(`/api/call-scoring/recordings/${a.body.recordingId}/uploaded`).set(withAuth(u.id)).send({}).expect(202);
+      await handle.db.update(schema.callRecordingsTable).set({ createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000) }).where(eq(schema.callRecordingsTable.id, a.body.recordingId));
+      expect((await post()).status).toBe(429);
+    } finally {
+      delete process.env.CALL_RECORDINGS_DAILY_LIMIT;
+    }
   });
 
   it("deletes the audio of uploads refused at the daily limit or abandoned", async () => {
@@ -552,6 +662,7 @@ describe("review fixes", () => {
       .where(eq(schema.callRecordingsTable.id, rid));
     const deleted: string[] = [];
     await recordings.sweepStalledRecordings(async () => true, new Date(), async (key) => void deleted.push(key));
+    expect((await rowOf(rid)).purgeAfter).toBeNull();
     expect(deleted).toContain(`call-recordings/${org.id}/${rid}`);
   });
 
@@ -642,14 +753,14 @@ describe("review fixes", () => {
       .where(eq(schema.callRecordingsTable.id, abandoned));
 
     const requeued: string[] = [];
-    const out = await recordings.sweepStalledRecordings(async (id) => (requeued.push(id), true));
+    const out = await recordings.sweepStalledRecordings(async (id) => (requeued.push(id), true), new Date(), sweepDelete);
     expect(requeued).toContain(stalled);
     expect(out.abandoned).toBeGreaterThanOrEqual(1);
     expect((await rowOf(abandoned)).status).toBe("failed");
 
     // Claimed: an immediate second sweep does not queue it again.
     const again: string[] = [];
-    await recordings.sweepStalledRecordings(async (id) => (again.push(id), true));
+    await recordings.sweepStalledRecordings(async (id) => (again.push(id), true), new Date(), sweepDelete);
     expect(again).not.toContain(stalled);
   });
 });

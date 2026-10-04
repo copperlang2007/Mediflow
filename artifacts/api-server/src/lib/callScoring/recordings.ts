@@ -19,8 +19,8 @@
  * (ingestTranscript also dedupes by content). `checked_at` records each look;
  * the sweeper (workers/recordingsSweep.ts) re-queues rows whose job chain died.
  */
-import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
-import { db, callRecordingsTable, callScoresTable, type CallRecordingLayout, type CallTranscriptSource } from "@workspace/db";
+import { and, desc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";
+import { db, callRecordingsTable, callScoreClaimsTable, callScoresTable, type CallRecordingLayout, type CallTranscriptSource } from "@workspace/db";
 import { logger } from "../logger";
 import { open } from "./seal";
 import { DEFAULT_RUBRIC_ID, getRubric } from "./rubrics";
@@ -49,6 +49,23 @@ async function fail(id: string, reason: string): Promise<StepOutcome> {
     .set({ status: "failed", error: reason, updatedAt: new Date() })
     .where(and(eq(callRecordingsTable.id, id), inArray(callRecordingsTable.status, ["queued", "transcribing"])));
   return "finished";
+}
+
+/** A claim older than this belongs to a job that died mid-score and is taken over. */
+const RESCORE_CLAIM_STALE_MS = 15 * 60 * 1000;
+
+/** Claim the right to add a score to a call; returns the claim's timestamp (its token) or null if another job holds it. */
+async function claimRescore(transcriptId: string, now: Date): Promise<Date | null> {
+  const claimed = await db
+    .insert(callScoreClaimsTable)
+    .values({ transcriptId, claimedAt: now })
+    .onConflictDoUpdate({
+      target: callScoreClaimsTable.transcriptId,
+      set: { claimedAt: now },
+      where: lt(callScoreClaimsTable.claimedAt, new Date(now.getTime() - RESCORE_CLAIM_STALE_MS)),
+    })
+    .returning({ claimedAt: callScoreClaimsTable.claimedAt });
+  return claimed.length ? now : null;
 }
 
 /** A start that was claimed but never recorded its operation (a crash mid-start) is retried after this. */
@@ -156,25 +173,34 @@ export async function processRecording(recordingId: string, deps: { privateObjec
   if (result.kind === "error") return fail(row.id, result.message);
   const transcriptId = result.kind === "ok" ? result.summary.transcriptId : result.transcriptId;
   if (result.kind === "duplicate") {
-    // Same speech as an earlier call. If it was scored under another checklist,
-    // add a score under the one chosen for this upload (history is kept).
-    // Only when no score under this checklist exists yet: alternating checklists
-    // across re-uploads must not re-run scoring every time.
-    const [existing] = await db
-      .select({ id: callScoresTable.id })
-      .from(callScoresTable)
-      .where(and(eq(callScoresTable.transcriptId, transcriptId), eq(callScoresTable.rubricId, rubric.id)))
-      .limit(1);
-    if (!existing) {
-      const rescored = await rescoreTranscript({
-        orgId: row.orgId,
-        userId: row.createdBy,
-        userRole: details.uploaderRole,
-        transcriptId,
-        rubric,
-        aiMode: row.aiMode === "off" ? "off" : "auto",
-      });
-      if (rescored.kind === "error") return fail(row.id, rescored.message);
+    // Same speech as an earlier call. The call shows its newest score, so when
+    // that is under another checklist, score it under the one chosen for this
+    // upload (history is kept). When the newest score already uses this
+    // checklist nothing is re-run. Only one recording at a time may add a
+    // score to a call: a duplicate racing another waits and re-checks.
+    const claimedAt = await claimRescore(transcriptId, now);
+    if (!claimedAt) return "poll";
+    try {
+      const [latest] = await db
+        .select({ rubricId: callScoresTable.rubricId })
+        .from(callScoresTable)
+        .where(and(eq(callScoresTable.orgId, row.orgId), eq(callScoresTable.transcriptId, transcriptId)))
+        .orderBy(desc(callScoresTable.createdAt), desc(callScoresTable.id))
+        .limit(1);
+      if (latest?.rubricId !== rubric.id) {
+        const rescored = await rescoreTranscript({
+          orgId: row.orgId,
+          userId: row.createdBy,
+          userRole: details.uploaderRole,
+          transcriptId,
+          rubric,
+          aiMode: row.aiMode === "off" ? "off" : "auto",
+        });
+        if (rescored.kind === "error") return fail(row.id, rescored.message);
+      }
+    } finally {
+      await db.delete(callScoreClaimsTable)
+        .where(and(eq(callScoreClaimsTable.transcriptId, transcriptId), eq(callScoreClaimsTable.claimedAt, claimedAt)));
     }
   }
   await db.update(callRecordingsTable)
@@ -193,18 +219,35 @@ export async function processRecording(recordingId: string, deps: { privateObjec
 export const STALLED_AFTER_MS = 10 * 60 * 1000;
 /** Signed upload URLs last 15 minutes; an upload never confirmed after this is given up on. */
 export const UPLOAD_ABANDONED_AFTER_MS = 24 * 60 * 60 * 1000;
+/** How long a signed upload URL stays valid. */
+export const UPLOAD_URL_TTL_MS = 15 * 60 * 1000;
+
+/**
+ * When audio that will not be transcribed can be deleted for good: after its
+ * upload link has expired (plus a minute of clock slack), so nobody can PUT it
+ * back. Deleting earlier is fine but must be repeated at this time.
+ */
+export function purgeTime(createdAt: Date, now: Date = new Date()): Date {
+  const expired = new Date(createdAt.getTime() + UPLOAD_URL_TTL_MS + 60_000);
+  return expired > now ? expired : now;
+}
+
+/** Most audio deletes one sweep attempts; the rest wait for the next run. */
+const PURGE_BATCH = 200;
 
 /**
  * Recover recordings whose job chain died (a failed re-enqueue, a lost job,
- * a crash): re-queue the job for stalled queued / transcribing rows, and fail
- * uploads that were never confirmed. Each stalled row is claimed by bumping
- * `checked_at` first, so overlapping sweeps queue it once.
+ * a crash): re-queue the job for stalled queued / transcribing rows, fail
+ * uploads that were never confirmed, and delete audio that will not be
+ * transcribed. Each stalled row is claimed by bumping `checked_at` first, so
+ * overlapping sweeps queue it once. A delete that fails keeps `purge_after`
+ * set and is retried on the next run.
  */
 export async function sweepStalledRecordings(
   requeue: (recordingId: string) => Promise<boolean>,
-  now: Date = new Date(),
-  deleteObject: (objectKey: string) => Promise<void> = async () => undefined,
-): Promise<{ requeued: number; abandoned: number }> {
+  now: Date,
+  deleteObject: (objectKey: string) => Promise<void>,
+): Promise<{ requeued: number; abandoned: number; purged: number }> {
   const stalledBefore = new Date(now.getTime() - STALLED_AFTER_MS);
   const stalled = await db
     .update(callRecordingsTable)
@@ -219,23 +262,34 @@ export async function sweepStalledRecordings(
   let requeued = 0;
   for (const r of stalled) if (await requeue(r.id)) requeued++;
 
+  // Whatever was uploaded for an unfinished recording is PHI nobody will use: mark it for deletion.
   const abandoned = await db
     .update(callRecordingsTable)
-    .set({ status: "failed", error: "The upload was never finished. Upload the recording again.", updatedAt: now })
+    .set({ status: "failed", error: "The upload was never finished. Upload the recording again.", purgeAfter: now, updatedAt: now })
     .where(
       and(
         eq(callRecordingsTable.status, "uploading"),
         lt(callRecordingsTable.createdAt, new Date(now.getTime() - UPLOAD_ABANDONED_AFTER_MS)),
       ),
     )
-    .returning({ id: callRecordingsTable.id, objectKey: callRecordingsTable.objectKey });
-  // Whatever was uploaded for an unfinished recording is PHI nobody will use: remove it.
-  for (const r of abandoned) {
+    .returning({ id: callRecordingsTable.id });
+
+  const due = await db
+    .select({ id: callRecordingsTable.id, objectKey: callRecordingsTable.objectKey })
+    .from(callRecordingsTable)
+    .where(and(eq(callRecordingsTable.status, "failed"), lte(callRecordingsTable.purgeAfter, now)))
+    .orderBy(callRecordingsTable.purgeAfter)
+    .limit(PURGE_BATCH);
+  let purged = 0;
+  for (const r of due) {
     try {
       await deleteObject(r.objectKey);
     } catch (err) {
-      logger.warn({ err: (err as Error).message, recordingId: r.id }, "Call recording sweep: could not delete an abandoned upload");
+      logger.warn({ err: (err as Error).message, recordingId: r.id }, "Call recording sweep: could not delete unused audio; will retry");
+      continue;
     }
+    await db.update(callRecordingsTable).set({ purgeAfter: null }).where(eq(callRecordingsTable.id, r.id));
+    purged++;
   }
-  return { requeued, abandoned: abandoned.length };
+  return { requeued, abandoned: abandoned.length, purged };
 }

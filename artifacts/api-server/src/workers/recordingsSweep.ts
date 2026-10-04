@@ -3,8 +3,8 @@
  *
  * The transcription job re-enqueues itself after each step; if one enqueue
  * fails or a job is lost, the recording would sit in queued / transcribing
- * forever. This puts those back on the queue and fails uploads that were
- * never confirmed. See sweepStalledRecordings in lib/callScoring/recordings.ts.
+ * forever. This puts those back on the queue, fails uploads that were
+ * never confirmed, and deletes audio that will not be transcribed. See sweepStalledRecordings in lib/callScoring/recordings.ts.
  */
 import { enqueue, JOB_NAMES, transcribeJobKey } from "../lib/jobs";
 import { sweepStalledRecordings } from "../lib/callScoring/recordings";
@@ -19,5 +19,5 @@ export async function recordingsSweepWorker(): Promise<void> {
     new Date(),
     (objectKey) => storage.deleteCallRecording(objectKey),
   );
-  if (summary.requeued || summary.abandoned) logger.info({ ...summary }, "Call recording sweep finished");
+  if (summary.requeued || summary.abandoned || summary.purged) logger.info({ ...summary }, "Call recording sweep finished");
 }

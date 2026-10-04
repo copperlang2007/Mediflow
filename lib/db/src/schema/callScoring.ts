@@ -289,6 +289,10 @@ export const callRecordingsTable = pgTable(
     attempts: integer("attempts").notNull().default(0),
     /** Last time the transcription job looked at this row; the sweeper re-queues stalled ones. */
     checkedAt: timestamp("checked_at", { withTimezone: true }),
+    /** When transcription was committed (confirm); the daily cap counts from here. */
+    committedAt: timestamp("committed_at", { withTimezone: true }),
+    /** Audio to delete once the upload link has expired; cleared only after the delete succeeds. */
+    purgeAfter: timestamp("purge_after", { withTimezone: true }),
     durationSeconds: integer("duration_seconds"),
     createdBy: text("created_by").references(() => usersTable.id, { onDelete: "set null" }),
     retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
@@ -298,8 +302,17 @@ export const callRecordingsTable = pgTable(
   (t) => [
     index("call_recordings_org_created_idx").on(t.orgId, t.createdAt),
     index("call_recordings_status_idx").on(t.status),
+    index("call_recordings_purge_after_idx").on(t.purgeAfter).where(sql`${t.purgeAfter} is not null`),
   ],
 );
 
 export type CallRecording = typeof callRecordingsTable.$inferSelect;
+
+/** One recording at a time may add a score to a call (see recordings.ts). */
+export const callScoreClaimsTable = pgTable("call_score_claims", {
+  transcriptId: text("transcript_id")
+    .primaryKey()
+    .references(() => callTranscriptsTable.id, { onDelete: "cascade" }),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull(),
+});
 
