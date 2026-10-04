@@ -13,6 +13,7 @@
     "seed:demo": "tsx ./src/seed-demo.ts",
     "move:clients": "tsx ./src/move-clients-between-orgs.ts",
     "check:migration-journal": "tsx ./src/check-migration-journal.ts",
+    "check:braces-audit-exception": "tsx ./src/check-braces-audit-exception.ts",
     "lq:sign": "tsx ./src/sign-lead-queue-request.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "predeploy:seed": "tsx ./src/predeploy-seed.ts"
