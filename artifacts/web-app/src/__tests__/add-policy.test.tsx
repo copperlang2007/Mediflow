@@ -35,7 +35,15 @@ vi.mock("@workspace/api-client-react", () => ({
   }),
   useGetMe: () => ({ data: { id: "u1", role: h.role } }),
   useGetCarriers: () => ({ data: [{ id: "car-1", name: "Humana" }] }),
-  useGetAgents: () => ({ data: { agents: [{ id: "ag-1", firstName: "Dana", lastName: "Reyes", email: "d@x.test" }] }, isLoading: false }),
+  useGetAgents: () => ({
+    data: {
+      agents: [
+        { id: "ag-1", firstName: "Dana", lastName: "Reyes", email: "dana.one@x.test" },
+        { id: "ag-2", firstName: "Dana", lastName: "Reyes", email: "dana.two@x.test" },
+      ],
+    },
+    isLoading: false,
+  }),
   getGetAgentsQueryKey: () => ["/api/agents"],
 }));
 
@@ -217,5 +225,35 @@ describe("Add policy form", () => {
   it("is honest that optional details can't be edited afterwards", async () => {
     await openDialog();
     expect(await screen.findByText(/can't be edited after saving yet/i)).toBeInTheDocument();
+  });
+
+  it("tells writing agents with the same name apart by email, and sends the chosen one", async () => {
+    await openDialog({ contact: { id: "c-7", name: "Sam Reed" } });
+    const agent = selectFor(/^Writing agent/);
+    const options = Array.from(agent.querySelectorAll("option")).map((o) => o.textContent ?? "");
+    expect(options.some((t) => t.includes("dana.one@x.test"))).toBe(true);
+    expect(options.some((t) => t.includes("dana.two@x.test"))).toBe(true);
+    fireEvent.change(agent, { target: { value: "ag-2" } });
+    fireEvent.change(selectFor(/^Plan type/), { target: { value: "MA" } });
+    fireEvent.change(screen.getByLabelText(/starts on/i), { target: { value: "2026-01-01" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add policy$/i }));
+    await waitFor(() => expect(posted()).toBeDefined());
+    expect(JSON.parse(String(posted()!.init!.body)).agentId).toBe("ag-2");
+  });
+
+  it.each([
+    ["active", true],
+    ["terminated", true],
+    ["pending", false],
+    ["cancelled", false],
+    ["declined", false],
+  ])("status %s is sent with effectuated=%s", async (status, effectuated) => {
+    await openDialog({ contact: { id: "c-7", name: "Sam Reed" } });
+    fireEvent.change(selectFor(/^Plan type/), { target: { value: "MA" } });
+    fireEvent.change(screen.getByLabelText(/starts on/i), { target: { value: "2026-01-01" } });
+    fireEvent.change(selectFor(/^Status/), { target: { value: status } });
+    fireEvent.click(screen.getByRole("button", { name: /^add policy$/i }));
+    await waitFor(() => expect(posted()).toBeDefined());
+    expect(JSON.parse(String(posted()!.init!.body))).toMatchObject({ status, effectuated });
   });
 });

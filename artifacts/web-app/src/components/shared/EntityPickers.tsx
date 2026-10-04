@@ -90,14 +90,20 @@ export function EntityPicker({
 
 const AGENT_PARAMS = { limit: 1000, sortBy: "name", sortDir: "asc" } as const;
 
-export function AgentPicker(props: BasePickerProps) {
+export function AgentPicker({ showEmail, ...props }: BasePickerProps & { showEmail?: boolean }) {
   const { data, isLoading } = useGetAgents(AGENT_PARAMS, {
     query: { queryKey: getGetAgentsQueryKey(AGENT_PARAMS), staleTime: 60_000 },
   });
-  const options = (data?.agents ?? []).map((a) => ({
-    value: a.id,
-    label: `${a.firstName} ${a.lastName}`.trim() || a.email,
-  }));
+  // `showEmail` adds the email after the name, for forms where the choice is
+  // money-bearing (commission attribution) and two agents may share a name.
+  const options = (data?.agents ?? []).map((a) => {
+    const name = `${a.firstName} ${a.lastName}`.trim();
+    return {
+      value: a.id,
+      label: name || a.email,
+      hint: showEmail && name && a.email ? a.email : undefined,
+    };
+  });
   return (
     <EntityPicker {...props} options={options} loading={isLoading} placeholder={props.placeholder ?? "Choose an agent"} emptyLabel="No agents yet" />
   );

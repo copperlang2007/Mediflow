@@ -14,7 +14,7 @@
  *     race/ethnicity exist only inside the encrypted payload.
  */
 import { randomUUID } from "crypto";
-import { and, eq, inArray, isNull, max, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, max, ne, or, sql } from "drizzle-orm";
 import {
   contactsTable,
   enrollmentsTable,
@@ -187,8 +187,13 @@ export async function applyCoverageLifecycle(
     await tx.update(contactsTable).set({ status: "enrolled" })
       .where(and(eq(contactsTable.id, contactId), inArray(contactsTable.status, ["lead", "prospect"])));
   } else if (isEndedStatus(policyStatus)) {
+    // In-force coverage is "effectuated" OR "active": imports create active rows
+    // that stay un-effectuated until a carrier statement confirms them.
     const [stillCovered] = await tx.select({ id: enrollmentsTable.id }).from(enrollmentsTable)
-      .where(and(eq(enrollmentsTable.contactId, contactId), eq(enrollmentsTable.effectuated, true))).limit(1);
+      .where(and(
+        eq(enrollmentsTable.contactId, contactId),
+        or(eq(enrollmentsTable.effectuated, true), eq(enrollmentsTable.status, "active")),
+      )).limit(1);
     if (!stillCovered) {
       await tx.update(contactsTable).set({ status: "lost" })
         .where(and(eq(contactsTable.id, contactId), eq(contactsTable.status, "enrolled")));

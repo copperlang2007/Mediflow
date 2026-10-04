@@ -169,8 +169,9 @@ export function AddPolicyDialog({
           applicationDate: applicationDate || null,
           effectiveDate,
           status,
-          // "Active" means in force, so it is also marked as having taken effect.
-          effectuated: status === "active",
+          // Active and Terminated both took effect (a terminated policy ended after it started);
+          // pending, cancelled and declined never did.
+          effectuated: status === "active" || status === "terminated",
           notes: notes.trim() || null,
         }),
       });
@@ -285,7 +286,7 @@ export function AddPolicyDialog({
             </div>
             <div>
               <Label>Writing agent</Label>
-              <AgentPicker value={agentId} onChange={setAgentId} noneLabel="Not assigned" className="mt-1" aria-label="Writing agent" />
+              <AgentPicker value={agentId} onChange={setAgentId} noneLabel="Not assigned" className="mt-1" aria-label="Writing agent" showEmail />
             </div>
           </div>
 

@@ -473,4 +473,20 @@ describe("client status follows coverage (same rule as EnrollHere)", () => {
     await post(enrolled.id, { status: "terminated", planType: "PDP", planYear: 2025, effectiveDate: "2025-01-01" });
     expect(await statusOf(enrolled.id)).toBe("enrolled");
   });
+
+  it("ended coverage does not mark a client lost while an ACTIVE policy that is not yet effectuated is on file", async () => {
+    // Imports create active rows that stay un-effectuated until a carrier statement confirms them.
+    const client = await seedContact(testDb, { orgId: orgA.id, firstName: "Imported", lastName: "Active", status: "enrolled" });
+    await post(client.id, { status: "active", effectuated: false, planType: "MAPD" });
+    await post(client.id, { status: "terminated", planType: "PDP", planYear: 2025, effectiveDate: "2025-01-01" });
+    expect(await statusOf(client.id)).toBe("enrolled");
+  });
+
+  it("a Terminated policy can be recorded as having taken effect", async () => {
+    const client = await seedContact(testDb, { orgId: orgA.id, firstName: "Was", lastName: "Effective", status: "retained" });
+    const res = await post(client.id, { status: "terminated", effectuated: true, planYear: 2025, effectiveDate: "2025-01-01" });
+    expect(res.status).toBe(201);
+    expect(res.body.effectuated).toBe(true);
+    expect(res.body.status).toBe("terminated");
+  });
 });

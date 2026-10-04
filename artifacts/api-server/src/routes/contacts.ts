@@ -128,6 +128,13 @@ router.get(
       // ordering — and was overkill for MBIs anyway, which are exact
       // identifiers. The remaining name/email/phone fields keep partial
       // ilike matching.
+      const fieldMatch = (term: string): SQL =>
+        or(
+          ilike(contactsTable.firstName, `%${term}%`),
+          ilike(contactsTable.lastName, `%${term}%`),
+          ilike(contactsTable.email, `%${term}%`),
+          ilike(contactsTable.phone, `%${term}%`),
+        ) as SQL;
       const searchClauses: SQL[] = [
         ilike(contactsTable.firstName, q) as SQL,
         ilike(contactsTable.lastName, q) as SQL,
@@ -135,6 +142,11 @@ router.get(
         ilike(contactsTable.phone, q) as SQL,
         eq(contactsTable.medicareIdHash, hashMedicareId(search)) as SQL,
       ];
+      // A full name ("Maria Lopez") never sits in one column, so also accept a
+      // contact where EVERY word matches some field. Additive: single words and
+      // whole-phrase matches behave exactly as before.
+      const words = search.split(/\s+/).filter(Boolean).slice(0, 5);
+      if (words.length > 1) searchClauses.push(and(...words.map(fieldMatch)) as SQL);
       conditions.push(or(...searchClauses) as SQL);
     }
     if (status && status !== "all") {
