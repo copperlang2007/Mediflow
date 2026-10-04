@@ -53,6 +53,9 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
 
+      - name: Verify braces audit exception
+        run: pnpm --filter @workspace/scripts check:braces-audit-exception
+
       # Fail the build on any moderate-or-above-severity advisory in the
       # resolved dependency tree. The previously-tracked transitives
       # (ws/jsdom, uuid/@google-cloud/storage, qs/supertest, esbuild via
