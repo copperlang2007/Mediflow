@@ -19,13 +19,20 @@ became #273 and #275). Re-measure before acting. The per-branch list is in
 
 | Bucket | Branches | Meaning | Safe to delete? |
 | --- | ---: | --- | --- |
-| A. Fully merged | 72 | 0 commits ahead of main. | **Yes.** |
+| A. Fully merged | 72 | 0 commits ahead of main at snapshot time. | **Yes, after re-fetching** — two of these (`claudemoogs/practical-thompson-09n6cr`, `claudemoogs/dreamy-ptolemy-2ho4s0`) were reused for new open PRs #273 and #275 minutes later and must now be **excluded**. |
 | B. Content already on main | 21 | Has commits main lacks by hash, but a merge changes nothing (`git merge-tree` result equals main's tree). | **Yes.** |
 | C. Reviewed, landed, then evolved | 62 | Work landed through a squash-merged PR; main has since changed those files, so a merge would conflict or re-add old lines. Each was checked by counting its added lines missing from main (almost always a few dozen of thousands) and, for the unusual ones, by hand. | **Very likely, but not proven per branch.** Verify the branch tip has no commits newer than its PR before deleting (see rule below), or get owner sign-off. |
 | D. — (none) | 0 | No branch was found whose only copy of real work is unmerged and abandoned. | — |
 | E. Open PR, unlanded | 1 | `claude/agencybridge-compliance-review-s3nc6l` = PR #272. | **No. Review and merge.** |
 
 ### Safe deletion rule
+
+**First, exclude every branch that is the head of an open PR** (list them on
+GitHub). Sessions reuse merged branch names; at the time of writing the heads of
+open PRs #272–#276 are `claude/agencybridge-compliance-review-s3nc6l`,
+`claudemoogs/practical-thompson-09n6cr` (#273), `claudemoogs/focused-feynman-01k79k` (#274),
+`claudemoogs/dreamy-ptolemy-2ho4s0` (#275) and `forge/ci-audit-braces-exception` (#276).
+Re-fetch immediately before deleting anything.
 
 Delete a branch only if **either**:
 1. `git rev-list --count origin/main..origin/<branch>` is `0`; **or**

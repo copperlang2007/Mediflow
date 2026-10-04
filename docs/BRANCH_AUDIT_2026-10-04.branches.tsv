@@ -81,12 +81,12 @@ B_CONTENT_IN_MAIN	claude/medi-flow-could-not-start-error	2026-09-23	1	0	NOOP_MER
 B_CONTENT_IN_MAIN	claude/node-forge-advisory	2026-10-02	1	1	NOOP_MERGE	merging adds nothing to main (tree-neutral)
 B_CONTENT_IN_MAIN	claude/remove-render-deploy	2026-10-02	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
 B_CONTENT_IN_MAIN	claudemoogs/agent-softphone-access	2026-09-29	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
-B_CONTENT_IN_MAIN	claudemoogs/dreamy-ptolemy-2ho4s0	2026-10-02	3	3	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+E_REUSED_OPEN_PR	claudemoogs/dreamy-ptolemy-2ho4s0	2026-10-02	3	3	NOOP_MERGE	REUSED after snapshot: now head of an open PR (#273/#275). DO NOT DELETE.
 B_CONTENT_IN_MAIN	claudemoogs/fix-aep-cockpit-test-clock	2026-09-30	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
 B_CONTENT_IN_MAIN	claudemoogs/fix-audit-markdown-it	2026-09-29	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
 B_CONTENT_IN_MAIN	claudemoogs/ghl-feed	2026-09-26	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
 B_CONTENT_IN_MAIN	claudemoogs/gracious-maxwell-vcqxxo	2026-10-01	26	26	NOOP_MERGE	merging adds nothing to main (tree-neutral)
-B_CONTENT_IN_MAIN	claudemoogs/practical-thompson-09n6cr	2026-10-02	16	16	NOOP_MERGE	merging adds nothing to main (tree-neutral)
+E_REUSED_OPEN_PR	claudemoogs/practical-thompson-09n6cr	2026-10-02	16	16	NOOP_MERGE	REUSED after snapshot: now head of an open PR (#273/#275). DO NOT DELETE.
 B_CONTENT_IN_MAIN	copilot/fix-build-deploy-cloud-run	2026-09-14	2	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
 B_CONTENT_IN_MAIN	copilot/fix-code-comments-review-201	2026-09-08	2	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)
 B_CONTENT_IN_MAIN	copperlang2007-patch-1	2026-10-02	1	0	NOOP_MERGE	merging adds nothing to main (tree-neutral)

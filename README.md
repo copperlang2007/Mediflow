@@ -220,7 +220,7 @@ confirmed production deploy.**
 | Render | — | **No BAA. Never use.** |
 | OpenAI (direct API) | — | **No BAA.** Dev/test only; never PHI. |
 | HighLevel, EnrollHere, DocuSign | Integrations | Docs say "confirm a signed BAA"; checklists unchecked. |
-| Twilio, Resend, Stripe, Sentry | Messaging, billing, errors | Repo is silent. Sentry is PHI-scrubbed instead. |
+| Twilio, Resend, Stripe, Sentry | Messaging, billing, errors | Repo is silent. Sentry events are regex-scrubbed for MBI/SSN/phone/email, but that is **defense in depth, not a BAA substitute**: it cannot recognise dates of birth, free-text diagnoses or recording content, so PHI must be kept out of errors structurally and a BAA confirmed before PHI can reach Sentry. |
 
 These are statements found in code and docs, **not verified contracts.** The
 in-app BAA checklist is `GET /admin/baa-checklist` / "Security & HIPAA".

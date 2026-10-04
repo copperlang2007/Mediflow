@@ -23,7 +23,7 @@ _Last updated: 2026-10-04 — by the audit session below._
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. |
 | Open PRs | Query GitHub live | At 2026-10-04 19:18 UTC: #272 (call-recording fixes + audit suppression), #273 (platform revenue overview), #274 (this docs PR), #275 (add-policy form), #276 (audit exception + ADR 0007). #273/#275 came from other sessions after the audit began and were not reviewed here. |
 | Migration high-water mark | `0066_kb_library_statement_upload_guide` | Two files share `0064`. 69 SQL files. |
-| Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156. See branch audit and its `.tsv`. |
+| Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
 ### Owner-only actions blocking progress
 
@@ -40,6 +40,13 @@ _Last updated: 2026-10-04 — by the audit session below._
 5. Approve a branch cleanup (see audit: delete the 93 in buckets A+B; spot-check the 62 in C). Existing
    `.github/scripts/nuke-branches.sh` embeds escaped quotes in its branch list
    and was not tested; do not run it as-is.
+
+### Security audit exceptions (`pnpm.auditConfig.ignoreGhsas` in `package.json`)
+
+| Advisory | Package path | Why not reachable | Remove when |
+| --- | --- | --- | --- |
+| `GHSA-86w9-cpqp-85rv` | `node-forge` | E-sign CMS signature verification now uses `node:crypto`, not the node-forge RSA verifier (PR #258; commit "Verify e-sign CMS signatures with node:crypto"). | node-forge is upgraded or dropped. |
+| `GHSA-vfj7-8cjw-p6xm` (`braces` ReDoS-style DoS, no patched release) | `api-server > http-proxy-middleware > micromatch > braces` | `braces` expands glob *patterns*, never request data. The only proxy (`middlewares/clerkProxyMiddleware.ts`, the sole `createProxyMiddleware` call) passes no `pathFilter`, so `micromatch` is never invoked. Verified in code 2026-10-04; fuller analysis in PR #276 / ADR 0007. | A patched `braces` ships (re-run `pnpm audit` with the ignore removed), **or** any `pathFilter` is added to a proxy. |
 
 ### Decided direction (do not reopen without an ADR)
 
