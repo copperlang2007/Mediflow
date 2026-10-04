@@ -10,7 +10,7 @@
  * recorded on the source and never thrown, so the next tick is the retry.
  */
 import { randomUUID } from "crypto";
-import { and, eq, inArray, isNull, lt } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import {
   db,
   notificationsTable,
@@ -33,6 +33,8 @@ export interface StatementIngestPollPayload {
 
 /** Files handled per source per run; the rest are picked up by a continuation job. */
 export const MAX_FILES_PER_RUN = 25;
+/** Ids per ledger lookup, keeping the IN list well under the bound-parameter limit. */
+const SEEN_LOOKUP_CHUNK = 500;
 /** At most one Sentry event per source per hour for a failure that repeats every tick. */
 const CAPTURE_COOLDOWN_MS = 60 * 60 * 1000;
 const lastCapturedAt = new Map<string, number>();
@@ -64,7 +66,7 @@ export async function statementIngestPollWorker(
         .set({ lastPolledAt: new Date(), lastError: null })
         .where(eq(statementIngestSourcesTable.id, source.id));
       lastCapturedAt.delete(source.id);
-      if (flagged > 0) await notifyReviewers(source, flagged);
+      if (flagged > 0) await notifyReviewers(source);
       if (more) {
         const id = await enqueue(JOB_NAMES.STATEMENT_INGEST_POLL, { sourceId: source.id });
         if (!id) logger.error({ sourceId: source.id }, "Statement ingest: could not queue continuation; next tick resumes");
@@ -90,7 +92,8 @@ async function pollSource(
   deps: PollDeps,
 ): Promise<{ more: boolean; flagged: number }> {
   // A file claimed by a run that then died would otherwise stay 'processing' forever.
-  await db
+  // These count as flagged: nothing else would ever tell a reviewer about them.
+  const interrupted = await db
     .update(statementIngestFilesTable)
     .set({ status: "failed", reason: "Interrupted before finishing; use Retry to process it again" })
     .where(
@@ -99,22 +102,29 @@ async function pollSource(
         eq(statementIngestFilesTable.status, "processing"),
         lt(statementIngestFilesTable.updatedAt, new Date(Date.now() - STALE_PROCESSING_MS)),
       ),
-    );
+    )
+    .returning({ id: statementIngestFilesTable.id });
 
   const from = deps.makeSource(source);
   const listed = await from.list();
 
-  const seen = await db
-    .select({ externalId: statementIngestFilesTable.externalId, checksum: statementIngestFilesTable.checksum })
-    .from(statementIngestFilesTable)
-    .where(eq(statementIngestFilesTable.sourceId, source.id));
-  const seenKeys = new Set(seen.map((r) => `${r.externalId}|${r.checksum}`));
+  // Look up only the files this listing contains, not the source's whole history: the ledger
+  // grows forever while the folder usually holds a handful of files.
+  const seenKeys = new Set<string>();
+  for (let i = 0; i < listed.length; i += SEEN_LOOKUP_CHUNK) {
+    const ids = listed.slice(i, i + SEEN_LOOKUP_CHUNK).map((f) => f.externalId);
+    const seen = await db
+      .select({ externalId: statementIngestFilesTable.externalId, checksum: statementIngestFilesTable.checksum })
+      .from(statementIngestFilesTable)
+      .where(and(eq(statementIngestFilesTable.sourceId, source.id), inArray(statementIngestFilesTable.externalId, ids)));
+    for (const r of seen) seenKeys.add(`${r.externalId}|${r.checksum}`);
+  }
   const fresh = listed
     .filter((f) => !seenKeys.has(`${f.externalId}|${f.checksum}`))
     // Oldest first, so statements post in the order they were dropped.
     .sort((a, b) => (a.modifiedTime?.getTime() ?? 0) - (b.modifiedTime?.getTime() ?? 0));
 
-  let flagged = 0;
+  let flagged = interrupted.length;
   for (const file of fresh.slice(0, MAX_FILES_PER_RUN)) {
     const outcome: IngestOutcome = await ingestFile(source, file, from, deps.ingest);
     if (outcome === "needs_review" || outcome === "failed") flagged += 1;
@@ -122,7 +132,7 @@ async function pollSource(
   return { more: fresh.length > MAX_FILES_PER_RUN, flagged };
 }
 
-async function notifyReviewers(source: StatementIngestSource, count: number): Promise<void> {
+async function notifyReviewers(source: StatementIngestSource): Promise<void> {
   const reviewers = await db
     .select({ id: usersTable.id })
     .from(usersTable)
@@ -143,6 +153,36 @@ async function notifyReviewers(source: StatementIngestSource, count: number): Pr
       ),
     );
   const skip = new Set(alreadyAlerted.map((r) => r.userId));
+
+  // The alert reports the real backlog, not just this poll's new flags, so a reviewer reading the
+  // title always sees the true count of files waiting on them.
+  const [{ open }] = await db
+    .select({ open: sql<number>`count(*)::int` })
+    .from(statementIngestFilesTable)
+    .where(
+      and(
+        eq(statementIngestFilesTable.sourceId, source.id),
+        inArray(statementIngestFilesTable.status, ["needs_review", "failed"]),
+      ),
+    );
+  const title = `${open} carrier statement${open === 1 ? "" : "s"} need review`;
+  const body = "Automatic statement intake could not finish these files. Open Commissions to review them.";
+
+  // Keep an existing unread alert current instead of leaving its title frozen at the first count.
+  if (skip.size > 0) {
+    await db
+      .update(notificationsTable)
+      .set({ title, body })
+      .where(
+        and(
+          eq(notificationsTable.orgId, source.orgId),
+          eq(notificationsTable.type, "statement_ingest_review"),
+          eq(notificationsTable.resourceId, source.id),
+          inArray(notificationsTable.userId, [...skip]),
+          isNull(notificationsTable.readAt),
+        ),
+      );
+  }
   const rows = reviewers
     .filter((u) => !skip.has(u.id))
     .map((u) => ({
@@ -150,16 +190,15 @@ async function notifyReviewers(source: StatementIngestSource, count: number): Pr
       orgId: source.orgId,
       userId: u.id,
       type: "statement_ingest_review",
-      title: `${count} carrier statement${count === 1 ? "" : "s"} need review`,
-      body: "Automatic statement intake could not finish these files. Open Commissions to review them.",
+      title,
+      body,
       priority: "high",
       resourceType: "statement_ingest_source",
       resourceId: source.id,
     }));
-  if (rows.length === 0) return;
-  await db.insert(notificationsTable).values(rows);
+  if (rows.length > 0) await db.insert(notificationsTable).values(rows);
   broadcastToUsers(
-    rows.map((r) => r.userId),
+    reviewers.map((u) => u.id),
     { type: "notification", resourceType: "statement_ingest_source", resourceId: source.id },
   );
 }

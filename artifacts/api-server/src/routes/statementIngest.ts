@@ -62,10 +62,22 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const { orgId } = req as AuthenticatedRequest;
     const status = typeof req.query.status === "string" ? req.query.status : undefined;
-    const statuses = status
-      ? status.split(",").filter((s): s is (typeof STATEMENT_INGEST_FILE_STATUSES)[number] =>
-          (STATEMENT_INGEST_FILE_STATUSES as readonly string[]).includes(s))
-      : null;
+    let statuses: Array<(typeof STATEMENT_INGEST_FILE_STATUSES)[number]> | null = null;
+    if (status !== undefined) {
+      const requested = status.split(",").map((s) => s.trim()).filter(Boolean);
+      const valid = new Set<string>(STATEMENT_INGEST_FILE_STATUSES);
+      const unknown = requested.filter((s) => !valid.has(s));
+      // A typo must not silently fall back to "everything".
+      if (unknown.length > 0) {
+        res.status(400).json({
+          error: `Invalid status: ${unknown.join(", ")}`,
+          validStatuses: STATEMENT_INGEST_FILE_STATUSES,
+        });
+        return;
+      }
+      // An empty value (`?status=`, a cleared filter field) means "no filter", as it always has.
+      if (requested.length > 0) statuses = requested as Array<(typeof STATEMENT_INGEST_FILE_STATUSES)[number]>;
+    }
 
     const [source] = await db
       .select()
@@ -76,7 +88,7 @@ router.get(
       .select()
       .from(statementIngestFilesTable)
       .where(
-        statuses && statuses.length > 0
+        statuses
           ? and(eq(statementIngestFilesTable.orgId, orgId), inArray(statementIngestFilesTable.status, statuses))
           : eq(statementIngestFilesTable.orgId, orgId),
       )
@@ -240,10 +252,16 @@ router.post(
       });
       return;
     }
-    await db
+    // The status may have changed since the read above (another admin, or a worker).
+    const [updated] = await db
       .update(statementIngestFilesTable)
       .set({ status: "dismissed" })
-      .where(and(eq(statementIngestFilesTable.id, row.id), inArray(statementIngestFilesTable.status, ["needs_review", "failed"])));
+      .where(and(eq(statementIngestFilesTable.id, row.id), inArray(statementIngestFilesTable.status, ["needs_review", "failed"])))
+      .returning({ id: statementIngestFilesTable.id });
+    if (!updated) {
+      res.status(409).json({ error: "The file changed state while dismissing; refresh and check its status" });
+      return;
+    }
     res.json({ status: "dismissed" });
   },
 );
