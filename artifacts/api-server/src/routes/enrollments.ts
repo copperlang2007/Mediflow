@@ -38,6 +38,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { safeLimit, safeOffset } from "../lib/listGuards";
+import { applyCoverageLifecycle } from "../lib/integrations/enrollhere/applicationStore";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -504,6 +505,10 @@ router.post(
         .returning();
 
         await syncContactCoverageProjection(data.contactId, authReq.orgId, tx);
+        // Lifecycle follows coverage, same rule as EnrollHere/GHL deliveries: in-force
+        // coverage turns a lead/prospect into an enrolled client; ended coverage turns
+        // an enrolled client with nothing else in force into "lost". Pending changes nothing.
+        await applyCoverageLifecycle(tx, data.contactId, row.id, row.status);
         return row;
       });
 

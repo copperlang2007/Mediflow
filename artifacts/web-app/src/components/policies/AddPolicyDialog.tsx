@@ -42,11 +42,22 @@ const STATUSES: { value: string; label: string }[] = [
 
 const NONE = "__none__";
 
-type ClientChoice = { id: string; name: string };
-type ContactLite = { id: string; firstName?: string | null; lastName?: string | null };
+type ClientChoice = { id: string; name: string; hint?: string };
+type ContactLite = {
+  id: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+};
 
 function nameOf(c: ContactLite): string {
   return `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || "Unnamed client";
+}
+
+/** Email and phone, so two clients with the same name (or none) can be told apart. */
+function hintOf(c: ContactLite): string {
+  return [c.email, c.phone].filter(Boolean).join(" · ");
 }
 
 /** The server's own message when it sent one, otherwise a plain fallback. */
@@ -123,6 +134,12 @@ export function AddPolicyDialog({
     setError(null);
   };
 
+  /** Every way of closing the form (X, Escape, Cancel, after saving) clears it. */
+  const close = () => {
+    onOpenChange(false);
+    reset();
+  };
+
   const onEffectiveChange = (value: string) => {
     setEffectiveDate(value);
     // A plan's year is almost always the year it starts; follow it until the user types their own.
@@ -161,8 +178,7 @@ export function AddPolicyDialog({
       void qc.invalidateQueries({ queryKey: ["/api/enrollments"] });
       void qc.invalidateQueries({ queryKey: ["/api/enrollments/summary"] });
       onSaved?.();
-      onOpenChange(false);
-      reset();
+      close();
     } catch (err) {
       setError(apiMessage(err, "Couldn't save that policy. Please check the details and try again."));
     } finally {
@@ -171,18 +187,21 @@ export function AddPolicyDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) reset(); }}>
+    <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(true) : close())}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-display">Add policy</DialogTitle>
-          <DialogDescription>Record the plan a client is enrolled in. Carrier, agent and the rest can be filled in later.</DialogDescription>
+          <DialogDescription>Record the plan a client is enrolled in. Carrier, agent and the other optional details can't be edited after saving yet, so add them now if you have them.</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
           <div>
             <Label htmlFor="ap-client">Client *</Label>
             {client ? (
               <div className="mt-1 flex items-center justify-between rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
-                <span className="font-medium">{client.name}</span>
+                <span className="min-w-0">
+                  <span className="font-medium">{client.name}</span>
+                  {client.hint && <span className="ml-2 text-xs text-muted-foreground">{client.hint}</span>}
+                </span>
                 {!contact && (
                   <Button type="button" variant="ghost" size="icon" className="h-6 w-6" aria-label="Choose a different client" onClick={() => setClient(null)}>
                     <X className="h-4 w-4" />
@@ -199,13 +218,23 @@ export function AddPolicyDialog({
                   <ul className="mt-1 max-h-48 overflow-y-auto rounded-md border border-border bg-popover text-sm" role="listbox" aria-label="Matching clients">
                     {search.isLoading ? (
                       <li className="px-3 py-2 text-muted-foreground">Searching…</li>
+                    ) : search.isError ? (
+                      <li className="flex items-center justify-between gap-2 px-3 py-2 text-destructive">
+                        <span>Couldn't search clients. Please try again.</span>
+                        <Button type="button" variant="outline" size="sm" onClick={() => void search.refetch()}>Retry</Button>
+                      </li>
                     ) : matches.length === 0 ? (
                       <li className="px-3 py-2 text-muted-foreground">No clients match “{debounced}”.</li>
                     ) : (
                       matches.map((m) => (
                         <li key={m.id} role="option" aria-selected={false}>
-                          <button type="button" className="w-full px-3 py-2 text-left hover:bg-accent/10" onClick={() => { setClient({ id: m.id, name: nameOf(m) }); setClientSearch(""); }}>
-                            {nameOf(m)}
+                          <button
+                            type="button"
+                            className="w-full px-3 py-2 text-left hover:bg-accent/10"
+                            onClick={() => { setClient({ id: m.id, name: nameOf(m), hint: hintOf(m) || undefined }); setClientSearch(""); }}
+                          >
+                            <span className="block">{nameOf(m)}</span>
+                            {hintOf(m) && <span className="block text-xs text-muted-foreground">{hintOf(m)}</span>}
                           </button>
                         </li>
                       ))
@@ -276,7 +305,7 @@ export function AddPolicyDialog({
           {error && <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={close} disabled={saving}>Cancel</Button>
             <Button type="submit" disabled={saving}>{saving ? "Saving…" : "Add policy"}</Button>
           </DialogFooter>
         </form>

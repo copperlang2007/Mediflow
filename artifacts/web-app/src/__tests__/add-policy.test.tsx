@@ -7,13 +7,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 const h = vi.hoisted(() => ({
   role: "agency_admin",
   calls: [] as Array<{ url: string; init?: { method?: string; body?: unknown } }>,
   failWith: null as null | { status: number; data: { error: string } },
-  contacts: [{ id: "c-1", firstName: "Maria", lastName: "Lopez" }] as unknown[],
+  searchFails: false,
+  contacts: [{ id: "c-1", firstName: "Maria", lastName: "Lopez", email: "maria@lopez.test", phone: "2025550101" }] as unknown[],
 }));
 
 vi.mock("@workspace/api-client-react", () => ({
@@ -24,7 +25,10 @@ vi.mock("@workspace/api-client-react", () => ({
       if (h.failWith) throw Object.assign(new Error("failed"), h.failWith);
       return { id: "e-1" };
     }
-    if (path === "/api/contacts") return { data: h.contacts, total: h.contacts.length };
+    if (path === "/api/contacts") {
+      if (h.searchFails) throw Object.assign(new Error("down"), { status: 500, data: { error: "down" } });
+      return { data: h.contacts, total: h.contacts.length };
+    }
     if (path === "/api/enrollments") return [];
     if (path === "/api/enrollments/summary") return { total: 0, active: 0, pending: 0, ended: 0, effectuated: 0, notEffectuated: 0, startingSoon: 0 };
     return [];
@@ -53,6 +57,8 @@ afterEach(() => {
   h.role = "agency_admin";
   h.calls.length = 0;
   h.failWith = null;
+  h.searchFails = false;
+  h.contacts = [{ id: "c-1", firstName: "Maria", lastName: "Lopez", email: "maria@lopez.test", phone: "2025550101" }];
 });
 
 function renderUi(node: ReactNode) {
@@ -96,7 +102,7 @@ describe("Add policy form", () => {
   it("finds the client by name, then records the policy with the plan year following the start date", async () => {
     const { onSaved } = await openDialog();
     fireEvent.change(await screen.findByPlaceholderText(/search by name/i), { target: { value: "lop" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Maria Lopez" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Maria Lopez/ }));
 
     fireEvent.change(selectFor(/^Plan type/), { target: { value: "MAPD" } });
     fireEvent.change(selectFor(/^Carrier/), { target: { value: "car-1" } });
@@ -151,5 +157,65 @@ describe("Add policy form", () => {
     fireEvent.change(screen.getByLabelText(/starts on/i), { target: { value: "2026-01-01" } });
     fireEvent.click(screen.getByRole("button", { name: /^add policy$/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/already has an enrollment/i);
+  });
+
+  it("tells clients with the same name apart by email and phone", async () => {
+    h.contacts = [
+      { id: "c-1", firstName: "Maria", lastName: "Lopez", email: "maria.one@lopez.test", phone: "2025550101" },
+      { id: "c-2", firstName: "Maria", lastName: "Lopez", email: "maria.two@lopez.test", phone: "2025550102" },
+      { id: "c-3", firstName: null, lastName: null, email: null, phone: "2025550103" },
+    ];
+    await openDialog();
+    fireEvent.change(await screen.findByPlaceholderText(/search by name/i), { target: { value: "lop" } });
+    const list = await screen.findByRole("listbox", { name: /matching clients/i });
+    await waitFor(() => expect(within(list).getAllByRole("option")).toHaveLength(3));
+    expect(list).toHaveTextContent("maria.one@lopez.test");
+    expect(list).toHaveTextContent("maria.two@lopez.test");
+    expect(list).toHaveTextContent("Unnamed client");
+    expect(list).toHaveTextContent("2025550103");
+
+    fireEvent.click(within(list).getByRole("button", { name: /maria\.two@lopez\.test/ }));
+    fireEvent.change(selectFor(/^Plan type/), { target: { value: "MA" } });
+    fireEvent.change(screen.getByLabelText(/starts on/i), { target: { value: "2026-01-01" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add policy$/i }));
+    await waitFor(() => expect(posted()).toBeDefined());
+    expect(JSON.parse(String(posted()!.init!.body)).contactId).toBe("c-2");
+  });
+
+  it("says the search failed, with Retry, instead of 'No clients match'", async () => {
+    h.searchFails = true;
+    await openDialog();
+    fireEvent.change(await screen.findByPlaceholderText(/search by name/i), { target: { value: "lop" } });
+    expect(await screen.findByText(/couldn't search clients/i, undefined, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.queryByText(/no clients match/i)).not.toBeInTheDocument();
+    h.searchFails = false;
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(await screen.findByRole("button", { name: /Maria Lopez/ })).toBeInTheDocument();
+  });
+
+  it("clears everything when Cancel is pressed, so reopening starts fresh", async () => {
+    const { AddPolicyDialog } = await import("@/components/policies/AddPolicyDialog");
+    function Harness() {
+      const [open, setOpen] = useState(true);
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>reopen</button>
+          <AddPolicyDialog open={open} onOpenChange={setOpen} />
+        </>
+      );
+    }
+    renderUi(<Harness />);
+    fireEvent.change(await screen.findByLabelText(/policy number/i), { target: { value: "STALE-1" } });
+    fireEvent.change(screen.getByLabelText(/starts on/i), { target: { value: "2031-05-05" } });
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByText("reopen"));
+    expect(await screen.findByLabelText(/policy number/i)).toHaveValue("");
+    expect(screen.getByLabelText(/starts on/i)).toHaveValue("");
+  });
+
+  it("is honest that optional details can't be edited afterwards", async () => {
+    await openDialog();
+    expect(await screen.findByText(/can't be edited after saving yet/i)).toBeInTheDocument();
   });
 });
