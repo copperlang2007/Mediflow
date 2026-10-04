@@ -384,8 +384,10 @@ describe("review findings (regressions)", () => {
     }
     expect(await ledger(source.id)).toHaveLength(3);
     const notes = await db.select().from(notificationsTable).where(eq(notificationsTable.resourceId, source.id));
-    // One reviewer in this org (the agency_admin), one unread alert.
+    // One reviewer in this org (the agency_admin), one unread alert...
     expect(notes).toHaveLength(1);
+    // ...whose title tracks the real backlog (3 flagged files), not the first poll's count of 1.
+    expect(notes[0].title).toBe("3 carrier statements need review");
   });
 });
 

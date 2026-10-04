@@ -68,14 +68,15 @@ router.get(
       const valid = new Set<string>(STATEMENT_INGEST_FILE_STATUSES);
       const unknown = requested.filter((s) => !valid.has(s));
       // A typo must not silently fall back to "everything".
-      if (requested.length === 0 || unknown.length > 0) {
+      if (unknown.length > 0) {
         res.status(400).json({
-          error: `Invalid status${unknown.length ? `: ${unknown.join(", ")}` : ""}`,
+          error: `Invalid status: ${unknown.join(", ")}`,
           validStatuses: STATEMENT_INGEST_FILE_STATUSES,
         });
         return;
       }
-      statuses = requested as Array<(typeof STATEMENT_INGEST_FILE_STATUSES)[number]>;
+      // An empty value (`?status=`, a cleared filter field) means "no filter", as it always has.
+      if (requested.length > 0) statuses = requested as Array<(typeof STATEMENT_INGEST_FILE_STATUSES)[number]>;
     }
 
     const [source] = await db

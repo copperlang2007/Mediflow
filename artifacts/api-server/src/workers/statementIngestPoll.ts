@@ -10,7 +10,7 @@
  * recorded on the source and never thrown, so the next tick is the retry.
  */
 import { randomUUID } from "crypto";
-import { and, eq, inArray, isNull, lt } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import {
   db,
   notificationsTable,
@@ -66,7 +66,7 @@ export async function statementIngestPollWorker(
         .set({ lastPolledAt: new Date(), lastError: null })
         .where(eq(statementIngestSourcesTable.id, source.id));
       lastCapturedAt.delete(source.id);
-      if (flagged > 0) await notifyReviewers(source, flagged);
+      if (flagged > 0) await notifyReviewers(source);
       if (more) {
         const id = await enqueue(JOB_NAMES.STATEMENT_INGEST_POLL, { sourceId: source.id });
         if (!id) logger.error({ sourceId: source.id }, "Statement ingest: could not queue continuation; next tick resumes");
@@ -132,7 +132,7 @@ async function pollSource(
   return { more: fresh.length > MAX_FILES_PER_RUN, flagged };
 }
 
-async function notifyReviewers(source: StatementIngestSource, count: number): Promise<void> {
+async function notifyReviewers(source: StatementIngestSource): Promise<void> {
   const reviewers = await db
     .select({ id: usersTable.id })
     .from(usersTable)
@@ -153,6 +153,36 @@ async function notifyReviewers(source: StatementIngestSource, count: number): Pr
       ),
     );
   const skip = new Set(alreadyAlerted.map((r) => r.userId));
+
+  // The alert reports the real backlog, not just this poll's new flags, so a reviewer reading the
+  // title always sees the true count of files waiting on them.
+  const [{ open }] = await db
+    .select({ open: sql<number>`count(*)::int` })
+    .from(statementIngestFilesTable)
+    .where(
+      and(
+        eq(statementIngestFilesTable.sourceId, source.id),
+        inArray(statementIngestFilesTable.status, ["needs_review", "failed"]),
+      ),
+    );
+  const title = `${open} carrier statement${open === 1 ? "" : "s"} need review`;
+  const body = "Automatic statement intake could not finish these files. Open Commissions to review them.";
+
+  // Keep an existing unread alert current instead of leaving its title frozen at the first count.
+  if (skip.size > 0) {
+    await db
+      .update(notificationsTable)
+      .set({ title, body })
+      .where(
+        and(
+          eq(notificationsTable.orgId, source.orgId),
+          eq(notificationsTable.type, "statement_ingest_review"),
+          eq(notificationsTable.resourceId, source.id),
+          inArray(notificationsTable.userId, [...skip]),
+          isNull(notificationsTable.readAt),
+        ),
+      );
+  }
   const rows = reviewers
     .filter((u) => !skip.has(u.id))
     .map((u) => ({
@@ -160,16 +190,15 @@ async function notifyReviewers(source: StatementIngestSource, count: number): Pr
       orgId: source.orgId,
       userId: u.id,
       type: "statement_ingest_review",
-      title: `${count} carrier statement${count === 1 ? "" : "s"} need review`,
-      body: "Automatic statement intake could not finish these files. Open Commissions to review them.",
+      title,
+      body,
       priority: "high",
       resourceType: "statement_ingest_source",
       resourceId: source.id,
     }));
-  if (rows.length === 0) return;
-  await db.insert(notificationsTable).values(rows);
+  if (rows.length > 0) await db.insert(notificationsTable).values(rows);
   broadcastToUsers(
-    rows.map((r) => r.userId),
+    reviewers.map((u) => u.id),
     { type: "notification", resourceType: "statement_ingest_source", resourceId: source.id },
   );
 }
