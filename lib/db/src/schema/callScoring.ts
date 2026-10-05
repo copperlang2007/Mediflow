@@ -304,6 +304,7 @@ export const callRecordingsTable = pgTable(
   (t) => [
     index("call_recordings_org_created_idx").on(t.orgId, t.createdAt),
     index("call_recordings_status_idx").on(t.status),
+    index("call_recordings_org_committed_idx").on(t.orgId, sql`coalesce(${t.committedAt}, ${t.createdAt})`),
     index("call_recordings_purge_after_idx").on(t.purgeAfter).where(sql`${t.purgeAfter} is not null`),
   ],
 );

@@ -555,6 +555,14 @@ describe("review fixes", () => {
     await recordings.processRecording(second);
     expect(await recordings.processRecording(second)).toBe("poll");
     expect((await rowOf(second)).status).toBe("transcribing");
+    // While it waits, later passes do not ask Google again.
+    let googleCalls = 0;
+    speech.setSpeechHttpForTests(async () => {
+      googleCalls++;
+      return {};
+    });
+    expect(await recordings.processRecording(second)).toBe("poll");
+    expect(googleCalls).toBe(0);
     const count = async () => (await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, transcriptId))).length;
     expect(await count()).toBe(1);
     // A claim left by a job that died is taken over.

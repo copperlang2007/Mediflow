@@ -20,7 +20,7 @@
  * the sweeper (workers/recordingsSweep.ts) re-queues rows whose job chain died.
  */
 import { and, desc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";
-import { db, callRecordingsTable, callScoreClaimsTable, callScoresTable, type CallRecordingLayout, type CallTranscriptSource } from "@workspace/db";
+import { db, callRecordingsTable, callScoreClaimsTable, callScoresTable, type CallRecording, type CallRecordingLayout, type CallTranscriptSource } from "@workspace/db";
 import { logger } from "../logger";
 import { open } from "./seal";
 import { DEFAULT_RUBRIC_ID, getRubric } from "./rubrics";
@@ -72,6 +72,11 @@ async function claimRescore(transcriptId: string, now: Date): Promise<Date | nul
     .returning({ claimedAt: callScoreClaimsTable.claimedAt });
   return claimed.length ? now : null;
 }
+
+const detailsOf = (row: CallRecording): RecordingDetails =>
+  open<RecordingDetails>(row.detailsEncrypted) ?? { filename: null, phone: null, externalRef: null, uploaderRole: "compliance_manager" };
+const rubricOf = (row: CallRecording): Rubric =>
+  resolveRubric(row.rubricId ?? undefined, getRubric(DEFAULT_RUBRIC_ID) as Rubric) ?? (getRubric(DEFAULT_RUBRIC_ID) as Rubric);
 
 /** A start that was claimed but never recorded its operation (a crash mid-start) is retried after this. */
 const START_STALL_MS = 10 * 60 * 1000;
@@ -128,6 +133,14 @@ export async function processRecording(recordingId: string, deps: { privateObjec
     return "retry_start";
   }
   await db.update(callRecordingsTable).set({ checkedAt: now }).where(eq(callRecordingsTable.id, row.id));
+  if (row.transcriptId) {
+    // Already transcribed: a duplicate waiting for another recording to finish scoring the same call.
+    if (!row.createdBy) return fail(row.id, "The person who uploaded this recording no longer has an account. Upload it again.");
+    const outcome = await scoreDuplicate(row, row.transcriptId, rubricOf(row), detailsOf(row), now);
+    if (outcome === "wait") return "poll";
+    if (outcome !== "done") return outcome;
+    return markScored(row.id, row.transcriptId, row.durationSeconds);
+  }
   let poll;
   try {
     poll = await pollTranscription(row.operationName);
@@ -154,8 +167,8 @@ export async function processRecording(recordingId: string, deps: { privateObjec
   if (!turns.length) return fail(row.id, "No speech was found in the recording.");
   if (!row.createdBy) return fail(row.id, "The person who uploaded this recording no longer has an account. Upload it again.");
 
-  const details = open<RecordingDetails>(row.detailsEncrypted) ?? { filename: null, phone: null, externalRef: null, uploaderRole: "compliance_manager" };
-  const rubric = resolveRubric(row.rubricId ?? undefined, getRubric(DEFAULT_RUBRIC_ID) as Rubric) ?? (getRubric(DEFAULT_RUBRIC_ID) as Rubric);
+  const details = detailsOf(row);
+  const rubric = rubricOf(row);
   const result = await ingestTranscript({
     orgId: row.orgId,
     userId: row.createdBy,
@@ -178,62 +191,80 @@ export async function processRecording(recordingId: string, deps: { privateObjec
   if (result.kind === "error") return fail(row.id, result.message);
   const transcriptId = result.kind === "ok" ? result.summary.transcriptId : result.transcriptId;
   if (result.kind === "duplicate") {
-    // Same speech as an earlier call. The call shows its newest score, so when
-    // that is under another checklist, score it under the one chosen for this
-    // upload (history is kept). When the newest score already uses this
-    // checklist nothing is re-run. Only one recording job at a time may add a
-    // score to a call: a duplicate racing another waits and re-checks. (A
-    // person's explicit "Rescore" in the app is not blocked by this claim.)
-    const claimedAt = await claimRescore(transcriptId, now);
-    if (!claimedAt) return "poll";
+    const outcome = await scoreDuplicate(row, transcriptId, rubric, details, now);
+    if (outcome === "wait") {
+      // Remember the call so later passes go straight to the claim instead of asking Google again.
+      await db.update(callRecordingsTable)
+        .set({ transcriptId, durationSeconds: poll.durationSeconds, checkedAt: now })
+        .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "transcribing")));
+      return "poll";
+    }
+    if (outcome !== "done") return outcome;
+  }
+  return markScored(row.id, transcriptId, poll.durationSeconds);
+}
+
+async function markScored(id: string, transcriptId: string, durationSeconds: number | null): Promise<StepOutcome> {
+  await db.update(callRecordingsTable)
+    .set({ status: "scored", transcriptId, durationSeconds, error: null, updatedAt: new Date() })
+    .where(eq(callRecordingsTable.id, id));
+  return "finished";
+}
+
+/**
+ * Same speech as an earlier call. The call shows its newest score, so when
+ * that is under another checklist, score it under the one chosen for this
+ * upload (history is kept). When the newest score already uses this checklist
+ * nothing is re-run. Only one recording job at a time may add a score to a
+ * call: a duplicate racing another returns "wait" and re-checks later. (A
+ * person's explicit "Rescore" in the app is not blocked by this claim.)
+ */
+async function scoreDuplicate(
+  row: CallRecording,
+  transcriptId: string,
+  rubric: Rubric,
+  details: RecordingDetails,
+  now: Date,
+): Promise<"done" | "wait" | StepOutcome> {
+  const claimedAt = await claimRescore(transcriptId, now);
+  if (!claimedAt) return "wait";
+  try {
+    const [latest] = await db
+      .select({ rubricId: callScoresTable.rubricId })
+      .from(callScoresTable)
+      .where(and(eq(callScoresTable.orgId, row.orgId), eq(callScoresTable.transcriptId, transcriptId)))
+      .orderBy(desc(callScoresTable.createdAt), desc(callScoresTable.id))
+      .limit(1);
+    if (latest?.rubricId === rubric.id) return "done";
+    const rescored = await rescoreTranscript({
+      orgId: row.orgId,
+      userId: row.createdBy!,
+      userRole: details.uploaderRole,
+      transcriptId,
+      rubric,
+      aiMode: row.aiMode === "off" ? "off" : "auto",
+      stillOwned: async (tx) =>
+        (
+          await tx
+            .select({ transcriptId: callScoreClaimsTable.transcriptId })
+            .from(callScoreClaimsTable)
+            .where(and(eq(callScoreClaimsTable.transcriptId, transcriptId), eq(callScoreClaimsTable.claimedAt, claimedAt)))
+            .for("update")
+        ).length > 0,
+    });
+    if (rescored.kind === "error") return fail(row.id, rescored.message);
+    // Lost the claim mid-score: nothing was saved. Check again later instead of finishing without this checklist's score.
+    if (rescored.kind === "duplicate") return "wait";
+    return "done";
+  } finally {
+    // Best effort: if this fails the claim goes stale and is taken over; the recording still finishes.
     try {
-      const [latest] = await db
-        .select({ rubricId: callScoresTable.rubricId })
-        .from(callScoresTable)
-        .where(and(eq(callScoresTable.orgId, row.orgId), eq(callScoresTable.transcriptId, transcriptId)))
-        .orderBy(desc(callScoresTable.createdAt), desc(callScoresTable.id))
-        .limit(1);
-      if (latest?.rubricId !== rubric.id) {
-        const rescored = await rescoreTranscript({
-          orgId: row.orgId,
-          userId: row.createdBy,
-          userRole: details.uploaderRole,
-          transcriptId,
-          rubric,
-          aiMode: row.aiMode === "off" ? "off" : "auto",
-          stillOwned: async (tx) =>
-            (
-              await tx
-                .select({ transcriptId: callScoreClaimsTable.transcriptId })
-                .from(callScoreClaimsTable)
-                .where(and(eq(callScoreClaimsTable.transcriptId, transcriptId), eq(callScoreClaimsTable.claimedAt, claimedAt)))
-                .for("update")
-            ).length > 0,
-        });
-        if (rescored.kind === "error") return fail(row.id, rescored.message);
-        // Lost the claim mid-score: nothing was saved. Check again later instead of finishing without this checklist's score.
-        if (rescored.kind === "duplicate") return "poll";
-      }
-    } finally {
-      // Best effort: if this fails the claim goes stale and is taken over; the recording still finishes.
-      try {
-        await db.delete(callScoreClaimsTable)
-          .where(and(eq(callScoreClaimsTable.transcriptId, transcriptId), eq(callScoreClaimsTable.claimedAt, claimedAt)));
-      } catch (err) {
-        logger.warn({ err: (err as Error).message, recordingId: row.id }, "Call recording: could not release the score claim; it will be taken over when stale");
-      }
+      await db.delete(callScoreClaimsTable)
+        .where(and(eq(callScoreClaimsTable.transcriptId, transcriptId), eq(callScoreClaimsTable.claimedAt, claimedAt)));
+    } catch (err) {
+      logger.warn({ err: (err as Error).message, recordingId: row.id }, "Call recording: could not release the score claim; it will be taken over when stale");
     }
   }
-  await db.update(callRecordingsTable)
-    .set({
-      status: "scored",
-      transcriptId,
-      durationSeconds: poll.durationSeconds,
-      error: null,
-      updatedAt: new Date(),
-    })
-    .where(eq(callRecordingsTable.id, row.id));
-  return "finished";
 }
 
 /** A queued or transcribing recording nobody has looked at for this long has lost its job chain. */
