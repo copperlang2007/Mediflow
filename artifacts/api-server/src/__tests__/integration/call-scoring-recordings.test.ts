@@ -47,6 +47,17 @@ vi.mock("@workspace/db", dbF);
 vi.mock("@clerk/express", clerkF);
 vi.mock("../../lib/jobs", jobsF);
 vi.mock("../../lib/objectStorage", storageF);
+// Lets a test stand in for rescoreTranscript (e.g. a job that lost its claim mid-score); otherwise the real one runs.
+vi.mock("../../lib/callScoring/ingest", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/callScoring/ingest")>();
+  return {
+    ...actual,
+    rescoreTranscript: (...args: Parameters<typeof actual.rescoreTranscript>) => {
+      const override = (globalThis as unknown as { __RESCORE_OVERRIDE__?: typeof actual.rescoreTranscript }).__RESCORE_OVERRIDE__;
+      return (override ?? actual.rescoreTranscript)(...args);
+    },
+  };
+});
 
 import { eq } from "drizzle-orm";
 import * as schema from "@workspace/db/schema";
@@ -552,6 +563,30 @@ describe("review fixes", () => {
     expect((await rowOf(second)).status).toBe("scored");
     expect(await count()).toBe(2);
     expect(await handle.db.select().from(schema.callScoreClaimsTable).where(eq(schema.callScoreClaimsTable.transcriptId, transcriptId))).toHaveLength(0);
+  });
+
+  it("a recording whose job lost its claim mid-score stays pending and is retried", async () => {
+    const results = stereoResults();
+    fakeGoogle({ poll: "done", results });
+    const first = await uploadAndConfirm(admin.id);
+    await recordings.processRecording(first);
+    await recordings.processRecording(first);
+    const second = await uploadAndConfirm(admin.id, { rubricId: "general-sales" });
+    await recordings.processRecording(second);
+    const g = globalThis as unknown as { __RESCORE_OVERRIDE__?: unknown };
+    g.__RESCORE_OVERRIDE__ = async (input: { transcriptId: string }) => ({ kind: "duplicate", transcriptId: input.transcriptId });
+    try {
+      expect(await recordings.processRecording(second)).toBe("poll");
+    } finally {
+      delete g.__RESCORE_OVERRIDE__;
+    }
+    expect((await rowOf(second)).status).toBe("transcribing");
+    // The retry scores it under the requested checklist.
+    expect(await recordings.processRecording(second)).toBe("finished");
+    const b = await rowOf(second);
+    expect(b.status).toBe("scored");
+    const scores = await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, b.transcriptId!));
+    expect(scores.map((x) => x.rubricId)).toContain("general-sales");
   });
 
   it("a job whose claim was taken over does not save its score", async () => {

@@ -14,7 +14,7 @@ _Last updated: 2026-10-04 — by the call-recordings follow-up session below._
 
 | Item | Status | Detail |
 | --- | --- | --- |
-| `main` HEAD | `2a29f04` (2026-10-04) | "Add policy: record a client's plan from the Policies page and the client page (#275)". Re-check: this row goes stale within hours. |
+| `main` HEAD | `997308b` (2026-10-04) | "Platform metrics: run snapshot reads sequentially inside the transaction (#279)". Re-check: this row goes stale within hours. |
 | CI: typecheck + test | Green | |
 | CI: `pnpm audit (moderate)` | Green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
 | CI: migration journal | Green | |

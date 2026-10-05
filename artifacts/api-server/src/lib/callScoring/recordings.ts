@@ -210,6 +210,8 @@ export async function processRecording(recordingId: string, deps: { privateObjec
             ).length > 0,
         });
         if (rescored.kind === "error") return fail(row.id, rescored.message);
+        // Lost the claim mid-score: nothing was saved. Check again later instead of finishing without this checklist's score.
+        if (rescored.kind === "duplicate") return "poll";
       }
     } finally {
       await db.delete(callScoreClaimsTable)
