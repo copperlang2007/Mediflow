@@ -92,6 +92,15 @@ ones with no inbound references.
 
 Newest first. Template in `AGENTS.md` §7.
 
+### 2026-10-05 — Merge-conflict follow-up — Copilot — branch `claude/agencybridge-compliance-review-s3nc6l`
+- **Outcome:** investigation-only
+- **Changed:** Recorded that the requested merge-conflict resolution was already completed by the repository owner; no conflict fix was needed in this session.
+- **Verified:** `git status --short --branch` was clean and the branch includes merge commit `43e4c6e` from `main`. **NOT independently verified:** CI; the owner reports typecheck and targeted tests pass.
+- **Left undone / broken:** Nothing related to merge conflicts.
+- **Decisions made:** none.
+- **Next agent should:** Continue the open PR work; no further merge-conflict resolution is needed unless new conflicts arise.
+- **Needs a human:** nothing.
+
 ### 2026-10-04 — Call recordings: fix review findings left open at #272 merge — Claude Code — branch `claude/agencybridge-compliance-review-s3nc6l`
 - **Outcome:** partial (PR #277 open, awaiting CI and merge)
 - **Changed:** PR #277. Confirm at the daily limit can no longer delete audio a concurrent confirm already accepted; unused audio (refused, oversized, abandoned) is deleted durably after its upload link expires, with backoff retries (`purge_after`, `purge_attempts`); the daily cap counts from confirm (`committed_at`); a duplicate recording rescores when the call's newest score is under another checklist, one job at a time per call (`call_score_claims`), and a job whose claim was taken over cannot save. Migration `0068_call_recordings_cleanup`. Earlier the same day: created the two missing Secret Manager secrets and the Token Creator grant (production deploys green since).
