@@ -56,7 +56,7 @@ import { DISCLAIMER, buildDetail, buildList, buildSummary } from "../lib/callSco
 import { listDncQueue, resolveDncFinding } from "../lib/callScoring/dncReview";
 import { loadTranscriptRow, retainUntil, type ScopeFilter } from "../lib/callScoring/store";
 import { speechSetup } from "../lib/callScoring/speech";
-import type { RecordingDetails } from "../lib/callScoring/recordings";
+import { purgeTime, UPLOAD_URL_TTL_MS, type RecordingDetails } from "../lib/callScoring/recordings";
 import { enqueue, JOB_NAMES, transcribeJobKey } from "../lib/jobs";
 import type { Rubric, TranscriptFormat } from "../lib/callScoring/types";
 
@@ -882,21 +882,19 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * per-agency advisory lock.
  */
 async function recordingsToday(tx: Tx, orgId: string, now: Date, opts: { includeOpenUploads?: boolean } = {}): Promise<number> {
-  const committed = or(
-    inArray(callRecordingsTable.status, ["queued", "transcribing", "scored"]),
-    and(eq(callRecordingsTable.status, "failed"), gt(callRecordingsTable.attempts, 0)),
+  // A committed recording counts for 24 hours from when it was committed, not from when its link was issued.
+  const committed = and(
+    or(
+      inArray(callRecordingsTable.status, ["queued", "transcribing", "scored"]),
+      and(eq(callRecordingsTable.status, "failed"), gt(callRecordingsTable.attempts, 0)),
+    ),
+    gt(sql`coalesce(${callRecordingsTable.committedAt}, ${callRecordingsTable.createdAt})`, new Date(now.getTime() - 24 * 60 * 60 * 1000)),
   );
-  const openUpload = and(eq(callRecordingsTable.status, "uploading"), gt(callRecordingsTable.createdAt, new Date(now.getTime() - 15 * 60 * 1000)));
+  const openUpload = and(eq(callRecordingsTable.status, "uploading"), gt(callRecordingsTable.createdAt, new Date(now.getTime() - UPLOAD_URL_TTL_MS)));
   const [{ n }] = await tx
     .select({ n: sql<number>`count(*)::int` })
     .from(callRecordingsTable)
-    .where(
-      and(
-        eq(callRecordingsTable.orgId, orgId),
-        gt(callRecordingsTable.createdAt, new Date(now.getTime() - 24 * 60 * 60 * 1000)),
-        opts.includeOpenUploads ? or(committed, openUpload) : committed,
-      ),
-    );
+    .where(and(eq(callRecordingsTable.orgId, orgId), opts.includeOpenUploads ? or(committed, openUpload) : committed));
   return Number(n);
 }
 
@@ -977,7 +975,7 @@ router.post(
     const details: RecordingDetails = { filename: f.filename, phone: f.phone ?? null, externalRef: f.externalRef ?? null, uploaderRole: authReq.userRole };
     let uploadUrl: string;
     try {
-      uploadUrl = await storage.getCallRecordingUploadURL(objectKey, f.contentType);
+      uploadUrl = await storage.getCallRecordingUploadURL(objectKey, f.contentType, UPLOAD_URL_TTL_MS / 1000);
     } catch (err) {
       logger.error({ err: (err as Error).message }, "Call recording: could not sign the upload URL");
       res.status(503).json({ error: "Recording storage is not available right now. Try again in a few minutes.", code: "storage_unavailable" });
@@ -1027,7 +1025,7 @@ router.post(
       uploadUrl,
       method: "PUT",
       headers: { "Content-Type": f.contentType, "x-goog-if-generation-match": "0" },
-      expiresInSeconds: 900,
+      expiresInSeconds: UPLOAD_URL_TTL_MS / 1000,
     });
   },
 );
@@ -1068,51 +1066,67 @@ router.post(
       return;
     }
     if (meta.size > MAX_RECORDING_BYTES) {
-      // The signed URL cannot bind the length, so an oversized file is deleted here, not kept.
-      try {
-        await storage.deleteCallRecording(row.objectKey);
-      } catch (err) {
-        logger.error({ err: (err as Error).message, recordingId: row.id }, "Call recording: could not delete an oversized upload");
-      }
+      // The signed URL cannot bind the length, so an oversized file is not kept.
       await db.update(callRecordingsTable)
-        .set({ status: "failed", error: "The recording is larger than the limit.", sizeBytes: meta.size, updatedAt: new Date() })
-        .where(eq(callRecordingsTable.id, row.id));
+        .set({ status: "failed", error: "The recording is larger than the limit.", sizeBytes: meta.size, purgeAfter: purgeTime(row.createdAt), updatedAt: new Date() })
+        .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "uploading")));
+      await deleteNow(storage, row.id, row.objectKey);
       res.status(413).json({ error: `Recordings are limited to ${MAX_RECORDING_BYTES / 1024 / 1024} MB.`, code: "file_too_large" });
       return;
     }
     // The cap is enforced again here, where transcription is committed: links
-    // handed out in a burst cannot all be confirmed past it.
+    // handed out in a burst cannot all be confirmed past it. A refusal is
+    // claimed (uploading → failed) under the lock before anything is deleted,
+    // so a concurrent confirm that already queued this recording keeps its audio.
     const limit = dailyRecordingLimit();
     const outcome = await db.transaction(async (tx) => {
       await lockRecordings(tx, authReq.orgId);
-      if ((await recordingsToday(tx, authReq.orgId, new Date())) >= limit) return "over_limit" as const;
+      const now = new Date();
+      const stillUploading = and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "uploading"));
+      if ((await recordingsToday(tx, authReq.orgId, now)) >= limit) {
+        const refused = await tx.update(callRecordingsTable)
+          .set({ status: "failed", error: "The daily recording limit was reached. Upload this recording again tomorrow.", purgeAfter: purgeTime(row.createdAt, now), updatedAt: now })
+          .where(stillUploading)
+          .returning({ id: callRecordingsTable.id });
+        return refused.length ? ("over_limit" as const) : ("unchanged" as const);
+      }
       const moved = await tx.update(callRecordingsTable)
-        .set({ status: "queued", sizeBytes: meta.size, updatedAt: new Date() })
-        .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "uploading")))
+        .set({ status: "queued", sizeBytes: meta.size, committedAt: now, updatedAt: now })
+        .where(stillUploading)
         .returning({ id: callRecordingsTable.id });
       return moved.length ? ("queued" as const) : ("unchanged" as const);
     });
     if (outcome === "over_limit") {
       logger.warn({ orgId: authReq.orgId, limit }, "Call recording: daily limit reached at confirm");
       // Not transcribed, so the uploaded audio is not kept; the user uploads it again later.
-      try {
-        await storage.deleteCallRecording(row.objectKey);
-      } catch (err) {
-        logger.error({ err: (err as Error).message, recordingId: row.id }, "Call recording: could not delete an upload refused at the daily limit");
-      }
-      await db.update(callRecordingsTable)
-        .set({ status: "failed", error: "The daily recording limit was reached. Upload this recording again tomorrow.", updatedAt: new Date() })
-        .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "uploading")));
+      await deleteNow(storage, row.id, row.objectKey);
       res.status(429).json({ error: dailyLimitMessage(limit), code: "daily_limit" });
       return;
     }
     if (outcome === "queued") {
       const jobId = await enqueue(JOB_NAMES.TRANSCRIBE_RECORDING, { recordingId: row.id }, { singletonKey: transcribeJobKey(row.id) });
       if (!jobId) logger.error({ recordingId: row.id }, "Call recording: could not queue transcription");
+      res.status(202).json({ recordingId: row.id, status: "queued" });
+      return;
     }
-    res.status(202).json({ recordingId: row.id, status: "queued" });
+    // Another confirm settled it first: report where it ended up.
+    const [current] = await db.select({ status: callRecordingsTable.status }).from(callRecordingsTable).where(eq(callRecordingsTable.id, row.id)).limit(1);
+    res.status(200).json({ recordingId: row.id, status: current?.status ?? row.status });
   },
 );
+
+/**
+ * Delete audio that will not be transcribed, best effort. The row's
+ * `purge_after` stays set, so the sweep deletes it again after the upload
+ * link expires (and retries if this failed).
+ */
+async function deleteNow(storage: { deleteCallRecording(key: string): Promise<void> }, recordingId: string, objectKey: string): Promise<void> {
+  try {
+    await storage.deleteCallRecording(objectKey);
+  } catch (err) {
+    logger.warn({ err: (err as Error).message, recordingId }, "Call recording: could not delete unused audio now; the sweep will retry");
+  }
+}
 
 const RecordingListQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
