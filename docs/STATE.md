@@ -8,21 +8,21 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-04 — by the call-recordings follow-up session below._
+_Last updated: 2026-10-05 — by the call-recordings follow-up session below._
 
 ### Health dashboard
 
 | Item | Status | Detail |
 | --- | --- | --- |
-| `main` HEAD | `997308b` (2026-10-04) | "Platform metrics: run snapshot reads sequentially inside the transaction (#279)". Re-check: this row goes stale within hours. |
+| `main` HEAD | `44b3739` (2026-10-05) | "Call recordings: fix review findings left open at #272 merge (#277)". Re-check: this row goes stale within hours. |
 | CI: typecheck + test | Green | |
 | CI: `pnpm audit (moderate)` | Green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
 | CI: migration journal | Green | |
 | Production deploy (GCP Cloud Run) | **Green** at `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. |
-| Open PRs | Query GitHub live | At 2026-10-05 ~01:40 UTC: #277 (call recordings follow-up, migration 0068). #279 (platform metrics reads sequential in the snapshot transaction) merged as 997308b. Merged since the last entry: #273 (platform revenue overview), #274 (audit docs), #275 (add-policy form), #276 (braces audit exception). |
-| Migration high-water mark | `0067_kb_library_policies_guide` on main; `0068_call_recordings_cleanup` in open PR #277 | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
+| Open PRs | Query GitHub live | At 2026-10-05 ~02:15 UTC: #278 (docs: which vendors need a BAA) and the #277 follow-up (waiting duplicates skip Speech-to-Text; migration 0069). #277 merged as 44b3739 at head 1a36e2b. |
+| Migration high-water mark | `0068_call_recordings_cleanup` on main; `0069_call_recordings_cap_index` in the #277 follow-up PR | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
 ### Owner-only actions
@@ -91,6 +91,15 @@ ones with no inbound references.
 ## Session log
 
 Newest first. Template in `AGENTS.md` §7.
+
+### 2026-10-05 — Call recordings: commit missed by the #277 merge — Claude Code — branch `claude/agencybridge-compliance-review-s3nc6l`
+- **Outcome:** partial (follow-up PR open)
+- **Changed:** #277 merged at `1a36e2b`, one commit before its last push. The missing change is re-applied on a fresh branch: a duplicate recording waiting for another to finish scoring the same call no longer polls Speech-to-Text every 30 s, and new migration `0069_call_recordings_cap_index` indexes the daily-cap count by `(org_id, coalesce(committed_at, created_at))` (0068 is already merged, so the index moved to its own migration).
+- **Verified:** `pnpm run typecheck`; `npx vitest run` (225 files, 2482 tests); `check:migration-journal` OK (71 entries).
+- **Left undone / broken:** Production deploy of 44b3739 (#277) was in progress when this entry was written. Live-transcription Chrome extension not started.
+- **Decisions made:** a person's explicit Rescore is intentionally not blocked by `call_score_claims` (claims serialize recording jobs only).
+- **Next agent should:** confirm the deploy of #277 went green, merge this follow-up, then build the live-transcription extension.
+- **Needs a human:** merge the follow-up PR.
 
 ### 2026-10-05 — Merge-conflict follow-up — Copilot — branch `claude/agencybridge-compliance-review-s3nc6l`
 - **Outcome:** investigation-only
