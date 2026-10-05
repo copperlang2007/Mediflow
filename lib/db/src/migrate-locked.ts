@@ -47,9 +47,12 @@ const here = path.dirname(fileURLToPath(import.meta.url));
  * own statement is a no-op and never holds a write lock on a live table (a
  * blocked write would stall the Twilio STOP webhook). On a fresh database the
  * table does not exist yet and the migration builds the index as usual.
- * Each `definition` must match its migration file exactly.
+ * Each `definition` must match its migration file exactly. `columns` lists
+ * columns an earlier migration adds: until they exist (a database catching up
+ * on several migrations at once) the prebuild is skipped and the migration
+ * builds the index itself.
  */
-const CONCURRENT_PREBUILDS: ReadonlyArray<{ name: string; table: string; definition: string }> = [
+const CONCURRENT_PREBUILDS: ReadonlyArray<{ name: string; table: string; definition: string; columns?: string[] }> = [
   {
     name: "contacts_phone_last10_idx",
     table: "contacts",
@@ -76,12 +79,27 @@ const CONCURRENT_PREBUILDS: ReadonlyArray<{ name: string; table: string; definit
     table: "contacts",
     definition: "(org_id, medicare_id_hash) WHERE medicare_id_hash IS NOT NULL",
   },
+  // 0069: daily recording cap count (committed_at comes from 0068).
+  {
+    name: "call_recordings_org_committed_idx",
+    table: "call_recordings",
+    definition: '("org_id", (coalesce("committed_at", "created_at")))',
+    columns: ["committed_at"],
+  },
 ];
 
 async function prebuildIndexesConcurrently(client: pg.Client): Promise<void> {
   for (const idx of CONCURRENT_PREBUILDS) {
     const table = await client.query("SELECT to_regclass($1) AS oid", [`public.${idx.table}`]);
     if (!table.rows[0]?.oid) continue;
+    if (idx.columns?.length) {
+      const cols = await client.query(
+        `SELECT count(*)::int AS n FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = $1 AND column_name = ANY($2)`,
+        [idx.table, idx.columns],
+      );
+      if (cols.rows[0]?.n !== idx.columns.length) continue;
+    }
     const existing = await client.query(
       `SELECT i.indisvalid AS valid
          FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
