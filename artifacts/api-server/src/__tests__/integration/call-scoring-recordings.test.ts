@@ -33,6 +33,7 @@ const { dbF, clerkF, jobsF, storageF } = vi.hoisted(() => ({
         return `https://storage.example/${key}?signed=1`;
       }
       async deleteCallRecording(key: string): Promise<void> {
+        if ((globalThis as unknown as { __REC_DELETE_FAILS__?: boolean }).__REC_DELETE_FAILS__) throw new Error("storage unavailable");
         g.__REC_OBJECTS__.delete(key);
       }
       async getCallRecordingMetadata(key: string): Promise<{ size: number; contentType: string } | null> {
@@ -46,14 +47,27 @@ vi.mock("@workspace/db", dbF);
 vi.mock("@clerk/express", clerkF);
 vi.mock("../../lib/jobs", jobsF);
 vi.mock("../../lib/objectStorage", storageF);
+// Lets a test stand in for rescoreTranscript (e.g. a job that lost its claim mid-score); otherwise the real one runs.
+vi.mock("../../lib/callScoring/ingest", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/callScoring/ingest")>();
+  return {
+    ...actual,
+    rescoreTranscript: (...args: Parameters<typeof actual.rescoreTranscript>) => {
+      const override = (globalThis as unknown as { __RESCORE_OVERRIDE__?: typeof actual.rescoreTranscript }).__RESCORE_OVERRIDE__;
+      return (override ?? actual.rescoreTranscript)(...args);
+    },
+  };
+});
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import * as schema from "@workspace/db/schema";
 import { bootTestDb, clearEnqueuedJobs, getEnqueuedJobs, shutdownTestDb, withAuth } from "../helpers/testApp";
 import { safeReason } from "../../lib/callScoring/speech";
 import { seedAgent, seedContact, seedOrg, seedUser } from "../helpers/testDb";
 import type { Express } from "express";
 
+const setDeleteFails = (on: boolean) => void ((globalThis as unknown as { __REC_DELETE_FAILS__?: boolean }).__REC_DELETE_FAILS__ = on);
+const sweepDelete = async (key: string) => void objects().delete(key);
 const objects = () => (globalThis as unknown as { __REC_OBJECTS__: Map<string, { size: number; contentType: string }> }).__REC_OBJECTS__;
 const signed = () => (globalThis as unknown as { __REC_SIGNED__: Array<{ key: string; contentType: string }> }).__REC_SIGNED__;
 
@@ -508,7 +522,7 @@ describe("review fixes", () => {
     expect((await rowOf(id)).status).toBe("failed");
   });
 
-  it("rescores a duplicate only once per checklist", async () => {
+  it("rescores a duplicate only when the call's current score uses another checklist", async () => {
     const results = stereoResults();
     fakeGoogle({ poll: "done", results });
     const run = async (rubricId?: string) => {
@@ -518,11 +532,195 @@ describe("review fixes", () => {
       return rowOf(id);
     };
     const first = await run();
-    await run("general-sales");
+    const scoresOf = () =>
+      handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, first.transcriptId!)).orderBy(schema.callScoresTable.createdAt);
     await run();
     await run("general-sales");
-    const scores = await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, first.transcriptId!));
-    expect(scores).toHaveLength(2);
+    await run("general-sales");
+    expect((await scoresOf()).map((x) => x.rubricId)).toEqual(["medicare-tpmo", "general-sales"]);
+    // Back to the first checklist: the call opens on its newest score, so that must be this checklist's.
+    await run();
+    expect((await scoresOf()).map((x) => x.rubricId)).toEqual(["medicare-tpmo", "general-sales", "medicare-tpmo"]);
+  });
+
+  it("a duplicate waits while another recording is scoring the same call", async () => {
+    const results = stereoResults();
+    fakeGoogle({ poll: "done", results });
+    const first = await uploadAndConfirm(admin.id);
+    await recordings.processRecording(first);
+    await recordings.processRecording(first);
+    const transcriptId = (await rowOf(first)).transcriptId!;
+    await handle.db.insert(schema.callScoreClaimsTable).values({ transcriptId, claimedAt: new Date() });
+    const second = await uploadAndConfirm(admin.id, { rubricId: "general-sales" });
+    await recordings.processRecording(second);
+    expect(await recordings.processRecording(second)).toBe("poll");
+    expect((await rowOf(second)).status).toBe("transcribing");
+    const count = async () => (await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, transcriptId))).length;
+    expect(await count()).toBe(1);
+    // A claim left by a job that died is taken over.
+    await handle.db.update(schema.callScoreClaimsTable).set({ claimedAt: new Date(Date.now() - 16 * 60 * 1000) }).where(eq(schema.callScoreClaimsTable.transcriptId, transcriptId));
+    expect(await recordings.processRecording(second)).toBe("finished");
+    expect((await rowOf(second)).status).toBe("scored");
+    expect(await count()).toBe(2);
+    expect(await handle.db.select().from(schema.callScoreClaimsTable).where(eq(schema.callScoreClaimsTable.transcriptId, transcriptId))).toHaveLength(0);
+  });
+
+  it("a recording whose job lost its claim mid-score stays pending and is retried", async () => {
+    const results = stereoResults();
+    fakeGoogle({ poll: "done", results });
+    const first = await uploadAndConfirm(admin.id);
+    await recordings.processRecording(first);
+    await recordings.processRecording(first);
+    const second = await uploadAndConfirm(admin.id, { rubricId: "general-sales" });
+    await recordings.processRecording(second);
+    const g = globalThis as unknown as { __RESCORE_OVERRIDE__?: unknown };
+    g.__RESCORE_OVERRIDE__ = async (input: { transcriptId: string }) => ({ kind: "duplicate", transcriptId: input.transcriptId });
+    try {
+      expect(await recordings.processRecording(second)).toBe("poll");
+    } finally {
+      delete g.__RESCORE_OVERRIDE__;
+    }
+    expect((await rowOf(second)).status).toBe("transcribing");
+    // The retry scores it under the requested checklist.
+    expect(await recordings.processRecording(second)).toBe("finished");
+    const b = await rowOf(second);
+    expect(b.status).toBe("scored");
+    const scores = await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, b.transcriptId!));
+    expect(scores.map((x) => x.rubricId)).toContain("general-sales");
+  });
+
+  it("a failed claim release does not leave the recording stuck", async () => {
+    const results = stereoResults();
+    fakeGoogle({ poll: "done", results });
+    const first = await uploadAndConfirm(admin.id);
+    await recordings.processRecording(first);
+    await recordings.processRecording(first);
+    const transcriptId = (await rowOf(first)).transcriptId!;
+    await handle.db.execute(sql`create or replace function block_claim_delete() returns trigger language plpgsql as $$ begin raise exception 'connection reset'; end $$`);
+    await handle.db.execute(sql`create trigger block_claim_delete before delete on call_score_claims for each row execute function block_claim_delete()`);
+    try {
+      const second = await uploadAndConfirm(admin.id, { rubricId: "general-sales" });
+      await recordings.processRecording(second);
+      expect(await recordings.processRecording(second)).toBe("finished");
+      expect((await rowOf(second)).status).toBe("scored");
+    } finally {
+      await handle.db.execute(sql`drop trigger block_claim_delete on call_score_claims`);
+      await handle.db.delete(schema.callScoreClaimsTable).where(eq(schema.callScoreClaimsTable.transcriptId, transcriptId));
+    }
+  });
+
+  it("a job whose claim was taken over does not save its score", async () => {
+    const results = stereoResults();
+    fakeGoogle({ poll: "done", results });
+    const first = await uploadAndConfirm(admin.id);
+    await recordings.processRecording(first);
+    await recordings.processRecording(first);
+    const transcriptId = (await rowOf(first)).transcriptId!;
+    const before = await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, transcriptId));
+    const { rescoreTranscript } = await import("../../lib/callScoring/ingest");
+    const { getRubric } = await import("../../lib/callScoring/rubrics");
+    const out = await rescoreTranscript({
+      orgId: org.id,
+      userId: admin.id,
+      userRole: "agency_admin",
+      transcriptId,
+      rubric: getRubric("general-sales")!,
+      aiMode: "off",
+      stillOwned: async () => false,
+    });
+    expect(out.kind).toBe("duplicate");
+    const after = await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, transcriptId));
+    expect(after).toHaveLength(before.length);
+  });
+
+  it("two confirms racing at the daily limit never delete accepted audio", async () => {
+    process.env.CALL_RECORDINGS_DAILY_LIMIT = "1";
+    try {
+      const orgR = await seedOrg(handle.db, { id: `rec-race-${Date.now()}` });
+      const u = await seedUser(handle.db, { orgId: orgR.id, role: "agency_admin" });
+      const start = await request(app).post("/api/call-scoring/recordings/upload-url").set(withAuth(u.id)).send(startBody());
+      const rid = start.body.recordingId as string;
+      const key = `call-recordings/${orgR.id}/${rid}`;
+      objects().set(key, { size: 10, contentType: "audio/mpeg" });
+      const confirm = () => request(app).post(`/api/call-scoring/recordings/${rid}/uploaded`).set(withAuth(u.id)).send({});
+      const out = await Promise.all([confirm(), confirm(), confirm()]);
+      expect(out.every((r) => r.status === 200 || r.status === 202)).toBe(true);
+      expect(out.every((r) => r.body.status === "queued")).toBe(true);
+      expect(objects().has(key)).toBe(true);
+      expect((await rowOf(rid)).status).toBe("queued");
+    } finally {
+      delete process.env.CALL_RECORDINGS_DAILY_LIMIT;
+    }
+  });
+
+  it("retries deleting refused audio until it succeeds, and deletes again after the upload link expires", async () => {
+    process.env.CALL_RECORDINGS_DAILY_LIMIT = "1";
+    try {
+      const orgP = await seedOrg(handle.db, { id: `rec-purge-${Date.now()}` });
+      const u = await seedUser(handle.db, { orgId: orgP.id, role: "agency_admin" });
+      const post = () => request(app).post("/api/call-scoring/recordings/upload-url").set(withAuth(u.id)).send(startBody());
+      const a = await post();
+      await handle.db.update(schema.callRecordingsTable).set({ createdAt: new Date(Date.now() - 16 * 60 * 1000) }).where(eq(schema.callRecordingsTable.id, a.body.recordingId));
+      const b = await post();
+      const keyB = `call-recordings/${orgP.id}/${b.body.recordingId}`;
+      objects().set(`call-recordings/${orgP.id}/${a.body.recordingId}`, { size: 10, contentType: "audio/mpeg" });
+      objects().set(keyB, { size: 10, contentType: "audio/mpeg" });
+      await request(app).post(`/api/call-scoring/recordings/${a.body.recordingId}/uploaded`).set(withAuth(u.id)).send({}).expect(202);
+      setDeleteFails(true);
+      try {
+        await request(app).post(`/api/call-scoring/recordings/${b.body.recordingId}/uploaded`).set(withAuth(u.id)).send({}).expect(429);
+      } finally {
+        setDeleteFails(false);
+      }
+      expect(objects().has(keyB)).toBe(true);
+      const refused = await rowOf(b.body.recordingId);
+      expect(refused.status).toBe("failed");
+      expect(refused.purgeAfter).not.toBeNull();
+
+      // Not due while the upload link is still valid.
+      const before = await recordings.sweepStalledRecordings(async () => true, new Date(), sweepDelete);
+      expect(objects().has(keyB)).toBe(true);
+      expect(before.purged).toBe(0);
+
+      // Due: a failing delete keeps it pending; the next run deletes it.
+      const later = new Date(refused.purgeAfter!.getTime() + 1000);
+      const failing = async () => {
+        throw new Error("503");
+      };
+      await recordings.sweepStalledRecordings(async () => true, later, failing);
+      const backedOff = await rowOf(b.body.recordingId);
+      expect(backedOff.purgeAttempts).toBe(1);
+      expect(backedOff.purgeAfter!.getTime()).toBe(later.getTime() + recordings.purgeBackoffMs(1));
+      // Backed off: not retried before its next time, so stuck deletes do not crowd out new ones.
+      await recordings.sweepStalledRecordings(async () => true, later, sweepDelete);
+      expect(objects().has(keyB)).toBe(true);
+      const retryAt = new Date(backedOff.purgeAfter!.getTime() + 1000);
+      await recordings.sweepStalledRecordings(async () => true, retryAt, sweepDelete);
+      expect(objects().has(keyB)).toBe(false);
+      const done = await rowOf(b.body.recordingId);
+      expect(done.purgeAfter).toBeNull();
+      expect(done.purgeAttempts).toBe(0);
+    } finally {
+      delete process.env.CALL_RECORDINGS_DAILY_LIMIT;
+    }
+  });
+
+  it("a recording counts against the cap for 24 hours from when it was confirmed", async () => {
+    process.env.CALL_RECORDINGS_DAILY_LIMIT = "1";
+    try {
+      const orgW = await seedOrg(handle.db, { id: `rec-window-${Date.now()}` });
+      const u = await seedUser(handle.db, { orgId: orgW.id, role: "agency_admin" });
+      const post = () => request(app).post("/api/call-scoring/recordings/upload-url").set(withAuth(u.id)).send(startBody());
+      const a = await post();
+      objects().set(`call-recordings/${orgW.id}/${a.body.recordingId}`, { size: 10, contentType: "audio/mpeg" });
+      // Link issued 23 hours ago, confirmed now: still counts for the next 24 hours.
+      await handle.db.update(schema.callRecordingsTable).set({ createdAt: new Date(Date.now() - 23 * 60 * 60 * 1000) }).where(eq(schema.callRecordingsTable.id, a.body.recordingId));
+      await request(app).post(`/api/call-scoring/recordings/${a.body.recordingId}/uploaded`).set(withAuth(u.id)).send({}).expect(202);
+      await handle.db.update(schema.callRecordingsTable).set({ createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000) }).where(eq(schema.callRecordingsTable.id, a.body.recordingId));
+      expect((await post()).status).toBe(429);
+    } finally {
+      delete process.env.CALL_RECORDINGS_DAILY_LIMIT;
+    }
   });
 
   it("deletes the audio of uploads refused at the daily limit or abandoned", async () => {
@@ -552,6 +750,7 @@ describe("review fixes", () => {
       .where(eq(schema.callRecordingsTable.id, rid));
     const deleted: string[] = [];
     await recordings.sweepStalledRecordings(async () => true, new Date(), async (key) => void deleted.push(key));
+    expect((await rowOf(rid)).purgeAfter).toBeNull();
     expect(deleted).toContain(`call-recordings/${org.id}/${rid}`);
   });
 
@@ -642,14 +841,14 @@ describe("review fixes", () => {
       .where(eq(schema.callRecordingsTable.id, abandoned));
 
     const requeued: string[] = [];
-    const out = await recordings.sweepStalledRecordings(async (id) => (requeued.push(id), true));
+    const out = await recordings.sweepStalledRecordings(async (id) => (requeued.push(id), true), new Date(), sweepDelete);
     expect(requeued).toContain(stalled);
     expect(out.abandoned).toBeGreaterThanOrEqual(1);
     expect((await rowOf(abandoned)).status).toBe("failed");
 
     // Claimed: an immediate second sweep does not queue it again.
     const again: string[] = [];
-    await recordings.sweepStalledRecordings(async (id) => (again.push(id), true));
+    await recordings.sweepStalledRecordings(async (id) => (again.push(id), true), new Date(), sweepDelete);
     expect(again).not.toContain(stalled);
   });
 });

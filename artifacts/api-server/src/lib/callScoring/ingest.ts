@@ -292,6 +292,11 @@ export async function rescoreTranscript(input: {
   rubric: Rubric;
   aiMode: "auto" | "off";
   reviewer?: RunScoringOptions["reviewer"];
+  /**
+   * Checked inside the save transaction; false means another job took over
+   * this scoring meanwhile, so nothing is saved (returns "duplicate").
+   */
+  stillOwned?: (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => Promise<boolean>;
 }): Promise<IngestResult> {
   const row = await loadTranscriptRow(db, input.orgId, input.transcriptId);
   if (!row) return { kind: "error", httpStatus: 404, code: "not_found", message: "Transcript not found." };
@@ -308,6 +313,7 @@ export async function rescoreTranscript(input: {
   };
   const run = await runScoring({ rubric: input.rubric, transcript: parsed, ai: input.aiMode, reviewer: input.reviewer });
   const scoreId = await db.transaction(async (tx) => {
+    if (input.stillOwned && !(await input.stillOwned(tx))) return null;
     const id = await persistScore(tx, { orgId: input.orgId, transcriptId: row.id, userId: input.userId, run, parsed });
     await tx.insert(auditLogTable).values({
       id: randomUUID(),
@@ -321,6 +327,7 @@ export async function rescoreTranscript(input: {
     });
     return id;
   });
+  if (!scoreId) return { kind: "duplicate", transcriptId: row.id };
   return {
     kind: "ok",
     summary: summarize(row.id, scoreId, run, parsed, row.contactId, row.contactMatch as CallContactMatch, false),
