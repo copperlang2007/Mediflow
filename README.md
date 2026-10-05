@@ -214,17 +214,21 @@ agencyBRIDGE handles Medicare IDs, dates of birth, health conditions and call
 recordings. **Do not load real client data into any environment other than a
 confirmed production deploy.**
 
-| Vendor | Role | BAA status per repo docs |
+| Vendor | What it handles | Is a BAA needed? |
 | --- | --- | --- |
-| Google Cloud (Run, SQL, GCS, Speech-to-Text) | Hosting, storage, transcription | Claimed under Google's compliance program; **confirm the BAA is signed and accepted**. |
-| AWS Bedrock | AI (Claude) | Claimed ("operator's AWS BAA"); confirm. |
+| Google Cloud (Run, SQL, GCS, Speech-to-Text) | Hosts the database, stores documents and call recordings | **Yes** — it holds PHI. Repo claims coverage under Google's compliance program; confirm the BAA is signed and accepted. |
+| AWS Bedrock | AI (Claude) | **Yes, as built** — chat and call analysis send live client data and transcripts to the model, and a boot guard requires a HIPAA-eligible AI provider. Repo claims the operator's AWS BAA; confirm. |
 | Azure OpenAI | Alternate AI | Microsoft offers a BAA; not the active provider. |
 | Render | — | **No BAA. Never use.** |
 | OpenAI (direct API) | — | **No BAA.** Dev/test only; never PHI. |
-| HighLevel, EnrollHere, DocuSign | Integrations | Docs say "confirm a signed BAA"; checklists unchecked. |
-| Twilio, Resend, Stripe, Sentry | Messaging, billing, errors | Repo is silent. Sentry events are regex-scrubbed for MBI/SSN/phone/email, but that is **defense in depth, not a BAA substitute**: it cannot recognise dates of birth, free-text diagnoses or recording content, so PHI must be kept out of errors structurally and a BAA confirmed before PHI can reach Sentry. |
+| HighLevel, EnrollHere | Systems the agency already uses; the platform reads contacts/calls from them | **Not a platform decision.** Only needed to the extent they hold client health or Medicare data, and that is the agency's own relationship with them. |
+| DocuSign | Signing agent contracting paperwork (not client records) | **Probably not** for agent paperwork. The code asks for a HIPAA-eligible plan if DocuSign is used; that guard may be stricter than necessary. Needed only if client documents are ever signed through it. |
+| Twilio (voice + SMS) | Client calls through the browser softphone; texts; optional call recording (off by default) | **Likely yes for calls.** Live call audio passes through Twilio and a sales call will include health details; recording, if turned on, stores it there too. Texts can be kept PHI-free, calls cannot. Confirm Twilio's BAA covers the products used, or stop using Twilio for client calls. Decide with your compliance advisor. |
+| Resend | Email to clients | **Depends on content.** Simplest safe design: keep Medicare IDs and health details out of email bodies. |
+| Stripe | Agency subscription billing | **No** — no client health data. |
+| Sentry | Error reports | **No, if PHI is kept out.** Events are regex-scrubbed for MBI/SSN/phone/email, which is defense in depth, not a substitute: it cannot see dates of birth, free-text diagnoses or recording content. |
 
-These are statements found in code and docs, **not verified contracts.** The
+These are statements found in code and docs, **not verified contracts, and not legal advice** — whether a vendor needs a BAA depends on whether PHI actually reaches it; confirm with a compliance advisor. The
 in-app BAA checklist is `GET /admin/baa-checklist` / "Security & HIPAA".
 
 ---
