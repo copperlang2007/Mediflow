@@ -59,7 +59,7 @@ vi.mock("../../lib/callScoring/ingest", async (importOriginal) => {
   };
 });
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import * as schema from "@workspace/db/schema";
 import { bootTestDb, clearEnqueuedJobs, getEnqueuedJobs, shutdownTestDb, withAuth } from "../helpers/testApp";
 import { safeReason } from "../../lib/callScoring/speech";
@@ -587,6 +587,26 @@ describe("review fixes", () => {
     expect(b.status).toBe("scored");
     const scores = await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, b.transcriptId!));
     expect(scores.map((x) => x.rubricId)).toContain("general-sales");
+  });
+
+  it("a failed claim release does not leave the recording stuck", async () => {
+    const results = stereoResults();
+    fakeGoogle({ poll: "done", results });
+    const first = await uploadAndConfirm(admin.id);
+    await recordings.processRecording(first);
+    await recordings.processRecording(first);
+    const transcriptId = (await rowOf(first)).transcriptId!;
+    await handle.db.execute(sql`create or replace function block_claim_delete() returns trigger language plpgsql as $$ begin raise exception 'connection reset'; end $$`);
+    await handle.db.execute(sql`create trigger block_claim_delete before delete on call_score_claims for each row execute function block_claim_delete()`);
+    try {
+      const second = await uploadAndConfirm(admin.id, { rubricId: "general-sales" });
+      await recordings.processRecording(second);
+      expect(await recordings.processRecording(second)).toBe("finished");
+      expect((await rowOf(second)).status).toBe("scored");
+    } finally {
+      await handle.db.execute(sql`drop trigger block_claim_delete on call_score_claims`);
+      await handle.db.delete(schema.callScoreClaimsTable).where(eq(schema.callScoreClaimsTable.transcriptId, transcriptId));
+    }
   });
 
   it("a job whose claim was taken over does not save its score", async () => {

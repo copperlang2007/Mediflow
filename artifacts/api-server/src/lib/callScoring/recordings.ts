@@ -181,8 +181,9 @@ export async function processRecording(recordingId: string, deps: { privateObjec
     // Same speech as an earlier call. The call shows its newest score, so when
     // that is under another checklist, score it under the one chosen for this
     // upload (history is kept). When the newest score already uses this
-    // checklist nothing is re-run. Only one recording at a time may add a
-    // score to a call: a duplicate racing another waits and re-checks.
+    // checklist nothing is re-run. Only one recording job at a time may add a
+    // score to a call: a duplicate racing another waits and re-checks. (A
+    // person's explicit "Rescore" in the app is not blocked by this claim.)
     const claimedAt = await claimRescore(transcriptId, now);
     if (!claimedAt) return "poll";
     try {
@@ -214,8 +215,13 @@ export async function processRecording(recordingId: string, deps: { privateObjec
         if (rescored.kind === "duplicate") return "poll";
       }
     } finally {
-      await db.delete(callScoreClaimsTable)
-        .where(and(eq(callScoreClaimsTable.transcriptId, transcriptId), eq(callScoreClaimsTable.claimedAt, claimedAt)));
+      // Best effort: if this fails the claim goes stale and is taken over; the recording still finishes.
+      try {
+        await db.delete(callScoreClaimsTable)
+          .where(and(eq(callScoreClaimsTable.transcriptId, transcriptId), eq(callScoreClaimsTable.claimedAt, claimedAt)));
+      } catch (err) {
+        logger.warn({ err: (err as Error).message, recordingId: row.id }, "Call recording: could not release the score claim; it will be taken over when stale");
+      }
     }
   }
   await db.update(callRecordingsTable)
