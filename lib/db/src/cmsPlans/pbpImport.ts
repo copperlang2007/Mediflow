@@ -16,7 +16,11 @@ import { createReadStream } from "node:fs";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 
-/** Anything with pg's `query(text, values)`; both `pg.Client` and PGlite fit. */
+/**
+ * Anything with pg's `query(text, values)` that runs every call on ONE
+ * connection (`pg.Client`, PGlite). Not a `pg.Pool`: BEGIN/COMMIT would land on
+ * different connections and the import would not be atomic.
+ */
 export interface Queryable {
   query(
     text: string,
@@ -183,6 +187,15 @@ function cell(row: { first: Map<string, number>; cells: string[] }, name: string
   return i === undefined ? "" : (row.cells[i] ?? "").trim();
 }
 
+/** Fails unless the file has the given columns and at least one data row. */
+async function requireRows(file: string, label: string, cols: string[]): Promise<void> {
+  for await (const row of readTable(file)) {
+    need(row.first, label, ...cols);
+    return; // closes the stream
+  }
+  throw new Error(`${label} has a header but no data rows`);
+}
+
 /** Case-insensitive lookup of a file in `dir`. */
 async function findFile(dir: string, wanted: string): Promise<string | null> {
   const hit = (await readdir(dir)).find((f) => f.toLowerCase() === wanted.toLowerCase());
@@ -196,13 +209,23 @@ export async function importPbpBenefits(db: Queryable, opts: ImportOptions): Pro
   const sectionAPath = await findFile(dir, "pbp_Section_A.txt");
   if (!sectionAPath) throw new Error(`pbp_Section_A.txt not found in ${dir}`);
 
-  // Section A carries no year. The service-area files do (contract_year), so at
-  // least one must be present for --year to be checked against the extract.
-  if (!(await findFile(dir, "PlanArea.txt")) && !(await findFile(dir, "PlanRegionArea.txt"))) {
-    throw new Error(
-      `neither PlanArea.txt nor PlanRegionArea.txt found in ${dir}; cannot check --year against the extract`,
-    );
+  if ("totalCount" in db) {
+    throw new Error("importPbpBenefits needs a single connection (pg.Client), not a pg.Pool");
   }
+
+  // Everything below is checked BEFORE the year is deleted, so a truncated or
+  // wrong extract can never replace good data. Section A carries no year; the
+  // service-area files do (contract_year), so both must be present with rows
+  // for --year to be checked against the extract.
+  const areaFile = await findFile(dir, "PlanArea.txt");
+  const regionFile = await findFile(dir, "PlanRegionArea.txt");
+  if (!areaFile) throw new Error(`PlanArea.txt not found in ${dir}`);
+  if (!regionFile) throw new Error(`PlanRegionArea.txt not found in ${dir}`);
+  await requireRows(sectionAPath, "pbp_Section_A.txt",
+    ["bid_id", "pbp_a_hnumber", "pbp_a_plan_identifier", "segment_id", "pbp_a_eghp_yn"]);
+  await requireRows(areaFile, "PlanArea.txt", ["bid_id", "contract_year", "county_code"]);
+  await requireRows(regionFile, "PlanRegionArea.txt",
+    ["bid_id", "contract_year", "region_type", "ma_or_pdp_region_code"]);
 
   const sectionFiles = (await readdir(dir))
     .filter((f) => /^pbp_.+\.txt$/i.test(f))
@@ -287,8 +310,7 @@ export async function importPbpBenefits(db: Queryable, opts: ImportOptions): Pro
     }
 
     // ---- Service areas: counties (local plans) and regions (regional plans, PDPs)
-    const areaFile = await findFile(dir, "PlanArea.txt");
-    if (areaFile) {
+    {
       const cols = ["plan_year", "bid_id", "county_code", "state_code", "county_name", "pending_flag", "partial_flag"];
       files.push(await loadAreas(db, areaFile, "PlanArea.txt", included, excluded, "cms_plan_service_areas", cols,
         planYear, (row) => [
@@ -296,8 +318,7 @@ export async function importPbpBenefits(db: Queryable, opts: ImportOptions): Pro
           cell(row, "pending_flag") || null, cell(row, "partial_flag") || null,
         ], ["county_code"], log));
     }
-    const regionFile = await findFile(dir, "PlanRegionArea.txt");
-    if (regionFile) {
+    {
       const cols = ["plan_year", "bid_id", "region_type", "region_code", "region_name", "pending_flag", "partial_flag"];
       files.push(await loadAreas(db, regionFile, "PlanRegionArea.txt", included, excluded, "cms_plan_regions", cols,
         planYear, (row) => [
