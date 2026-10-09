@@ -8,22 +8,20 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-08 — audit advisories cleared (see session log)._
-_Last updated: 2026-10-08 — owner BAA statement recorded (see session log)._
+_Last updated: 2026-10-08 — owner BAA statement recorded; audit advisories cleared (see session log)._
 
 ### Health dashboard
 
 | Item | Status | Detail |
 | --- | --- | --- |
-| `main` HEAD | `d9ba459` (2026-10-08) | "Migration 0070: move artificialBRIDGE clients into INSUREitALL (#281)". Re-check: this row goes stale within hours. |
-| CI: typecheck + test | Green | |
-| CI: `pnpm audit (moderate)` | Red on main from 2026-10-08 (four new advisories); this PR clears them. Was green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
-| CI: `pnpm audit (moderate)` | **Red on main since 2026-10-08** (four new advisories: proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate); fix in PR #284. Was green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
-| CI: migration journal | Green | |
+| `main` HEAD | `efe7e4c` (2026-10-08) | "Clear four new pnpm audit advisories (proxy-addr critical) (#284)". Re-check: this row goes stale within hours. |
+| CI: typecheck + test | Green | Run 37865453026 on `efe7e4c` (2026-10-09) |
+| CI: `pnpm audit (moderate)` | **Green** — run 37865453026 on `efe7e4c` (#284, 2026-10-09) passed. Was red on main from 2026-10-08 when four advisories (proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate) were published | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
+| CI: migration journal | Green | Run 37865453026 on `efe7e4c` |
 | Production deploy (GCP Cloud Run) | **Green** at `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
-| Open PRs | Query GitHub live | At 2026-10-08 ~19:30 CT: #282 (docs: owner BAA statement) and #284 (clear four audit advisories). #281 (migration 0070) merged as d9ba459. |
+| Open PRs | Query GitHub live | At 2026-10-08 ~19:45 CT: #283 (CMS 2027 plan benefit data; another session's branch, migration file is 0071, currently conflicting with main) and #285 (this tidy-up). Merged today: #281 (migration 0070), #282 (BAA note), #284 (audit advisories). |
 | Migration high-water mark | `0070_move_artificialbridge_clients_to_insureitall` on main (#281) | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
@@ -35,7 +33,7 @@ _Last updated: 2026-10-08 — owner BAA statement recorded (see session log)._
 4. **Verify Clerk is on production keys**, not a development-mode key, before any PHI.
 5. **Turn on** GitHub setting "Automatically delete head branches".
 6. Approve a branch cleanup (see audit: delete the 93 in buckets A+B, excluding any head of an open PR; spot-check the 62 in C). Existing `.github/scripts/nuke-branches.sh` embeds escaped quotes in its branch list and was not tested; do not run it as-is.
-7. Close #276 (its audit suppression and ADR 0007 duplicate #272; keep ADR 0007 if the reachability write-up is wanted).
+7. ~~Close #276~~ — already merged (CI: documented audit exception for braces); nothing to do.
 
 ### Security audit exceptions (`pnpm.auditConfig.ignoreGhsas` in `package.json`)
 
@@ -56,7 +54,7 @@ Scope of Appointment captured on call recording (no 48-hour wait enforced).
 - Is the GCP project actually provisioned, and has any deploy ever succeeded?
 - Clerk → Identity Platform: go or no-go? (ADR 0006, proposed). Production
   currently reportedly uses a Clerk **development-mode** key — verify before PHI.
-- #276 duplicates the suppression now on main and adds ADR 0007 (reachability analysis). Keep the ADR, close or rebase the PR.
+- #276 is merged (the braces suppression and ADR 0007 are on main); no action needed.
 
 ### Known gaps
 
@@ -93,6 +91,15 @@ ones with no inbound references.
 ## Session log
 
 Newest first. Template in `AGENTS.md` §7.
+
+### 2026-10-08 — Tidy STATE.md after #282/#284 — Claude Code — branch `state-tidy-after-284`
+- **Outcome:** done (docs only)
+- **Changed:** Removed duplicate header lines that reached `main` when #284 merged before the cleanup commit landed; made the Current state block consistent: main HEAD `efe7e4c`, single audit row, deploy row, open-PR row (#283 and #285 open; #281, #282, #284 merged today), migration high-water mark `0070` on main (#281), and owner action 7 (#276 is already merged, nothing to close). No code or migration changes. PR #285.
+- **Verified:** Read the resulting file top to bottom; `git diff origin/main --stat` shows only `docs/STATE.md`. CI on `main` at `efe7e4c` (run 37865453026) succeeded, including `pnpm audit`; the audit row records it. The Cloud Run deploy for `efe7e4c` has not been checked.
+- **Left undone / broken:** #283 (CMS 2027 plan benefits, another session) is open and conflicts with `main`; its migration file is numbered 0071 while its title says 0070. Not touched. The 0070 client move is deployed but not confirmed (no access to Cloud Run logs).
+- **Decisions made:** none
+- **Next agent should:** check Cloud Run logs for lines starting `0070:` (a "skipped" line means the org slugs or names did not match exactly one org each); then confirm `main` CI, including `pnpm audit`, is green.
+- **Needs a human:** nothing new; the earlier owner actions in the Current state block still stand.
 
 ### 2026-10-08 — Clear four new audit advisories — Claude Code — branch `fix-audit-advisories-2026-10-08`
 - **Outcome:** done
