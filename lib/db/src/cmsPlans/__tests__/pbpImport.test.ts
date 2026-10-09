@@ -167,11 +167,38 @@ describe("importPbpBenefits", () => {
     ).resolves.toBe(2);
   });
 
-  it("refuses to run when no service-area file exists to check the year against", async () => {
-    rmSync(path.join(dir, "PlanArea.txt"));
-    rmSync(path.join(dir, "PlanRegionArea.txt"));
-    await expect(importPbpBenefits(pg, { dir, planYear: 2099 })).rejects.toThrow(/cannot check --year/);
-    expect(await count("cms_plan_benefit_packages")).toBe(0);
+  it.each(["PlanArea.txt", "PlanRegionArea.txt"])("refuses to run without %s", async (name) => {
+    await importPbpBenefits(pg, { dir, planYear: 2027 });
+    rmSync(path.join(dir, name));
+    await expect(importPbpBenefits(pg, { dir, planYear: 2027 })).rejects.toThrow(/not found/);
+    expect(await count("cms_plan_benefit_packages")).toBe(2); // good data kept
+  });
+
+  it("refuses header-only files before touching existing data", async () => {
+    await importPbpBenefits(pg, { dir, planYear: 2027 });
+    for (const name of ["pbp_Section_A.txt", "PlanArea.txt", "PlanRegionArea.txt"]) {
+      const full = path.join(dir, name);
+      const original = readFileSync(full);
+      const headerOnly = original.toString("latin1").split("\r\n")[0] + "\r\n";
+      writeFileSync(full, Buffer.from(headerOnly, "latin1"));
+      await expect(importPbpBenefits(pg, { dir, planYear: 2027 })).rejects.toThrow(/no data rows/);
+      writeFileSync(full, original);
+    }
+    expect(await count("cms_plan_benefit_packages")).toBe(2);
+    expect(await count("cms_plan_service_areas")).toBe(2);
+  });
+
+  it("requires the employer-plan column so the default filter cannot silently turn off", async () => {
+    writeCms(dir, "pbp_Section_A.txt", [
+      A_HEAD.map((h) => (h === "pbp_a_eghp_yn" ? "renamed" : h)),
+      ...A_ROWS,
+    ]);
+    await expect(importPbpBenefits(pg, { dir, planYear: 2027 })).rejects.toThrow(/pbp_a_eghp_yn/);
+  });
+
+  it("rejects a connection pool, which cannot keep one transaction", async () => {
+    const fakePool = { totalCount: 0, query: pg.query.bind(pg) };
+    await expect(importPbpBenefits(fakePool, { dir, planYear: 2027 })).rejects.toThrow(/single connection/);
   });
 
   it("fails clearly when Section A is missing", async () => {

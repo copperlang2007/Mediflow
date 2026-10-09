@@ -94,9 +94,9 @@ Newest first. Template in `AGENTS.md` §7.
 
 ### 2026-10-09 — Resolve merge conflicts for CMS plan data — Copilot — branch `claude/admiring-allen-b6wum5`
 - **Outcome:** done (current `main` merged into PR #283)
-- **Changed:** Merged `main` at `f821a54` into #283, retained both branches' `docs/STATE.md` history, and kept the CMS migration numbered `0071` after main's `0070` migration.
-- **Verified:** `corepack pnpm install --frozen-lockfile`; `pnpm --filter @workspace/scripts run check:migration-journal` (73 entries); `pnpm exec vitest run lib/db/src/cmsPlans artifacts/api-server/src/__tests__/guards/tenant-isolation.test.ts` (15 tests); `pnpm run typecheck`; all passed. Node 22.23.3 was used although the repository targets Node 24. Main deploy run 37867735824 succeeded; main CI run 37867735833 was still in progress.
-- **Left undone / broken:** PR #283 CI has not yet run on the merge commit; CMS data remains unloaded to a real database.
+- **Changed:** Merged `main` at `f821a54` into #283, retained both branches' `docs/STATE.md` history, kept the CMS migration numbered `0071` after main's `0070`, and preserved the concurrent PR updates through `625b331`.
+- **Verified:** Before preserving the concurrent importer follow-up, `corepack pnpm install --frozen-lockfile`; `pnpm --filter @workspace/scripts run check:migration-journal` (73 entries); `pnpm exec vitest run lib/db/src/cmsPlans artifacts/api-server/src/__tests__/guards/tenant-isolation.test.ts` (15 tests); and `pnpm run typecheck` passed. Node 22.23.3 was used although the repository targets Node 24. Main deploy run 37867735824 succeeded; main CI run 37867735833 was in progress at last check.
+- **Left undone / broken:** CI has not yet run on the final combined PR head; CMS data remains unloaded to a real database.
 - **Decisions made:** none
 - **Next agent should:** verify PR #283 CI and mergeability after this commit is published.
 - **Needs a human:** nothing
@@ -135,6 +135,7 @@ Newest first. Template in `AGENTS.md` §7.
 - **Decisions made:** none
 - **Next agent should:** open a dependency-bump PR to clear the audit; confirm Clerk production keys and the Twilio position before any real PHI.
 - **Needs a human:** confirm the Twilio conduit position with a compliance advisor; confirm Clerk is on production keys.
+
 ### 2026-10-08 — Move artificialBRIDGE clients to INSUREitALL — Claude Code — branch `move-artificialbridge-clients-to-insureitall`
 - **Outcome:** partial (migration written and tested; not yet run on production)
 - **Changed:** New migration `0070_move_artificialbridge_clients_to_insureitall.sql` (+ journal entry, + test `migration-0070-move-clients.test.ts`). It moves every contact in the artificialBRIDGE org, and all rows hanging off those contacts, into the INSUREitALL org. It clears each moved contact's assigned agent (those agents belong to the old org). Nothing is deleted; the artificialBRIDGE org stays.
