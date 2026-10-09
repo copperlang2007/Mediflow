@@ -16,7 +16,8 @@ _Last updated: 2026-10-08 — owner BAA statement recorded; audit advisories cle
 | --- | --- | --- |
 | `main` HEAD | `d9ba459` (2026-10-08) | "Migration 0070: move artificialBRIDGE clients into INSUREitALL (#281)". Re-check: this row goes stale within hours. |
 | CI: typecheck + test | Green | |
-| CI: `pnpm audit (moderate)` | Was red on main from 2026-10-08 (four new advisories: proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate); cleared by PR #284 once merged. Was green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
+| CI: `pnpm audit (moderate)` | Red on main from 2026-10-08 (four new advisories); this PR clears them. Was green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
+| CI: `pnpm audit (moderate)` | **Red on main since 2026-10-08** (four new advisories: proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate); fix in PR #284. Was green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
 | CI: migration journal | Green | |
 | Production deploy (GCP Cloud Run) | **Green** at `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
@@ -100,7 +101,6 @@ Newest first. Template in `AGENTS.md` §7.
 - **Decisions made:** overrides (the repo's existing pattern) rather than suppressions.
 - **Next agent should:** remove these overrides once the parent packages ship fixed ranges.
 - **Needs a human:** review the `proxy-addr` bump (security-only release; trust proxy is a hop count of 1).
-
 ### 2026-10-08 — Record owner BAA statement — Claude Code — branch `docs-record-baa-status`
 - **Outcome:** done (docs only)
 - **Changed:** `docs/STATE.md` only: recorded the owner's statement that Google Cloud and AWS BAAs are signed, and that Twilio is treated as a conduit (no recording). Marked unverified. PR #282.
