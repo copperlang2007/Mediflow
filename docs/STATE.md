@@ -8,7 +8,7 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-05 — by the call-recordings follow-up session below._
+_Last updated: 2026-10-08 — audit advisories cleared (see session log)._
 
 ### Health dashboard
 
@@ -16,7 +16,7 @@ _Last updated: 2026-10-05 — by the call-recordings follow-up session below._
 | --- | --- | --- |
 | `main` HEAD | `44b3739` (2026-10-05) | "Call recordings: fix review findings left open at #272 merge (#277)". Re-check: this row goes stale within hours. |
 | CI: typecheck + test | Green | |
-| CI: `pnpm audit (moderate)` | Green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
+| CI: `pnpm audit (moderate)` | Red on main from 2026-10-08 (four new advisories); this PR clears them. Was green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
 | CI: migration journal | Green | |
 | Production deploy (GCP Cloud Run) | **Green** at `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
@@ -91,6 +91,15 @@ ones with no inbound references.
 ## Session log
 
 Newest first. Template in `AGENTS.md` §7.
+
+### 2026-10-08 — Clear four new audit advisories — Claude Code — branch `fix-audit-advisories-2026-10-08`
+- **Outcome:** done
+- **Changed:** Added four `pnpm.overrides` in `package.json` (lockfile updated): `proxy-addr` 2.0.7 to 2.0.8 (critical, via express), `source-map-js` 1.2.1 to 1.2.2 (high, mockup-sandbox build tooling), `fast-copy` 4.0.2 to 4.1.2 (moderate, via pino-pretty), and `postcss-selector-parser` 6.0.10 to 7.1.6 (moderate, only under `@tailwindcss/typography`). No suppressions added.
+- **Verified:** `pnpm audit --audit-level moderate` reports only the two already-ignored advisories; `pnpm --filter @workspace/web-app run build` passes; `pnpm test` 2482 pass. Two 404 tests (metrics, release-hygiene) failed only while a local web build existed in `artifacts/web-app/dist` (SPA fallback returns 200) and pass with it removed (20/20). CI not yet seen.
+- **Left undone / broken:** `typecheck` has hundreds of pre-existing errors on a local machine without built libs; CI is the check.
+- **Decisions made:** overrides (the repo's existing pattern) rather than suppressions.
+- **Next agent should:** remove these overrides once the parent packages ship fixed ranges.
+- **Needs a human:** review the `proxy-addr` bump (security-only release; trust proxy is a hop count of 1).
 
 ### 2026-10-08 — Move artificialBRIDGE clients to INSUREitALL — Claude Code — branch `move-artificialbridge-clients-to-insureitall`
 - **Outcome:** partial (migration written and tested; not yet run on production)
