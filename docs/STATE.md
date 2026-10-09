@@ -15,9 +15,9 @@ _Last updated: 2026-10-09 — CMS plan data branch refreshed against current mai
 | Item | Status | Detail |
 | --- | --- | --- |
 | `main` HEAD | `f821a54` (2026-10-09) | "STATE: tidy duplicate rows after #284 (#285)". Re-check: this row goes stale within hours. |
-| CI: typecheck + test | In progress | Run 37867735833 on `f821a54` (checked 2026-10-09) |
-| CI: `pnpm audit (moderate)` | **Green** — run 37865453026 on `efe7e4c` (#284, 2026-10-09) passed. Was red on main from 2026-10-08 when four advisories (proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate) were published | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
-| CI: migration journal | Green | Run 37865453026 on `efe7e4c` |
+| CI: typecheck + test | Green | Run 37867735833 on `f821a54` (2026-10-09) |
+| CI: `pnpm audit (moderate)` | **Green** — run 37867735833 on `f821a54` passed. Was red on main from 2026-10-08 when four advisories (proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate) were published | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
+| CI: migration journal | Green | Run 37867735833 on `f821a54` |
 | Production deploy (GCP Cloud Run) | **Green** at `f821a54` (run 37867735824), `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
@@ -95,7 +95,7 @@ Newest first. Template in `AGENTS.md` §7.
 ### 2026-10-09 — Resolve merge conflicts for CMS plan data — Copilot — branch `claude/admiring-allen-b6wum5`
 - **Outcome:** done (current `main` merged into PR #283)
 - **Changed:** Merged `main` at `f821a54` into #283, retained both branches' `docs/STATE.md` history, kept the CMS migration numbered `0071` after main's `0070`, and preserved the concurrent PR updates through `625b331`.
-- **Verified:** Before preserving the concurrent importer follow-up, `corepack pnpm install --frozen-lockfile`; `pnpm --filter @workspace/scripts run check:migration-journal` (73 entries); `pnpm exec vitest run lib/db/src/cmsPlans artifacts/api-server/src/__tests__/guards/tenant-isolation.test.ts` (15 tests); and `pnpm run typecheck` passed. Node 22.23.3 was used although the repository targets Node 24. Main deploy run 37867735824 succeeded; main CI run 37867735833 was in progress at last check.
+- **Verified:** Before preserving the concurrent importer follow-up, `corepack pnpm install --frozen-lockfile`; `pnpm --filter @workspace/scripts run check:migration-journal` (73 entries); `pnpm exec vitest run lib/db/src/cmsPlans artifacts/api-server/src/__tests__/guards/tenant-isolation.test.ts` (15 tests); and `pnpm run typecheck` passed. Node 22.23.3 was used although the repository targets Node 24. Main deploy run 37867735824 and CI run 37867735833 succeeded.
 - **Left undone / broken:** CI has not yet run on the final combined PR head; CMS data remains unloaded to a real database.
 - **Decisions made:** none
 - **Next agent should:** verify PR #283 CI and mergeability after this commit is published.
