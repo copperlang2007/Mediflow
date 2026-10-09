@@ -196,6 +196,14 @@ export async function importPbpBenefits(db: Queryable, opts: ImportOptions): Pro
   const sectionAPath = await findFile(dir, "pbp_Section_A.txt");
   if (!sectionAPath) throw new Error(`pbp_Section_A.txt not found in ${dir}`);
 
+  // Section A carries no year. The service-area files do (contract_year), so at
+  // least one must be present for --year to be checked against the extract.
+  if (!(await findFile(dir, "PlanArea.txt")) && !(await findFile(dir, "PlanRegionArea.txt"))) {
+    throw new Error(
+      `neither PlanArea.txt nor PlanRegionArea.txt found in ${dir}; cannot check --year against the extract`,
+    );
+  }
+
   const sectionFiles = (await readdir(dir))
     .filter((f) => /^pbp_.+\.txt$/i.test(f))
     .sort((a, b) => a.localeCompare(b));

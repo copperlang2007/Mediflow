@@ -167,6 +167,13 @@ describe("importPbpBenefits", () => {
     ).resolves.toBe(2);
   });
 
+  it("refuses to run when no service-area file exists to check the year against", async () => {
+    rmSync(path.join(dir, "PlanArea.txt"));
+    rmSync(path.join(dir, "PlanRegionArea.txt"));
+    await expect(importPbpBenefits(pg, { dir, planYear: 2099 })).rejects.toThrow(/cannot check --year/);
+    expect(await count("cms_plan_benefit_packages")).toBe(0);
+  });
+
   it("fails clearly when Section A is missing", async () => {
     rmSync(path.join(dir, "pbp_Section_A.txt"));
     await expect(importPbpBenefits(pg, { dir, planYear: 2027 })).rejects.toThrow(/pbp_Section_A\.txt not found/);
