@@ -8,21 +8,21 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-09 — by the CMS plan data session below._
+_Last updated: 2026-10-09 — CMS plan data branch refreshed against current main._
 
 ### Health dashboard
 
 | Item | Status | Detail |
 | --- | --- | --- |
-| `main` HEAD | `efe7e4c` (2026-10-09) | "Clear four new pnpm audit advisories (proxy-addr critical) (#284)". Re-check: this row goes stale within hours. |
-| CI: typecheck + test | Green | |
-| CI: `pnpm audit (moderate)` | Was red on main 2026-10-08 (four new advisories: proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate); fix #284 merged as `efe7e4c`. Not re-checked after the merge (verify before relying on it). Was green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
-| CI: migration journal | Green | |
-| Production deploy (GCP Cloud Run) | **Green** at `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
+| `main` HEAD | `f821a54` (2026-10-09) | "STATE: tidy duplicate rows after #284 (#285)". Re-check: this row goes stale within hours. |
+| CI: typecheck + test | Green | Run 37867735833 on `f821a54` (2026-10-09) |
+| CI: `pnpm audit (moderate)` | **Green** — run 37867735833 on `f821a54` passed. Was red on main from 2026-10-08 when four advisories (proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate) were published | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
+| CI: migration journal | Green | Run 37867735833 on `f821a54` |
+| Production deploy (GCP Cloud Run) | **Green** at `f821a54` (run 37867735824), `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
-| Open PRs | Query GitHub live | At 2026-10-09 ~01:10 UTC: only #283 (CMS 2027 plan benefit data, migration 0071). #281, #282 and #284 are merged. |
-| Migration high-water mark | `0070_move_artificialbridge_clients_to_insureitall` on main (#281); `0071_cms_plan_benefits` in the CMS plan data PR (#283) | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
+| Open PRs | Query GitHub live | As of 2026-10-09, #283 (CMS 2027 plan benefit data; now includes main at `f821a54`). #285 merged as `f821a54`; #281, #282, and #284 are also merged. |
+| Migration high-water mark | `0070_move_artificialbridge_clients_to_insureitall` on main (#281); `0071_cms_plan_benefits` in PR #283 | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
 ### Owner-only actions
@@ -33,7 +33,7 @@ _Last updated: 2026-10-09 — by the CMS plan data session below._
 4. **Verify Clerk is on production keys**, not a development-mode key, before any PHI.
 5. **Turn on** GitHub setting "Automatically delete head branches".
 6. Approve a branch cleanup (see audit: delete the 93 in buckets A+B, excluding any head of an open PR; spot-check the 62 in C). Existing `.github/scripts/nuke-branches.sh` embeds escaped quotes in its branch list and was not tested; do not run it as-is.
-7. Close #276 (its audit suppression and ADR 0007 duplicate #272; keep ADR 0007 if the reachability write-up is wanted).
+7. ~~Close #276~~ — already merged (CI: documented audit exception for braces); nothing to do.
 
 ### Security audit exceptions (`pnpm.auditConfig.ignoreGhsas` in `package.json`)
 
@@ -54,7 +54,7 @@ Scope of Appointment captured on call recording (no 48-hour wait enforced).
 - Is the GCP project actually provisioned, and has any deploy ever succeeded?
 - Clerk → Identity Platform: go or no-go? (ADR 0006, proposed). Production
   currently reportedly uses a Clerk **development-mode** key — verify before PHI.
-- #276 duplicates the suppression now on main and adds ADR 0007 (reachability analysis). Keep the ADR, close or rebase the PR.
+- #276 is merged (the braces suppression and ADR 0007 are on main); no action needed.
 
 ### Known gaps
 
@@ -92,6 +92,15 @@ ones with no inbound references.
 
 Newest first. Template in `AGENTS.md` §7.
 
+### 2026-10-09 — Resolve merge conflicts for CMS plan data — Copilot — branch `claude/admiring-allen-b6wum5`
+- **Outcome:** done (current `main` merged into PR #283)
+- **Changed:** Merged `main` at `f821a54` into #283, retained both branches' `docs/STATE.md` history, kept the CMS migration numbered `0071` after main's `0070`, and preserved the concurrent PR updates through `625b331`.
+- **Verified:** Before preserving the concurrent importer follow-up, `corepack pnpm install --frozen-lockfile`; `pnpm --filter @workspace/scripts run check:migration-journal` (73 entries); `pnpm exec vitest run lib/db/src/cmsPlans artifacts/api-server/src/__tests__/guards/tenant-isolation.test.ts` (15 tests); and `pnpm run typecheck` passed. Node 22.23.3 was used although the repository targets Node 24. Main deploy run 37867735824 and CI run 37867735833 succeeded.
+- **Left undone / broken:** CI has not yet run on the final combined PR head; CMS data remains unloaded to a real database.
+- **Decisions made:** none
+- **Next agent should:** verify PR #283 CI and mergeability after this commit is published.
+- **Needs a human:** nothing
+
 ### 2026-10-09 — CMS 2027 plan benefit data: tables + importer — Claude Code — branch `claude/admiring-allen-b6wum5`
 - **Outcome:** partial (code ready; data NOT yet loaded into any real database)
 - **Changed:** New migration `0071_cms_plan_benefits` (4 global tables: plans, per-plan benefit JSON, plan-to-county, plan-to-region), loader `lib/db/src/cmsPlans/pbpImport.ts`, command `pnpm --filter @workspace/scripts import:pbp`, how-to in `docs/cms-plan-data.md`. The uploaded zip is CMS tab-delimited text, not JSON, and is not committed (252 MB). Employer-only plans (1,673) are skipped by default.
@@ -100,6 +109,15 @@ Newest first. Template in `AGENTS.md` §7.
 - **Decisions made:** none needing an ADR (public reference data, global tables like the KB library).
 - **Next agent should:** run the importer against the real database after merge, then add a read-only plans-by-county route (OpenAPI + `requirePermission`, add the tables to `GLOBAL_TABLES`).
 - **Needs a human:** after merge, run the importer on the production database (or approve me doing so); confirm which year/refresh cadence you want.
+
+### 2026-10-08 — Tidy STATE.md after #282/#284 — Claude Code — branch `state-tidy-after-284`
+- **Outcome:** done (docs only)
+- **Changed:** Removed duplicate header lines that reached `main` when #284 merged before the cleanup commit landed; made the Current state block consistent: main HEAD `efe7e4c`, single audit row, deploy row, open-PR row (#283 and #285 open; #281, #282, #284 merged today), migration high-water mark `0070` on main (#281), and owner action 7 (#276 is already merged, nothing to close). No code or migration changes. PR #285.
+- **Verified:** Read the resulting file top to bottom; `git diff origin/main --stat` shows only `docs/STATE.md`. CI on `main` at `efe7e4c` (run 37865453026) succeeded, including `pnpm audit`; the audit row records it. The Cloud Run deploy for `efe7e4c` has not been checked.
+- **Left undone / broken:** #283 (CMS 2027 plan benefits, another session) is open and conflicts with `main`; its migration file is numbered 0071 while its title says 0070. Not touched. The 0070 client move is deployed but not confirmed (no access to Cloud Run logs).
+- **Decisions made:** none
+- **Next agent should:** check Cloud Run logs for lines starting `0070:` (a "skipped" line means the org slugs or names did not match exactly one org each); then confirm `main` CI, including `pnpm audit`, is green.
+- **Needs a human:** nothing new; the earlier owner actions in the Current state block still stand.
 
 ### 2026-10-08 — Clear four new audit advisories — Claude Code — branch `fix-audit-advisories-2026-10-08`
 - **Outcome:** done
