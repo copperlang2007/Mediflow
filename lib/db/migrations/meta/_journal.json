@@ -503,7 +503,14 @@
       "idx": 71,
       "version": "7",
       "when": 1793300000000,
-      "tag": "0070_cms_plan_benefits",
+      "tag": "0070_move_artificialbridge_clients_to_insureitall",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1793400000000,
+      "tag": "0071_cms_plan_benefits",
       "breakpoints": true
     }
   ]

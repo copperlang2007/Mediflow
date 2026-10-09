@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildRecord, importPbpBenefits, sectionName } from "../pbpImport";
 
-const MIGRATION = path.resolve(__dirname, "../../../migrations/0070_cms_plan_benefits.sql");
+const MIGRATION = path.resolve(__dirname, "../../../migrations/0071_cms_plan_benefits.sql");
 
 /** Tab-delimited, CRLF, Windows-1252 — exactly how CMS ships the files. */
 function writeCms(dir: string, name: string, rows: string[][]): void {

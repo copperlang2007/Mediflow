@@ -5,7 +5,7 @@ Part D plans: who offers each plan, what it costs, what it covers, and where it
 is sold. No client data, no PHI. It is the same for every agency, so these
 tables have no `org_id` (global tables, like the shared Knowledge Base).
 
-## Tables (migration `0070_cms_plan_benefits`)
+## Tables (migration `0071_cms_plan_benefits`)
 
 | Table | One row per | Use |
 | --- | --- | --- |

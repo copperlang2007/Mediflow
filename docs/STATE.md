@@ -22,7 +22,7 @@ _Last updated: 2026-10-09 — by the CMS plan data session below._
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. |
 | Open PRs | Query GitHub live | At 2026-10-05 ~02:15 UTC: #278 (docs: which vendors need a BAA) and the #277 follow-up (waiting duplicates skip Speech-to-Text; migration 0069). #277 merged as 44b3739 at head 1a36e2b. |
-| Migration high-water mark | `0069_call_recordings_cap_index` on main; `0070_cms_plan_benefits` in the CMS plan data PR | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
+| Migration high-water mark | `0068_call_recordings_cleanup` on main; `0069_call_recordings_cap_index` (main); `0070_move_artificialbridge_clients_to_insureitall` in the move-clients PR; `0071_cms_plan_benefits` in the CMS plan data PR | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
 ### Owner-only actions
@@ -94,12 +94,21 @@ Newest first. Template in `AGENTS.md` §7.
 
 ### 2026-10-09 — CMS 2027 plan benefit data: tables + importer — Claude Code — branch `claude/admiring-allen-b6wum5`
 - **Outcome:** partial (code ready; data NOT yet loaded into any real database)
-- **Changed:** New migration `0070_cms_plan_benefits` (4 global tables: plans, per-plan benefit JSON, plan-to-county, plan-to-region), loader `lib/db/src/cmsPlans/pbpImport.ts`, command `pnpm --filter @workspace/scripts import:pbp`, how-to in `docs/cms-plan-data.md`. The uploaded zip is CMS tab-delimited text, not JSON, and is not committed (252 MB). Employer-only plans (1,673) are skipped by default.
-- **Verified:** loaded the real 2027 extract twice into a throwaway PostgreSQL 16 database: 6,300 plans, 377,453 section rows, 125,383 county rows, 364 region rows, ~320 MB, under a minute; dry run saves nothing. `npx vitest run lib/db/src/cmsPlans` (11 tests) and the tenant guard pass; `pnpm run typecheck` and `check:migration-journal` (72 entries) OK. Full `pnpm test`: 226 files, 2,493 tests passed locally.
+- **Changed:** New migration `0071_cms_plan_benefits` (4 global tables: plans, per-plan benefit JSON, plan-to-county, plan-to-region), loader `lib/db/src/cmsPlans/pbpImport.ts`, command `pnpm --filter @workspace/scripts import:pbp`, how-to in `docs/cms-plan-data.md`. The uploaded zip is CMS tab-delimited text, not JSON, and is not committed (252 MB). Employer-only plans (1,673) are skipped by default.
+- **Verified:** loaded the real 2027 extract twice into a throwaway PostgreSQL 16 database: 6,300 plans, 377,453 section rows, 125,383 county rows, 364 region rows, ~320 MB, under a minute; dry run saves nothing. `npx vitest run lib/db/src/cmsPlans` (11 tests) and the tenant guard pass; `pnpm run typecheck` and `check:migration-journal` (72 entries) OK. Full `pnpm test`: 227 files, 2,496 tests passed locally after merging main.
 - **Left undone / broken:** Nothing reads these tables yet (no API route or screen). `county_code` is CMS/SSA, not FIPS (needs a crosswalk to match client counties).
 - **Decisions made:** none needing an ADR (public reference data, global tables like the KB library).
 - **Next agent should:** run the importer against the real database after merge, then add a read-only plans-by-county route (OpenAPI + `requirePermission`, add the tables to `GLOBAL_TABLES`).
 - **Needs a human:** after merge, run the importer on the production database (or approve me doing so); confirm which year/refresh cadence you want.
+
+### 2026-10-08 — Move artificialBRIDGE clients to INSUREitALL — Claude Code — branch `move-artificialbridge-clients-to-insureitall`
+- **Outcome:** partial (migration written and tested; not yet run on production)
+- **Changed:** New migration `0070_move_artificialbridge_clients_to_insureitall.sql` (+ journal entry, + test `migration-0070-move-clients.test.ts`). It moves every contact in the artificialBRIDGE org, and all rows hanging off those contacts, into the INSUREitALL org. It clears each moved contact's assigned agent (those agents belong to the old org). Nothing is deleted; the artificialBRIDGE org stays.
+- **Verified:** `pnpm exec vitest run artifacts/api-server/src/__tests__/integration/migration-0070-move-clients.test.ts` (2 pass: move + idempotency + other-org untouched; ambiguous/missing org = no-op). `check:migration-journal` OK. Full `pnpm test` and CI NOT run here; api-server `typecheck` has 719 pre-existing errors on this machine, unchanged by this change.
+- **Left undone / broken:** The migration finds the two orgs by slug/name (artificialbridge / insureitall, case-insensitive). If prod uses other names it logs a notice and does nothing. Not confirmed against the real prod org rows.
+- **Decisions made:** Contacts only move with their child rows; agents/users are not moved; assigned agent is cleared rather than crossing tenants.
+- **Next agent should:** Confirm the real org slugs in prod, then let CI run and merge; check the migration notices for the moved row counts.
+- **Needs a human:** Approve the PR; after deploy, re-assign the moved clients to INSUREitALL agents.
 
 ### 2026-10-05 — Call recordings: commit missed by the #277 merge — Claude Code — branch `claude/agencybridge-compliance-review-s3nc6l`
 - **Outcome:** partial (follow-up PR open)
