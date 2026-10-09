@@ -8,7 +8,7 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-09 — CMS plan data branch refreshed against current main._
+_Last updated: 2026-10-09 — CMS 2027 plan data loaded into production (see session log)._
 
 ### Health dashboard
 
@@ -91,6 +91,15 @@ ones with no inbound references.
 ## Session log
 
 Newest first. Template in `AGENTS.md` §7.
+
+### 2026-10-09 — CMS 2027 plan data loaded into production — Claude Code (via Desktop Commander on the owner's PC) — branch `claude/admiring-allen-b6wum5`
+- **Outcome:** done
+- **Changed:** Loaded the CMS 2027 plan benefit data into the production database (`mediflow-prod-db`) using a temporary Cloud Run job built from the live image (`mediflow-prod`, commit `410a7b4`), with the extract staged in a temporary private bucket. Executions: dry run `cms-pbp-import-9x2qs`, then real load `cms-pbp-import-t5vcj` (log line `LOADED — plan year 2027`). The job and bucket were deleted afterwards; the app's service, secrets and the existing buckets were not touched. Only the four `cms_plan_*` tables were written (public CMS data, no PHI).
+- **Verified:** Dry run and real load both reported 6,300 plans, 125,383 county rows, 364 region rows (identical to the local PostgreSQL 16 test); the dry run also proved migration `0071` was live in production. Buckets after cleanup: `agencyportal-501523-mediflow-phi`, `run-sources-agencyportal-501523-us-south1` only. **NOT verified:** a direct row-count query against production (no query path from here); the job's own log is the evidence.
+- **Left undone / broken:** Nothing reads these tables yet (no API route or screen). `county_code` is CMS/SSA, not FIPS. The unzipped extract (`C:\Users\lang2\Downloads\pbp-2027-extract`) and a few `pbp-*.log` files remain on the owner's PC.
+- **Decisions made:** none needing an ADR. Production DB stays private-IP only; no public access was opened. The production image already contains the importer, so future loads can reuse the same temporary-job method.
+- **Next agent should:** build the read-only plans-by-county route (OpenAPI + `requirePermission`, add the tables to `GLOBAL_TABLES`), with an SSA-to-FIPS county crosswalk.
+- **Needs a human:** nothing.
 
 ### 2026-10-09 — Resolve merge conflicts for CMS plan data — Copilot — branch `claude/admiring-allen-b6wum5`
 - **Outcome:** done (current `main` merged into PR #283)
