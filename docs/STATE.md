@@ -15,9 +15,9 @@ _Last updated: 2026-10-08 — owner BAA statement recorded; audit advisories cle
 | Item | Status | Detail |
 | --- | --- | --- |
 | `main` HEAD | `efe7e4c` (2026-10-08) | "Clear four new pnpm audit advisories (proxy-addr critical) (#284)". Re-check: this row goes stale within hours. |
-| CI: typecheck + test | Green | |
-| CI: `pnpm audit (moderate)` | Green expected after #284 (merged 2026-10-08, efe7e4c); re-check CI on main. Was red on main from 2026-10-08 when four advisories (proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate) were published | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
-| CI: migration journal | Green | |
+| CI: typecheck + test | Green | Run 37865453026 on `efe7e4c` (2026-10-09) |
+| CI: `pnpm audit (moderate)` | **Green** — run 37865453026 on `efe7e4c` (#284, 2026-10-09) passed. Was red on main from 2026-10-08 when four advisories (proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate) were published | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
+| CI: migration journal | Green | Run 37865453026 on `efe7e4c` |
 | Production deploy (GCP Cloud Run) | **Green** at `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
@@ -95,7 +95,7 @@ Newest first. Template in `AGENTS.md` §7.
 ### 2026-10-08 — Tidy STATE.md after #282/#284 — Claude Code — branch `state-tidy-after-284`
 - **Outcome:** done (docs only)
 - **Changed:** Removed duplicate header lines that reached `main` when #284 merged before the cleanup commit landed; made the Current state block consistent: main HEAD `efe7e4c`, single audit row, deploy row, open-PR row (#283 and #285 open; #281, #282, #284 merged today), migration high-water mark `0070` on main (#281), and owner action 7 (#276 is already merged, nothing to close). No code or migration changes. PR #285.
-- **Verified:** Read the resulting file top to bottom; `git diff origin/main --stat` shows only `docs/STATE.md`. CI on `main` after #284's deploy NOT yet seen, so the audit and deploy rows say "re-check".
+- **Verified:** Read the resulting file top to bottom; `git diff origin/main --stat` shows only `docs/STATE.md`. CI on `main` at `efe7e4c` (run 37865453026) succeeded, including `pnpm audit`; the audit row records it. The Cloud Run deploy for `efe7e4c` has not been checked.
 - **Left undone / broken:** #283 (CMS 2027 plan benefits, another session) is open and conflicts with `main`; its migration file is numbered 0071 while its title says 0070. Not touched. The 0070 client move is deployed but not confirmed (no access to Cloud Run logs).
 - **Decisions made:** none
 - **Next agent should:** check Cloud Run logs for lines starting `0070:` (a "skipped" line means the org slugs or names did not match exactly one org each); then confirm `main` CI, including `pnpm audit`, is green.
