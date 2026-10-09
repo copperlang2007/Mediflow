@@ -21,7 +21,7 @@ _Last updated: 2026-10-08 — owner BAA statement recorded; audit advisories cle
 | Production deploy (GCP Cloud Run) | **Green** at `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
-| Open PRs | Query GitHub live | None open at 2026-10-08 ~19:40 CT. Merged today: #281 (migration 0070), #282 (BAA note), #284 (audit advisories). |
+| Open PRs | Query GitHub live | At 2026-10-08 ~19:45 CT: #283 (CMS 2027 plan benefit data; another session's branch, migration file is 0071, currently conflicting with main) and #285 (this tidy-up). Merged today: #281 (migration 0070), #282 (BAA note), #284 (audit advisories). |
 | Migration high-water mark | `0070_move_artificialbridge_clients_to_insureitall` on main (#281) | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
@@ -33,7 +33,7 @@ _Last updated: 2026-10-08 — owner BAA statement recorded; audit advisories cle
 4. **Verify Clerk is on production keys**, not a development-mode key, before any PHI.
 5. **Turn on** GitHub setting "Automatically delete head branches".
 6. Approve a branch cleanup (see audit: delete the 93 in buckets A+B, excluding any head of an open PR; spot-check the 62 in C). Existing `.github/scripts/nuke-branches.sh` embeds escaped quotes in its branch list and was not tested; do not run it as-is.
-7. Close #276 (its audit suppression and ADR 0007 duplicate #272; keep ADR 0007 if the reachability write-up is wanted).
+7. ~~Close #276~~ — already merged (CI: documented audit exception for braces); nothing to do.
 
 ### Security audit exceptions (`pnpm.auditConfig.ignoreGhsas` in `package.json`)
 
@@ -54,7 +54,7 @@ Scope of Appointment captured on call recording (no 48-hour wait enforced).
 - Is the GCP project actually provisioned, and has any deploy ever succeeded?
 - Clerk → Identity Platform: go or no-go? (ADR 0006, proposed). Production
   currently reportedly uses a Clerk **development-mode** key — verify before PHI.
-- #276 duplicates the suppression now on main and adds ADR 0007 (reachability analysis). Keep the ADR, close or rebase the PR.
+- #276 is merged (the braces suppression and ADR 0007 are on main); no action needed.
 
 ### Known gaps
 
