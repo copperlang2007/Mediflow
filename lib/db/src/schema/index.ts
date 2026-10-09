@@ -25,6 +25,7 @@ export * from "./enrollments";
 export * from "./invitations";
 export * from "./integrations";
 export * from "./knowledgeBase";
+export * from "./cmsPlans";
 // --- stage2/calendar-branding ---
 export * from "./appointments";
 export * from "./branding";
