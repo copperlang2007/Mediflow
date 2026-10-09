@@ -8,28 +8,28 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-08 — audit advisories cleared (see session log)._
+_Last updated: 2026-10-08 — owner BAA statement recorded; audit advisories cleared (see session log)._
 
 ### Health dashboard
 
 | Item | Status | Detail |
 | --- | --- | --- |
-| `main` HEAD | `44b3739` (2026-10-05) | "Call recordings: fix review findings left open at #272 merge (#277)". Re-check: this row goes stale within hours. |
+| `main` HEAD | `d9ba459` (2026-10-08) | "Migration 0070: move artificialBRIDGE clients into INSUREitALL (#281)". Re-check: this row goes stale within hours. |
 | CI: typecheck + test | Green | |
-| CI: `pnpm audit (moderate)` | Red on main from 2026-10-08 (four new advisories); this PR clears them. Was green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
+| CI: `pnpm audit (moderate)` | Was red on main from 2026-10-08 (four new advisories: proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate); cleared by PR #284 once merged. Was green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
 | CI: migration journal | Green | |
-| Production deploy (GCP Cloud Run) | **Green** at `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
+| Production deploy (GCP Cloud Run) | **Green** at `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
-| Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. |
-| Open PRs | Query GitHub live | At 2026-10-05 ~02:15 UTC: #278 (docs: which vendors need a BAA) and the #277 follow-up (waiting duplicates skip Speech-to-Text; migration 0069). #277 merged as 44b3739 at head 1a36e2b. |
-| Migration high-water mark | `0068_call_recordings_cleanup` on main; `0069_call_recordings_cap_index` (main); `0070_move_artificialbridge_clients_to_insureitall` in the move-clients PR | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
+| Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
+| Open PRs | Query GitHub live | At 2026-10-08 ~19:30 CT: #282 (docs: owner BAA statement) and #284 (clear four audit advisories). #281 (migration 0070) merged as d9ba459. |
+| Migration high-water mark | `0070_move_artificialbridge_clients_to_insureitall` on main (#281) | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
 ### Owner-only actions
 
 1. Confirm the e-sign signing secrets hold real production PEMs. (How the deploy was fixed is now recorded in the health table.) The two placeholder secrets hold `unset`: put the real Twilio API key secret and statement-ingest Google credentials in Secret Manager when those features go live.
 2. **Promote ADR 0004** to Accepted if you consider the production deploy proven; otherwise say what is still missing.
-3. **Confirm the BAAs that are actually needed:** Google Cloud and AWS Bedrock (both receive PHI as built), and **Twilio for client calls** (live call audio, and recordings if enabled, carry health details; texts can be kept PHI-free but calls cannot). Not needed for Stripe, and probably not DocuSign (agent paperwork only). HighLevel/EnrollHere are the agency's own existing relationships. Resend depends on whether email bodies contain PHI. Decide with a compliance advisor and record the outcome here.
+3. **Confirm the BAAs that are actually needed:** Google Cloud and AWS Bedrock (both receive PHI as built), and **Twilio for client calls** (live call audio, and recordings if enabled, carry health details; texts can be kept PHI-free but calls cannot). Not needed for Stripe, and probably not DocuSign (agent paperwork only). HighLevel/EnrollHere are the agency's own existing relationships. Resend depends on whether email bodies contain PHI. Decide with a compliance advisor and record the outcome here. **2026-10-08 (owner, unverified here):** Google Cloud and AWS BAAs signed long ago; owner says Twilio needs none because calls are not recorded and Twilio only carries the call (owner's conduit reasoning, unverified). Owner also states call recording and transcription do not go through Twilio. The code has two paths: (1) Twilio-side recording (`record="record-from-answer-dual"` in `lib/voice/twiml.ts`), OFF by default and would store PHI at Twilio if switched on; (2) uploaded recordings stored in Google Cloud with Google Speech-to-Text (`call_recordings`, `SPEECH_TO_TEXT_PROVIDER=google`), which falls under the Google BAA. Owner's statement matches path (2) only; path (1) must stay off. Open point for the compliance advisor: confirm the conduit position for live call audio, and keep recording off for INSUREitALL unless a Twilio BAA is in place.
 4. **Verify Clerk is on production keys**, not a development-mode key, before any PHI.
 5. **Turn on** GitHub setting "Automatically delete head branches".
 6. Approve a branch cleanup (see audit: delete the 93 in buckets A+B, excluding any head of an open PR; spot-check the 62 in C). Existing `.github/scripts/nuke-branches.sh` embeds escaped quotes in its branch list and was not tested; do not run it as-is.
@@ -100,6 +100,15 @@ Newest first. Template in `AGENTS.md` §7.
 - **Decisions made:** overrides (the repo's existing pattern) rather than suppressions.
 - **Next agent should:** remove these overrides once the parent packages ship fixed ranges.
 - **Needs a human:** review the `proxy-addr` bump (security-only release; trust proxy is a hop count of 1).
+
+### 2026-10-08 — Record owner BAA statement — Claude Code — branch `docs-record-baa-status`
+- **Outcome:** done (docs only)
+- **Changed:** `docs/STATE.md` only: recorded the owner's statement that Google Cloud and AWS BAAs are signed, and that Twilio is treated as a conduit (no recording). Marked unverified. PR #282.
+- **Verified:** NOT verified: BAAs and the Twilio position are the owner's word; no agreement documents were seen. Recording-is-off-by-default read from `lib/voice/twiml.ts`.
+- **Left undone / broken:** `pnpm audit (moderate)` red on this PR from advisories already on main (proxy-addr, source-map-js, postcss-selector-parser, fast-copy); not caused by this change.
+- **Decisions made:** none
+- **Next agent should:** open a dependency-bump PR to clear the audit; confirm Clerk production keys and the Twilio position before any real PHI.
+- **Needs a human:** confirm the Twilio conduit position with a compliance advisor; confirm Clerk is on production keys.
 
 ### 2026-10-08 — Move artificialBRIDGE clients to INSUREitALL — Claude Code — branch `move-artificialbridge-clients-to-insureitall`
 - **Outcome:** partial (migration written and tested; not yet run on production)
