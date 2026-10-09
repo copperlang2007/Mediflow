@@ -201,6 +201,21 @@ describe("importPbpBenefits", () => {
     await expect(importPbpBenefits(fakePool, { dir, planYear: 2027 })).rejects.toThrow(/single connection/);
   });
 
+  it("never commits an empty replacement when the filter removes every plan", async () => {
+    writeCms(dir, "pbp_Section_A.txt", [A_HEAD, A_ROWS[2]!]); // only the employer plan
+    await importPbpBenefits(pg, { dir, planYear: 2027, includeEmployerGroups: true });
+    await expect(importPbpBenefits(pg, { dir, planYear: 2027 })).rejects.toThrow(/no plans left/);
+    expect(await count("cms_plan_benefit_packages")).toBe(1); // previous year kept
+  });
+
+  it("rejects a wrong --year before deleting anything", async () => {
+    await importPbpBenefits(pg, { dir, planYear: 2027 });
+    const seen: string[] = [];
+    const spy = { query: (q: string, v?: unknown[]) => (seen.push(q.trim().split(/\s+/)[0]!), pg.query<Record<string, unknown>>(q, v)) };
+    await expect(importPbpBenefits(spy, { dir, planYear: 2028 })).rejects.toThrow(/contract_year 2027/);
+    expect(seen).toEqual([]); // nothing, not even BEGIN, was sent to the database
+  });
+
   it("fails clearly when Section A is missing", async () => {
     rmSync(path.join(dir, "pbp_Section_A.txt"));
     await expect(importPbpBenefits(pg, { dir, planYear: 2027 })).rejects.toThrow(/pbp_Section_A\.txt not found/);

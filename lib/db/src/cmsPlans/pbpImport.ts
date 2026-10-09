@@ -187,13 +187,25 @@ function cell(row: { first: Map<string, number>; cells: string[] }, name: string
   return i === undefined ? "" : (row.cells[i] ?? "").trim();
 }
 
-/** Fails unless the file has the given columns and at least one data row. */
-async function requireRows(file: string, label: string, cols: string[]): Promise<void> {
+/**
+ * Fails unless the file has the given columns and at least one data row; with
+ * `planYear`, also that the first row's contract_year matches (fails in
+ * milliseconds on a mistyped --year instead of after the whole load).
+ */
+async function requireRows(file: string, label: string, cols: string[], planYear?: number): Promise<void> {
   for await (const row of readTable(file)) {
     need(row.first, label, ...cols);
+    if (planYear !== undefined) checkYear(row, label, planYear);
     return; // closes the stream
   }
   throw new Error(`${label} has a header but no data rows`);
+}
+
+function checkYear(row: { first: Map<string, number>; cells: string[] }, label: string, planYear: number): void {
+  const year = Number(cell(row, "contract_year"));
+  if (year !== planYear) {
+    throw new Error(`${label}: contract_year ${year} does not match --year ${planYear}`);
+  }
 }
 
 /** Case-insensitive lookup of a file in `dir`. */
@@ -223,9 +235,9 @@ export async function importPbpBenefits(db: Queryable, opts: ImportOptions): Pro
   if (!regionFile) throw new Error(`PlanRegionArea.txt not found in ${dir}`);
   await requireRows(sectionAPath, "pbp_Section_A.txt",
     ["bid_id", "pbp_a_hnumber", "pbp_a_plan_identifier", "segment_id", "pbp_a_eghp_yn"]);
-  await requireRows(areaFile, "PlanArea.txt", ["bid_id", "contract_year", "county_code"]);
+  await requireRows(areaFile, "PlanArea.txt", ["bid_id", "contract_year", "county_code"], opts.planYear);
   await requireRows(regionFile, "PlanRegionArea.txt",
-    ["bid_id", "contract_year", "region_type", "ma_or_pdp_region_code"]);
+    ["bid_id", "contract_year", "region_type", "ma_or_pdp_region_code"], opts.planYear);
 
   const sectionFiles = (await readdir(dir))
     .filter((f) => /^pbp_.+\.txt$/i.test(f))
@@ -327,6 +339,17 @@ export async function importPbpBenefits(db: Queryable, opts: ImportOptions): Pro
         ], ["region_type", "ma_or_pdp_region_code"], log));
     }
 
+    // The pre-checks ran before BEGIN; if a file changed underneath us (or the
+    // employer filter removed every plan) never commit an empty replacement.
+    const empty = files.filter((f) => /^Plan(Region)?Area\.txt$/i.test(f.file) && f.read === 0);
+    if (included.size === 0 || empty.length > 0) {
+      throw new Error(
+        included.size === 0
+          ? "no plans left to load after filtering; refusing to replace the year with nothing"
+          : `${empty.map((f) => f.file).join(", ")} had no rows during the load; refusing to commit`,
+      );
+    }
+
     await db.query(opts.dryRun ? "ROLLBACK" : "COMMIT");
     return {
       planYear,
@@ -375,10 +398,7 @@ async function loadAreas(
   for await (const row of readTable(file)) {
     need(row.first, label, "bid_id", "contract_year", ...required);
     report.read++;
-    const year = Number(cell(row, "contract_year"));
-    if (year !== planYear) {
-      throw new Error(`${label}: contract_year ${year} does not match --year ${planYear}`);
-    }
+    checkYear(row, label, planYear);
     const bidId = cell(row, "bid_id");
     if (!included.has(bidId)) {
       if (excluded.has(bidId)) report.skippedEmployerGroup++;

@@ -48,5 +48,11 @@ are untouched); any error leaves the previous data in place. Re-running is safe.
 rows, 125,383 county rows, 364 region rows, about 320 MB of database. The run
 takes under a minute.
 
+Before the first production load, run the dry run (no `--apply`) against the
+production database from a trusted machine and watch database CPU, storage and
+WAL in the Cloud SQL console; it has only been exercised on a local PostgreSQL 16. The whole
+load is one transaction (about 320 MB of data, plus the same again being
+replaced on a re-run), so make sure the instance has that much free disk.
+
 To use a different year, pass `--year`; the importer refuses files whose
 `contract_year` does not match.
