@@ -8,32 +8,32 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-09 — by the CMS plan data session below._
+_Last updated: 2026-10-09 — CMS plan data branch refreshed against current main._
 
 ### Health dashboard
 
 | Item | Status | Detail |
 | --- | --- | --- |
-| `main` HEAD | `44b3739` (2026-10-05) | "Call recordings: fix review findings left open at #272 merge (#277)". Re-check: this row goes stale within hours. |
-| CI: typecheck + test | Green | |
-| CI: `pnpm audit (moderate)` | Green at `4911b43` | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
-| CI: migration journal | Green | |
-| Production deploy (GCP Cloud Run) | **Green** at `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
+| `main` HEAD | `f821a54` (2026-10-09) | "STATE: tidy duplicate rows after #284 (#285)". Re-check: this row goes stale within hours. |
+| CI: typecheck + test | In progress | Run 37867735833 on `f821a54` (checked 2026-10-09) |
+| CI: `pnpm audit (moderate)` | **Green** — run 37865453026 on `efe7e4c` (#284, 2026-10-09) passed. Was red on main from 2026-10-08 when four advisories (proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate) were published | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
+| CI: migration journal | Green | Run 37865453026 on `efe7e4c` |
+| Production deploy (GCP Cloud Run) | **Green** at `f821a54` (run 37867735824), `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
-| Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. |
-| Open PRs | Query GitHub live | At 2026-10-05 ~02:15 UTC: #278 (docs: which vendors need a BAA) and the #277 follow-up (waiting duplicates skip Speech-to-Text; migration 0069). #277 merged as 44b3739 at head 1a36e2b. |
-| Migration high-water mark | `0068_call_recordings_cleanup` on main; `0069_call_recordings_cap_index` (main); `0070_move_artificialbridge_clients_to_insureitall` in the move-clients PR; `0071_cms_plan_benefits` in the CMS plan data PR | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
+| Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
+| Open PRs | Query GitHub live | As of 2026-10-09, #283 (CMS 2027 plan benefit data; now includes main at `f821a54`). #285 merged as `f821a54`; #281, #282, and #284 are also merged. |
+| Migration high-water mark | `0070_move_artificialbridge_clients_to_insureitall` on main (#281); `0071_cms_plan_benefits` in PR #283 | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
 ### Owner-only actions
 
 1. Confirm the e-sign signing secrets hold real production PEMs. (How the deploy was fixed is now recorded in the health table.) The two placeholder secrets hold `unset`: put the real Twilio API key secret and statement-ingest Google credentials in Secret Manager when those features go live.
 2. **Promote ADR 0004** to Accepted if you consider the production deploy proven; otherwise say what is still missing.
-3. **Confirm the BAAs that are actually needed:** Google Cloud and AWS Bedrock (both receive PHI as built), and **Twilio for client calls** (live call audio, and recordings if enabled, carry health details; texts can be kept PHI-free but calls cannot). Not needed for Stripe, and probably not DocuSign (agent paperwork only). HighLevel/EnrollHere are the agency's own existing relationships. Resend depends on whether email bodies contain PHI. Decide with a compliance advisor and record the outcome here.
+3. **Confirm the BAAs that are actually needed:** Google Cloud and AWS Bedrock (both receive PHI as built), and **Twilio for client calls** (live call audio, and recordings if enabled, carry health details; texts can be kept PHI-free but calls cannot). Not needed for Stripe, and probably not DocuSign (agent paperwork only). HighLevel/EnrollHere are the agency's own existing relationships. Resend depends on whether email bodies contain PHI. Decide with a compliance advisor and record the outcome here. **2026-10-08 (owner, unverified here):** Google Cloud and AWS BAAs signed long ago; owner says Twilio needs none because calls are not recorded and Twilio only carries the call (owner's conduit reasoning, unverified). Owner also states call recording and transcription do not go through Twilio. The code has two paths: (1) Twilio-side recording (`record="record-from-answer-dual"` in `lib/voice/twiml.ts`), OFF by default and would store PHI at Twilio if switched on; (2) uploaded recordings stored in Google Cloud with Google Speech-to-Text (`call_recordings`, `SPEECH_TO_TEXT_PROVIDER=google`), which falls under the Google BAA. Owner's statement matches path (2) only; path (1) must stay off. Open point for the compliance advisor: confirm the conduit position for live call audio, and keep recording off for INSUREitALL unless a Twilio BAA is in place.
 4. **Verify Clerk is on production keys**, not a development-mode key, before any PHI.
 5. **Turn on** GitHub setting "Automatically delete head branches".
 6. Approve a branch cleanup (see audit: delete the 93 in buckets A+B, excluding any head of an open PR; spot-check the 62 in C). Existing `.github/scripts/nuke-branches.sh` embeds escaped quotes in its branch list and was not tested; do not run it as-is.
-7. Close #276 (its audit suppression and ADR 0007 duplicate #272; keep ADR 0007 if the reachability write-up is wanted).
+7. ~~Close #276~~ — already merged (CI: documented audit exception for braces); nothing to do.
 
 ### Security audit exceptions (`pnpm.auditConfig.ignoreGhsas` in `package.json`)
 
@@ -54,7 +54,7 @@ Scope of Appointment captured on call recording (no 48-hour wait enforced).
 - Is the GCP project actually provisioned, and has any deploy ever succeeded?
 - Clerk → Identity Platform: go or no-go? (ADR 0006, proposed). Production
   currently reportedly uses a Clerk **development-mode** key — verify before PHI.
-- #276 duplicates the suppression now on main and adds ADR 0007 (reachability analysis). Keep the ADR, close or rebase the PR.
+- #276 is merged (the braces suppression and ADR 0007 are on main); no action needed.
 
 ### Known gaps
 
@@ -92,6 +92,15 @@ ones with no inbound references.
 
 Newest first. Template in `AGENTS.md` §7.
 
+### 2026-10-09 — Resolve merge conflicts for CMS plan data — Copilot — branch `claude/admiring-allen-b6wum5`
+- **Outcome:** done (current `main` merged into PR #283)
+- **Changed:** Merged `main` at `f821a54` into #283, retained both branches' `docs/STATE.md` history, and kept the CMS migration numbered `0071` after main's `0070` migration.
+- **Verified:** `corepack pnpm install --frozen-lockfile`; `pnpm --filter @workspace/scripts run check:migration-journal` (73 entries); `pnpm exec vitest run lib/db/src/cmsPlans artifacts/api-server/src/__tests__/guards/tenant-isolation.test.ts` (15 tests); `pnpm run typecheck`; all passed. Node 22.23.3 was used although the repository targets Node 24. Main deploy run 37867735824 succeeded; main CI run 37867735833 was still in progress.
+- **Left undone / broken:** PR #283 CI has not yet run on the merge commit; CMS data remains unloaded to a real database.
+- **Decisions made:** none
+- **Next agent should:** verify PR #283 CI and mergeability after this commit is published.
+- **Needs a human:** nothing
+
 ### 2026-10-09 — CMS 2027 plan benefit data: tables + importer — Claude Code — branch `claude/admiring-allen-b6wum5`
 - **Outcome:** partial (code ready; data NOT yet loaded into any real database)
 - **Changed:** New migration `0071_cms_plan_benefits` (4 global tables: plans, per-plan benefit JSON, plan-to-county, plan-to-region), loader `lib/db/src/cmsPlans/pbpImport.ts`, command `pnpm --filter @workspace/scripts import:pbp`, how-to in `docs/cms-plan-data.md`. The uploaded zip is CMS tab-delimited text, not JSON, and is not committed (252 MB). Employer-only plans (1,673) are skipped by default.
@@ -101,6 +110,31 @@ Newest first. Template in `AGENTS.md` §7.
 - **Next agent should:** run the importer against the real database after merge, then add a read-only plans-by-county route (OpenAPI + `requirePermission`, add the tables to `GLOBAL_TABLES`).
 - **Needs a human:** after merge, run the importer on the production database (or approve me doing so); confirm which year/refresh cadence you want.
 
+### 2026-10-08 — Tidy STATE.md after #282/#284 — Claude Code — branch `state-tidy-after-284`
+- **Outcome:** done (docs only)
+- **Changed:** Removed duplicate header lines that reached `main` when #284 merged before the cleanup commit landed; made the Current state block consistent: main HEAD `efe7e4c`, single audit row, deploy row, open-PR row (#283 and #285 open; #281, #282, #284 merged today), migration high-water mark `0070` on main (#281), and owner action 7 (#276 is already merged, nothing to close). No code or migration changes. PR #285.
+- **Verified:** Read the resulting file top to bottom; `git diff origin/main --stat` shows only `docs/STATE.md`. CI on `main` at `efe7e4c` (run 37865453026) succeeded, including `pnpm audit`; the audit row records it. The Cloud Run deploy for `efe7e4c` has not been checked.
+- **Left undone / broken:** #283 (CMS 2027 plan benefits, another session) is open and conflicts with `main`; its migration file is numbered 0071 while its title says 0070. Not touched. The 0070 client move is deployed but not confirmed (no access to Cloud Run logs).
+- **Decisions made:** none
+- **Next agent should:** check Cloud Run logs for lines starting `0070:` (a "skipped" line means the org slugs or names did not match exactly one org each); then confirm `main` CI, including `pnpm audit`, is green.
+- **Needs a human:** nothing new; the earlier owner actions in the Current state block still stand.
+
+### 2026-10-08 — Clear four new audit advisories — Claude Code — branch `fix-audit-advisories-2026-10-08`
+- **Outcome:** done
+- **Changed:** Added four `pnpm.overrides` in `package.json` (lockfile updated): `proxy-addr` 2.0.7 to 2.0.8 (critical, via express), `source-map-js` 1.2.1 to 1.2.2 (high, mockup-sandbox build tooling), `fast-copy` 4.0.2 to 4.1.2 (moderate, via pino-pretty), and `postcss-selector-parser` 6.0.10 to 7.1.6 (moderate, only under `@tailwindcss/typography`). No suppressions added.
+- **Verified:** `pnpm audit --audit-level moderate` reports only the two already-ignored advisories; `pnpm --filter @workspace/web-app run build` passes; `pnpm test` 2482 pass. Two 404 tests (metrics, release-hygiene) failed only while a local web build existed in `artifacts/web-app/dist` (SPA fallback returns 200) and pass with it removed (20/20). CI not yet seen.
+- **Left undone / broken:** `typecheck` has hundreds of pre-existing errors on a local machine without built libs; CI is the check.
+- **Decisions made:** overrides (the repo's existing pattern) rather than suppressions.
+- **Next agent should:** remove these overrides once the parent packages ship fixed ranges.
+- **Needs a human:** review the `proxy-addr` bump (security-only release; trust proxy is a hop count of 1).
+### 2026-10-08 — Record owner BAA statement — Claude Code — branch `docs-record-baa-status`
+- **Outcome:** done (docs only)
+- **Changed:** `docs/STATE.md` only: recorded the owner's statement that Google Cloud and AWS BAAs are signed, and that Twilio is treated as a conduit (no recording). Marked unverified. PR #282.
+- **Verified:** NOT verified: BAAs and the Twilio position are the owner's word; no agreement documents were seen. Recording-is-off-by-default read from `lib/voice/twiml.ts`.
+- **Left undone / broken:** `pnpm audit (moderate)` red on this PR from advisories already on main (proxy-addr, source-map-js, postcss-selector-parser, fast-copy); not caused by this change.
+- **Decisions made:** none
+- **Next agent should:** open a dependency-bump PR to clear the audit; confirm Clerk production keys and the Twilio position before any real PHI.
+- **Needs a human:** confirm the Twilio conduit position with a compliance advisor; confirm Clerk is on production keys.
 ### 2026-10-08 — Move artificialBRIDGE clients to INSUREitALL — Claude Code — branch `move-artificialbridge-clients-to-insureitall`
 - **Outcome:** partial (migration written and tested; not yet run on production)
 - **Changed:** New migration `0070_move_artificialbridge_clients_to_insureitall.sql` (+ journal entry, + test `migration-0070-move-clients.test.ts`). It moves every contact in the artificialBRIDGE org, and all rows hanging off those contacts, into the INSUREitALL org. It clears each moved contact's assigned agent (those agents belong to the old org). Nothing is deleted; the artificialBRIDGE org stays.
