@@ -270,7 +270,7 @@ async function importRow(
       if (rec) {
         await tx
           .update(callRecordingsTable)
-          .set({ status: "fetching", detailsEncrypted: seal(details), error: null, purgeAfter: null, purgeAttempts: 0, checkedAt: null, updatedAt: now })
+          .set({ status: "fetching", detailsEncrypted: seal(details), error: null, sizeBytes: null, purgeAfter: null, purgeAttempts: 0, checkedAt: null, updatedAt: now })
           .where(and(eq(callRecordingsTable.id, recordingId), eq(callRecordingsTable.status, "failed"), eq(callRecordingsTable.attempts, 0)));
         return { line, callId, outcome: "requeued" as const, recordingId };
       }

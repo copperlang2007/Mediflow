@@ -330,7 +330,7 @@ describe("downloading the recording", () => {
     const again = await importFile(admin.id, csv([row({ ID: "call-exp", "Recording URL": recUrl("call-exp", "fresh") })]));
     expect(again.body).toMatchObject({ requeued: 1, duplicates: 0 });
     rec = (await rowOf(id))!;
-    expect(rec).toMatchObject({ status: "fetching", error: null, purgeAfter: null });
+    expect(rec).toMatchObject({ status: "fetching", error: null, purgeAfter: null, sizeBytes: null });
     const ok = fakeFetch(200);
     expect(await recordings.processRecording(id, { storage: fakeStore(), fetchImpl: ok.impl })).toBe("poll");
     expect(ok.calls[0]!.url).toContain("Signature=fresh");

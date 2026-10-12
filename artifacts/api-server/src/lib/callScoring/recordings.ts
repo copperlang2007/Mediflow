@@ -303,8 +303,11 @@ async function fetchAudio(row: CallRecording, deps: ProcessDeps): Promise<StepOu
   const url = enrollhereRecordingUrl(details.sourceUrl);
   if (!url) return fail(row.id, LINK_UNUSABLE);
   const limit = dailyRecordingLimit();
-  // Cheap check before any download: an agency already at its cap does not
-  // pull the audio just to have it refused (the locked check below is the real one).
+  // Best-effort check before any download: an agency already at its cap does
+  // not pull the audio just to have it refused. Unlocked on purpose: a lock
+  // here would not help (parallel workers would still each see one slot
+  // free), so at the boundary up to the job concurrency (4) may download and
+  // then be refused below; the locked check at commit is the real one.
   if ((await db.transaction((tx) => recordingsToday(tx, row.orgId, now))) >= limit) {
     return refuseOverLimit(row.id, limit, null, now);
   }
