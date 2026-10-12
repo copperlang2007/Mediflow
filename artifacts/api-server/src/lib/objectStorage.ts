@@ -1,5 +1,6 @@
 import { Storage, File } from "@google-cloud/storage";
 import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 import { randomUUID } from "crypto";
 import {
   ObjectAclPolicy,
@@ -329,6 +330,17 @@ export class ObjectStorageService {
         expires: Date.now() + ttlSec * 1000,
       });
     return url;
+  }
+
+  /**
+   * Write a recording the server downloaded itself (EnrollHere call-log
+   * import). Create-only like the signed upload URL: an object already at
+   * this key is never overwritten (the caller checks for it first).
+   */
+  async saveCallRecording(objectKey: string, body: Readable, contentType: string): Promise<void> {
+    const { bucketName, objectName } = parseObjectPath(`${this.getPrivateObjectDir()}/${objectKey}`);
+    const file = objectStorageClient.bucket(bucketName).file(objectName);
+    await pipeline(body, file.createWriteStream({ resumable: false, contentType, preconditionOpts: { ifGenerationMatch: 0 } }));
   }
 
   /** Remove an uploaded recording (rejected uploads). Missing objects are fine. */

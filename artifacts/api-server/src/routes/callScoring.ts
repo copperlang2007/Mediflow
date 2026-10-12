@@ -56,7 +56,8 @@ import { DISCLAIMER, buildDetail, buildList, buildSummary } from "../lib/callSco
 import { listDncQueue, resolveDncFinding } from "../lib/callScoring/dncReview";
 import { loadTranscriptRow, retainUntil, type ScopeFilter } from "../lib/callScoring/store";
 import { speechSetup } from "../lib/callScoring/speech";
-import { purgeTime, UPLOAD_URL_TTL_MS, type RecordingDetails } from "../lib/callScoring/recordings";
+import { importCallLog, readCallLog } from "../lib/callScoring/enrollhereCallLog";
+import { dailyRecordingLimit, lockRecordings, purgeTime, recordingsToday, UPLOAD_URL_TTL_MS, type RecordingDetails } from "../lib/callScoring/recordings";
 import { enqueue, JOB_NAMES, transcribeJobKey } from "../lib/jobs";
 import type { Rubric, TranscriptFormat } from "../lib/callScoring/types";
 
@@ -75,15 +76,6 @@ export const AUDIO_NOT_SET_UP =
 /** Recordings go straight to storage, not through this server: a long call fits. */
 export const MAX_RECORDING_BYTES = 500 * 1024 * 1024;
 const RECORDING_EXTENSIONS = [".mp3", ".wav", ".m4a", ".mp4", ".ogg", ".oga", ".flac", ".webm", ".opus", ".aac", ".amr"];
-/**
- * Recordings an agency may start per rolling 24 hours: a ceiling on
- * Speech-to-Text spend if an admin account is misused. Set
- * CALL_RECORDINGS_DAILY_LIMIT to raise it for a large look-back.
- */
-export function dailyRecordingLimit(env: NodeJS.ProcessEnv = process.env): number {
-  const n = Number.parseInt(env.CALL_RECORDINGS_DAILY_LIMIT ?? "", 10);
-  return Number.isFinite(n) && n > 0 ? n : 300;
-}
 const RECORDING_TYPE_RE = /^(audio\/[a-z0-9.+-]+|application\/ogg|video\/(mp4|webm))$/;
 
 // Reads of transcripts are PHI reads: audited. Summary/config carry no PHI.
@@ -879,35 +871,6 @@ router.post(
 
 // ---- recordings (phase 2b) ---------------------------------------------------
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-/**
- * Recordings that count against the agency's daily cap: everything that
- * reached (or is about to reach) Speech-to-Text in the last 24 hours. A
- * failure after Google was called (attempts > 0) still cost money and counts;
- * an upload rejected before transcription does not. With `includeOpenUploads`,
- * upload links issued in the last 15 minutes count too. Call it under the
- * per-agency advisory lock.
- */
-async function recordingsToday(tx: Tx, orgId: string, now: Date, opts: { includeOpenUploads?: boolean } = {}): Promise<number> {
-  // A committed recording counts for 24 hours from when it was committed, not from when its link was issued.
-  const committed = and(
-    or(
-      inArray(callRecordingsTable.status, ["queued", "transcribing", "scored"]),
-      and(eq(callRecordingsTable.status, "failed"), gt(callRecordingsTable.attempts, 0)),
-    ),
-    gt(sql`coalesce(${callRecordingsTable.committedAt}, ${callRecordingsTable.createdAt})`, new Date(now.getTime() - 24 * 60 * 60 * 1000)),
-  );
-  const openUpload = and(eq(callRecordingsTable.status, "uploading"), gt(callRecordingsTable.createdAt, new Date(now.getTime() - UPLOAD_URL_TTL_MS)));
-  const [{ n }] = await tx
-    .select({ n: sql<number>`count(*)::int` })
-    .from(callRecordingsTable)
-    .where(and(eq(callRecordingsTable.orgId, orgId), opts.includeOpenUploads ? or(committed, openUpload) : committed));
-  return Number(n);
-}
-
-const lockRecordings = (tx: Tx, orgId: string) => tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`call-recordings:${orgId}`}))`);
-
 const dailyLimitMessage = (limit: number) =>
   `Your agency has started ${limit} recordings in the last 24 hours, the daily limit. Try again later, or ask the administrator to raise it.`;
 
@@ -1186,5 +1149,75 @@ router.get(
   },
 );
 
+
+// ---- EnrollHere call-log import ---------------------------------------------
+
+/** A call-log export: thousands of rows of ~3 KB each. */
+const MAX_CALL_LOG_BYTES = 20 * 1024 * 1024;
+/** EnrollHere calls are scored on the IIA 2026 QA scorecard unless another checklist is chosen. */
+const CALL_LOG_DEFAULT_RUBRIC_ID = "iia-2026-qa";
+const callLogUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_CALL_LOG_BYTES, files: 1, fields: 5 } });
+
+router.post(
+  "/call-scoring/enrollhere-call-log",
+  requireAuth,
+  requireMfa,
+  requirePermission("call_scoring", "create"),
+  (req: Request, res: Response, next: NextFunction): void => {
+    callLogUpload.single("file")(req, res, (err?: unknown) => {
+      if (!err) return next();
+      const code = (err as { code?: string }).code;
+      if (code === "LIMIT_FILE_SIZE") res.status(413).json({ error: "That file is larger than 20 MB. Export fewer days at a time.", code: "file_too_large" });
+      else res.status(400).json({ error: "The upload could not be read.", code: "bad_upload" });
+    });
+  },
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const file = (req as Request & { file?: Express.Multer.File }).file;
+    if (!file) {
+      res.status(400).json({ error: "Choose the EnrollHere call-log CSV.", code: "no_file" });
+      return;
+    }
+    const fields = z.object({ rubricId: optional(z.string().trim().max(64)) }).safeParse(req.body ?? {});
+    if (!fields.success) {
+      res.status(400).json({ error: "Check the fields you entered.", code: "invalid" });
+      return;
+    }
+    const fallback = getRubric(CALL_LOG_DEFAULT_RUBRIC_ID) ?? getRubric(DEFAULT_RUBRIC_ID);
+    const rubric = resolveRubric(fields.data.rubricId ?? CALL_LOG_DEFAULT_RUBRIC_ID, fallback as Rubric);
+    if (!rubric) {
+      res.status(400).json({ error: "Unknown rubric.", code: "unknown_rubric" });
+      return;
+    }
+    let log: ReturnType<typeof readCallLog>;
+    try {
+      log = readCallLog(file.buffer);
+    } catch (err) {
+      if (err instanceof CsvFileError) {
+        res.status(400).json({ error: err.message, code: "not_a_call_log" });
+        return;
+      }
+      throw err;
+    }
+    const { ObjectStorageService } = await import("../lib/objectStorage");
+    const storage = new ObjectStorageService();
+    const summary = await importCallLog({
+      orgId: authReq.orgId,
+      userId: authReq.userId,
+      userRole: authReq.userRole,
+      rows: log.rows,
+      unreadable: log.unreadable,
+      rubricId: rubric.id,
+      transcribe: speechSetup().ready,
+      objectKey: (orgId, id) => storage.callRecordingKey(orgId, id),
+    });
+    // Counts only: never values from the file.
+    logger.info(
+      { orgId: authReq.orgId, rows: summary.rows, stored: summary.stored, queued: summary.queued, requeued: summary.requeued, duplicates: summary.duplicates, errors: summary.errors },
+      "EnrollHere call log imported",
+    );
+    res.status(200).json({ ...summary, rubricId: rubric.id });
+  },
+);
 
 export default router;

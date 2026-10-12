@@ -250,7 +250,8 @@ export type CallScoreReview = typeof callScoreReviewsTable.$inferSelect;
  * kept only inside `details_encrypted`. Retained like transcripts: never
  * earlier than the CMS 10-year floor.
  */
-export const CALL_RECORDING_STATUSES = ["uploading", "queued", "transcribing", "scored", "failed"] as const;
+/** fetching = audio being downloaded from an EnrollHere call-log recording link (no browser upload). */
+export const CALL_RECORDING_STATUSES = ["fetching", "uploading", "queued", "transcribing", "scored", "failed"] as const;
 export type CallRecordingStatus = (typeof CALL_RECORDING_STATUSES)[number];
 
 /** mono = one mixed track (speakers separated by voice); stereo = agent and client on separate channels. */

@@ -5,6 +5,9 @@
  * URL (Cloud Run caps request bodies at 32 MB, too small for a long call), then
  * confirms. A background job moves the row along:
  *
+ *   fetching      → (EnrollHere call-log import only) download the audio from
+ *                   the row's sealed EnrollHere link into the bucket, then
+ *                   commit it against the daily cap like a confirmed upload
  *   queued        → start Google Speech-to-Text on the gs:// object
  *   transcribing  → poll the operation; when done, turn the result into the
  *                   utterance JSON parse.ts reads and score it through the
@@ -19,13 +22,14 @@
  * (ingestTranscript also dedupes by content). `checked_at` records each look;
  * the sweeper (workers/recordingsSweep.ts) re-queues rows whose job chain died.
  */
-import { and, desc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { db, callRecordingsTable, callScoreClaimsTable, callScoresTable, type CallRecording, type CallRecordingLayout, type CallTranscriptSource } from "@workspace/db";
 import { logger } from "../logger";
-import { open } from "./seal";
+import { open, seal } from "./seal";
 import { DEFAULT_RUBRIC_ID, getRubric } from "./rubrics";
 import { ingestTranscript, rescoreTranscript, resolveRubric } from "./ingest";
 import type { Rubric } from "./types";
+import { downloadRecording, enrollhereRecordingUrl, RecordingLinkError, type RecordingWriter } from "./enrollhereRecordingLink";
 import { cancelTranscription, gsUri, pollTranscription, resultsToTurns, safeReason, speechSetup, startTranscription } from "./speech";
 
 /** How long a transcription may run before it is given up on. */
@@ -39,7 +43,48 @@ export interface RecordingDetails {
   phone: string | null;
   externalRef: string | null;
   uploaderRole: string;
+  /** EnrollHere's signed recording link, until the audio is in our bucket. A credential: never logged. */
+  sourceUrl?: string | null;
 }
+
+/**
+ * Recordings an agency may start per rolling 24 hours: a ceiling on
+ * Speech-to-Text spend if an admin account is misused. Set
+ * CALL_RECORDINGS_DAILY_LIMIT to raise it for a large look-back.
+ */
+export function dailyRecordingLimit(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number.parseInt(env.CALL_RECORDINGS_DAILY_LIMIT ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : 300;
+}
+
+export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Recordings that count against the agency's daily cap: everything that
+ * reached (or is about to reach) Speech-to-Text in the last 24 hours. A
+ * failure after Google was called (attempts > 0) still cost money and counts;
+ * an upload rejected before transcription does not. With `includeOpenUploads`,
+ * upload links issued in the last 15 minutes count too. Call it under the
+ * per-agency advisory lock.
+ */
+export async function recordingsToday(tx: Tx, orgId: string, now: Date, opts: { includeOpenUploads?: boolean } = {}): Promise<number> {
+  // A committed recording counts for 24 hours from when it was committed, not from when its link was issued.
+  const committed = and(
+    or(
+      inArray(callRecordingsTable.status, ["queued", "transcribing", "scored"]),
+      and(eq(callRecordingsTable.status, "failed"), gt(callRecordingsTable.attempts, 0)),
+    ),
+    gt(sql`coalesce(${callRecordingsTable.committedAt}, ${callRecordingsTable.createdAt})`, new Date(now.getTime() - 24 * 60 * 60 * 1000)),
+  );
+  const openUpload = and(eq(callRecordingsTable.status, "uploading"), gt(callRecordingsTable.createdAt, new Date(now.getTime() - UPLOAD_URL_TTL_MS)));
+  const [{ n }] = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(callRecordingsTable)
+    .where(and(eq(callRecordingsTable.orgId, orgId), opts.includeOpenUploads ? or(committed, openUpload) : committed));
+  return Number(n);
+}
+
+export const lockRecordings = (tx: Tx, orgId: string) => tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`call-recordings:${orgId}`}))`);
 
 export type StepOutcome = "poll" | "retry_start" | "finished";
 
@@ -47,7 +92,7 @@ export type StepOutcome = "poll" | "retry_start" | "finished";
 async function fail(id: string, reason: string): Promise<StepOutcome> {
   await db.update(callRecordingsTable)
     .set({ status: "failed", error: reason, updatedAt: new Date() })
-    .where(and(eq(callRecordingsTable.id, id), inArray(callRecordingsTable.status, ["queued", "transcribing"])));
+    .where(and(eq(callRecordingsTable.id, id), inArray(callRecordingsTable.status, ["fetching", "queued", "transcribing"])));
   return "finished";
 }
 
@@ -81,12 +126,25 @@ const rubricOf = (row: CallRecording): Rubric =>
 /** A start that was claimed but never recorded its operation (a crash mid-start) is retried after this. */
 const START_STALL_MS = 10 * 60 * 1000;
 
-export async function processRecording(recordingId: string, deps: { privateObjectDir?: string } = {}): Promise<StepOutcome> {
+export interface RecordingStore extends RecordingWriter {
+  getCallRecordingMetadata(objectKey: string): Promise<{ size: number; contentType: string | null } | null>;
+}
+
+export interface ProcessDeps {
+  privateObjectDir?: string;
+  /** Bucket access for the fetching step; defaults to ObjectStorageService. */
+  storage?: RecordingStore;
+  /** HTTP for the fetching step; defaults to global fetch. */
+  fetchImpl?: Parameters<typeof downloadRecording>[3];
+}
+
+export async function processRecording(recordingId: string, deps: ProcessDeps = {}): Promise<StepOutcome> {
   const [row] = await db.select().from(callRecordingsTable).where(eq(callRecordingsTable.id, recordingId)).limit(1);
   if (!row || row.status === "scored" || row.status === "failed" || row.status === "uploading") return "finished";
 
   const setup = speechSetup();
   if (!setup.ready) return fail(row.id, setup.message);
+  if (row.status === "fetching") return fetchAudio(row, deps);
   const layout = row.layout as CallRecordingLayout;
   const now = new Date();
 
@@ -204,6 +262,79 @@ export async function processRecording(recordingId: string, deps: { privateObjec
   return markScored(row.id, transcriptId, poll.durationSeconds);
 }
 
+/** A download that keeps failing for this long (EnrollHere down, network) is given up on. */
+export const FETCH_GIVE_UP_MS = 24 * 60 * 60 * 1000;
+const LINK_UNUSABLE = "This call has no usable EnrollHere recording link. Import a fresh call-log export to try again.";
+
+async function defaultStore(): Promise<RecordingStore> {
+  const { ObjectStorageService } = await import("../objectStorage");
+  return new ObjectStorageService();
+}
+
+/**
+ * fetching → queued. Downloads the audio from the sealed EnrollHere link
+ * (skipped when an earlier, interrupted run already stored it), then commits
+ * it under the per-agency lock and daily cap exactly like a confirmed upload.
+ * The link is dropped from the row once the audio is stored. A refused or
+ * expired link fails at once; anything else is retried for a day
+ * (`updated_at` is when the fetch was queued).
+ */
+async function fetchAudio(row: CallRecording, deps: ProcessDeps): Promise<StepOutcome> {
+  const now = new Date();
+  await db.update(callRecordingsTable).set({ checkedAt: now }).where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "fetching")));
+  const details = detailsOf(row);
+  const url = enrollhereRecordingUrl(details.sourceUrl);
+  if (!url) return fail(row.id, LINK_UNUSABLE);
+  const storage = deps.storage ?? (await defaultStore());
+
+  let size: number;
+  try {
+    const stored = await storage.getCallRecordingMetadata(row.objectKey);
+    size = stored && stored.size > 0 ? stored.size : await downloadRecording(url, row.objectKey, storage, deps.fetchImpl);
+  } catch (err) {
+    if (err instanceof RecordingLinkError) {
+      // Anything partly written is deleted by the sweep.
+      await db.update(callRecordingsTable)
+        .set({ status: "failed", error: err.message, purgeAfter: now, updatedAt: now })
+        .where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "fetching")));
+      return "finished";
+    }
+    // Never the link or the message (a fetch error can quote the URL): the error's kind only.
+    logger.warn({ errName: (err as Error).name, recordingId: row.id }, "EnrollHere recording: download failed; will retry");
+    if (now.getTime() - row.updatedAt.getTime() > FETCH_GIVE_UP_MS) {
+      return fail(row.id, "The recording could not be downloaded from EnrollHere for a day. Import a fresh call-log export to try again.");
+    }
+    return "retry_start";
+  }
+
+  const limit = dailyRecordingLimit();
+  const outcome = await db.transaction(async (tx) => {
+    await lockRecordings(tx, row.orgId);
+    const t = new Date();
+    const stillFetching = and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "fetching"));
+    if ((await recordingsToday(tx, row.orgId, t)) >= limit) {
+      const refused = await tx.update(callRecordingsTable)
+        .set({
+          status: "failed",
+          error: `Your agency reached the daily limit of ${limit} recordings. Import the same call log again tomorrow to score this call.`,
+          sizeBytes: size,
+          purgeAfter: t,
+          updatedAt: t,
+        })
+        .where(stillFetching)
+        .returning({ id: callRecordingsTable.id });
+      return refused.length ? ("over_limit" as const) : ("unchanged" as const);
+    }
+    const moved = await tx.update(callRecordingsTable)
+      .set({ status: "queued", sizeBytes: size, detailsEncrypted: seal({ ...details, sourceUrl: null }), committedAt: t, updatedAt: t })
+      .where(stillFetching)
+      .returning({ id: callRecordingsTable.id });
+    return moved.length ? ("queued" as const) : ("unchanged" as const);
+  });
+  if (outcome === "over_limit") logger.warn({ orgId: row.orgId, limit }, "EnrollHere recording: daily limit reached");
+  return outcome === "queued" ? "poll" : "finished";
+}
+
 async function markScored(id: string, transcriptId: string, durationSeconds: number | null): Promise<StepOutcome> {
   await db.update(callRecordingsTable)
     .set({ status: "scored", transcriptId, durationSeconds, error: null, updatedAt: new Date() })
@@ -313,7 +444,7 @@ export async function sweepStalledRecordings(
     .set({ checkedAt: now })
     .where(
       and(
-        inArray(callRecordingsTable.status, ["queued", "transcribing"]),
+        inArray(callRecordingsTable.status, ["fetching", "queued", "transcribing"]),
         lt(sql`coalesce(${callRecordingsTable.checkedAt}, ${callRecordingsTable.updatedAt})`, stalledBefore),
       ),
     )
