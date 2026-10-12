@@ -67,7 +67,7 @@ You will find it in the sidebar under **Compliance > Call scoring**.
 | A critical item has not been graded | The call is **Needs review**, never a silent pass |
 | AI says "pass" but its quoted words are not in the transcript | **Needs review** |
 | AI clears a phrase the rules flagged on a critical item | **Needs review** |
-| AI says "not applicable" on a critical item (required or judgment) | **Needs review** until a person confirms. Exception: a critical item the checklist marks as applying only to some calls (SNP plans, calls that reach enrollment, TPV) is "not applicable" when the AI quotes words, found in the transcript, that show why |
+| AI says "not applicable" on a critical item (required or judgment) | **Needs review** until a person confirms (the AI's reason and quotes are shown to help) |
 | AI is not set up, errors, or times out | Judgment items are **Needs review** |
 | The file has no agent label, so a hit (or a disclosure) can't be pinned on the agent | **Needs review**, never a failure and never a pass |
 | AI quotes words from a speaker who is not identified as the agent | **Needs review** |
@@ -96,6 +96,8 @@ The IIA 2026 scorecard follows the scorecard's own rules:
 - **Not applicable earns full points**, so an agent is not penalized for a step that did not apply (for example C-SNP items on a PPO call).
 - **Pass at 120 of 150 points (80%)**, compared on the points themselves: 119.4 points is a fail even though it rounds to 80%. Below that with no auto-fail is **FAIL – BELOW THRESHOLD**.
 - The call view shows the points (for example "131 / 150 points") and the findings grouped by the 19 sections.
+
+Critical items that only apply to some calls (C-SNP / D-SNP items, the enrollment steps, TPV) still need a person to confirm "not applicable" on calls where they do not apply; the AI suggests it with the words that show why.
 
 Items a person must judge, or that need the AI reviewer (for example "plan-type explanation matches the plan sold"), read **Needs review** until graded when AI review is not set up.
 

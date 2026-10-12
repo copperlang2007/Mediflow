@@ -455,6 +455,19 @@ describe("IIA 2026 scorecard", () => {
       .set(withAuth(compliance.id))
       .send({ verdict: "partial", fraction: 0.5, note: "Most of it was read." })
       .expect(400);
+    // Still refused once the built-in checklist has moved to a newer version than this score's.
+    const { iia2026Rubric } = await import("../../lib/callScoring/rubrics");
+    const version = iia2026Rubric.version;
+    iia2026Rubric.version = "2027.1";
+    try {
+      await request(app)
+        .patch(`/api/call-scoring/transcripts/${t.transcriptId}/criteria/2-1-tpmo-verbatim`)
+        .set(withAuth(compliance.id))
+        .send({ verdict: "partial", fraction: 0.5, note: "Most of it was read." })
+        .expect(400);
+    } finally {
+      iia2026Rubric.version = version;
+    }
     // Non-auto-fail items still take partial credit.
     await request(app)
       .patch(`/api/call-scoring/transcripts/${t.transcriptId}/criteria/2-4-callback-permission`)

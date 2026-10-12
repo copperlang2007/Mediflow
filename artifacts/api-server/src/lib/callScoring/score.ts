@@ -235,10 +235,11 @@ function judgeByAi(
 }
 
 /**
- * The AI says the item does not apply to this call. An AI alone cannot take a
- * critical item out of the score and the gate, with one exception: a
- * conditional item (one that only applies to some calls) where the AI quotes
- * words, verified in the transcript, that show why it does not apply.
+ * The AI says the item does not apply to this call. An AI alone never takes a
+ * critical item out of the score and the gate: a person confirms. (A quote
+ * that merely exists in the transcript does not prove non-applicability, and
+ * the transcript is untrusted text.) The AI's reason and any verified quotes
+ * are kept so the person can confirm quickly.
  */
 function judgeNa(
   c: Criterion,
@@ -250,17 +251,14 @@ function judgeNa(
   prefix = "",
 ): CriterionResult {
   if (c.severity !== "critical") return result(c, "na", 0, [], ai.rationale, source, extra);
-  if (c.conditional) {
-    // Either party's words can show why (e.g. the client declining to enroll).
-    const shown = verifyEvidence(ai, byUtt);
-    if (shown.length) return result(c, "na", 0, shown, `Not applicable to this call: ${ai.rationale}`, source, extra);
-  }
+  // Either party's words may support the reason (e.g. the client declining to enroll).
+  const shown = c.conditional ? verifyEvidence(ai, byUtt) : [];
   return result(
     c,
     "needs_review",
     0,
-    ruleEvidence,
-    `${prefix}The AI reviewer marked this not applicable${c.conditional ? " but quoted no words that show why" : ""}. A person must confirm that before a critical item is left out. ${ai.rationale}`,
+    shown.length ? shown : ruleEvidence,
+    `${prefix}The AI reviewer marked this not applicable. A person must confirm that before a critical item is left out. ${ai.rationale}`,
     source,
     extra,
   );

@@ -111,7 +111,7 @@ describe("scorecard rules in the engine", () => {
     }
   });
 
-  it("lets the AI mark a conditional critical item not applicable only with quoted words that show why", async () => {
+  it("never lets the AI alone take a critical item out: N/A goes to a person, with the AI's quotes kept", async () => {
     const t = tx([
       utt(0, 1, "agent", "This plan is a PPO plan, not a special needs plan, so there is no extra eligibility check."),
       utt(1, 6, "client", "Okay."),
@@ -131,9 +131,11 @@ describe("scorecard rules in the engine", () => {
       },
     });
     const withQuote = byId(await runScoring({ rubric: iia2026Rubric, transcript: t, ai: "auto", reviewer: reviewer("This plan is a PPO plan, not a special needs plan") }));
-    expect(withQuote["8-1-csnp-disclosure"]!.status).toBe("na");
-    const withoutQuote = byId(await runScoring({ rubric: iia2026Rubric, transcript: t, ai: "auto", reviewer: reviewer(null) }));
-    expect(withoutQuote["8-1-csnp-disclosure"]!.status).toBe("needs_review");
+    expect(withQuote["8-1-csnp-disclosure"]!.status).toBe("needs_review");
+    expect(withQuote["8-1-csnp-disclosure"]!.evidence[0]!.quote).toContain("PPO plan");
+    // An unrelated (or injected) quote cannot clear it either.
+    const unrelated = byId(await runScoring({ rubric: iia2026Rubric, transcript: t, ai: "auto", reviewer: reviewer(null) }));
+    expect(unrelated["8-1-csnp-disclosure"]!.status).toBe("needs_review");
   });
 
   it("leaves the existing Medicare rubric's N/A and partial behaviour unchanged", () => {

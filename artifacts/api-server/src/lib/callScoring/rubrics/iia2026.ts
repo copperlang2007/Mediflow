@@ -15,9 +15,9 @@ import { GUARANTEE_PATTERNS, PLAN_SPECIFIC_PATTERNS, PRESSURE_PATTERNS, RECORDIN
  *    the points.
  *  - Not-applicable items earn full points (naCredit "full"), as the
  *    scorecard instructs. Items that only apply to some calls (SNP plans,
- *    calls that reach enrollment, TPV) are "conditional": the AI reviewer may
- *    mark a critical one not applicable only by quoting words that show why;
- *    otherwise a person decides.
+ *    calls that reach enrollment, TPV) are "conditional": the AI reviewer
+ *    says when one does not apply and quotes why, and a person confirms
+ *    before a critical item is left out.
  *  - Pass mark 120 / 150 (80%).
  *
  * As the scorecard itself says, this reflects public CMS guidance as of August

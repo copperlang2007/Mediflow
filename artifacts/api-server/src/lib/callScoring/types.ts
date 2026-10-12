@@ -105,8 +105,8 @@ export interface Criterion {
   allOrNothing?: boolean;
   /**
    * Applies only to some calls (e.g. SNP plans, calls that reach enrollment).
-   * The AI reviewer may mark a CRITICAL conditional item not applicable, but
-   * only with quoted words that show why; otherwise a person decides.
+   * The AI reviewer is asked to say so, with quotes that show why; on a
+   * critical item a person still confirms before it is left out.
    */
   conditional?: boolean;
   /** Required wording for the call's disposition when this critical item fails. */

@@ -530,7 +530,7 @@ router.patch(
     }
     const criterionId = param(req.params.criterionId);
     const [score] = await db
-      .select({ id: callScoresTable.id, rubricId: callScoresTable.rubricId, rubricVersion: callScoresTable.rubricVersion })
+      .select({ id: callScoresTable.id, rubricId: callScoresTable.rubricId })
       .from(callScoresTable)
       .where(and(eq(callScoresTable.orgId, authReq.orgId), eq(callScoresTable.transcriptId, transcript.id)))
       .orderBy(desc(callScoresTable.createdAt), desc(callScoresTable.id))
@@ -555,8 +555,8 @@ router.patch(
     }
     const { verdict, fraction, note } = body.data;
     if (verdict === "partial") {
-      const rubric = getRubric(score.rubricId);
-      const meta = rubric && rubric.version === score.rubricVersion ? rubric.criteria.find((c) => c.id === criterionId) : undefined;
+      // By rubric id, not version: an item that is all-or-nothing today was on older versions too.
+      const meta = getRubric(score.rubricId)?.criteria.find((c) => c.id === criterionId);
       if (meta?.allOrNothing) {
         res.status(400).json({ error: "This item is all-or-nothing: grade it pass or fail.", code: "all_or_nothing" });
         return;

@@ -360,7 +360,8 @@ export async function buildDetail(orgId: string, transcriptId: string, scope: Sc
   const ids = [...groups.keys()].sort((a, b) => {
     const ia = order.indexOf(a);
     const ib = order.indexOf(b);
-    return (ia < 0 ? 1e6 : ia) - (ib < 0 ? 1e6 : ib) || a.localeCompare(b);
+    // Numeric-aware so ids like "2-1-…" sort before "11-1-…" when the rubric version no longer matches.
+    return (ia < 0 ? 1e6 : ia) - (ib < 0 ? 1e6 : ib) || a.localeCompare(b, undefined, { numeric: true });
   });
   const latestNote = new Map<string, { note: string | null; reviewerName: string | null; reviewerRole: string | null; at: string }>();
   for (const r of reviewRows) {
