@@ -47,7 +47,7 @@ interface FullApplication {
 const pretty = (code: string | null | undefined, prefix: RegExp) =>
   code ? code.replace(prefix, "").replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase()) : null;
 
-function Tree({ value, depth = 0 }: { value: unknown; depth?: number }) {
+export function Tree({ value, depth = 0 }: { value: unknown; depth?: number }) {
   if (value === null || value === undefined || value === "") return <span className="text-muted-foreground">—</span>;
   if (Array.isArray(value)) {
     if (value.length === 0) return <span className="text-muted-foreground">none</span>;
@@ -126,6 +126,47 @@ export function FullApplicationDialog({ applicationId, onClose }: { applicationI
               <div><dt className="text-muted-foreground">Medicare ID</dt><dd>{data.medicareId ?? "Not provided"}</dd></div>
               <div><dt className="text-muted-foreground">Medicaid number</dt><dd>{data.medicaidNumber ?? "Not provided"}</dd></div>
             </dl>
+            <div className="rounded-md border p-3"><Tree value={data.payload} /></div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface FullIntegrationRecord {
+  id: string;
+  source: string;
+  eventType: string | null;
+  receivedAt: string;
+  payload: unknown;
+}
+
+/** Every value EnrollHere sent for one call, as received. Each open is an audited PHI view. */
+export function FullIntegrationRecordDialog({ payloadId, onClose }: { payloadId: string; onClose: () => void }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["integration-payload", payloadId],
+    queryFn: () => customFetch<FullIntegrationRecord>(`/api/integration-payloads/${payloadId}`),
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Full EnrollHere record</DialogTitle>
+        </DialogHeader>
+        {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {error && <p role="alert" className="text-sm text-destructive">This record could not be opened.</p>}
+        {data && (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Received {new Date(data.receivedAt).toLocaleString()}
+              {data.eventType ? ` · ${data.eventType}` : ""} · this view is recorded in the audit log.
+            </p>
             <div className="rounded-md border p-3"><Tree value={data.payload} /></div>
           </div>
         )}

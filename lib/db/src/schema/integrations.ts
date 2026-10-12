@@ -16,10 +16,10 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
  * The unique key makes a redelivered event a no-op, so a retrying sender can
  * never log the same call twice.
  *
- * The payload itself is NOT stored: it carries PHI (names, DOB, Medicare ID)
- * and the contact + activity rows already hold what we keep. `payloadKeys`
- * records only the field names seen, so an unmapped field in a vendor's
- * payload can be diagnosed without retaining the data.
+ * This ledger holds no payload values: `payloadKeys` records only the field
+ * names seen, so an unmapped field can be diagnosed. The full delivery is kept
+ * encrypted in `integration_payloads` (below), which outlives this ledger's
+ * 90-day prune.
  */
 export const integrationEventsTable = pgTable(
   "integration_events",
@@ -43,6 +43,37 @@ export const integrationEventsTable = pgTable(
 );
 
 export type IntegrationEvent = typeof integrationEventsTable.$inferSelect;
+
+/**
+ * Every value an integration sent, kept in Mediflow as the system of record:
+ * the whole delivery, encrypted with the PHI key, retained at least the CMS
+ * 10 years (`retainUntil`). One row per (org, source, external id), so a
+ * redelivery adds nothing. Read only through the audited full-record view.
+ */
+export const integrationPayloadsTable = pgTable(
+  "integration_payloads",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizationsTable.id),
+    source: text("source").notNull(),
+    externalId: text("external_id").notNull(),
+    eventType: text("event_type"),
+    contactId: text("contact_id").references(() => contactsTable.id, { onDelete: "cascade" }),
+    activityId: text("activity_id").references(() => activitiesTable.id, { onDelete: "set null" }),
+    payloadEncrypted: bytea("payload_encrypted").notNull(),
+    payloadHmac: bytea("payload_hmac").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    unique("integration_payloads_org_source_external_key").on(t.orgId, t.source, t.externalId),
+    index("integration_payloads_contact_idx").on(t.contactId),
+  ],
+);
+
+export type IntegrationPayload = typeof integrationPayloadsTable.$inferSelect;
 
 /**
  * Maps a contact in an external system (e.g. a GoHighLevel contact id) to our
