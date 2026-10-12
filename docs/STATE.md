@@ -8,20 +8,20 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-09 — CMS 2027 plan data loaded into production (see session log)._
+_Last updated: 2026-10-12 — IIA 2026 QA scorecard added to call scoring (see session log)._
 
 ### Health dashboard
 
 | Item | Status | Detail |
 | --- | --- | --- |
-| `main` HEAD | `f821a54` (2026-10-09) | "STATE: tidy duplicate rows after #284 (#285)". Re-check: this row goes stale within hours. |
+| `main` HEAD | `00c3a40` (2026-10-09) | "STATE: CMS 2027 plan data loaded into production (#286)". Re-check: this row goes stale within hours. |
 | CI: typecheck + test | Green | Run 37867735833 on `f821a54` (2026-10-09) |
 | CI: `pnpm audit (moderate)` | **Green** — run 37867735833 on `f821a54` passed. Was red on main from 2026-10-08 when four advisories (proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate) were published | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
 | CI: migration journal | Green | Run 37867735833 on `f821a54` |
 | Production deploy (GCP Cloud Run) | **Green** at `f821a54` (run 37867735824), `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
-| Open PRs | Query GitHub live | As of 2026-10-09, #283 (CMS 2027 plan benefit data; now includes main at `f821a54`). #285 merged as `f821a54`; #281, #282, and #284 are also merged. |
+| Open PRs | Query GitHub live | As of 2026-10-12: the IIA 2026 QA scorecard PR (branch `claude/agencybridge-compliance-review-s3nc6l`). No other open PRs. |
 | Migration high-water mark | `0070_move_artificialbridge_clients_to_insureitall` on main (#281); `0071_cms_plan_benefits` in PR #283 | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
@@ -91,6 +91,15 @@ ones with no inbound references.
 ## Session log
 
 Newest first. Template in `AGENTS.md` §7.
+
+### 2026-10-12 — Call scoring: IIA 2026 QA Compliance Scorecard (150 pts) — Claude Code — branch `claude/agencybridge-compliance-review-s3nc6l`
+- **Outcome:** partial (PR open, awaiting CI and merge)
+- **Changed:** New built-in checklist `iia-2026-qa`: the owner's IIA 2026 QA Compliance Scorecard (19 sections, 47 items, 150 points, pass at 120). Engine extensions, all opt-in per rubric: N/A earns full points (`naCredit: "full"`); auto-fail items are all-or-nothing (`allOrNothing`, partial grades refused by the API and hidden in the UI); conditional critical items (SNP, enrollment-only, TPV) may be marked N/A by the AI only with verified quotes (`conditional`); each auto-fail item carries the scorecard's disposition wording (`autoFailNote`); the rubric's own outcome labels (PASS / FAIL – BELOW THRESHOLD / AUTOMATIC FAIL – NON-COMPLIANT). Totals now carry points earned/possible, and "meets standard" compares points rather than the rounded score (affects every rubric at the boundary: 79.6% no longer rounds up to a pass). Call view shows points, groups findings by section, and shows the auto-fail wording. Shared Medicare phrase patterns moved to `rubrics/patterns.ts` (Medicare rubric verified byte-identical). No migration.
+- **Verified:** `pnpm run typecheck`; `npx vitest run` (228 files, 2512 tests), including new `iia2026.test.ts` (section subtotals match the scorecard, auto-fail set exact, N/A credit, points-based pass mark, all-or-nothing, conditional N/A), an API test (scorecard wording, partial refused on auto-fail items) and a web test.
+- **Left undone / broken:** Most scorecard items need the AI reviewer or a person; with AI review off they read "Needs review". Script-specific phrase lists (e.g. the exact IIA red-text wording) can be tightened once real call transcripts are available.
+- **Decisions made:** Kept the scorecard's call-order numbering as criterion ids (`1-2-recorded-line` …). Critical conditional N/A needs quoted evidence rather than always a person, to avoid a review on every non-SNP call.
+- **Next agent should:** get the PR merged, then score a few real IIA calls and tune phrase patterns against them.
+- **Needs a human:** merge the PR; have compliance confirm the scorecard mapping (it reflects CMS guidance as of August 2026, per the scorecard).
 
 ### 2026-10-09 — CMS 2027 plan data loaded into production — Claude Code (via Desktop Commander on the owner's PC) — branch `claude/admiring-allen-b6wum5`
 - **Outcome:** done

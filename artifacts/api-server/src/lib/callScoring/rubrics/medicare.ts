@@ -1,4 +1,13 @@
 import type { Rubric } from "../types";
+import {
+  GOVERNMENT_AFFILIATION_PATTERNS,
+  GUARANTEE_PATTERNS,
+  PLAN_SPECIFIC_PATTERNS,
+  PRESSURE_PATTERNS,
+  RECORDING_PATTERNS,
+  SUPERLATIVE_PATTERNS,
+  TPMO_COMPONENTS,
+} from "./patterns";
 
 /**
  * Medicare Advantage / Part D sales-call rubric for TPMOs, FMOs and agencies.
@@ -45,34 +54,7 @@ export const medicareRubric: Rubric = {
       kind: "required",
       evaluator: "hybrid",
       withinSeconds: 60,
-      components: [
-        {
-          id: "not_every_plan",
-          label: "“We do not offer every plan available in your area”",
-          patterns: ["(do not|dont) offer (every|each|all(?: of)?(?: the)?) plans?", "not every plan (available )?in your area"],
-        },
-        {
-          id: "represent_count",
-          label: "Number of organizations / plans represented",
-          patterns: [
-            "represent (?:[a-z0-9]+ ){1,6}?(organizations?|companies|carriers)",
-            "(organizations?|companies|carriers) (which|that) offer (?:[a-z0-9]+ ){0,4}?(plans|products)",
-            "limited to (those|the) plans (we|i) (do )?offer",
-          ],
-        },
-        {
-          id: "all_options",
-          label: "Medicare.gov, 1-800-MEDICARE or local SHIP",
-          patterns: [
-            "medicare (dot )?gov",
-            "(1 )?800 medicare",
-            "1800 medicare",
-            "one (eight hundred|800) medicare",
-            "state health insurance( assistance)? program",
-            "local ship",
-          ],
-        },
-      ],
+      components: TPMO_COMPONENTS,
       guidance:
         "Pass only if all three elements are conveyed in substance within the first 60 seconds. A paraphrase is acceptable only if it is materially equivalent. Cite the utterances.",
       hint: "Read the TPMO disclaimer now: not every plan · # of organizations/plans · Medicare.gov / 1-800-MEDICARE / SHIP.",
@@ -89,12 +71,7 @@ export const medicareRubric: Rubric = {
       kind: "required",
       evaluator: "rules",
       withinSeconds: 120,
-      patterns: [
-        "(this|the|our) (call|conversation) (is|may be|will be|might be|is being|are being) (being )?(recorded|monitored)",
-        "(recorded|monitored) (line|call)",
-        "(im|i am|we are|were|i will be|well be) recording (this|the|our) (call|conversation)",
-        "calls? (are|is) recorded",
-      ],
+      patterns: RECORDING_PATTERNS,
       hint: "Tell the caller the call is recorded.",
     },
     {
@@ -134,12 +111,7 @@ export const medicareRubric: Rubric = {
       // opener like "our plan is to walk through your options" or "are you
       // interested in a Humana product" does not. Kept narrow on purpose; a real
       // premature pitch still sends the item to a person.
-      mustPrecede: [
-        "(humana|aetna|united ?healthcare|uhc|wellcare|cigna|anthem|blue cross|kaiser|devoted|clover|bcbs) (?:[a-z0-9]+ ){0,3}?(ppo|hmo|dsnp|snp|pdp|plan) (has|comes with|includes|offers|covers|gives|is a|is an|is the)",
-        "(this|that|the|your) (plan|policy) (has|comes with|includes|offers|covers)",
-        "(premium|copay|co pay|deductible|out of pocket maximum|maximum out of pocket|part d deductible)s? (is|are|would be|will be|starts at|of) (zero|free|only|just|\\d+)",
-        "(has|comes with|includes|with) (a )?(zero|no|\\d+) (dollar )?(premium|copay|co pay)",
-      ],
+      mustPrecede: PLAN_SPECIFIC_PATTERNS,
       patterns: [
         "scope of (the )?appointment",
         "s o a",
@@ -163,14 +135,7 @@ export const medicareRubric: Rubric = {
       severity: "critical",
       kind: "prohibited",
       evaluator: "hybrid",
-      patterns: [
-        "(calling|call you|reaching out) (from|on behalf of) (medicare|social security|the government|cms)",
-        "(im|i am|were|we are|this is) (with|from|calling from) (medicare|social security|the government|cms)(?! (advantage|supplement|plans?|part))",
-        "(medicare|social security|the government|cms) (sent|asked|told) (me|us)",
-        "(im|i am|were|we are) (a |an )?(medicare|government|social security) (representative|rep|agent|employee|official)",
-        "(medicare|government) (office|department) (calling|here)",
-        "(endorsed|approved|recommended) by (medicare|cms|the government)",
-      ],
+      patterns: GOVERNMENT_AFFILIATION_PATTERNS,
       guidance:
         "A violation is any statement that the agent is from, works for, or is endorsed by Medicare/CMS/SSA/the government. Saying they sell Medicare plans, or reading 'Medicare.gov' in the disclaimer, is NOT a violation.",
       hint: "Never imply you are from Medicare or the government.",
@@ -185,13 +150,7 @@ export const medicareRubric: Rubric = {
       severity: "major",
       kind: "prohibited",
       evaluator: "hybrid",
-      patterns: [
-        "(the|your) best (plan|option|coverage|deal|benefits|company|choice)",
-        "best plan",
-        "number one (plan|company|rated|choice)",
-        "(top|highest) rated (plan|company)",
-        "(cheapest|lowest (priced|cost|premium)) plan (in|anywhere|available)",
-      ],
+      patterns: SUPERLATIVE_PATTERNS,
       guidance:
         "Violation only when the agent makes an unsubstantiated superlative claim. Citing a verifiable source (e.g., 'this plan has a 5-star CMS rating') is allowed. Negated or hypothetical use ('I can't tell you which is best') is not a violation.",
       hint: "Avoid 'best'/'#1' claims — describe how the plan fits their needs instead.",
@@ -206,17 +165,7 @@ export const medicareRubric: Rubric = {
       severity: "major",
       kind: "prohibited",
       evaluator: "hybrid",
-      patterns: [
-        "act (now|fast|today)",
-        "today only",
-        "(only|just) (for )?today",
-        "limited time (offer|only)",
-        "last chance",
-        "before (it|this|the offer) (runs out|goes away|expires)",
-        "(you ll|youll|you will|you could|you might|you re going to|youre going to) lose (your )?(medicare|benefits|coverage|doctors?|social security)",
-        "(have|need|got) to (decide|sign up|enroll|do this) (right now|today|now)",
-        "offer (ends|expires) (today|tonight)",
-      ],
+      patterns: PRESSURE_PATTERNS,
       guidance:
         "Accurately stating a real enrollment-period deadline is allowed. Flag false urgency, threats, or refusing to let the beneficiary take time to decide.",
       hint: "Don't pressure — give them time to decide.",
@@ -231,11 +180,7 @@ export const medicareRubric: Rubric = {
       severity: "major",
       kind: "prohibited",
       evaluator: "hybrid",
-      patterns: [
-        "(i|we) (can )?(guarantee|promise)(?! (issue|issued|renewable))",
-        "guaranteed (savings|to save|approval|benefits|money|lower)",
-        "(you ll|youll|you will) (definitely|for sure|100 percent|absolutely) (save|get|qualify|pay less)",
-      ],
+      patterns: GUARANTEE_PATTERNS,
       guidance: "'Guaranteed issue' and 'guaranteed renewable' are legitimate Medigap terms, not violations.",
       hint: "Don't promise savings or benefits — describe what the plan documents say.",
     },

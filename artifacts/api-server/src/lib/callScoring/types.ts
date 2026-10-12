@@ -101,6 +101,16 @@ export interface Criterion {
   guidance?: string;
   /** Short coaching line shown when the item is missing or violated. */
   hint?: string;
+  /** Full credit or none: a partial result counts as a fail (zero-tolerance items). */
+  allOrNothing?: boolean;
+  /**
+   * Applies only to some calls (e.g. SNP plans, calls that reach enrollment).
+   * The AI reviewer may mark a CRITICAL conditional item not applicable, but
+   * only with quoted words that show why; otherwise a person decides.
+   */
+  conditional?: boolean;
+  /** Required wording for the call's disposition when this critical item fails. */
+  autoFailNote?: string;
 }
 
 export interface RubricSection {
@@ -116,6 +126,14 @@ export interface Rubric {
   description: string;
   /** Minimum quality score for a "meets standard" outcome (0-100). */
   passThreshold: number;
+  /**
+   * How a not-applicable item counts. "exclude" (default) leaves it out of the
+   * score; "full" awards its points, as scorecards that say "N/A = full
+   * credit" require.
+   */
+  naCredit?: "exclude" | "full";
+  /** The rubric's own wording for the call outcome, shown instead of the generic labels. */
+  outcomeLabels?: { pass: string; belowThreshold: string; autoFail: string; review: string };
   sections: RubricSection[];
   criteria: Criterion[];
 }
@@ -167,6 +185,8 @@ export type ComplianceStatus = "pass" | "fail" | "review";
 export interface ScoreTotals {
   /** 0-100 weighted quality score over criteria that could be assessed. */
   score: number;
+  /** The points behind `score`: earned out of possible (items awaiting a person are left out of both). */
+  points: { earned: number; possible: number };
   compliance: ComplianceStatus;
   criticalFailures: string[];
   needsReview: string[];

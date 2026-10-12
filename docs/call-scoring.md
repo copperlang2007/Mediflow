@@ -67,7 +67,7 @@ You will find it in the sidebar under **Compliance > Call scoring**.
 | A critical item has not been graded | The call is **Needs review**, never a silent pass |
 | AI says "pass" but its quoted words are not in the transcript | **Needs review** |
 | AI clears a phrase the rules flagged on a critical item | **Needs review** |
-| AI says "not applicable" on a critical item (required or judgment) | **Needs review** until a person confirms |
+| AI says "not applicable" on a critical item (required or judgment) | **Needs review** until a person confirms. Exception: a critical item the checklist marks as applying only to some calls (SNP plans, calls that reach enrollment, TPV) is "not applicable" when the AI quotes words, found in the transcript, that show why |
 | AI is not set up, errors, or times out | Judgment items are **Needs review** |
 | The file has no agent label, so a hit (or a disclosure) can't be pinned on the agent | **Needs review**, never a failure and never a pass |
 | AI quotes words from a speaker who is not identified as the agent | **Needs review** |
@@ -79,6 +79,25 @@ You will find it in the sidebar under **Compliance > Call scoring**.
 
 Compliance is a gate, not an average. The quality score (0 to 100) is separate
 and never outvotes a failed critical item.
+
+### Checklists
+
+Pick the checklist when adding a transcript or recording. Built in:
+
+| Checklist | What it is |
+| --- | --- |
+| Medicare sales call — CMS/TPMO compliance + quality | The default. Disclosures, conduct, needs analysis, plan presentation. |
+| IIA 2026 QA Compliance Scorecard (150 pts) | The IIA 2026 telephonic sales and enrollment scorecard: 19 sections in call order, 47 items, 150 points. Section 19 (conduct) is judged across the whole call. |
+| General sales call | Non-Medicare sales calls. |
+
+The IIA 2026 scorecard follows the scorecard's own rules:
+
+- **Auto-fail items** (the "Y" items: recorded line, POA, TPMO, non-affiliation, SOA, election period, SNP verification, plan type, pre-enrollment disclosures, recorded consent, enrollment confirmation, TPV and the conduct items) are full credit or none. Anything short of full credit fails the call as **AUTOMATIC FAIL – NON-COMPLIANT**, whatever the points, and the finding shows the scorecard's disposition wording. A reviewer can grade these pass or fail only, not partial.
+- **Not applicable earns full points**, so an agent is not penalized for a step that did not apply (for example C-SNP items on a PPO call).
+- **Pass at 120 of 150 points (80%)**, compared on the points themselves: 119.4 points is a fail even though it rounds to 80%. Below that with no auto-fail is **FAIL – BELOW THRESHOLD**.
+- The call view shows the points (for example "131 / 150 points") and the findings grouped by the 19 sections.
+
+Items a person must judge, or that need the AI reviewer (for example "plan-type explanation matches the plan sold"), read **Needs review** until graded when AI review is not set up.
 
 ### Speaker labels and timestamps
 

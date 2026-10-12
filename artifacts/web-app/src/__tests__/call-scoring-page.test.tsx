@@ -402,6 +402,54 @@ describe("Call detail", () => {
     expect(within(crit).getByRole("button", { name: /Go back to the automatic grade/ })).toBeInTheDocument();
   });
 
+  it("shows a QA scorecard's own outcome, points, sections and auto-fail wording, with no partial grade on auto-fail items", async () => {
+    const base = detail();
+    setup({
+      "GET /api/call-scoring/transcripts/t1": () =>
+        detail({
+          score: {
+            ...base.score,
+            rubric: {
+              id: "iia-2026-qa",
+              version: "2026.1",
+              name: "IIA 2026 QA Compliance Scorecard (150 pts)",
+              passThreshold: 80,
+              outcomeLabels: { pass: "PASS", belowThreshold: "FAIL – BELOW THRESHOLD", autoFail: "AUTOMATIC FAIL – NON-COMPLIANT", review: "NEEDS A REVIEWER" },
+              sections: [{ id: "s02-tpmo", name: "2. TPMO Disclosure, Callback Consent & Non-Affiliation Statement" }],
+            },
+            effective: { ...base.score.effective, compliance: "fail", points: { earned: 131, possible: 150 } },
+          },
+          criteria: [
+            {
+              ...base.criteria[1],
+              criterionId: "2-1-tpmo-verbatim",
+              name: "2.1 TPMO disclaimer read verbatim with accurate counts",
+              sectionId: "s02-tpmo",
+              severity: "critical",
+              allOrNothing: true,
+              points: 3,
+              status: "fail",
+              autoStatus: "fail",
+              autoFailNote: "AUTOMATIC FAIL – NON-COMPLIANT: Required TPMO disclaimer was missing, inaccurate, or untimely.",
+            },
+          ],
+        }),
+    });
+    renderPage();
+    await userEvent.click(await screen.findByText("REC-1001"));
+    // 131 / 150 clears the points bar, but an auto-fail decides the outcome.
+    expect(await screen.findByText("AUTOMATIC FAIL – NON-COMPLIANT")).toBeInTheDocument();
+    expect(screen.getByTestId("score-points")).toHaveTextContent("131 / 150 points");
+    expect(screen.getByText("2. TPMO Disclosure, Callback Consent & Non-Affiliation Statement")).toBeInTheDocument();
+    const crit = screen.getByTestId("criterion-2-1-tpmo-verbatim");
+    expect(within(crit).getByText(/Auto-fail · 3 pts/)).toBeInTheDocument();
+    expect(within(crit).getByText(/Required TPMO disclaimer was missing/)).toBeInTheDocument();
+    await userEvent.click(within(crit).getByRole("button", { name: "Override the grade" }));
+    await userEvent.click(within(crit).getByRole("combobox", { name: "Your grade" }));
+    expect(screen.queryByRole("option", { name: "Partial" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Fail" })).toBeInTheDocument();
+  });
+
   it("an agent cannot see override or do-not-contact controls", async () => {
     state.role = "agent";
     setup({

@@ -451,7 +451,7 @@ export async function loadLiteCriteria(handle: AnyDb, orgId: string, scoreIds: s
 export async function computeEffective(
   handle: AnyDb,
   orgId: string,
-  scores: Array<{ id: string; transcriptId: string }>,
+  scores: Array<{ id: string; transcriptId: string; rubricId?: string }>,
 ): Promise<Map<string, EffectiveScore>> {
   const out = new Map<string, EffectiveScore>();
   if (!scores.length) return out;
@@ -510,7 +510,7 @@ export interface DncFlagRow {
  * (a page of thousands of scores does not rescan every row for every score).
  */
 export function assembleEffective(args: {
-  scores: Array<{ id: string; transcriptId: string }>;
+  scores: Array<{ id: string; transcriptId: string; rubricId?: string }>;
   lite: LiteCriterion[];
   reviews: Array<Pick<ReviewRow, "scoreId" | "kind" | "criterionId" | "verdict" | "fraction" | "reviewerUserId" | "createdAt">>;
   dncRows: DncFlagRow[];
@@ -552,11 +552,13 @@ export function assembleEffective(args: {
     const overrides = effectiveOverrides(history);
     const flags = dncByScore.get(s.id) ?? [];
     const openDnc = flags.filter((d) => !resolved.has(`${d.transcriptId}|${d.fingerprint}`)).length;
+    // The rubric's N/A policy (e.g. "N/A = full credit") applies to stored scores too.
+    const naCredit = s.rubricId ? getRubric(s.rubricId)?.naCredit : undefined;
     out.set(s.id, {
       scoreId: s.id,
       transcriptId: s.transcriptId,
-      auto: summarizeWith(critical, auto, flags.length),
-      effective: summarizeWith(critical, applyOverrides(auto, overrides), openDnc),
+      auto: summarizeWith(critical, auto, flags.length, { naCredit }),
+      effective: summarizeWith(critical, applyOverrides(auto, overrides), openDnc, { naCredit }),
       openDnc,
       resolvedDnc: flags.length - openDnc,
       overrides,
