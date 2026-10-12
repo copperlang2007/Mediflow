@@ -27,6 +27,7 @@ import {
   callLabel,
   fmtClock,
   fmtDate,
+  outcomeOf,
   scoreCaveats,
   type CsCriterion,
   type CsDetail,
@@ -64,6 +65,16 @@ function DetailDncControls({ transcriptId, findingId, contact }: { transcriptId:
       emailOnFile={item?.emailOnFile ?? null}
     />
   );
+}
+
+/** Findings grouped by the rubric's sections, in rubric order; one unnamed group when it has none. */
+function criteriaGroups(data: CsDetail): Array<{ id: string; name: string | null; criteria: CsCriterion[] }> {
+  const sections = data.score?.rubric.sections ?? [];
+  if (!sections.length) return [{ id: "all", name: null, criteria: data.criteria }];
+  const groups = sections.map((s) => ({ id: s.id, name: s.name, criteria: data.criteria.filter((c) => c.sectionId === s.id) }));
+  const other = data.criteria.filter((c) => !sections.some((s) => s.id === c.sectionId));
+  if (other.length) groups.push({ id: "other", name: "Other", criteria: other });
+  return groups.filter((g) => g.criteria.length);
 }
 
 function OverrideControls({ transcriptId, criterion }: { transcriptId: string; criterion: CsCriterion }) {
@@ -108,7 +119,7 @@ function OverrideControls({ transcriptId, criterion }: { transcriptId: string; c
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="pass">Pass</SelectItem>
-                  <SelectItem value="partial">Partial</SelectItem>
+                  {!criterion.allOrNothing && <SelectItem value="partial">Partial</SelectItem>}
                   <SelectItem value="fail">Fail</SelectItem>
                   <SelectItem value="na">Not applicable</SelectItem>
                 </SelectContent>
@@ -152,7 +163,8 @@ function Finding({
         <div className="min-w-0">
           <p className="font-medium">{c.name}</p>
           <p className="text-xs text-muted-foreground">
-            {SEVERITY_LABEL[c.severity]}
+            {c.allOrNothing ? "Auto-fail" : SEVERITY_LABEL[c.severity]}
+            {c.points !== undefined ? ` · ${c.points} pt${c.points === 1 ? "" : "s"}` : ""}
             {c.citation ? ` · ${c.citation}` : ""}
           </p>
         </div>
@@ -182,6 +194,9 @@ function Finding({
       )}
       {c.evidence.length === 0 && c.status !== "na" && c.kind === "required" && (
         <p className="mt-2 text-xs text-muted-foreground">No words matching this requirement were found.</p>
+      )}
+      {c.autoFailNote && (c.status === "fail" || c.status === "partial") && (
+        <p className="mt-2 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs font-medium text-destructive">{c.autoFailNote}</p>
       )}
       {c.coaching && c.status !== "pass" && <p className="mt-2 text-xs text-muted-foreground">Coaching: {c.coaching}</p>}
       {c.human && (
@@ -266,11 +281,20 @@ export function CallDetail({ transcriptId, canReview, onClose }: { transcriptId:
         {data && score && (
           <div className="mt-4 space-y-5">
             <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border p-4">
-              <StatusPill tone={COMPLIANCE_TONE[score.effective.compliance].tone}>{COMPLIANCE_TONE[score.effective.compliance].label}</StatusPill>
+              {score.rubric.outcomeLabels ? (
+                <StatusPill tone={outcomeOf(score.rubric.outcomeLabels, score.effective).tone}>{outcomeOf(score.rubric.outcomeLabels, score.effective).label}</StatusPill>
+              ) : (
+                <StatusPill tone={COMPLIANCE_TONE[score.effective.compliance].tone}>{COMPLIANCE_TONE[score.effective.compliance].label}</StatusPill>
+              )}
               <span className="font-display text-2xl font-bold">{score.effective.score}</span>
               <span className="text-sm text-muted-foreground">
                 quality score{score.rubric.passThreshold !== null ? ` (target ${score.rubric.passThreshold})` : ""}
               </span>
+              {score.effective.points && score.effective.points.possible > 0 && (
+                <span className="text-sm text-muted-foreground" data-testid="score-points">
+                  {score.effective.points.earned} / {score.effective.points.possible} points
+                </span>
+              )}
               {score.effective.compliance !== score.auto.compliance && (
                 <span className="text-xs text-muted-foreground">Automatic result: {COMPLIANCE_TONE[score.auto.compliance].label}, {score.auto.score}</span>
               )}
@@ -332,11 +356,16 @@ export function CallDetail({ transcriptId, canReview, onClose }: { transcriptId:
             <div className="grid gap-5 lg:grid-cols-2">
               <section aria-label="Findings" className="space-y-3">
                 <h3 className="font-display text-base font-semibold">Findings</h3>
-                <ul className="space-y-3">
-                  {data.criteria.map((c) => (
-                    <Finding key={c.criterionId} c={c} onJump={doJump} canReview={canReview} transcriptId={data.transcript.id} />
-                  ))}
-                </ul>
+                {criteriaGroups(data).map((g) => (
+                  <div key={g.id} className="space-y-3">
+                    {g.name && <h4 className="text-sm font-semibold text-muted-foreground">{g.name}</h4>}
+                    <ul className="space-y-3">
+                      {g.criteria.map((c) => (
+                        <Finding key={c.criterionId} c={c} onJump={doJump} canReview={canReview} transcriptId={data.transcript.id} />
+                      ))}
+                    </ul>
+                  </div>
+                ))}
               </section>
               <section aria-label="Transcript" className="space-y-3 lg:sticky lg:top-0 lg:max-h-[80vh] lg:self-start lg:overflow-y-auto">
                 <h3 className="font-display text-base font-semibold">Transcript</h3>

@@ -83,6 +83,9 @@ function describeCriterion(c: Criterion, f: RuleFinding | undefined): string {
   if (c.citation) lines.push(`rule: ${c.citation}`);
   if (c.components?.length) lines.push(`elements: ${c.components.map((k) => `${k.id} = ${k.label}`).join("; ")}`);
   if (c.guidance) lines.push(`guidance: ${c.guidance}`);
+  if (c.allOrNothing) lines.push("scoring: all or nothing. Use only pass or fail, never partial: anything missed, materially altered or inaccurate is a fail.");
+  if (c.conditional)
+    lines.push('applies only to some calls. If it does not apply to this call, return "na" and quote the words (from either speaker) that show why, e.g. the plan type named or the client declining to enroll.');
   if (f) {
     const hits = f.evidence.map((e) => `u${e.utteranceId}${e.componentId ? ` (${e.componentId})` : ""}`).join(", ") || "none";
     if (c.kind === "prohibited") {

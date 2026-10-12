@@ -130,7 +130,7 @@ async function loadScored(
     const eff = await computeEffective(
       db,
       args.orgId,
-      scores.map((s) => ({ id: s.id, transcriptId: s.transcriptId })),
+      scores.map((s) => ({ id: s.id, transcriptId: s.transcriptId, rubricId: s.rubricId })),
     );
     for (const row of rows) {
       const score = byTranscript.get(row.id);
@@ -320,7 +320,7 @@ export async function buildDetail(orgId: string, transcriptId: string, scope: Sc
   if (!score) return { ...base, score: null, criteria: [], dnc: [], reviews: [], previousScores: [] };
 
   const [effMap, findingRows, reviewRows, resolutionRows] = await Promise.all([
-    computeEffective(db, orgId, [{ id: score.id, transcriptId: row.id }]),
+    computeEffective(db, orgId, [{ id: score.id, transcriptId: row.id, rubricId: score.rubricId }]),
     db
       .select()
       .from(callScoreFindingsTable)
@@ -360,7 +360,8 @@ export async function buildDetail(orgId: string, transcriptId: string, scope: Sc
   const ids = [...groups.keys()].sort((a, b) => {
     const ia = order.indexOf(a);
     const ib = order.indexOf(b);
-    return (ia < 0 ? 1e6 : ia) - (ib < 0 ? 1e6 : ib) || a.localeCompare(b);
+    // Numeric-aware so ids like "2-1-…" sort before "11-1-…" when the rubric version no longer matches.
+    return (ia < 0 ? 1e6 : ia) - (ib < 0 ? 1e6 : ib) || a.localeCompare(b, undefined, { numeric: true });
   });
   const latestNote = new Map<string, { note: string | null; reviewerName: string | null; reviewerRole: string | null; at: string }>();
   for (const r of reviewRows) {
@@ -389,6 +390,8 @@ export async function buildDetail(orgId: string, transcriptId: string, scope: Sc
       sectionId: meta?.sectionId ?? null,
       description: meta?.description ?? null,
       citation: meta?.citation ?? null,
+      allOrNothing: meta?.allOrNothing ?? false,
+      autoFailNote: meta?.autoFailNote ?? null,
       points: first.maxPoints,
       status,
       autoStatus: first.verdict as CriterionStatus,
@@ -455,6 +458,8 @@ export async function buildDetail(orgId: string, transcriptId: string, scope: Sc
         // Only the version the score was made under supplies a pass mark. If the
         // built-in checklist has changed since, no threshold is shown.
         passThreshold: rubricMatches?.passThreshold ?? null,
+        outcomeLabels: rubricMatches?.outcomeLabels ?? null,
+        sections: rubricMatches?.sections.map((s) => ({ id: s.id, name: s.name })) ?? [],
         currentVersion: rubric?.version ?? null,
         versionChanged: Boolean(rubric && !rubricMatches),
       },
@@ -463,12 +468,14 @@ export async function buildDetail(orgId: string, transcriptId: string, scope: Sc
       speakerMode: score.speakerMode,
       auto: {
         score: eff.auto.score,
+        points: eff.auto.points,
         compliance: score.complianceStatus,
         criticalFailures: eff.auto.criticalFailures,
         needsReview: eff.auto.needsReview,
       },
       effective: {
         score: eff.effective.score,
+        points: eff.effective.points,
         compliance: eff.effective.compliance,
         criticalFailures: eff.effective.criticalFailures,
         needsReview: eff.effective.needsReview,

@@ -203,7 +203,7 @@ describe("config: honest about what is not set up", () => {
     expect(res.body.audio.supported).toBe(false);
     expect(res.body.audio.message).toMatch(/not set up/i);
     expect(res.body.ai.status).toBe("needs_setup");
-    expect(res.body.rubrics.map((r: { id: string }) => r.id)).toEqual(["medicare-tpmo", "general-sales"]);
+    expect(res.body.rubrics.map((r: { id: string }) => r.id)).toEqual(["medicare-tpmo", "iia-2026-qa", "general-sales"]);
     expect(res.body.disclaimer).toMatch(/not legal advice/i);
     expect(res.body.limits.acceptedFormats).toEqual([".txt", ".vtt", ".srt", ".json"]);
     expect(res.body.canCreate).toBe(true);
@@ -430,6 +430,50 @@ describe("reading: org scoping and agent scoping", () => {
     expect(failing.body.items.every((i: { compliance: string }) => i.compliance === "fail")).toBe(true);
     await request(app).get("/api/call-scoring/transcripts?compliance=bogus").set(withAuth(admin.id)).expect(400);
     await request(app).get("/api/call-scoring/transcripts?limit=1000").set(withAuth(admin.id)).expect(400);
+  });
+});
+
+describe("IIA 2026 scorecard", () => {
+  it("scores under the 150-point scorecard, shows its wording, and refuses partial credit on auto-fail items", async () => {
+    const t = await createScored(
+      ["Agent: Hi, my name is Sam, a licensed insurance agent with InsureItAll. This call is on a recorded line.", `Customer: Okay, go ahead. ${randomUUID()}`].join("\n"),
+      { rubricId: "iia-2026-qa" },
+    );
+    const detail = await request(app).get(`/api/call-scoring/transcripts/${t.transcriptId}`).set(withAuth(admin.id)).expect(200);
+    expect(detail.body.score.rubric).toMatchObject({ id: "iia-2026-qa", passThreshold: 80 });
+    expect(detail.body.score.rubric.outcomeLabels.autoFail).toBe("AUTOMATIC FAIL – NON-COMPLIANT");
+    expect(detail.body.score.rubric.sections).toHaveLength(19);
+    // Missing TPMO disclaimer is an auto-fail, with the scorecard's disposition wording.
+    expect(detail.body.score.effective.compliance).toBe("fail");
+    const tpmo = detail.body.criteria.find((c: { criterionId: string }) => c.criterionId === "2-1-tpmo-verbatim");
+    expect(tpmo).toMatchObject({ status: "fail", allOrNothing: true });
+    expect(tpmo.autoFailNote).toMatch(/^AUTOMATIC FAIL – NON-COMPLIANT: Required TPMO disclaimer/);
+    expect(detail.body.score.effective.points.possible).toBeGreaterThan(0);
+
+    await request(app)
+      .patch(`/api/call-scoring/transcripts/${t.transcriptId}/criteria/2-1-tpmo-verbatim`)
+      .set(withAuth(compliance.id))
+      .send({ verdict: "partial", fraction: 0.5, note: "Most of it was read." })
+      .expect(400);
+    // Still refused once the built-in checklist has moved to a newer version than this score's.
+    const { iia2026Rubric } = await import("../../lib/callScoring/rubrics");
+    const version = iia2026Rubric.version;
+    iia2026Rubric.version = "2027.1";
+    try {
+      await request(app)
+        .patch(`/api/call-scoring/transcripts/${t.transcriptId}/criteria/2-1-tpmo-verbatim`)
+        .set(withAuth(compliance.id))
+        .send({ verdict: "partial", fraction: 0.5, note: "Most of it was read." })
+        .expect(400);
+    } finally {
+      iia2026Rubric.version = version;
+    }
+    // Non-auto-fail items still take partial credit.
+    await request(app)
+      .patch(`/api/call-scoring/transcripts/${t.transcriptId}/criteria/2-4-callback-permission`)
+      .set(withAuth(compliance.id))
+      .send({ verdict: "partial", fraction: 0.5, note: "Number taken, no permission asked." })
+      .expect(200);
   });
 });
 
