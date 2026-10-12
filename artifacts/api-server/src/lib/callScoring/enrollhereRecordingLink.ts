@@ -17,7 +17,12 @@ const BUCKET_PATH_RE = /^\/enroll-here-dialer-[a-z0-9-]+\/./;
 
 /** Same ceiling as a browser upload (routes/callScoring.ts MAX_RECORDING_BYTES). */
 export const MAX_FETCH_BYTES = 500 * 1024 * 1024;
-export const FETCH_TIMEOUT_MS = 10 * 60 * 1000;
+/**
+ * Must stay under the recordings sweep's STALLED_AFTER_MS (10 min): the
+ * fetching step marks the row only when it starts, so a download still
+ * running at that age would be picked up and started a second time.
+ */
+export const FETCH_TIMEOUT_MS = 8 * 60 * 1000;
 
 /** A link that will never work (expired, refused, too large, empty): do not retry. */
 export class RecordingLinkError extends Error {}

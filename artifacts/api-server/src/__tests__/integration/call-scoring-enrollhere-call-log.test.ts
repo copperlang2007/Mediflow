@@ -355,11 +355,43 @@ describe("downloading the recording", () => {
     process.env.CALL_RECORDINGS_DAILY_LIMIT = "1"; // call-1 is already queued today
     await importFile(admin.id, csv([row({ ID: "call-cap", "Recording URL": recUrl("call-cap") })]));
     const id = callLog.recordingIdFor(org.id, "call-cap");
-    expect(await recordings.processRecording(id, { storage: fakeStore(), fetchImpl: fakeFetch(200).impl })).toBe("finished");
+    const http = fakeFetch(200);
+    expect(await recordings.processRecording(id, { storage: fakeStore(), fetchImpl: http.impl })).toBe("finished");
+    // Refused before anything is downloaded.
+    expect(http.calls).toHaveLength(0);
     const rec = (await rowOf(id))!;
     expect(rec.status).toBe("failed");
     expect(rec.error).toMatch(/daily limit/i);
     expect(rec.purgeAfter).not.toBeNull();
+  });
+
+  it("a download times out before the sweep would treat it as stalled", () => {
+    expect(link.FETCH_TIMEOUT_MS).toBeLessThan(recordings.STALLED_AFTER_MS);
+  });
+
+  it("the sweep never deletes audio of a call a re-import has already revived", async () => {
+    await importFile(admin.id, csv([row({ ID: "call-race", "Recording URL": recUrl("call-race", "old") })]));
+    const id = callLog.recordingIdFor(org.id, "call-race");
+    // Failed and due for purge (as after an expired link)...
+    expect(await recordings.processRecording(id, { storage: fakeStore(), fetchImpl: fakeFetch(403).impl })).toBe("finished");
+    expect((await rowOf(id))!.status).toBe("failed");
+    // ...the sweep lists it, then a fresh export revives it before the delete runs.
+    const now = new Date(Date.now() + 1000);
+    await importFile(admin.id, csv([row({ ID: "call-race", "Recording URL": recUrl("call-race", "fresh") })]));
+    const deleted: string[] = [];
+    expect(await recordings.purgeOne(id, now, async (k) => void deleted.push(k))).toBe(false);
+    expect(deleted).toEqual([]);
+    expect((await rowOf(id))!.status).toBe("fetching");
+  });
+
+  it("the sweep does delete a failed call's audio and clears the mark", async () => {
+    await importFile(admin.id, csv([row({ ID: "call-purge", "Recording URL": recUrl("call-purge") })]));
+    const id = callLog.recordingIdFor(org.id, "call-purge");
+    await recordings.processRecording(id, { storage: fakeStore(), fetchImpl: fakeFetch(403).impl });
+    const deleted: string[] = [];
+    expect(await recordings.purgeOne(id, new Date(Date.now() + 1000), async (k) => void deleted.push(k))).toBe(true);
+    expect(deleted).toEqual([`call-recordings/${org.id}/${id}`]);
+    expect((await rowOf(id))!.purgeAfter).toBeNull();
   });
 
   it("the sweep re-queues a download whose job was lost", async () => {

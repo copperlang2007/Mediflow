@@ -279,12 +279,35 @@ async function defaultStore(): Promise<RecordingStore> {
  * expired link fails at once; anything else is retried for a day
  * (`updated_at` is when the fetch was queued).
  */
+const overLimit = (limit: number, size: number | null, t: Date) => ({
+  status: "failed",
+  error: `Your agency reached the daily limit of ${limit} recordings. Import the same call log again tomorrow to score this call.`,
+  sizeBytes: size,
+  // Audio an interrupted earlier run may have stored is not kept.
+  purgeAfter: t,
+  updatedAt: t,
+});
+
+async function refuseOverLimit(id: string, limit: number, size: number | null, now: Date): Promise<StepOutcome> {
+  await db.update(callRecordingsTable)
+    .set(overLimit(limit, size, now))
+    .where(and(eq(callRecordingsTable.id, id), eq(callRecordingsTable.status, "fetching")));
+  logger.warn({ recordingId: id, limit }, "EnrollHere recording: daily limit reached");
+  return "finished";
+}
+
 async function fetchAudio(row: CallRecording, deps: ProcessDeps): Promise<StepOutcome> {
   const now = new Date();
   await db.update(callRecordingsTable).set({ checkedAt: now }).where(and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "fetching")));
   const details = detailsOf(row);
   const url = enrollhereRecordingUrl(details.sourceUrl);
   if (!url) return fail(row.id, LINK_UNUSABLE);
+  const limit = dailyRecordingLimit();
+  // Cheap check before any download: an agency already at its cap does not
+  // pull the audio just to have it refused (the locked check below is the real one).
+  if ((await db.transaction((tx) => recordingsToday(tx, row.orgId, now))) >= limit) {
+    return refuseOverLimit(row.id, limit, null, now);
+  }
   const storage = deps.storage ?? (await defaultStore());
 
   let size: number;
@@ -307,22 +330,12 @@ async function fetchAudio(row: CallRecording, deps: ProcessDeps): Promise<StepOu
     return "retry_start";
   }
 
-  const limit = dailyRecordingLimit();
   const outcome = await db.transaction(async (tx) => {
     await lockRecordings(tx, row.orgId);
     const t = new Date();
     const stillFetching = and(eq(callRecordingsTable.id, row.id), eq(callRecordingsTable.status, "fetching"));
     if ((await recordingsToday(tx, row.orgId, t)) >= limit) {
-      const refused = await tx.update(callRecordingsTable)
-        .set({
-          status: "failed",
-          error: `Your agency reached the daily limit of ${limit} recordings. Import the same call log again tomorrow to score this call.`,
-          sizeBytes: size,
-          purgeAfter: t,
-          updatedAt: t,
-        })
-        .where(stillFetching)
-        .returning({ id: callRecordingsTable.id });
+      const refused = await tx.update(callRecordingsTable).set(overLimit(limit, size, t)).where(stillFetching).returning({ id: callRecordingsTable.id });
       return refused.length ? ("over_limit" as const) : ("unchanged" as const);
     }
     const moved = await tx.update(callRecordingsTable)
@@ -465,28 +478,45 @@ export async function sweepStalledRecordings(
     .returning({ id: callRecordingsTable.id });
 
   const due = await db
-    .select({ id: callRecordingsTable.id, objectKey: callRecordingsTable.objectKey, purgeAttempts: callRecordingsTable.purgeAttempts })
+    .select({ id: callRecordingsTable.id })
     .from(callRecordingsTable)
     .where(and(eq(callRecordingsTable.status, "failed"), lte(callRecordingsTable.purgeAfter, now)))
     .orderBy(callRecordingsTable.purgeAfter)
     .limit(PURGE_BATCH);
   let purged = 0;
-  for (const r of due) {
+  for (const r of due) if (await purgeOne(r.id, now, deleteObject)) purged++;
+  return { requeued, abandoned: abandoned.length, purged };
+}
+
+/**
+ * Delete one failed recording's audio. The row is re-read and locked first
+ * and stays locked through the delete, so an EnrollHere re-import (which
+ * turns a failed row back to `fetching`) either waits for the delete and then
+ * downloads afresh, or wins and the delete is skipped: audio a live row needs
+ * is never removed. Returns true when the audio was deleted.
+ */
+export async function purgeOne(id: string, now: Date, deleteObject: (objectKey: string) => Promise<void>): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const [r] = await tx
+      .select({ objectKey: callRecordingsTable.objectKey, purgeAttempts: callRecordingsTable.purgeAttempts })
+      .from(callRecordingsTable)
+      .where(and(eq(callRecordingsTable.id, id), eq(callRecordingsTable.status, "failed"), lte(callRecordingsTable.purgeAfter, now)))
+      .for("update", { skipLocked: true });
+    if (!r) return false;
     try {
       await deleteObject(r.objectKey);
     } catch (err) {
       // Back off so stuck deletes do not crowd out new ones; keep retrying.
       const attempts = r.purgeAttempts + 1;
-      await db.update(callRecordingsTable)
+      await tx.update(callRecordingsTable)
         .set({ purgeAttempts: attempts, purgeAfter: new Date(now.getTime() + purgeBackoffMs(attempts)) })
-        .where(eq(callRecordingsTable.id, r.id));
-      const log = { err: (err as Error).message, recordingId: r.id, attempts };
+        .where(eq(callRecordingsTable.id, id));
+      const log = { err: (err as Error).message, recordingId: id, attempts };
       if (attempts >= PURGE_ALERT_AFTER) logger.error(log, "Call recording sweep: unused audio still cannot be deleted; check bucket access");
       else logger.warn(log, "Call recording sweep: could not delete unused audio; will retry");
-      continue;
+      return false;
     }
-    await db.update(callRecordingsTable).set({ purgeAfter: null, purgeAttempts: 0 }).where(eq(callRecordingsTable.id, r.id));
-    purged++;
-  }
-  return { requeued, abandoned: abandoned.length, purged };
+    await tx.update(callRecordingsTable).set({ purgeAfter: null, purgeAttempts: 0 }).where(eq(callRecordingsTable.id, id));
+    return true;
+  });
 }
