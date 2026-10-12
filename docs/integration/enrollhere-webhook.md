@@ -62,9 +62,19 @@ fields are filled on an existing contact. Medicare IDs are stored encrypted.
 | 422 `{ fieldsReceived }` | No contact name in the payload — lists the field names that did arrive |
 | 500 | Temporary failure — safe to retry |
 
-Payload values are never stored beyond the contact and call log; the
-`integration_events` table records only the field **names** seen, so an
-unmapped EnrollHere field can be spotted and added.
+**Every value is kept in Mediflow.** Each accepted call delivery is stored
+whole (minus the relay `headers` wrapper) in `integration_payloads`, encrypted
+with the PII key, and kept for the CMS 10-year record period (`retain_until`).
+The call-log activity carries `metadata.payloadId`. Admins and compliance
+managers (`super_admin`, `agency_admin`, `compliance_manager`) open it from the
+contact timeline ("Full EnrollHere record") via
+`GET /api/integration-payloads/:id`. Every view writes an
+`view_integration_payload` audit row first and is sent `Cache-Control: no-store`;
+other roles get 403 and other orgs 404. A redelivery of the same call id keeps
+one row. Rejected deliveries (422, no contact name) are **not** stored yet.
+
+`integration_events` still records only the field **names** seen (pruned after
+90 days), so an unmapped EnrollHere field can be spotted and mapped.
 
 ## Deploy
 

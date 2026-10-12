@@ -43,7 +43,7 @@ import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import CreateLeadDialog from "@/pages/crm/CreateLeadDialog";
-import ApplicationsTab from "@/pages/crm/ApplicationsTab";
+import ApplicationsTab, { FullIntegrationRecordDialog } from "@/pages/crm/ApplicationsTab";
 import { ContactAvatar } from "@/pages/crm/ui";
 import { EmptyState, SectionCard, StatusPill } from "@/components/shared";
 import { BookAppointmentButton } from "@/components/calendar/BookAppointmentButton";
@@ -293,8 +293,14 @@ type TimelineEntry =
   | { kind: "activity"; id: string; at: Date; activity: Activity }
   | { kind: "message"; id: string; at: Date; message: ContactMessage };
 
+/** Roles that may open a full integration record (the server enforces this too). */
+const FULL_RECORD_ROLES = ["super_admin", "agency_admin", "compliance_manager"];
+
 function TimelineTab({ contactId }: { contactId: string }) {
   const [logOpen, setLogOpen] = useState(false);
+  const [recordId, setRecordId] = useState<string | null>(null);
+  const { data: me } = useGetMe();
+  const canViewFullRecord = FULL_RECORD_ROLES.includes(me?.role ?? "");
   const { data: activitiesRaw, isLoading: activitiesLoading } = useGetContactActivities(
     contactId,
     { limit: 100 },
@@ -387,6 +393,14 @@ function TimelineTab({ contactId }: { contactId: string }) {
                             </a>
                           ) : null;
                         })()}
+                        {(() => {
+                          const payloadId = entry.activity.metadata?.payloadId;
+                          return canViewFullRecord && typeof payloadId === "string" ? (
+                            <Button variant="link" size="sm" className="h-auto p-0 ml-3 text-sm" onClick={() => setRecordId(payloadId)}>
+                              Full EnrollHere record
+                            </Button>
+                          ) : null;
+                        })()}
                       </div>
                       <p className="text-xs text-muted-foreground shrink-0 mt-0.5">
                         {formatDistanceToNow(entry.at)} ago
@@ -445,6 +459,7 @@ function TimelineTab({ contactId }: { contactId: string }) {
         </div>
       )}
       <LogActivityModal contactId={contactId} open={logOpen} onClose={() => setLogOpen(false)} />
+      {recordId && <FullIntegrationRecordDialog payloadId={recordId} onClose={() => setRecordId(null)} />}
     </div>
   );
 }

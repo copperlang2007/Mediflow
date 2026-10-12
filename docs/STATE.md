@@ -8,7 +8,7 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-12 — IIA 2026 QA scorecard added to call scoring (see session log)._
+_Last updated: 2026-10-12 — every EnrollHere call value now kept encrypted in Mediflow (see session log)._
 
 ### Health dashboard
 
@@ -21,8 +21,8 @@ _Last updated: 2026-10-12 — IIA 2026 QA scorecard added to call scoring (see s
 | Production deploy (GCP Cloud Run) | **Green** at `f821a54` (run 37867735824), `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
-| Open PRs | Query GitHub live | As of 2026-10-12: the IIA 2026 QA scorecard PR (branch `claude/agencybridge-compliance-review-s3nc6l`). No other open PRs. |
-| Migration high-water mark | `0070_move_artificialbridge_clients_to_insureitall` on main (#281); `0071_cms_plan_benefits` in PR #283 | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
+| Open PRs | Query GitHub live | As of 2026-10-12: the EnrollHere full-record PR (branch `claude/agencybridge-compliance-review-s3nc6l`; IIA scorecard #287 merged). No other open PRs. |
+| Migration high-water mark | `0071_cms_plan_benefits` on main (#283); `0072_integration_payloads` on branch `claude/agencybridge-compliance-review-s3nc6l` | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
 ### Owner-only actions
@@ -89,6 +89,15 @@ ones with no inbound references.
 ---
 
 ## Session log
+
+### 2026-10-12 — Keep every EnrollHere call value in Mediflow — Claude Code — branch `claude/agencybridge-compliance-review-s3nc6l`
+- **Outcome:** done (pending PR review and deploy)
+- **Changed:** Owner asked that Mediflow be the home for all EnrollHere data (owner states BAAs are in place). Each accepted call webhook is now stored whole, encrypted, in new table `integration_payloads` (migration `0072_integration_payloads`), kept 10 years (`retain_until`). Admins/compliance can open it from the contact timeline ("Full EnrollHere record"); every view is audited (`view_integration_payload`) and not cached. New route `GET /api/integration-payloads/:id`. Docs: `docs/integration/enrollhere-webhook.md`. IIA scorecard PR #287 merged at `862f66f`, deploy run 38287471984 succeeded.
+- **Verified:** `pnpm run typecheck` clean; `pnpm test` 228 files / 2513 tests passed; `node --test tests/*.test.mjs` 3 passed; `check:migration-journal` OK (74/74). New integration tests: encrypted storage of all fields incl. unmapped, dedupe on redelivery, audited admin view, agent 403, other-org 404.
+- **Left undone / broken:** Rejected (422) deliveries are still not stored. Twice-daily EnrollHere CSV pull into call scoring not built yet (waiting on owner: CSV headers, whether recording links open without an EnrollHere login, pull times). Webhooks still go to GoHighLevel until Mediflow is added as a destination in EnrollHere.
+- **Decisions made:** Full payloads use the existing PII key and CMS 10-year retention constant; viewing limited to `PHI_PRIVILEGED_ROLES`. No ADR.
+- **Next agent should:** Build the CSV pull (Drive folder → recording download → transcription → IIA 2026 scoring), storing every CSV column in `integration_payloads` with `source = 'enrollhere_csv'`.
+- **Needs a human:** Add Mediflow's webhook URL in EnrollHere; send the CSV headers (no real client rows); confirm pull times.
 
 Newest first. Template in `AGENTS.md` §7.
 

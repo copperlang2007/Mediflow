@@ -21,8 +21,10 @@
  * Payload: EnrollHere does not publish a webhook schema, so fields are read
  * tolerantly (see lib/integrations/payload.ts) — the person may be top-level
  * or nested under `contact`/`lead`/`client`, with snake or camel case keys.
- * The field NAMES of every payload are recorded (never values) so a field we
- * don't map yet can be spotted and added.
+ * The field NAMES of every payload are recorded in the event ledger so a field
+ * we don't map yet can be spotted and added; the whole delivery (every value)
+ * is kept encrypted in integration_payloads, Mediflow being the system of
+ * record, and is shown only through the audited full-record view.
  *
  * Idempotent: the event is keyed on the sender's call/event id (or a hash of
  * the body when none is sent), so a redelivery returns 200 without logging the
@@ -44,6 +46,8 @@ import {
   contactsTable,
   externalContactLinksTable,
   integrationEventsTable,
+  integrationPayloadsTable,
+  encryptPii,
 } from "@workspace/db";
 import { verifyWebhookSignature } from "../lib/dialer/signature";
 import { canonicalJson, flattenPayload, interpretPayloadContact, normalizeKey, payloadKeyPaths, pick } from "../lib/integrations/payload";
@@ -53,6 +57,7 @@ import { logger } from "../lib/logger";
 import { captureWorkerError } from "../lib/sentry";
 import { isPolicyEvent, parsePolicyEvent } from "../lib/integrations/enrollhere/policyEvent";
 import { applyCoverageLifecycle, storeApplication, upsertPolicyEnrollment } from "../lib/integrations/enrollhere/applicationStore";
+import { CMS_RECORD_RETENTION_DAYS } from "../lib/compliance/retention";
 
 const router: IRouter = Router();
 const SOURCE = "enrollhere";
@@ -311,6 +316,10 @@ router.post(
         ].filter(Boolean).join(" ");
 
         const activityId = randomUUID();
+        // Every value of the delivery, encrypted (minus a relay's request-headers wrapper).
+        const payloadId = randomUUID();
+        const { headers: _relayHeaders, ...stored } = req.body as Record<string, unknown>;
+        const sealed = encryptPii(canonicalJson(stored as never));
         await tx.insert(activitiesTable).values({
           id: activityId,
           orgId,
@@ -329,7 +338,20 @@ router.post(
             recordingUrl,
             startedAt,
             phone,
+            payloadId,
           },
+        });
+        await tx.insert(integrationPayloadsTable).values({
+          id: payloadId,
+          orgId,
+          source: SOURCE,
+          externalId,
+          eventType,
+          contactId,
+          activityId,
+          payloadEncrypted: sealed.encrypted,
+          payloadHmac: sealed.hash,
+          retainUntil: new Date(Date.now() + CMS_RECORD_RETENTION_DAYS * 86_400_000),
         });
         await tx.update(integrationEventsTable).set({ contactId, activityId })
           .where(eq(integrationEventsTable.id, eventRowId));
