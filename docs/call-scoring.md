@@ -258,6 +258,40 @@ only inside encrypted details.
 **Still to come:** live transcription for web-based dialers, and linking native
 softphone calls to their recordings automatically.
 
+## EnrollHere call-log import
+
+On **Call scoring > Add calls > Import an EnrollHere call log**, upload the
+call-log CSV exported from EnrollHere (one row per call, with a **Recording
+URL** column). Calls are scored on the **IIA 2026 QA** scorecard unless another
+checklist is picked. What happens to each row:
+
+- **Every column is kept** in Mediflow, encrypted, for the 10-year CMS period
+  (`integration_payloads`, source `enrollhere_call_log`, keyed by EnrollHere's
+  call **ID**), whether or not the call is scored.
+- A call with a recording and at least **60 seconds** in call (the
+  "Duration In Call" column, in milliseconds) is downloaded from EnrollHere,
+  transcribed and scored in the background. It appears under **Recent
+  recordings** as "Downloading from EnrollHere", then follows the normal
+  recording path. Shorter calls and calls without a recording are stored only.
+- The agent is matched by **Agent Email**; the client by **Lead Phone** (only
+  when exactly one client has that number). **Created At** is read as US
+  Central time.
+- The recording link is a signed Google Cloud Storage link on EnrollHere's
+  bucket. It opens without an EnrollHere login and **expires a few days after
+  the export**, so import each export the same day. Only links on
+  `storage.googleapis.com/enroll-here-dialer-…` are fetched (no redirects); the
+  link is kept sealed until the audio is stored, then dropped, and never logged.
+- **Importing the same file again is safe**: calls already imported are
+  skipped. It is also the retry: a call whose recording never reached
+  Speech-to-Text (expired link, daily recording limit) is sent again with the
+  new file's fresh link.
+- Downloads count against the daily recording limit
+  (`CALL_RECORDINGS_DAILY_LIMIT`, default 300 per agency per 24 hours) like
+  uploads do. Raise it if two daily exports exceed that.
+
+Not built yet: pulling the export automatically. Today a person exports the
+call log from EnrollHere and uploads it (twice a day if wanted).
+
 ## Retention and privacy
 
 - Transcript text, quotes, reviewer notes and the upload's file name are stored

@@ -20,7 +20,7 @@ import { FileAudio, Loader2, Upload } from "lucide-react";
 import { QK, apiMessage, fmtDate, type CsConfig } from "./shared";
 
 type Layout = string;
-type RecordingStatus = "uploading" | "queued" | "transcribing" | "scored" | "failed";
+type RecordingStatus = "fetching" | "uploading" | "queued" | "transcribing" | "scored" | "failed";
 
 interface StartResponse {
   recordingId: string;
@@ -48,6 +48,7 @@ const LAYOUT_INFO: Record<string, { label: string; hint: string }> = {
 };
 
 const STATUS: Record<RecordingStatus, { label: string; tone: StatusTone }> = {
+  fetching: { label: "Downloading from EnrollHere", tone: "info" },
   uploading: { label: "Upload not finished", tone: "neutral" },
   queued: { label: "Waiting", tone: "neutral" },
   transcribing: { label: "Transcribing", tone: "info" },
@@ -55,7 +56,7 @@ const STATUS: Record<RecordingStatus, { label: string; tone: StatusTone }> = {
   failed: { label: "Failed", tone: "danger" },
 };
 
-const PENDING: RecordingStatus[] = ["queued", "transcribing"];
+const PENDING: RecordingStatus[] = ["fetching", "queued", "transcribing"];
 
 /** Content type for the signed upload; the browser leaves some audio types blank. */
 function typeFor(file: File): string {

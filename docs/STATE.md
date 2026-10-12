@@ -8,7 +8,7 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-12 — every EnrollHere call value now kept encrypted in Mediflow (see session log)._
+_Last updated: 2026-10-12 — EnrollHere call-log CSV import into call scoring (see session log)._
 
 ### Health dashboard
 
@@ -21,8 +21,8 @@ _Last updated: 2026-10-12 — every EnrollHere call value now kept encrypted in 
 | Production deploy (GCP Cloud Run) | **Green** at `f821a54` (run 37867735824), `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
-| Open PRs | Query GitHub live | As of 2026-10-12: the EnrollHere full-record PR (branch `claude/agencybridge-compliance-review-s3nc6l`; IIA scorecard #287 merged). No other open PRs. |
-| Migration high-water mark | `0071_cms_plan_benefits` on main (#283); `0072_integration_payloads` on branch `claude/agencybridge-compliance-review-s3nc6l` | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
+| Open PRs | Query GitHub live | As of 2026-10-12: the EnrollHere call-log import PR (branch `claude/agencybridge-compliance-review-s3nc6l`; #287 and #288 merged). No other open PRs. |
+| Migration high-water mark | `0072_integration_payloads` on main (#288); `0073_call_recordings_fetching` on branch `claude/agencybridge-compliance-review-s3nc6l` | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
 ### Owner-only actions
@@ -89,6 +89,15 @@ ones with no inbound references.
 ---
 
 ## Session log
+
+### 2026-10-12 — EnrollHere call-log CSV import into call scoring — Claude Code — branch `claude/agencybridge-compliance-review-s3nc6l`
+- **Outcome:** done (pending PR review and deploy)
+- **Changed:** #288 (every EnrollHere webhook value kept, encrypted) merged at `19be9a3`; production deploy run 38293119970 succeeded. New: **Call scoring > Add calls > Import an EnrollHere call log** takes the call-log CSV the owner exports from EnrollHere. Every column of every row is stored encrypted for 10 years (`integration_payloads`, source `enrollhere_call_log`). Calls with a recording and at least 60 s in call get a `call_recordings` row in new status `fetching` (migration `0073_call_recordings_fetching`); the transcription job downloads the audio from EnrollHere's signed Cloud Storage link (host/bucket allow-list, no redirects, 500 MB cap), then transcribes and scores it on IIA 2026 by default. Re-import is safe and retries expired links. Route `POST /api/call-scoring/enrollhere-call-log`. Docs: `docs/call-scoring.md`.
+- **Verified:** `pnpm run typecheck` clean; `pnpm test` 230 files / 2529 tests passed; `node --test tests/*.test.mjs` 3 passed; `check:migration-journal` OK (75/75). New tests: API (13, incl. cross-org, agent 403, expired link and re-import, retry/give-up, daily cap, sweep) and web (3). The owner's example export parsed locally: 1 row, 133 columns, link accepted, 500 s, time converted. NOT verified: a real download from EnrollHere's bucket and a real transcription (needs production).
+- **Left undone / broken:** No automatic twice-daily pull: a person exports and uploads the CSV. Mono transcription is assumed for EnrollHere recordings (not confirmed whether they are dual-channel). The webhook still stores `recordingUrl` unencrypted in activity metadata (pre-existing). Rejected (422) webhook deliveries still not stored.
+- **Decisions made:** IIA 2026 is the default checklist for this import; calls under 60 s are stored but not scored; "Created At" read as America/Chicago. No ADR.
+- **Next agent should:** Find out whether EnrollHere can schedule or email the call-log export (or has an API), then automate the twice-daily pull on top of `importCallLog`.
+- **Needs a human:** Export and import the call log (same day, links expire). Confirm the export's time zone is Central. Raise `CALL_RECORDINGS_DAILY_LIMIT` if two exports exceed 300 scored calls a day.
 
 ### 2026-10-12 — Keep every EnrollHere call value in Mediflow — Claude Code — branch `claude/agencybridge-compliance-review-s3nc6l`
 - **Outcome:** done (pending PR review and deploy)
