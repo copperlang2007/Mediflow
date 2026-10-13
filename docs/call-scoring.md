@@ -199,6 +199,13 @@ in a few minutes, and the call is then scored exactly like a transcript. The
 - **One track** (most downloads): speakers are told apart by voice and shown as
   "Speaker 1" / "Speaker 2". Roles are never guessed from what was said, so
   agent-only checks are marked for review, as with an unlabelled transcript.
+  **A reviewer fixes this in one click.** Open the call and use **Which voice is
+  the agent?**: pick the voice and the call is scored again with Agent / Client on
+  every line. The choice (who and when) is kept sealed with the transcript, the
+  audit log records only counts, and the earlier score stays in the history
+  (reviewer decisions on the old result are not carried over). Picking the other
+  voice corrects a mistake. With more than two voices only the agent is set; the
+  rest stay unknown. A file that already names its agent never shows the choice.
 - **Stereo, agent on the left / right**: each side is transcribed separately and
   labelled Agent / Client. Use this whenever the dialer can export dual-channel
   audio; scoring is much more precise.
@@ -354,7 +361,7 @@ rubrics as data, redaction, fail-closed merge, parsing, storage) and
 `lib/callScoring/recordings.ts` (one idempotent step per run of the
 `transcribe-recording` job, `workers/transcribeRecording.ts`), and
 `components/call-scoring/RecordingUpload.tsx`. Endpoints are under `/api/call-scoring/`: `config`,
-`transcripts` (POST, GET), `transcripts/:id` (GET), `transcripts/:id/rescore`,
+`transcripts` (POST, GET), `transcripts/:id` (GET), `transcripts/:id/rescore`, `transcripts/:id/agent-speaker` (POST),
 `transcripts/:id/criteria/:criterionId` (PATCH), `summary`, `dnc-review` (GET),
 `dnc-review/:findingId/resolve` (POST), `import` (POST),
 `recordings/upload-url` (POST), `recordings/:id/uploaded` (POST), `recordings` (GET).

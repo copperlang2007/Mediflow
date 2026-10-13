@@ -30,6 +30,7 @@ import {
   type TranscriptFilters,
 } from "./store";
 import { open } from "./seal";
+import { speakerSummary } from "./speakerRoles";
 import { meetsStandard } from "./score";
 import type { CriterionStatus, Role, Utterance } from "./types";
 
@@ -309,6 +310,11 @@ export async function buildDetail(orgId: string, transcriptId: string, scope: Sc
       utteranceCount: row.utteranceCount,
       filename: payload?.filename ?? null,
       textAvailable: Boolean(payload),
+      // Which voices a reviewer can choose between (one-track recordings only).
+      speakers: speakerSummary(utterances, { reassigning: Boolean(payload?.speakerAssignment) }),
+      speakerAssignedAt: payload?.speakerAssignment?.at ?? null,
+      // False when a reviewer's choice was saved but the call was not scored again under it.
+      speakerScoreCurrent: payload?.speakerAssignment ? payload.speakerAssignment.scoredId === payload.speakerAssignment.id : true,
       callSessionLinked: Boolean(row.callSessionId),
       contact: row.contactId ? { id: row.contactId, name: names.contacts.get(row.contactId) ?? "Unnamed" } : null,
       contactMatch: row.contactMatch,

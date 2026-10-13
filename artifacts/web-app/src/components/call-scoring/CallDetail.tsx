@@ -17,6 +17,7 @@ import { StatusPill } from "@/components/shared";
 import { AlertTriangle, LocateFixed, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DncResolveControls } from "./DncResolveControls";
+import { SpeakerRoleControls } from "./SpeakerRoleControls";
 import {
   COMPLIANCE_TONE,
   CRITERION_TONE,
@@ -302,6 +303,8 @@ export function CallDetail({ transcriptId, canReview, onClose }: { transcriptId:
               <span className="ml-auto text-xs text-muted-foreground">Scored {fmtDate(score.createdAt)}</span>
             </div>
 
+            {canReview && <SpeakerRoleControls detail={data} />}
+
             {caveats.length > 0 && (
               <ul className="space-y-1 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm" aria-label="About this score">
                 {caveats.map((c) => (
@@ -337,7 +340,11 @@ export function CallDetail({ transcriptId, canReview, onClose }: { transcriptId:
                     <div className="mt-2">
                       {d.status === "open" ? (
                         canReview ? (
-                          <DetailDncControls transcriptId={data.transcript.id} findingId={d.findingId} contact={data.transcript.contact} />
+                          data.transcript.speakerScoreCurrent === false ? (
+                            <p className="text-sm text-muted-foreground">Waiting for the call to be scored again after the speaker change.</p>
+                          ) : (
+                            <DetailDncControls transcriptId={data.transcript.id} findingId={d.findingId} contact={data.transcript.contact} />
+                          )
                         ) : (
                           <p className="text-sm text-muted-foreground">Waiting for a compliance reviewer.</p>
                         )
@@ -361,7 +368,7 @@ export function CallDetail({ transcriptId, canReview, onClose }: { transcriptId:
                     {g.name && <h4 className="text-sm font-semibold text-muted-foreground">{g.name}</h4>}
                     <ul className="space-y-3">
                       {g.criteria.map((c) => (
-                        <Finding key={c.criterionId} c={c} onJump={doJump} canReview={canReview} transcriptId={data.transcript.id} />
+                        <Finding key={c.criterionId} c={c} onJump={doJump} canReview={canReview && data.transcript.speakerScoreCurrent !== false} transcriptId={data.transcript.id} />
                       ))}
                     </ul>
                   </div>

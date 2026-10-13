@@ -4,6 +4,7 @@
  *   GET   /call-scoring/config                              what is / is not set up
  *   POST  /call-scoring/transcripts                         paste or upload + score (rules, AI if set up)
  *   POST  /call-scoring/transcripts/:id/rescore             new automatic result; history kept
+ *   POST  /call-scoring/transcripts/:id/agent-speaker       reviewer says which voice is the agent, then rescores
  *   GET   /call-scoring/transcripts                         list + filters
  *   GET   /call-scoring/transcripts/:id                     detail: findings with quotes and positions
  *   PATCH /call-scoring/transcripts/:id/criteria/:criterionId   human override (auto result untouched)
@@ -38,6 +39,7 @@ import {
   callScoreFindingsTable,
   callScoreReviewsTable,
   callScoresTable,
+  callTranscriptsTable,
 
   db,
 } from "@workspace/db";
@@ -47,11 +49,12 @@ import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { isSelfScopedAgent } from "../middlewares/agentSelfScope";
 import { parseCsvTolerant, parseFlexibleDate, CsvFileError } from "../lib/csvImport";
 import { logger } from "../lib/logger";
-import { open, seal } from "../lib/callScoring/seal";
+import { open, seal, type TranscriptPayload } from "../lib/callScoring/seal";
 import { PARSE_LIMITS } from "../lib/callScoring/parse";
 import { DEFAULT_RUBRIC_ID, builtInRubrics, getRubric } from "../lib/callScoring/rubrics";
 import { resolveAiReviewer } from "../lib/callScoring/aiReviewer";
 import { ingestTranscript, rescoreTranscript, resolveRubric, type IngestResult } from "../lib/callScoring/ingest";
+import { assignAgentSpeaker } from "../lib/callScoring/speakerAssign";
 import { DISCLAIMER, buildDetail, buildList, buildSummary } from "../lib/callScoring/detail";
 import { listDncQueue, resolveDncFinding } from "../lib/callScoring/dncReview";
 import { loadTranscriptRow, retainUntil, type ScopeFilter } from "../lib/callScoring/store";
@@ -348,6 +351,41 @@ router.post(
   },
 );
 
+router.post(
+  "/call-scoring/transcripts/:id/agent-speaker",
+  requireAuth,
+  requireMfa,
+  requirePermission("call_scoring", "create"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const parsed = z
+      .object({ agentSpeaker: z.string().trim().min(1).max(40), rubricId: optional(z.string().trim().max(64)), ai: boolField })
+      .safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "Choose which voice is the agent.", code: "invalid" });
+      return;
+    }
+    const rubric = resolveRubric(parsed.data.rubricId, getRubric(DEFAULT_RUBRIC_ID) as Rubric);
+    if (!rubric) {
+      res.status(400).json({ error: "Unknown rubric.", code: "unknown_rubric" });
+      return;
+    }
+    const result = await assignAgentSpeaker({
+      orgId: authReq.orgId,
+      userId: authReq.userId,
+      userRole: authReq.userRole,
+      transcriptId: param(req.params.id),
+      agentLabel: parsed.data.agentSpeaker,
+      rubric,
+      // Not given: keep the call's earlier AI setting.
+      ...(parsed.data.ai === undefined ? {} : { aiMode: aiModeFrom(parsed.data.ai) }),
+    });
+    if (result.kind === "ok") res.status(201).json(result.summary);
+    else if (result.kind === "error") res.status(result.httpStatus).json({ error: result.message, code: result.code });
+    else res.status(409).json({ error: "Unexpected duplicate.", code: "duplicate" });
+  },
+);
+
 // ---- read ------------------------------------------------------------------
 
 const ListQuery = z.object({
@@ -554,7 +592,21 @@ router.patch(
         return;
       }
     }
+    let rescoringPending = false;
     await db.transaction(async (tx) => {
+      // Locked, so a speaker choice cannot land between this check and the decision being recorded.
+      const [locked] = await tx
+        .select({ sealed: callTranscriptsTable.transcriptEncrypted })
+        .from(callTranscriptsTable)
+        .where(and(eq(callTranscriptsTable.id, transcript.id), eq(callTranscriptsTable.orgId, authReq.orgId)))
+        .for("share")
+        .limit(1);
+      const assignment = open<TranscriptPayload>(locked?.sealed)?.speakerAssignment;
+      if (assignment && assignment.scoredId !== assignment.id) {
+        // The speakers changed but the call was not scored under them yet: this score may be wrong.
+        rescoringPending = true;
+        return;
+      }
       await tx.insert(callScoreReviewsTable).values({
         id: randomUUID(),
         orgId: authReq.orgId,
@@ -580,6 +632,13 @@ router.patch(
         changes: { scoreId: score.id, criterionId, verdict },
       });
     });
+    if (rescoringPending) {
+      res.status(409).json({
+        error: "The speakers on this call were just changed and it has not been scored again yet. Wait for the new result (or press the agent voice again), then grade it.",
+        code: "rescoring_pending",
+      });
+      return;
+    }
     const detail = await buildDetail(authReq.orgId, transcript.id, undefined);
     res.json(detail);
   },

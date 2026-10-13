@@ -166,6 +166,11 @@ export interface CsDetail {
     timing: "recorded" | "estimated";
     filename: string | null;
     textAvailable: boolean;
+    /** Voices a reviewer can choose between on a one-track recording. Absent on older responses. */
+    speakers?: { assignable: boolean; speakers: Array<{ label: string; turns: number; role: "agent" | "client" | "unknown" }> };
+    speakerAssignedAt?: string | null;
+    /** False when a choice was saved but the call was not scored again under it. Absent on older responses. */
+    speakerScoreCurrent?: boolean;
     contact: { id: string; name: string } | null;
     contactMatch: string;
     agent: { id: string; name: string } | null;
@@ -184,6 +189,8 @@ export interface CsDetail {
       sections?: Array<{ id: string; name: string }>;
     };
     ai: { status: "used" | "needs_setup" | "failed" | "skipped"; model: string | null; error: string | null };
+    /** Who was identified when this score was made. Absent on older responses. */
+    speakerMode?: "labelled" | "partial" | "unlabelled";
     auto: { score: number; points?: ScorePoints; compliance: Compliance; criticalFailures: string[]; needsReview: string[] };
     effective: { score: number; points?: ScorePoints; compliance: Compliance; criticalFailures: string[]; needsReview: string[]; openDnc: number; meetsStandard: boolean | null };
   };
