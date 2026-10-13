@@ -561,7 +561,9 @@ router.post(
         if (state !== "pending") throw new InviteUnusableError(state, 410);
 
         await lockOrgSeats(invite.orgId, tx);
-        await requireSeat(invite.orgId, tx);
+        // This invitation's own reservation becomes the new member's seat, so
+        // it must not be counted against itself (see requireSeat).
+        await requireSeat(invite.orgId, tx, { excludeInvitationId: invite.id });
 
         // Re-checked inside the transaction, not only before it: two concurrent
         // accepts by the same Clerk identity would both pass an outside check
