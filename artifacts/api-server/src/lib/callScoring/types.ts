@@ -36,6 +36,12 @@ export interface ParsedTranscript {
   timing: TimingMode;
   durationSec: number;
   format: TranscriptFormat;
+  /**
+   * True when a reviewer, not the file, said who the agent is. Do-not-contact
+   * flags on client turns then get their own fingerprint, so a dismissal made
+   * while the speaker was unknown cannot silently cover them.
+   */
+  speakersAssigned?: boolean;
 }
 
 // ---------------------------------------------------------------------------

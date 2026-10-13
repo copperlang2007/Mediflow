@@ -174,6 +174,81 @@ describe("choosing which voice is the agent", () => {
     expect([...agents]).toEqual(["Speaker 2"]);
   });
 
+  it("keeps a call that was scored rules-only rules-only", async () => {
+    const res = await request(app).post("/api/call-scoring/transcripts").set(withAuth(admin.id)).send({ text: oneTrackCall(), ai: false });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const id = res.body.transcriptId as string;
+    await choose(admin.id, id, { agentSpeaker: "Speaker 2" }).expect(201);
+    const d = await request(app).get(`/api/call-scoring/transcripts/${id}`).set(withAuth(admin.id)).expect(200);
+    expect(d.body.score.ai.status).toBe("skipped");
+  });
+
+  it("a stop-calling request dismissed while the speaker was unknown comes back for review once the client is identified", async () => {
+    const id = await create(`${oneTrackCall()}\nSpeaker 1: Please stop calling me.`);
+    const [first] = await handle.db
+      .select()
+      .from(schema.callScoreFindingsTable)
+      .where(and(eq(schema.callScoreFindingsTable.transcriptId, id), eq(schema.callScoreFindingsTable.kind, "dnc")));
+    await request(app)
+      .post(`/api/call-scoring/dnc-review/${first!.id}/resolve`)
+      .set(withAuth(admin.id))
+      .send({ action: "dismiss", note: "Could not tell who said it." })
+      .expect(200);
+    const openFlagsFor = async () => {
+      const queue = await request(app).get("/api/call-scoring/dnc-review").set(withAuth(admin.id)).expect(200);
+      return (queue.body.items as Array<{ transcriptId?: string; transcript?: { id: string } }>).filter((i) => (i.transcriptId ?? i.transcript?.id) === id);
+    };
+    expect(await openFlagsFor()).toHaveLength(0);
+
+    await choose(admin.id, id, { agentSpeaker: "Speaker 2" }).expect(201); // Speaker 1 is now known to be the client
+    expect(await openFlagsFor()).toHaveLength(1);
+  });
+
+  it("two reviewers pressing together end with one consistent saved choice", async () => {
+    const id = await create(oneTrackCall());
+    const [a, b] = await Promise.all([choose(admin.id, id, { agentSpeaker: "Speaker 1" }), choose(admin.id, id, { agentSpeaker: "Speaker 2" })]);
+    expect([a.status, b.status].every((s) => s === 201 || s === 409)).toBe(true);
+    expect([a.status, b.status]).toContain(201);
+    const d = await request(app).get(`/api/call-scoring/transcripts/${id}`).set(withAuth(admin.id)).expect(200);
+    const agents = new Set(d.body.utterances.filter((u: { role: string }) => u.role === "agent").map((u: { speaker: string }) => u.speaker));
+    expect(agents.size).toBe(1);
+    expect(d.body.transcript.speakerMode).toBe("labelled");
+  });
+
+  it("a plain rescore that read the old roles saves nothing if a choice lands meanwhile", async () => {
+    const id = await create(oneTrackCall());
+    const { rescoreTranscript } = await import("../../lib/callScoring/ingest");
+    const { getRubric, DEFAULT_RUBRIC_ID } = await import("../../lib/callScoring/rubrics");
+    const scoresOf = async () => (await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, id))).length;
+    const before = await scoresOf();
+    const reviewer = {
+      name: "test-reviewer",
+      review: async () => {
+        // Runs while the rescore is scoring, after it has read the transcript.
+        await choose(admin.id, id, { agentSpeaker: "Speaker 2" }).expect(201);
+        return { criteria: [] };
+      },
+    };
+    const out = await rescoreTranscript({ orgId: org.id, userId: admin.id, userRole: "agency_admin", transcriptId: id, rubric: getRubric(DEFAULT_RUBRIC_ID)!, aiMode: "auto", reviewer });
+    expect(out.kind).toBe("duplicate");
+    expect(await scoresOf()).toBe(before + 1); // only the choice's own score
+  });
+
+  it("gives every choice its own identity, not one derived from the time", async () => {
+    const id = await create(oneTrackCall());
+    const idOfLatestChoice = async () => {
+      const [row] = await handle.db.select().from(schema.callTranscriptsTable).where(eq(schema.callTranscriptsTable.id, id));
+      return storeLib.openTranscript(row!)?.speakerAssignment?.id;
+    };
+    await choose(admin.id, id, { agentSpeaker: "Speaker 1" }).expect(201);
+    const first = await idOfLatestChoice();
+    await choose(admin.id, id, { agentSpeaker: "Speaker 2" }).expect(201);
+    const second = await idOfLatestChoice();
+    expect(first).toMatch(/^[0-9a-f-]{36}$/);
+    expect(second).toMatch(/^[0-9a-f-]{36}$/);
+    expect(second).not.toBe(first);
+  });
+
   it("refuses a voice that is not in the call, and a blank choice", async () => {
     const id = await create(oneTrackCall());
     await choose(admin.id, id, { agentSpeaker: "Speaker 9" }).expect(422);

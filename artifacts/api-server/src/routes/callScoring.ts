@@ -376,7 +376,8 @@ router.post(
       transcriptId: param(req.params.id),
       agentLabel: parsed.data.agentSpeaker,
       rubric,
-      aiMode: aiModeFrom(parsed.data.ai),
+      // Not given: keep the call's earlier AI setting.
+      ...(parsed.data.ai === undefined ? {} : { aiMode: aiModeFrom(parsed.data.ai) }),
     });
     if (result.kind === "ok") res.status(201).json(result.summary);
     else if (result.kind === "error") res.status(result.httpStatus).json({ error: result.message, code: result.code });

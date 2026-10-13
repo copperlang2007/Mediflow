@@ -7,16 +7,17 @@
  * stays as history (a rescore adds a new result; reviews are not carried over).
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
-import { auditLogTable, callTranscriptsTable, db } from "@workspace/db";
+import { and, desc, eq, isNull } from "drizzle-orm";
+import { auditLogTable, callScoresTable, callTranscriptsTable, db } from "@workspace/db";
 import { logger } from "../logger";
 import { rescoreTranscript, type IngestResult } from "./ingest";
 import { open, seal, type TranscriptPayload } from "./seal";
 import { applyAgentSpeaker } from "./speakerRoles";
-import { loadTranscriptRow, openTranscript } from "./store";
+import { loadTranscriptRow } from "./store";
 import type { Rubric } from "./types";
 
 type Failure = Extract<IngestResult, { kind: "error" }>;
+type Saved = { ok: true } | { ok: false; failure: Failure };
 
 export async function assignAgentSpeaker(input: {
   orgId: string;
@@ -25,7 +26,8 @@ export async function assignAgentSpeaker(input: {
   transcriptId: string;
   agentLabel: string;
   rubric: Rubric;
-  aiMode: "auto" | "off";
+  /** Omit to keep however the call was scored before: rules-only stays rules-only. */
+  aiMode?: "auto" | "off";
   /** Test seam: the scoring step that follows the save. */
   rescore?: typeof rescoreTranscript;
 }): Promise<IngestResult> {
@@ -33,29 +35,49 @@ export async function assignAgentSpeaker(input: {
 
   const row = await loadTranscriptRow(db, input.orgId, input.transcriptId);
   if (!row) return fail(404, "not_found", "Transcript not found.");
-  const payload = openTranscript(row);
-  if (!payload || !payload.utterances.length) {
-    return fail(409, "text_unavailable", "The transcript text is no longer available to score.");
+
+  // A call deliberately scored rules-only must not start going to the AI reviewer just because a speaker was chosen.
+  let aiMode = input.aiMode;
+  if (!aiMode) {
+    const [latest] = await db
+      .select({ ai: callScoresTable.aiStatus })
+      .from(callScoresTable)
+      .where(and(eq(callScoresTable.transcriptId, row.id), eq(callScoresTable.orgId, input.orgId)))
+      .orderBy(desc(callScoresTable.createdAt), desc(callScoresTable.id))
+      .limit(1);
+    aiMode = latest?.ai === "skipped" ? "off" : "auto";
   }
-  const applied = applyAgentSpeaker(payload.utterances, input.agentLabel, { reassigning: Boolean(payload.speakerAssignment) });
-  if (!applied.ok) return fail(422, "speaker_not_assignable", applied.message);
 
   // Marks this choice. A scoring run only saves if this is still the latest choice.
   const assignedAt = new Date().toISOString();
-  const saved = await db.transaction(async (tx) => {
-    const updated = await tx
+  const assignmentId = randomUUID();
+  const saved: Saved = await db.transaction(async (tx) => {
+    // Read the sealed text again under a row lock, so a choice someone else made a
+    // moment ago is built on, never overwritten with an older copy.
+    const [current] = await tx
+      .select({ sealed: callTranscriptsTable.transcriptEncrypted })
+      .from(callTranscriptsTable)
+      .where(and(eq(callTranscriptsTable.id, row.id), eq(callTranscriptsTable.orgId, input.orgId), isNull(callTranscriptsTable.purgedAt)))
+      .for("update")
+      .limit(1);
+    const payload = open<TranscriptPayload>(current?.sealed);
+    if (!payload || !payload.utterances.length) {
+      return { ok: false, failure: fail(409, "text_unavailable", "The transcript text is no longer available to score.") };
+    }
+    const applied = applyAgentSpeaker(payload.utterances, input.agentLabel, { reassigning: Boolean(payload.speakerAssignment) });
+    if (!applied.ok) return { ok: false, failure: fail(422, "speaker_not_assignable", applied.message) };
+
+    await tx
       .update(callTranscriptsTable)
       .set({
         transcriptEncrypted: seal({
           ...payload,
           utterances: applied.utterances,
-          speakerAssignment: { agentLabel: input.agentLabel, userId: input.userId, at: assignedAt },
+          speakerAssignment: { agentLabel: input.agentLabel, userId: input.userId, at: assignedAt, id: assignmentId },
         }),
         speakerMode: applied.speakerMode,
       })
-      .where(and(eq(callTranscriptsTable.id, row.id), eq(callTranscriptsTable.orgId, input.orgId), isNull(callTranscriptsTable.purgedAt)))
-      .returning({ id: callTranscriptsTable.id });
-    if (!updated.length) return false;
+      .where(and(eq(callTranscriptsTable.id, row.id), eq(callTranscriptsTable.orgId, input.orgId)));
     await tx.insert(auditLogTable).values({
       id: randomUUID(),
       orgId: input.orgId,
@@ -70,9 +92,9 @@ export async function assignAgentSpeaker(input: {
         clientTurns: applied.utterances.filter((u) => u.role === "client").length,
       },
     });
-    return true;
+    return { ok: true };
   });
-  if (!saved) return fail(409, "text_unavailable", "The transcript text is no longer available to score.");
+  if (!saved.ok) return saved.failure;
 
   // The choice is saved by now. If scoring again fails, say so plainly: the roles
   // are kept, the old score is still shown, and pressing the button again retries.
@@ -88,15 +110,17 @@ export async function assignAgentSpeaker(input: {
       userRole: input.userRole,
       transcriptId: row.id,
       rubric: input.rubric,
-      aiMode: input.aiMode,
+      aiMode,
       // Two reviewers choosing at once: only the latest choice may save a score.
       stillOwned: async (tx) => {
+        // A shared lock held until the score is committed: a newer choice (which takes an exclusive lock) waits for it.
         const [current] = await tx
           .select({ sealed: callTranscriptsTable.transcriptEncrypted })
           .from(callTranscriptsTable)
           .where(and(eq(callTranscriptsTable.id, row.id), eq(callTranscriptsTable.orgId, input.orgId)))
+          .for("share")
           .limit(1);
-        return open<TranscriptPayload>(current?.sealed)?.speakerAssignment?.at === assignedAt;
+        return open<TranscriptPayload>(current?.sealed)?.speakerAssignment?.id === assignmentId;
       },
     });
     if (result.kind === "duplicate") {

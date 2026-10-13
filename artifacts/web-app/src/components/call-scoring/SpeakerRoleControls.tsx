@@ -10,8 +10,6 @@ import { Button } from "@/components/ui/button";
 import { QK, apiMessage, fmtDate, type CsDetail } from "./shared";
 
 const SNIPPET = 90;
-/** Tolerance for the app and database clocks differing a little. */
-const STALE_AFTER_MS = 2000;
 
 function firstWords(detail: CsDetail, label: string): string {
   const turn = detail.utterances.find((u) => u.speaker === label);
@@ -40,10 +38,11 @@ export function SpeakerRoleControls({ detail }: { detail: CsDetail }) {
     },
   });
 
-  if (!info?.assignable) return null;
+  if (!info?.assignable || info.speakers.length === 0) return null;
   const assigned = detail.transcript.speakerAssignedAt;
-  // A choice newer than the score means scoring again failed; the same voice can be pressed again to retry.
-  const scoreStale = Boolean(assigned && detail.score && Date.parse(assigned) - Date.parse(detail.score.createdAt) > STALE_AFTER_MS);
+  // The score was made while nobody was identified, but now someone is: scoring again failed after the choice was saved.
+  // (Compares what each side recorded, not clocks from two machines.)
+  const scoreStale = Boolean(assigned && detail.score?.speakerMode && detail.score.speakerMode !== detail.transcript.speakerMode);
 
   return (
     <section aria-label="Who is the agent" className="rounded-lg border border-border bg-muted/30 p-3 text-sm" data-testid="speaker-roles">
@@ -64,12 +63,13 @@ export function SpeakerRoleControls({ detail }: { detail: CsDetail }) {
             <Button
               size="sm"
               variant={s.role === "agent" ? "default" : "outline"}
-              disabled={choose.isPending || (s.role === "agent" && !scoreStale)}
+              disabled={choose.isPending}
               onClick={() => choose.mutate(s.label)}
               aria-label={`${s.label} is the agent`}
             >
               {s.label} is the agent
             </Button>
+            {s.role === "agent" && <span className="text-xs font-medium">Chosen</span>}
             <span className="text-xs text-muted-foreground">
               {s.turns} {s.turns === 1 ? "turn" : "turns"}
               {firstWords(detail, s.label) ? ` · starts “${firstWords(detail, s.label)}”` : ""}

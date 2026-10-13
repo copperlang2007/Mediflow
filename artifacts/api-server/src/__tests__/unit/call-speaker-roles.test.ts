@@ -1,6 +1,44 @@
 import { describe, expect, it } from "vitest";
 import type { Utterance } from "../../lib/callScoring/types";
 import { applyAgentSpeaker, speakerSummary } from "../../lib/callScoring/speakerRoles";
+import { detectDncRequests } from "../../lib/callScoring/dnc";
+import type { ParsedTranscript } from "../../lib/callScoring/types";
+
+describe("do-not-contact flags after a reviewer names the agent", () => {
+  const stop = (role: Utterance["role"]): Utterance => ({ id: 3, startSec: 9, endSec: 12, speaker: "Speaker 1", role, text: "Please stop calling me." });
+  const call = (role: Utterance["role"], speakersAssigned: boolean): ParsedTranscript => ({
+    utterances: [stop(role)],
+    speakerMode: "partial",
+    timing: "recorded",
+    durationSec: 12,
+    format: "json",
+    speakersAssigned,
+  });
+
+  it("gives a client turn a new fingerprint, so an earlier dismissal made while the speaker was unknown cannot cover it", () => {
+    const before = detectDncRequests(call("unknown", false))[0]!;
+    const after = detectDncRequests(call("client", true))[0]!;
+    expect(before.fingerprint).toBe(`dnc:3:${before.startOffset}`);
+    expect(after.fingerprint).toBe(`dnc:3:${after.startOffset}:client`);
+    expect(after.fingerprint).not.toBe(before.fingerprint);
+  });
+
+  it("leaves fingerprints alone for files that named their own speakers", () => {
+    expect(detectDncRequests(call("client", false))[0]!.fingerprint).toMatch(/^dnc:3:\d+$/);
+  });
+
+  it("finds nothing in an empty call", () => {
+    expect(detectDncRequests({ ...call("client", true), utterances: [] })).toEqual([]);
+  });
+
+  it("never flags what the agent said, even after an assignment", () => {
+    expect(detectDncRequests(call("agent", true))).toEqual([]);
+  });
+
+  it("leaves unknown turns alone even after an assignment", () => {
+    expect(detectDncRequests(call("unknown", true))[0]!.fingerprint).toMatch(/^dnc:3:\d+$/);
+  });
+});
 
 function u(id: number, speaker: string, role: Utterance["role"] = "unknown"): Utterance {
   return { id, startSec: id * 5, endSec: id * 5 + 4, speaker, role, text: `line ${id}` };

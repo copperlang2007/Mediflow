@@ -187,6 +187,8 @@ export interface CsDetail {
       sections?: Array<{ id: string; name: string }>;
     };
     ai: { status: "used" | "needs_setup" | "failed" | "skipped"; model: string | null; error: string | null };
+    /** Who was identified when this score was made. Absent on older responses. */
+    speakerMode?: "labelled" | "partial" | "unlabelled";
     auto: { score: number; points?: ScorePoints; compliance: Compliance; criticalFailures: string[]; needsReview: string[] };
     effective: { score: number; points?: ScorePoints; compliance: Compliance; criticalFailures: string[]; needsReview: string[]; openDnc: number; meetsStandard: boolean | null };
   };

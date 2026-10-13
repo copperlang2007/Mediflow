@@ -224,7 +224,7 @@ function sentenceAround(text: string, start: number, end: number): string {
   return out || text.slice(start, end);
 }
 
-function scanUtterance(u: Utterance): DncFinding | null {
+function scanUtterance(u: Utterance, speakersAssigned: boolean): DncFinding | null {
   const { norm, map } = normalizeMapped(u.text);
   if (!norm) return null;
   const hits: Array<{ from: number; to: number; id: string; negation: DncPattern["negation"] }> = [];
@@ -257,7 +257,8 @@ function scanUtterance(u: Utterance): DncFinding | null {
       role: u.role,
       quote,
       patternId: h.id,
-      fingerprint: `dnc:${u.id}:${startOffset}`,
+      // A reviewer-assigned client turn is a new attribution: earlier dismissals (made while the speaker was unknown) do not apply.
+      fingerprint: speakersAssigned && u.role === "client" ? `dnc:${u.id}:${startOffset}:client` : `dnc:${u.id}:${startOffset}`,
     };
   }
   return null;
@@ -272,7 +273,7 @@ export function detectDncRequests(transcript: ParsedTranscript): DncFinding[] {
   const out: DncFinding[] = [];
   for (const u of transcript.utterances) {
     if (u.role === "agent") continue;
-    const f = scanUtterance(u);
+    const f = scanUtterance(u, transcript.speakersAssigned === true);
     if (f) out.push(f);
   }
   return out;

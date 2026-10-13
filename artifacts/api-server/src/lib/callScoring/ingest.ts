@@ -18,7 +18,7 @@ import {
 import { runScoring, type RunScoringOptions, type ScoreRun } from "./engine";
 import { TranscriptParseError, parseTranscript } from "./parse";
 import { persistScore, persistScoredTranscript, matchContactByPhone, loadTranscriptRow, openTranscript } from "./store";
-import { contentDigest } from "./seal";
+import { contentDigest, open, type TranscriptPayload } from "./seal";
 import { getRubric } from "./rubrics";
 import type { ParsedTranscript, Rubric, TranscriptFormat } from "./types";
 
@@ -310,10 +310,21 @@ export async function rescoreTranscript(input: {
     timing: row.timing as ParsedTranscript["timing"],
     durationSec: row.durationSeconds ?? payload.utterances[payload.utterances.length - 1]!.endSec,
     format: row.format as TranscriptFormat,
+    speakersAssigned: Boolean(payload.speakerAssignment),
   };
+  // A reviewer choosing the agent while this run scores must win: a run that read the
+  // old roles saves nothing (the same version check the speaker choice itself uses).
+  const assignmentSeen = payload.speakerAssignment?.id ?? null;
   const run = await runScoring({ rubric: input.rubric, transcript: parsed, ai: input.aiMode, reviewer: input.reviewer });
   const scoreId = await db.transaction(async (tx) => {
     if (input.stillOwned && !(await input.stillOwned(tx))) return null;
+    const [current] = await tx
+      .select({ sealed: callTranscriptsTable.transcriptEncrypted })
+      .from(callTranscriptsTable)
+      .where(and(eq(callTranscriptsTable.id, row.id), eq(callTranscriptsTable.orgId, input.orgId)))
+      .for("share") // held until this score commits, so a newer speaker choice waits for it
+      .limit(1);
+    if ((open<TranscriptPayload>(current?.sealed)?.speakerAssignment?.id ?? null) !== assignmentSeen) return null;
     const id = await persistScore(tx, { orgId: input.orgId, transcriptId: row.id, userId: input.userId, run, parsed });
     await tx.insert(auditLogTable).values({
       id: randomUUID(),

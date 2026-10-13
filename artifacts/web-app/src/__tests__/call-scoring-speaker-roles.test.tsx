@@ -41,7 +41,7 @@ const voices = (r1: Role = "unknown", r2: Role = "unknown") => [
   { label: "Speaker 2", turns: 3, role: r2 },
 ];
 
-function detail(over: { assignable?: boolean; speakers?: ReturnType<typeof voices>; assignedAt?: string | null; omit?: boolean } = {}) {
+function detail(over: { assignable?: boolean; speakers?: ReturnType<typeof voices>; assignedAt?: string | null; omit?: boolean; transcriptMode?: string; scoreMode?: string } = {}) {
   const assignable = over.assignable ?? true;
   const transcript: Record<string, unknown> = {
     id: "t1",
@@ -51,7 +51,7 @@ function detail(over: { assignable?: boolean; speakers?: ReturnType<typeof voice
     callDate: null,
     createdAt: "2026-09-01T12:00:00.000Z",
     retainUntil: "2036-09-01T12:00:00.000Z",
-    speakerMode: "unlabelled",
+    speakerMode: over.transcriptMode ?? "unlabelled",
     timing: "recorded",
     filename: null,
     textAvailable: true,
@@ -75,6 +75,7 @@ function detail(over: { assignable?: boolean; speakers?: ReturnType<typeof voice
       createdAt: "2026-09-01T12:00:00.000Z",
       rubric: { id: "iia-2026", version: "1", name: "IIA", passThreshold: 80 },
       ai: { status: "needs_setup", model: null, error: null },
+      speakerMode: over.scoreMode ?? "unlabelled",
       auto: { score: 50, compliance: "review", criticalFailures: [], needsReview: [] },
       effective: { score: 50, compliance: "review", criticalFailures: [], needsReview: [], openDnc: 0, meetsStandard: false },
     },
@@ -119,25 +120,27 @@ describe("which voice is the agent", () => {
     expect(post.body).toEqual({ agentSpeaker: "Speaker 2", rubricId: "iia-2026" });
   });
 
-  it("after a choice, the chosen voice is marked and the other can be picked to correct it", async () => {
-    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-01T12:00:00.500Z" });
+  it("after a choice, the chosen voice is marked, and either voice can still be pressed to correct or retry", async () => {
+    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-02T12:00:00.000Z", transcriptMode: "labelled", scoreMode: "labelled" });
     renderDetail();
     expect(await screen.findByText("Who is the agent on this call?")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Speaker 2 is the agent" })).toBeDisabled();
+    expect(screen.getByText("Chosen")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Speaker 2 is the agent" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Speaker 1 is the agent" })).toBeEnabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("when scoring again failed (choice newer than the score), says so and lets the same voice be pressed again", async () => {
-    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-02T12:00:00.000Z" });
+  it("when scoring again failed (the score predates the choice), says so, and the chosen voice can be pressed again", async () => {
+    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-02T12:00:00.000Z", transcriptMode: "labelled", scoreMode: "unlabelled" });
     renderDetail();
     expect(await screen.findByRole("alert")).toHaveTextContent(/score shown was made before this choice/i);
-    expect(screen.getByRole("button", { name: "Speaker 2 is the agent" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "Speaker 2 is the agent" }));
     await waitFor(() => expect(state.calls.some((c) => c.method === "POST")).toBe(true));
   });
 
-  it("does not call a fresh choice stale", async () => {
-    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-01T12:00:00.500Z" });
+  it("does not depend on the clocks of two machines agreeing", async () => {
+    // A save that worked, with the choice stamped some seconds after the score by a skewed clock.
+    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-01T12:00:09.000Z", transcriptMode: "labelled", scoreMode: "labelled" });
     renderDetail();
     await screen.findByText("Who is the agent on this call?");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -154,6 +157,20 @@ describe("which voice is the agent", () => {
     renderDetail();
     await screen.findByText(/Thank you for calling Sunrise Benefits\./);
     expect(screen.queryByTestId("speaker-roles")).not.toBeInTheDocument();
+  });
+
+  it("shows nothing when the server says assignable but lists no voices", async () => {
+    state.detail = detail({ speakers: [] });
+    renderDetail();
+    await screen.findByText(/Thank you for calling Sunrise Benefits\./);
+    expect(screen.queryByTestId("speaker-roles")).not.toBeInTheDocument();
+  });
+
+  it("works with a single voice found", async () => {
+    state.detail = detail({ speakers: [{ label: "Speaker 1", turns: 2, role: "unknown" }] });
+    renderDetail();
+    expect(await screen.findByRole("button", { name: "Speaker 1 is the agent" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Speaker 2 is the agent" })).not.toBeInTheDocument();
   });
 
   it("does not break against a response without voice information", async () => {
