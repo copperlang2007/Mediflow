@@ -91,7 +91,7 @@ ones with no inbound references.
 ## Session log
 
 ### 2026-10-13 — Invite "Accept" says Unauthorized: retry with fresh token + safe diagnostics — Claude Code — branch `claudemoogs/fix-agency-invite-clean`
-- **Outcome:** partial (root cause NOT confirmed; mitigation and diagnostics shipped in the follow-up PR)
+- **Outcome:** partial (root cause NOT confirmed; mitigation and diagnostics implemented in the follow-up PR (not yet deployed))
 - **Changed:** After PR #291 reached production (deploy run 128 succeeded), accepting an invite still showed "Unauthorized" for a freshly created account: the server's own check found no verified Clerk session. Code review found the accept path identical to `/auth/provision`, so the cause is runtime (token/host/session state). The accept page now retries once with a brand-new Clerk token (`getToken({skipCache:true})`) after a 1.5 s pause and, if still refused, shows plain words instead of "Unauthorized" and keeps the remembered link. The API logs a non-PHI warning (booleans: bearer header present, session cookie present, host) when it refuses.
 - **Verified:** web tests for accept-invite and pendingInvite 31/31; API `invitations.test.ts` 25/25; `pnpm run typecheck` clean. NOT verified: that this fixes the live case (needs the owner to retry after deploy).
 - **Left undone / broken:** If the retry does not help, read Cloud Run logs for "Invitation accept refused": `hasBearer:false` means the browser never got a token (possibly an incomplete Clerk session, e.g. a pending sign-in step), `hasBearer:true` means the server rejected it (key/host mismatch between browser and API). No Google Cloud credentials in the agent session, so logs were not read.

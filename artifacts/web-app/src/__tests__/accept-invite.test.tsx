@@ -20,9 +20,13 @@ const clerkState = {
   user: null as { fullName?: string; primaryEmailAddress?: { emailAddress: string } } | null,
 };
 
+const getTokenMock = vi.hoisted(() =>
+  vi.fn(async (_opts?: { skipCache?: boolean }) => "clerk-token"),
+);
+
 vi.mock("@clerk/react", () => ({
   useUser: () => clerkState,
-  useAuth: () => ({ getToken: async (_opts?: unknown) => "clerk-token" }),
+  useAuth: () => ({ getToken: getTokenMock }),
 }));
 
 const toastError = vi.hoisted(() => vi.fn());
@@ -74,6 +78,7 @@ const LONG_TOKEN = "test-invite-token-0123456789";
 
 beforeEach(() => {
   window.localStorage.clear();
+  getTokenMock.mockClear();
   clerkState.isSignedIn = false;
   clerkState.user = null;
   // wouter's memoryLocation does not touch window.location, which the page
@@ -281,9 +286,20 @@ describe("keeping the invitation through sign-up", () => {
       return base(input);
     });
     vi.stubGlobal("fetch", fetchMock);
+    getTokenMock
+      .mockResolvedValueOnce("stale-token")
+      .mockResolvedValueOnce("fresh-token");
     renderAt(`/accept-invite?token=${LONG_TOKEN}`);
     fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }));
     await waitFor(() => expect(posts).toBe(2), { timeout: 4000 });
+
+    // The retry must ask Clerk for a brand-new token and actually send it.
+    expect(getTokenMock).toHaveBeenNthCalledWith(2, { skipCache: true });
+    const sent = fetchMock.mock.calls
+      .filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")
+      .map(([, init]) => (init as RequestInit).headers as Record<string, string>);
+    expect(sent[0].Authorization).toBe("Bearer stale-token");
+    expect(sent[1].Authorization).toBe("Bearer fresh-token");
   });
 
   it("explains a persistent 401 in plain words instead of just 'Unauthorized'", async () => {

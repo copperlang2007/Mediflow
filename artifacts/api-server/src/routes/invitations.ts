@@ -520,7 +520,7 @@ router.post(
       // without logging anything about the person or the invitation.
       logger.warn(
         {
-          hasBearer: Boolean(req.headers.authorization),
+          hasBearer: /^Bearer\s+\S+/i.test(req.headers.authorization ?? ""),
           hasSessionCookie: /(?:^|;\s*)__session=/.test(req.headers.cookie ?? ""),
           host: req.headers["x-forwarded-host"] ?? req.headers.host,
         },
