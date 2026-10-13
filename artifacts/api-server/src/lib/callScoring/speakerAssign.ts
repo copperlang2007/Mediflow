@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { auditLogTable, callTranscriptsTable, db } from "@workspace/db";
+import { logger } from "../logger";
 import { rescoreTranscript, type IngestResult } from "./ingest";
 import { seal } from "./seal";
 import { applyAgentSpeaker } from "./speakerRoles";
@@ -25,6 +26,8 @@ export async function assignAgentSpeaker(input: {
   agentLabel: string;
   rubric: Rubric;
   aiMode: "auto" | "off";
+  /** Test seam: the scoring step that follows the save. */
+  rescore?: typeof rescoreTranscript;
 }): Promise<IngestResult> {
   const fail = (httpStatus: number, code: string, message: string): Failure => ({ kind: "error", httpStatus, code, message });
 
@@ -69,12 +72,25 @@ export async function assignAgentSpeaker(input: {
   });
   if (!saved) return fail(409, "text_unavailable", "The transcript text is no longer available to score.");
 
-  return rescoreTranscript({
-    orgId: input.orgId,
-    userId: input.userId,
-    userRole: input.userRole,
-    transcriptId: row.id,
-    rubric: input.rubric,
-    aiMode: input.aiMode,
-  });
+  // The choice is saved by now. If scoring again fails, say so plainly: the roles
+  // are kept, the old score is still shown, and pressing the button again retries.
+  const notRescored = fail(
+    502,
+    "rescore_failed",
+    "Your choice was saved, but the call could not be scored again just now. The score shown is the earlier one. Press the button again to retry.",
+  );
+  try {
+    const result = await (input.rescore ?? rescoreTranscript)({
+      orgId: input.orgId,
+      userId: input.userId,
+      userRole: input.userRole,
+      transcriptId: row.id,
+      rubric: input.rubric,
+      aiMode: input.aiMode,
+    });
+    return result.kind === "ok" ? result : notRescored;
+  } catch (err) {
+    logger.error({ err: err instanceof Error ? err.name : "unknown", transcriptId: row.id }, "call scoring: rescore after speaker choice failed");
+    return notRescored;
+  }
 }

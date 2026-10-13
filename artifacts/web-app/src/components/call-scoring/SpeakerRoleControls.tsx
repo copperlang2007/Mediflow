@@ -31,7 +31,11 @@ export function SpeakerRoleControls({ detail }: { detail: CsDetail }) {
       toast.success("Saved. The call was scored again with that voice as the agent. The earlier result is kept in the history.");
       void qc.invalidateQueries({ queryKey: QK });
     },
-    onError: (err) => toast.error(apiMessage(err, "That did not work. Nothing was changed.")),
+    onError: (err) => {
+      toast.error(apiMessage(err, "That did not work. Nothing was changed."));
+      // The choice may have been saved even though scoring again failed.
+      void qc.invalidateQueries({ queryKey: QK });
+    },
   });
 
   if (!info?.assignable) return null;

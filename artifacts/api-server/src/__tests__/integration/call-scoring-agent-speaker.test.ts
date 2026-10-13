@@ -132,6 +132,23 @@ describe("choosing which voice is the agent", () => {
     expect(audit[0]!.changes).toMatchObject({ speakerMode: "labelled", agentTurns: 3, clientTurns: 2 });
   });
 
+  it("when scoring again fails, keeps the saved choice and says so plainly", async () => {
+    const id = await create(oneTrackCall());
+    const { assignAgentSpeaker } = await import("../../lib/callScoring/speakerAssign");
+    const { getRubric, DEFAULT_RUBRIC_ID } = await import("../../lib/callScoring/rubrics");
+    const base = { orgId: org.id, userId: admin.id, userRole: "agency_admin", transcriptId: id, agentLabel: "Speaker 2", rubric: getRubric(DEFAULT_RUBRIC_ID)!, aiMode: "off" as const };
+
+    const thrown = await assignAgentSpeaker({ ...base, rescore: async () => { throw new Error("boom with Sunrise Benefits"); } });
+    expect(thrown).toMatchObject({ kind: "error", httpStatus: 502, code: "rescore_failed" });
+    const errored = await assignAgentSpeaker({ ...base, rescore: async () => ({ kind: "error", httpStatus: 500, code: "x", message: "y" }) });
+    expect(errored).toMatchObject({ kind: "error", code: "rescore_failed" });
+
+    const [row] = await handle.db.select().from(schema.callTranscriptsTable).where(eq(schema.callTranscriptsTable.id, id));
+    expect(row!.speakerMode).toBe("labelled");
+    // Retrying the real thing works.
+    await choose(admin.id, id, { agentSpeaker: "Speaker 2" }).expect(201);
+  });
+
   it("refuses a voice that is not in the call, and a blank choice", async () => {
     const id = await create(oneTrackCall());
     await choose(admin.id, id, { agentSpeaker: "Speaker 9" }).expect(422);
