@@ -17,6 +17,7 @@ import { StatusPill } from "@/components/shared";
 import { AlertTriangle, LocateFixed, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DncResolveControls } from "./DncResolveControls";
+import { SpeakerRoleControls } from "./SpeakerRoleControls";
 import {
   COMPLIANCE_TONE,
   CRITERION_TONE,
@@ -301,6 +302,8 @@ export function CallDetail({ transcriptId, canReview, onClose }: { transcriptId:
               {score.effective.openDnc > 0 && <StatusPill tone="danger">{score.effective.openDnc} possible do-not-contact</StatusPill>}
               <span className="ml-auto text-xs text-muted-foreground">Scored {fmtDate(score.createdAt)}</span>
             </div>
+
+            {canReview && <SpeakerRoleControls detail={data} />}
 
             {caveats.length > 0 && (
               <ul className="space-y-1 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm" aria-label="About this score">

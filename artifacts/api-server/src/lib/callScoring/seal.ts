@@ -27,6 +27,8 @@ export interface TranscriptPayload {
   filename: string | null;
   /** The phone number given with the upload, kept sealed. */
   phone: string | null;
+  /** Set when a reviewer chose which voice is the agent on a one-track recording. */
+  speakerAssignment?: { agentLabel: string; userId: string; at: string };
 }
 
 export function sealTranscript(parsed: ParsedTranscript, extra: { filename?: string | null; phone?: string | null }): Buffer {

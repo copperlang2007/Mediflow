@@ -8,7 +8,7 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-13 — Agency invitation fixes, PR #291 (see session log)._
+_Last updated: 2026-10-13 — Call scoring agent-voice button (see session log)._
 
 ### Health dashboard
 
@@ -89,6 +89,15 @@ ones with no inbound references.
 ---
 
 ## Session log
+
+### 2026-10-13 — Call scoring: "Which voice is the agent?" button for one-track recordings — Claude Code — branch `claudemoogs/gracious-brown-0kq356`
+- **Outcome:** done (code and tests); not yet seen on real recordings.
+- **Changed:** New reviewer button on the call page: on a one-track recording the reviewer picks which voice ("Speaker 1"/"Speaker 2") is the agent; the other voice becomes the client, the choice is saved sealed with the transcript, and the call is scored again (old score kept as history). New route `POST /api/call-scoring/transcripts/:id/agent-speaker` (`routes/callScoring.ts`), `lib/callScoring/speakerRoles.ts` (pure logic), `speakerAssign.ts` (save + rescore + audit counts only), `components/call-scoring/SpeakerRoleControls.tsx`. Call detail now returns `transcript.speakers` and `speakerAssignedAt`. No migration, no OpenAPI change. Doc: `docs/call-scoring.md`.
+- **Verified:** `pnpm run typecheck` clean; `pnpm test` 234 files / 2586 tests passed, including the new `call-speaker-roles` (unit, 17), `call-scoring-agent-speaker` (integration, 7, incl. cross-org 404, viewer 403, audit has no words) and `call-scoring-speaker-roles` (web, 7). The unit test was run and seen failing before the code existed. NOT verified: against a real EnrollHere recording (no production access from this session).
+- **Left undone / broken:** The owner reports messy transcripts generally ("none of it is clean and cohesive"); this button fixes WHO is speaking, not word accuracy or turn order. Suspected but unconfirmed: (a) stereo recordings get wrong turn start times in `resultsToTurns` (`lib/callScoring/speech.ts`: a turn's start is the previous end on the same channel, so turns can interleave wrongly); (b) `diarizationConfig` min/max speaker counts with `chirp_3` were not checked against Google's limits; (c) phone audio with `en-US` only. EnrollHere cannot export two-channel audio (owner, 2026-10-13), so recordings stay one-track.
+- **Decisions made:** The app still never guesses the agent; a person chooses. Roles stay keyed on the voice label, so a correction is possible. No ADR.
+- **Next agent should:** Get one real bad recording's transcript (owner pastes ~20 de-identified lines from the call page) and find out whether the words, the order, or the speaker split is wrong; then fix the cause (see suspects above). Do not read production transcripts without the owner's go-ahead (PHI).
+- **Needs a human:** Owner: after deploy, open a one-track recording, press the agent button, and confirm the labels and score look right.
 
 ### 2026-10-13 — Invite "Accept" says Unauthorized: retry with fresh token + safe diagnostics — Claude Code — branch `claudemoogs/fix-agency-invite-clean`
 - **Outcome:** partial (root cause NOT confirmed; mitigation and diagnostics implemented in the follow-up PR (not yet deployed))

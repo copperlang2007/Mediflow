@@ -166,6 +166,9 @@ export interface CsDetail {
     timing: "recorded" | "estimated";
     filename: string | null;
     textAvailable: boolean;
+    /** Voices a reviewer can choose between on a one-track recording. Absent on older responses. */
+    speakers?: { assignable: boolean; speakers: Array<{ label: string; turns: number; role: "agent" | "client" | "unknown" }> };
+    speakerAssignedAt?: string | null;
     contact: { id: string; name: string } | null;
     contactMatch: string;
     agent: { id: string; name: string } | null;

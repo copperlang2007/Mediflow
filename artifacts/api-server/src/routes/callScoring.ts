@@ -4,6 +4,7 @@
  *   GET   /call-scoring/config                              what is / is not set up
  *   POST  /call-scoring/transcripts                         paste or upload + score (rules, AI if set up)
  *   POST  /call-scoring/transcripts/:id/rescore             new automatic result; history kept
+ *   POST  /call-scoring/transcripts/:id/agent-speaker       reviewer says which voice is the agent, then rescores
  *   GET   /call-scoring/transcripts                         list + filters
  *   GET   /call-scoring/transcripts/:id                     detail: findings with quotes and positions
  *   PATCH /call-scoring/transcripts/:id/criteria/:criterionId   human override (auto result untouched)
@@ -52,6 +53,7 @@ import { PARSE_LIMITS } from "../lib/callScoring/parse";
 import { DEFAULT_RUBRIC_ID, builtInRubrics, getRubric } from "../lib/callScoring/rubrics";
 import { resolveAiReviewer } from "../lib/callScoring/aiReviewer";
 import { ingestTranscript, rescoreTranscript, resolveRubric, type IngestResult } from "../lib/callScoring/ingest";
+import { assignAgentSpeaker } from "../lib/callScoring/speakerAssign";
 import { DISCLAIMER, buildDetail, buildList, buildSummary } from "../lib/callScoring/detail";
 import { listDncQueue, resolveDncFinding } from "../lib/callScoring/dncReview";
 import { loadTranscriptRow, retainUntil, type ScopeFilter } from "../lib/callScoring/store";
@@ -339,6 +341,40 @@ router.post(
       userId: authReq.userId,
       userRole: authReq.userRole,
       transcriptId: param(req.params.id),
+      rubric,
+      aiMode: aiModeFrom(parsed.data.ai),
+    });
+    if (result.kind === "ok") res.status(201).json(result.summary);
+    else if (result.kind === "error") res.status(result.httpStatus).json({ error: result.message, code: result.code });
+    else res.status(409).json({ error: "Unexpected duplicate.", code: "duplicate" });
+  },
+);
+
+router.post(
+  "/call-scoring/transcripts/:id/agent-speaker",
+  requireAuth,
+  requireMfa,
+  requirePermission("call_scoring", "create"),
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const parsed = z
+      .object({ agentSpeaker: z.string().trim().min(1).max(40), rubricId: optional(z.string().trim().max(64)), ai: boolField })
+      .safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "Choose which voice is the agent.", code: "invalid" });
+      return;
+    }
+    const rubric = resolveRubric(parsed.data.rubricId, getRubric(DEFAULT_RUBRIC_ID) as Rubric);
+    if (!rubric) {
+      res.status(400).json({ error: "Unknown rubric.", code: "unknown_rubric" });
+      return;
+    }
+    const result = await assignAgentSpeaker({
+      orgId: authReq.orgId,
+      userId: authReq.userId,
+      userRole: authReq.userRole,
+      transcriptId: param(req.params.id),
+      agentLabel: parsed.data.agentSpeaker,
       rubric,
       aiMode: aiModeFrom(parsed.data.ai),
     });
