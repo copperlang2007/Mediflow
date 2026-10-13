@@ -31,9 +31,20 @@ describe("speakerSummary", () => {
   });
 
   it("reports the role a past choice gave each voice", () => {
-    const s = speakerSummary([u(0, "Speaker 1", "agent"), u(1, "Speaker 2", "client")]);
+    const s = speakerSummary([u(0, "Speaker 1", "agent"), u(1, "Speaker 2", "client")], { reassigning: true });
     expect(s.speakers.map((x) => x.role)).toEqual(["agent", "client"]);
     expect(s.assignable).toBe(true);
+  });
+
+  it("trusts roles the file itself supplied, even on numbered voices", () => {
+    const fromFile = [u(0, "Speaker 1", "agent"), u(1, "Speaker 2", "client")];
+    expect(speakerSummary(fromFile).assignable).toBe(false);
+    expect(applyAgentSpeaker(fromFile, "Speaker 2").ok).toBe(false);
+  });
+
+  it("still protects a file's own named agent when re-choosing", () => {
+    const mixed = [u(0, "Dana (Agent)", "agent"), u(1, "Speaker 1", "client")];
+    expect(speakerSummary(mixed, { reassigning: true }).assignable).toBe(false);
   });
 });
 
@@ -49,7 +60,7 @@ describe("applyAgentSpeaker", () => {
   it("can be corrected: choosing the other voice swaps the roles", () => {
     const first = applyAgentSpeaker([u(0, "Speaker 1"), u(1, "Speaker 2")], "Speaker 1");
     if (!first.ok) throw new Error(first.message);
-    const second = applyAgentSpeaker(first.utterances, "Speaker 2");
+    const second = applyAgentSpeaker(first.utterances, "Speaker 2", { reassigning: true });
     if (!second.ok) throw new Error(second.message);
     expect(second.utterances.map((x) => x.role)).toEqual(["client", "agent"]);
   });

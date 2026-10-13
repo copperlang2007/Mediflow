@@ -37,7 +37,7 @@ export async function assignAgentSpeaker(input: {
   if (!payload || !payload.utterances.length) {
     return fail(409, "text_unavailable", "The transcript text is no longer available to score.");
   }
-  const applied = applyAgentSpeaker(payload.utterances, input.agentLabel);
+  const applied = applyAgentSpeaker(payload.utterances, input.agentLabel, { reassigning: Boolean(payload.speakerAssignment) });
   if (!applied.ok) return fail(422, "speaker_not_assignable", applied.message);
 
   // Marks this choice. A scoring run only saves if this is still the latest choice.

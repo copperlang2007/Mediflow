@@ -311,7 +311,7 @@ export async function buildDetail(orgId: string, transcriptId: string, scope: Sc
       filename: payload?.filename ?? null,
       textAvailable: Boolean(payload),
       // Which voices a reviewer can choose between (one-track recordings only).
-      speakers: speakerSummary(utterances),
+      speakers: speakerSummary(utterances, { reassigning: Boolean(payload?.speakerAssignment) }),
       speakerAssignedAt: payload?.speakerAssignment?.at ?? null,
       callSessionLinked: Boolean(row.callSessionId),
       contact: row.contactId ? { id: row.contactId, name: names.contacts.get(row.contactId) ?? "Unnamed" } : null,

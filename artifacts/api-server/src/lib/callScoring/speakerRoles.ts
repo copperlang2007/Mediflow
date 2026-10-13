@@ -24,13 +24,22 @@ export interface SpeakerSummary {
   assignable: boolean;
 }
 
-/** A file or caption that names the agent itself is trusted as-is. */
-function namesAgentItself(utterances: Utterance[]): boolean {
-  return utterances.some((u) => u.role === "agent" && !VOICE_LABEL.test(u.speaker));
+export interface RoleSource {
+  /** True when a reviewer already chose, so roles on the numbered voices came from that choice. */
+  reassigning?: boolean;
 }
 
-export function speakerSummary(utterances: Utterance[]): SpeakerSummary {
-  if (namesAgentItself(utterances)) return { speakers: [], assignable: false };
+/**
+ * Roles that came with the file are trusted as-is, even on a numbered voice
+ * (a JSON export can say {"speaker":"Speaker 1","role":"agent"}). The only
+ * roles a reviewer may replace are the ones an earlier choice of theirs made.
+ */
+function fileSuppliedRoles(utterances: Utterance[], source: RoleSource): boolean {
+  return utterances.some((u) => u.role !== "unknown" && !(source.reassigning && VOICE_LABEL.test(u.speaker)));
+}
+
+export function speakerSummary(utterances: Utterance[], source: RoleSource = {}): SpeakerSummary {
+  if (fileSuppliedRoles(utterances, source)) return { speakers: [], assignable: false };
   const byLabel = new Map<string, SpeakerInfo>();
   for (const u of utterances) {
     if (!VOICE_LABEL.test(u.speaker)) continue;
@@ -51,8 +60,8 @@ export type ApplyResult =
  * becomes the client; with more than one other voice they stay unknown, because
  * nothing says which of them is the client. Returns new objects.
  */
-export function applyAgentSpeaker(utterances: Utterance[], agentLabel: string): ApplyResult {
-  const { speakers, assignable } = speakerSummary(utterances);
+export function applyAgentSpeaker(utterances: Utterance[], agentLabel: string, source: RoleSource = {}): ApplyResult {
+  const { speakers, assignable } = speakerSummary(utterances, source);
   if (!assignable) {
     return { ok: false, message: "This call has no separate voices to choose from." };
   }
