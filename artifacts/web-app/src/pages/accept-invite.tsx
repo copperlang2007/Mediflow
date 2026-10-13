@@ -144,22 +144,35 @@ export default function AcceptInvitePage() {
     // empty `fullName` on the most common path: an invitee who accepts without
     // editing the prefilled name.
     mutationFn: async (name: string) => {
-      const clerkToken = await getToken();
       const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-      const res = await fetch(`${base}/api/invitations/accept`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          ...(clerkToken ? { Authorization: `Bearer ${clerkToken}` } : {}),
-        },
-        body: JSON.stringify({ token, fullName: name.trim() }),
-      });
+      const post = async (clerkToken: string | null) =>
+        fetch(`${base}/api/invitations/accept`, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            ...(clerkToken ? { Authorization: `Bearer ${clerkToken}` } : {}),
+          },
+          body: JSON.stringify({ token, fullName: name.trim() }),
+        });
+      let res = await post(await getToken());
+      if (res.status === 401) {
+        // A session minted moments ago can present a token the server does
+        // not yet accept (clock skew, or a sign-in step still finishing).
+        // Ask Clerk for a brand-new one and try once more before giving up.
+        await new Promise((r) => setTimeout(r, 1500));
+        res = await post(await getToken({ skipCache: true }));
+      }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as {
           error?: string;
           code?: string;
         };
+        if (res.status === 401) {
+          throw new Error(
+            "We could not confirm your sign-in. Please sign out, sign back in, and open the invitation link again.",
+          );
+        }
         // Link used, withdrawn, expired, or this account already has an
         // agency: retrying cannot help, so stop sending the person back.
         if (body.code && TERMINAL_CODES.has(body.code)) {

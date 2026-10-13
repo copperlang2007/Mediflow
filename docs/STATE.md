@@ -90,6 +90,15 @@ ones with no inbound references.
 
 ## Session log
 
+### 2026-10-13 — Invite "Accept" says Unauthorized: retry with fresh token + safe diagnostics — Claude Code — branch `claudemoogs/fix-agency-invite-clean`
+- **Outcome:** partial (root cause NOT confirmed; mitigation and diagnostics shipped in the follow-up PR)
+- **Changed:** After PR #291 reached production (deploy run 128 succeeded), accepting an invite still showed "Unauthorized" for a freshly created account: the server's own check found no verified Clerk session. Code review found the accept path identical to `/auth/provision`, so the cause is runtime (token/host/session state). The accept page now retries once with a brand-new Clerk token (`getToken({skipCache:true})`) after a 1.5 s pause and, if still refused, shows plain words instead of "Unauthorized" and keeps the remembered link. The API logs a non-PHI warning (booleans: bearer header present, session cookie present, host) when it refuses.
+- **Verified:** web tests for accept-invite and pendingInvite 31/31; API `invitations.test.ts` 25/25; `pnpm run typecheck` clean. NOT verified: that this fixes the live case (needs the owner to retry after deploy).
+- **Left undone / broken:** If the retry does not help, read Cloud Run logs for "Invitation accept refused": `hasBearer:false` means the browser never got a token (possibly an incomplete Clerk session, e.g. a pending sign-in step), `hasBearer:true` means the server rejected it (key/host mismatch between browser and API). No Google Cloud credentials in the agent session, so logs were not read.
+- **Decisions made:** none.
+- **Next agent should:** read the log line above after the owner retries; then continue with the call-log import access request.
+- **Needs a human:** Owner: retry the invite after deploy and report the message shown; someone with Google Cloud access can search the logs for "Invitation accept refused".
+
 ### 2026-10-13 — Fix agency invitations (last-seat accept, invite lost during sign-up) — Claude Code — branch `claudemoogs/fix-agency-invite-clean`
 - **Outcome:** partial (code done, PR #291 open and awaiting review/merge)
 - **Changed:** Two independent bugs. (1) The server counted an invitation's own reserved seat against the invitee, so accepting the invite that took an agency's last seat failed with 402; `requireSeat`/`countSeatsUsed` now exclude that invitation. (2) The invite link lived only in the page address, so sign-up (email verification in a new tab, MFA) dropped it and the new user landed on "Create your agency"; the link is now remembered in the browser (`web-app/src/lib/pendingInvite.ts`, bounded by the invite's real expiry) and the provisioning gate sends the person back to accept it. Review follow-ups: a temporary lookup failure (rate limit, server error, offline) keeps the link; only a dead link is forgotten; a "forget this invitation" option; clearing is token-specific.
