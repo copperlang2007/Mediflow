@@ -40,9 +40,8 @@ export function SpeakerRoleControls({ detail }: { detail: CsDetail }) {
 
   if (!info?.assignable || info.speakers.length === 0) return null;
   const assigned = detail.transcript.speakerAssignedAt;
-  // The score was made while nobody was identified, but now someone is: scoring again failed after the choice was saved.
-  // (Compares what each side recorded, not clocks from two machines.)
-  const scoreStale = Boolean(assigned && detail.score?.speakerMode && detail.score.speakerMode !== detail.transcript.speakerMode);
+  // The server knows which choice the latest score was made under; false means scoring again failed after the choice was saved.
+  const scoreStale = Boolean(assigned && detail.transcript.speakerScoreCurrent === false);
 
   return (
     <section aria-label="Who is the agent" className="rounded-lg border border-border bg-muted/30 p-3 text-sm" data-testid="speaker-roles">

@@ -313,6 +313,8 @@ export async function buildDetail(orgId: string, transcriptId: string, scope: Sc
       // Which voices a reviewer can choose between (one-track recordings only).
       speakers: speakerSummary(utterances, { reassigning: Boolean(payload?.speakerAssignment) }),
       speakerAssignedAt: payload?.speakerAssignment?.at ?? null,
+      // False when a reviewer's choice was saved but the call was not scored again under it.
+      speakerScoreCurrent: payload?.speakerAssignment ? payload.speakerAssignment.scoredId === payload.speakerAssignment.id : true,
       callSessionLinked: Boolean(row.callSessionId),
       contact: row.contactId ? { id: row.contactId, name: names.contacts.get(row.contactId) ?? "Unnamed" } : null,
       contactMatch: row.contactMatch,

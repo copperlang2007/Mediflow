@@ -18,7 +18,7 @@ import {
 import { runScoring, type RunScoringOptions, type ScoreRun } from "./engine";
 import { TranscriptParseError, parseTranscript } from "./parse";
 import { persistScore, persistScoredTranscript, matchContactByPhone, loadTranscriptRow, openTranscript } from "./store";
-import { contentDigest, open, type TranscriptPayload } from "./seal";
+import { contentDigest, open, seal, type TranscriptPayload } from "./seal";
 import { getRubric } from "./rubrics";
 import type { ParsedTranscript, Rubric, TranscriptFormat } from "./types";
 
@@ -322,10 +322,18 @@ export async function rescoreTranscript(input: {
       .select({ sealed: callTranscriptsTable.transcriptEncrypted })
       .from(callTranscriptsTable)
       .where(and(eq(callTranscriptsTable.id, row.id), eq(callTranscriptsTable.orgId, input.orgId)))
-      .for("share") // held until this score commits, so a newer speaker choice waits for it
+      .for("update") // held until this score commits, so a newer speaker choice waits for it
       .limit(1);
-    if ((open<TranscriptPayload>(current?.sealed)?.speakerAssignment?.id ?? null) !== assignmentSeen) return null;
+    const currentPayload = open<TranscriptPayload>(current?.sealed);
+    if ((currentPayload?.speakerAssignment?.id ?? null) !== assignmentSeen) return null;
     const id = await persistScore(tx, { orgId: input.orgId, transcriptId: row.id, userId: input.userId, run, parsed });
+    if (currentPayload?.speakerAssignment && assignmentSeen) {
+      // Remember which choice this score was made under, so a later page view can tell a missing re-score.
+      await tx
+        .update(callTranscriptsTable)
+        .set({ transcriptEncrypted: seal({ ...currentPayload, speakerAssignment: { ...currentPayload.speakerAssignment, scoredId: assignmentSeen } }) })
+        .where(and(eq(callTranscriptsTable.id, row.id), eq(callTranscriptsTable.orgId, input.orgId)));
+    }
     await tx.insert(auditLogTable).values({
       id: randomUUID(),
       orgId: input.orgId,

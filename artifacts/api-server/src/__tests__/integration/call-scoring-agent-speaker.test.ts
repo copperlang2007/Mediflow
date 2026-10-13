@@ -249,6 +249,50 @@ describe("choosing which voice is the agent", () => {
     expect(second).not.toBe(first);
   });
 
+  it("tells a missing re-score apart even when the choice only swapped the two voices", async () => {
+    const id = await create(oneTrackCall());
+    const { assignAgentSpeaker } = await import("../../lib/callScoring/speakerAssign");
+    const { getRubric, DEFAULT_RUBRIC_ID } = await import("../../lib/callScoring/rubrics");
+    const base = { orgId: org.id, userId: admin.id, userRole: "agency_admin", transcriptId: id, rubric: getRubric(DEFAULT_RUBRIC_ID)!, aiMode: "off" as const };
+    const scoreCurrent = async () =>
+      (await request(app).get(`/api/call-scoring/transcripts/${id}`).set(withAuth(admin.id)).expect(200)).body.transcript.speakerScoreCurrent as boolean;
+
+    await choose(admin.id, id, { agentSpeaker: "Speaker 1" }).expect(201);
+    expect(await scoreCurrent()).toBe(true);
+
+    // Swap the voices; both choices leave the call "labelled", but scoring again fails.
+    const failed = await assignAgentSpeaker({ ...base, agentLabel: "Speaker 2", rescore: async () => { throw new Error("boom"); } });
+    expect(failed).toMatchObject({ code: "rescore_failed" });
+    expect(await scoreCurrent()).toBe(false);
+
+    await choose(admin.id, id, { agentSpeaker: "Speaker 2" }).expect(201); // pressing the chosen voice again retries
+    expect(await scoreCurrent()).toBe(true);
+  });
+
+  it("a stop-calling request that is no longer flagged after the agent is named cannot be acted on from a stale list", async () => {
+    // Speaker 1 says it; nobody is identified yet, so it is flagged.
+    const id = await create(`${oneTrackCall()}\nSpeaker 1: Please stop calling me.`);
+    const [stale] = await handle.db
+      .select()
+      .from(schema.callScoreFindingsTable)
+      .where(and(eq(schema.callScoreFindingsTable.transcriptId, id), eq(schema.callScoreFindingsTable.kind, "dnc")));
+    expect(stale).toBeTruthy();
+
+    // A second reviewer names Speaker 1 as the AGENT: those words were the agent's.
+    await choose(admin.id, id, { agentSpeaker: "Speaker 1" }).expect(201);
+
+    for (const body of [
+      { action: "dismiss", note: "from a stale list" },
+      { action: "add_opt_out", phoneSource: "typed", phone: "+13105550199" },
+    ]) {
+      const res = await request(app).post(`/api/call-scoring/dnc-review/${stale!.id}/resolve`).set(withAuth(admin.id)).send(body);
+      expect(res.status, JSON.stringify(res.body)).toBe(409);
+      expect(res.body.code).toBe("out_of_date");
+    }
+    const optOuts = await handle.db.select().from(schema.optOutsTable).where(eq(schema.optOutsTable.orgId, org.id));
+    expect(optOuts.filter((o) => o.phone === "+13105550199")).toHaveLength(0);
+  });
+
   it("refuses a voice that is not in the call, and a blank choice", async () => {
     const id = await create(oneTrackCall());
     await choose(admin.id, id, { agentSpeaker: "Speaker 9" }).expect(422);

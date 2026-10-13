@@ -29,6 +29,7 @@ import {
   optOutsTable,
   usersTable,
   agentsTable,
+  callScoresTable,
 } from "@workspace/db";
 import { recordEmailOptOut, recordPhoneOptOut } from "../compliance/optOut";
 import { phoneMatchKey, phoneMatchKeySql } from "../compliance/phone";
@@ -324,6 +325,32 @@ export async function resolveDncFinding(args: {
     .where(and(eq(callTranscriptsTable.id, finding.transcriptId), eq(callTranscriptsTable.orgId, orgId)))
     .limit(1);
   if (!transcript) return { ok: false, httpStatus: 404, code: "not_found", message: "Request not found." };
+
+  // A request that is no longer on the call's latest result (for example, after a reviewer
+  // named the agent and these words turned out to be the agent's) must not add an opt-out.
+  const [latestScore] = await db
+    .select({ id: callScoresTable.id })
+    .from(callScoresTable)
+    .where(and(eq(callScoresTable.transcriptId, transcript.id), eq(callScoresTable.orgId, orgId)))
+    .orderBy(desc(callScoresTable.createdAt), desc(callScoresTable.id))
+    .limit(1);
+  if (latestScore && latestScore.id !== finding.scoreId) {
+    const [stillThere] = await db
+      .select({ id: callScoreFindingsTable.id })
+      .from(callScoreFindingsTable)
+      .where(
+        and(
+          eq(callScoreFindingsTable.orgId, orgId),
+          eq(callScoreFindingsTable.scoreId, latestScore.id),
+          eq(callScoreFindingsTable.kind, "dnc"),
+          eq(callScoreFindingsTable.fingerprint, finding.fingerprint),
+        ),
+      )
+      .limit(1);
+    if (!stillThere) {
+      return { ok: false, httpStatus: 409, code: "out_of_date", message: "This request is out of date: the call was scored again and these words are no longer flagged. Reload the list." };
+    }
+  }
 
   const existingFor = async (h: AnyDb) => {
     const [row] = await h

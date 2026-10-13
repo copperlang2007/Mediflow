@@ -169,6 +169,8 @@ export interface CsDetail {
     /** Voices a reviewer can choose between on a one-track recording. Absent on older responses. */
     speakers?: { assignable: boolean; speakers: Array<{ label: string; turns: number; role: "agent" | "client" | "unknown" }> };
     speakerAssignedAt?: string | null;
+    /** False when a choice was saved but the call was not scored again under it. Absent on older responses. */
+    speakerScoreCurrent?: boolean;
     contact: { id: string; name: string } | null;
     contactMatch: string;
     agent: { id: string; name: string } | null;

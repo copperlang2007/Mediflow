@@ -113,12 +113,13 @@ export async function assignAgentSpeaker(input: {
       aiMode,
       // Two reviewers choosing at once: only the latest choice may save a score.
       stillOwned: async (tx) => {
-        // A shared lock held until the score is committed: a newer choice (which takes an exclusive lock) waits for it.
+        // Locked until the score is committed: a newer choice waits for it. (Taken exclusively from the start,
+        // because the score save writes to this row too and a share-then-update upgrade can deadlock.)
         const [current] = await tx
           .select({ sealed: callTranscriptsTable.transcriptEncrypted })
           .from(callTranscriptsTable)
           .where(and(eq(callTranscriptsTable.id, row.id), eq(callTranscriptsTable.orgId, input.orgId)))
-          .for("share")
+          .for("update")
           .limit(1);
         return open<TranscriptPayload>(current?.sealed)?.speakerAssignment?.id === assignmentId;
       },

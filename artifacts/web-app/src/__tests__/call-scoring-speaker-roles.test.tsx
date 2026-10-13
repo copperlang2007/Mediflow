@@ -41,7 +41,7 @@ const voices = (r1: Role = "unknown", r2: Role = "unknown") => [
   { label: "Speaker 2", turns: 3, role: r2 },
 ];
 
-function detail(over: { assignable?: boolean; speakers?: ReturnType<typeof voices>; assignedAt?: string | null; omit?: boolean; transcriptMode?: string; scoreMode?: string } = {}) {
+function detail(over: { assignable?: boolean; speakers?: ReturnType<typeof voices>; assignedAt?: string | null; omit?: boolean; scoreCurrent?: boolean } = {}) {
   const assignable = over.assignable ?? true;
   const transcript: Record<string, unknown> = {
     id: "t1",
@@ -51,7 +51,7 @@ function detail(over: { assignable?: boolean; speakers?: ReturnType<typeof voice
     callDate: null,
     createdAt: "2026-09-01T12:00:00.000Z",
     retainUntil: "2036-09-01T12:00:00.000Z",
-    speakerMode: over.transcriptMode ?? "unlabelled",
+    speakerMode: "unlabelled",
     timing: "recorded",
     filename: null,
     textAvailable: true,
@@ -62,6 +62,7 @@ function detail(over: { assignable?: boolean; speakers?: ReturnType<typeof voice
   if (!over.omit) {
     transcript.speakers = { assignable, speakers: assignable ? (over.speakers ?? voices()) : [] };
     transcript.speakerAssignedAt = over.assignedAt ?? null;
+    transcript.speakerScoreCurrent = over.scoreCurrent ?? true;
   }
   return {
     transcript,
@@ -75,7 +76,6 @@ function detail(over: { assignable?: boolean; speakers?: ReturnType<typeof voice
       createdAt: "2026-09-01T12:00:00.000Z",
       rubric: { id: "iia-2026", version: "1", name: "IIA", passThreshold: 80 },
       ai: { status: "needs_setup", model: null, error: null },
-      speakerMode: over.scoreMode ?? "unlabelled",
       auto: { score: 50, compliance: "review", criticalFailures: [], needsReview: [] },
       effective: { score: 50, compliance: "review", criticalFailures: [], needsReview: [], openDnc: 0, meetsStandard: false },
     },
@@ -121,7 +121,7 @@ describe("which voice is the agent", () => {
   });
 
   it("after a choice, the chosen voice is marked, and either voice can still be pressed to correct or retry", async () => {
-    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-02T12:00:00.000Z", transcriptMode: "labelled", scoreMode: "labelled" });
+    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-02T12:00:00.000Z", scoreCurrent: true });
     renderDetail();
     expect(await screen.findByText("Who is the agent on this call?")).toBeInTheDocument();
     expect(screen.getByText("Chosen")).toBeInTheDocument();
@@ -131,7 +131,7 @@ describe("which voice is the agent", () => {
   });
 
   it("when scoring again failed (the score predates the choice), says so, and the chosen voice can be pressed again", async () => {
-    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-02T12:00:00.000Z", transcriptMode: "labelled", scoreMode: "unlabelled" });
+    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-02T12:00:00.000Z", scoreCurrent: false });
     renderDetail();
     expect(await screen.findByRole("alert")).toHaveTextContent(/score shown was made before this choice/i);
     await userEvent.click(screen.getByRole("button", { name: "Speaker 2 is the agent" }));
@@ -140,7 +140,7 @@ describe("which voice is the agent", () => {
 
   it("does not depend on the clocks of two machines agreeing", async () => {
     // A save that worked, with the choice stamped some seconds after the score by a skewed clock.
-    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-01T12:00:09.000Z", transcriptMode: "labelled", scoreMode: "labelled" });
+    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-01T12:00:09.000Z", scoreCurrent: true });
     renderDetail();
     await screen.findByText("Who is the agent on this call?");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
