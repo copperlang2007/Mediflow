@@ -53,7 +53,7 @@ export function SpeakerRoleControls({ detail }: { detail: CsDetail }) {
       </p>
       {scoreStale && (
         <p role="alert" className="mt-2 text-warning">
-          The score shown was made before this choice. Press the agent voice again to score the call again.
+          The score shown was made before this choice. If the call is still being scored, give it a minute and reload; if it stays like this, press the agent voice again to score it again.
         </p>
       )}
       <ul className="mt-3 space-y-2">
