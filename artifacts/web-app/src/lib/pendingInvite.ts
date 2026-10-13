@@ -29,15 +29,53 @@ const TOKEN_SHAPE = /^[A-Za-z0-9_-]{20,200}$/;
 interface Stored {
   token: string;
   savedAt: number;
+  /** The invitation's real expiry, once the server has told us (epoch ms). */
+  expiresAt?: number;
+}
+
+function readStored(): Stored | null {
+  const raw = window.localStorage.getItem(KEY);
+  if (!raw) return null;
+  const parsed = JSON.parse(raw) as Partial<Stored>;
+  if (typeof parsed.token !== "string" || typeof parsed.savedAt !== "number") {
+    return null;
+  }
+  return {
+    token: parsed.token,
+    savedAt: parsed.savedAt,
+    expiresAt: typeof parsed.expiresAt === "number" ? parsed.expiresAt : undefined,
+  };
 }
 
 export function rememberPendingInvite(token: string, now: number = Date.now()): void {
   if (!TOKEN_SHAPE.test(token)) return;
   try {
-    const value: Stored = { token, savedAt: now };
+    // Re-opening the same link keeps the expiry already learned for it.
+    const prior = readStored();
+    const value: Stored = {
+      token,
+      savedAt: now,
+      expiresAt: prior?.token === token ? prior.expiresAt : undefined,
+    };
     window.localStorage.setItem(KEY, JSON.stringify(value));
   } catch {
     // Storage unavailable (private window, blocked site data): the URL still works.
+  }
+}
+
+/**
+ * Records the invitation's real expiry (from the server's preview) so the
+ * remembered link never outlives it. Ignored if a different link is remembered.
+ */
+export function setPendingInviteExpiry(token: string, expiresAtIso: string): void {
+  const expiresAt = Date.parse(expiresAtIso);
+  if (!Number.isFinite(expiresAt)) return;
+  try {
+    const stored = readStored();
+    if (!stored || stored.token !== token) return;
+    window.localStorage.setItem(KEY, JSON.stringify({ ...stored, expiresAt }));
+  } catch {
+    // Best effort; the fixed 7-day bound still applies.
   }
 }
 
@@ -45,13 +83,13 @@ export function readPendingInvite(now: number = Date.now()): string | null {
   try {
     const raw = window.localStorage.getItem(KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<Stored>;
+    const parsed = readStored();
     if (
-      typeof parsed.token !== "string" ||
-      typeof parsed.savedAt !== "number" ||
+      !parsed ||
       !TOKEN_SHAPE.test(parsed.token) ||
       now - parsed.savedAt > PENDING_INVITE_TTL_MS ||
-      parsed.savedAt > now + 60_000
+      parsed.savedAt > now + 60_000 ||
+      (parsed.expiresAt !== undefined && now >= parsed.expiresAt)
     ) {
       clearPendingInvite();
       return null;
@@ -62,8 +100,16 @@ export function readPendingInvite(now: number = Date.now()): string | null {
   }
 }
 
-export function clearPendingInvite(): void {
+/**
+ * Forgets the remembered link. Pass the token you were acting on: if a newer
+ * link has been remembered since (another tab), it is left alone.
+ */
+export function clearPendingInvite(onlyToken?: string): void {
   try {
+    if (onlyToken !== undefined) {
+      const stored = readStored();
+      if (stored && stored.token !== onlyToken) return;
+    }
     window.localStorage.removeItem(KEY);
   } catch {
     // Nothing to clear if storage is unavailable.

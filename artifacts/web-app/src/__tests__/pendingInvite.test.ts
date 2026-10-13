@@ -11,6 +11,7 @@ import {
   rememberPendingInvite,
   readPendingInvite,
   clearPendingInvite,
+  setPendingInviteExpiry,
   pendingInvitePath,
   PENDING_INVITE_TTL_MS,
 } from "@/lib/pendingInvite";
@@ -78,6 +79,39 @@ describe("remembering an invitation", () => {
     );
     expect(readPendingInvite()).toBeNull();
     expect(window.localStorage.getItem("mediflow:pending-invite")).toBeNull();
+  });
+});
+
+describe("expiry and clearing", () => {
+  it("stops returning the link once the invitation's real expiry has passed", () => {
+    const now = Date.now();
+    rememberPendingInvite(TOKEN, now);
+    setPendingInviteExpiry(TOKEN, new Date(now + 60_000).toISOString());
+    expect(readPendingInvite(now + 30_000)).toBe(TOKEN);
+    expect(readPendingInvite(now + 61_000)).toBeNull();
+  });
+
+  it("keeps the learned expiry when the same link is opened again", () => {
+    const now = Date.now();
+    rememberPendingInvite(TOKEN, now);
+    setPendingInviteExpiry(TOKEN, new Date(now + 60_000).toISOString());
+    rememberPendingInvite(TOKEN, now + 1_000);
+    expect(readPendingInvite(now + 61_000)).toBeNull();
+  });
+
+  it("ignores an expiry for a link that is not the remembered one", () => {
+    const now = Date.now();
+    rememberPendingInvite(TOKEN, now);
+    setPendingInviteExpiry("another-invite-token-0123456789", new Date(now - 1).toISOString());
+    expect(readPendingInvite(now)).toBe(TOKEN);
+  });
+
+  it("only clears when the remembered link is the one being cleared", () => {
+    rememberPendingInvite(TOKEN);
+    clearPendingInvite("another-invite-token-0123456789");
+    expect(readPendingInvite()).toBe(TOKEN);
+    clearPendingInvite(TOKEN);
+    expect(readPendingInvite()).toBeNull();
   });
 });
 

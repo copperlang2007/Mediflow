@@ -30,6 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   clearPendingInvite,
   rememberPendingInvite,
+  setPendingInviteExpiry,
 } from "@/lib/pendingInvite";
 
 interface InvitationPreview {
@@ -48,6 +49,20 @@ const REASONS: Record<string, string> = {
   accepted: "This invitation has already been used.",
   revoked: "This invitation was withdrawn by the agency.",
 };
+
+/** Failures that mean this link can never work, as opposed to "try again". */
+const TERMINAL_CODES = new Set([
+  "invalid",
+  "expired",
+  "accepted",
+  "revoked",
+  "already_provisioned",
+]);
+
+const RETRY_MESSAGE =
+  "We could not check this invitation just now. Please try again in a moment.";
+
+class TransientLookupError extends Error {}
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
@@ -81,23 +96,44 @@ export default function AcceptInvitePage() {
     retry: false,
     queryFn: async () => {
       const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-      const res = await fetch(
-        `${base}/api/invitations/lookup?token=${encodeURIComponent(token)}`,
-        { credentials: "include" },
-      );
+      let res: Response;
+      try {
+        res = await fetch(
+          `${base}/api/invitations/lookup?token=${encodeURIComponent(token)}`,
+          { credentials: "include" },
+        );
+      } catch {
+        // Offline or the request was cut: the link itself may be fine.
+        throw new TransientLookupError(RETRY_MESSAGE);
+      }
       const body = (await res.json().catch(() => ({}))) as Record<
         string,
         unknown
       >;
       if (!res.ok) {
-        const code = typeof body.code === "string" ? body.code : "invalid";
+        const code = typeof body.code === "string" ? body.code : "";
+        const terminal =
+          TERMINAL_CODES.has(code) ||
+          res.status === 400 ||
+          res.status === 404 ||
+          res.status === 410;
+        if (!terminal) {
+          // Rate limit or a server hiccup says nothing about the link, so keep
+          // it: forgetting it here would strand a good invitee after sign-up.
+          throw new TransientLookupError(RETRY_MESSAGE);
+        }
         // A link that can never work must not keep pulling the person back.
-        clearPendingInvite();
+        clearPendingInvite(token);
         throw new Error(REASONS[code] ?? REASONS.invalid);
       }
       return body as unknown as InvitationPreview;
     },
   });
+
+  const previewExpiry = preview.data?.expiresAt;
+  useEffect(() => {
+    if (token && previewExpiry) setPendingInviteExpiry(token, previewExpiry);
+  }, [token, previewExpiry]);
 
   const accept = useMutation({
     // The name travels as a mutation variable rather than being read from
@@ -122,13 +158,19 @@ export default function AcceptInvitePage() {
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as {
           error?: string;
+          code?: string;
         };
+        // Link used, withdrawn, expired, or this account already has an
+        // agency: retrying cannot help, so stop sending the person back.
+        if (body.code && TERMINAL_CODES.has(body.code)) {
+          clearPendingInvite(token);
+        }
         throw new Error(body.error ?? "Could not accept this invitation");
       }
       return res.json();
     },
     onSuccess: () => {
-      clearPendingInvite();
+      clearPendingInvite(token);
       // The caller had no org a moment ago; any cached 401 would bounce them
       // straight back out of the app they have just been let into.
       qc.clear();
@@ -184,6 +226,13 @@ export default function AcceptInvitePage() {
           {preview.error instanceof Error
             ? preview.error.message
             : REASONS.invalid}
+          {preview.error instanceof TransientLookupError && (
+            <div className="mt-4">
+              <Button variant="secondary" onClick={() => preview.refetch()}>
+                Try again
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Shell>
     );
@@ -291,6 +340,17 @@ export default function AcceptInvitePage() {
               <a href={signInUrl} className="underline">
                 Use a different account
               </a>
+              {" · "}
+              <button
+                type="button"
+                className="underline"
+                onClick={() => {
+                  clearPendingInvite(token);
+                  window.location.href = `${import.meta.env.BASE_URL?.replace(/\/$/, "") ?? ""}/`;
+                }}
+              >
+                Not now, forget this invitation
+              </button>
             </p>
           </form>
         )}

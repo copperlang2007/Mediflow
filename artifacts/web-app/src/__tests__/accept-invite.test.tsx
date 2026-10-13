@@ -231,6 +231,53 @@ describe("keeping the invitation through sign-up", () => {
     expect(readPendingInvite()).toBe(LONG_TOKEN);
   });
 
+  it("keeps the link when the check fails for a reason that is not the link's fault", async () => {
+    for (const status of [429, 503]) {
+      window.localStorage.clear();
+      vi.stubGlobal("fetch", mockLookup({ ok: false, status, code: "" }));
+      const { unmount } = renderAt(`/accept-invite?token=${LONG_TOKEN}`);
+      expect(await screen.findByText(/try again in a moment/i)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
+      expect(readPendingInvite()).toBe(LONG_TOKEN);
+      unmount();
+    }
+  });
+
+  it("keeps the link when the network drops", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("offline"); }));
+    renderAt(`/accept-invite?token=${LONG_TOKEN}`);
+    expect(await screen.findByText(/try again in a moment/i)).toBeInTheDocument();
+    expect(readPendingInvite()).toBe(LONG_TOKEN);
+  });
+
+  it("lets a signed-in person drop the remembered invitation", async () => {
+    clerkState.isSignedIn = true;
+    clerkState.user = { fullName: "Nora", primaryEmailAddress: { emailAddress: "n@x.test" } };
+    vi.stubGlobal("fetch", mockLookup({ ok: true }));
+    renderAt(`/accept-invite?token=${LONG_TOKEN}`);
+    const forget = await screen.findByRole("button", { name: /forget this invitation/i });
+    // jsdom cannot navigate; only the clearing matters here.
+    const loc = window.location;
+    vi.stubGlobal("location", { ...loc, href: loc.href });
+    fireEvent.click(forget);
+    expect(readPendingInvite()).toBeNull();
+  });
+
+  it("stops remembering the link when accepting it fails for good", async () => {
+    clerkState.isSignedIn = true;
+    clerkState.user = { fullName: "Nora", primaryEmailAddress: { emailAddress: "n@x.test" } };
+    const base = mockLookup({ ok: true });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return { ok: false, status: 409, json: async () => ({ error: "already", code: "already_provisioned" }) } as Response;
+      }
+      return base(input);
+    }));
+    renderAt(`/accept-invite?token=${LONG_TOKEN}`);
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }));
+    await waitFor(() => expect(readPendingInvite()).toBeNull());
+  });
+
   it("forgets a link that can never work, so it stops pulling the person back", async () => {
     vi.stubGlobal("fetch", mockLookup({ ok: false, status: 410, code: "revoked" }));
     renderAt(`/accept-invite?token=${LONG_TOKEN}`);
