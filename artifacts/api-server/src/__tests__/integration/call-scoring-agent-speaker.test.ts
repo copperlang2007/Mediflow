@@ -149,6 +149,31 @@ describe("choosing which voice is the agent", () => {
     await choose(admin.id, id, { agentSpeaker: "Speaker 2" }).expect(201);
   });
 
+  it("when two reviewers choose at once, only the latest choice saves a score", async () => {
+    const id = await create(oneTrackCall());
+    const { assignAgentSpeaker } = await import("../../lib/callScoring/speakerAssign");
+    const { rescoreTranscript } = await import("../../lib/callScoring/ingest");
+    const { getRubric, DEFAULT_RUBRIC_ID } = await import("../../lib/callScoring/rubrics");
+    const base = { orgId: org.id, userId: admin.id, userRole: "agency_admin", transcriptId: id, rubric: getRubric(DEFAULT_RUBRIC_ID)!, aiMode: "off" as const };
+    const scoresOf = async () => (await handle.db.select().from(schema.callScoresTable).where(eq(schema.callScoresTable.transcriptId, id))).length;
+    const before = await scoresOf();
+
+    // Reviewer A picks Speaker 1; before A's scoring saves, reviewer B picks Speaker 2 and finishes.
+    const a = await assignAgentSpeaker({
+      ...base,
+      agentLabel: "Speaker 1",
+      rescore: async (args) => {
+        await choose(admin.id, id, { agentSpeaker: "Speaker 2" }).expect(201);
+        return rescoreTranscript(args);
+      },
+    });
+    expect(a).toMatchObject({ kind: "error", httpStatus: 409, code: "superseded" });
+    expect(await scoresOf()).toBe(before + 1); // only B's run saved
+    const d = await request(app).get(`/api/call-scoring/transcripts/${id}`).set(withAuth(admin.id)).expect(200);
+    const agents = new Set(d.body.utterances.filter((u: { role: string }) => u.role === "agent").map((u: { speaker: string }) => u.speaker));
+    expect([...agents]).toEqual(["Speaker 2"]);
+  });
+
   it("refuses a voice that is not in the call, and a blank choice", async () => {
     const id = await create(oneTrackCall());
     await choose(admin.id, id, { agentSpeaker: "Speaker 9" }).expect(422);

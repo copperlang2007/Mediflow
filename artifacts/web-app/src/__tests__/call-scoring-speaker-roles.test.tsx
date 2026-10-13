@@ -120,11 +120,27 @@ describe("which voice is the agent", () => {
   });
 
   it("after a choice, the chosen voice is marked and the other can be picked to correct it", async () => {
-    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-02T12:00:00.000Z" });
+    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-01T12:00:00.500Z" });
     renderDetail();
     expect(await screen.findByText("Who is the agent on this call?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Speaker 2 is the agent" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Speaker 1 is the agent" })).toBeEnabled();
+  });
+
+  it("when scoring again failed (choice newer than the score), says so and lets the same voice be pressed again", async () => {
+    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-02T12:00:00.000Z" });
+    renderDetail();
+    expect(await screen.findByRole("alert")).toHaveTextContent(/score shown was made before this choice/i);
+    expect(screen.getByRole("button", { name: "Speaker 2 is the agent" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Speaker 2 is the agent" }));
+    await waitFor(() => expect(state.calls.some((c) => c.method === "POST")).toBe(true));
+  });
+
+  it("does not call a fresh choice stale", async () => {
+    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-01T12:00:00.500Z" });
+    renderDetail();
+    await screen.findByText("Who is the agent on this call?");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("is hidden from people who cannot review", async () => {

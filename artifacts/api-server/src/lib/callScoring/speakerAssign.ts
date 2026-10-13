@@ -11,7 +11,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { auditLogTable, callTranscriptsTable, db } from "@workspace/db";
 import { logger } from "../logger";
 import { rescoreTranscript, type IngestResult } from "./ingest";
-import { seal } from "./seal";
+import { open, seal, type TranscriptPayload } from "./seal";
 import { applyAgentSpeaker } from "./speakerRoles";
 import { loadTranscriptRow, openTranscript } from "./store";
 import type { Rubric } from "./types";
@@ -40,6 +40,8 @@ export async function assignAgentSpeaker(input: {
   const applied = applyAgentSpeaker(payload.utterances, input.agentLabel);
   if (!applied.ok) return fail(422, "speaker_not_assignable", applied.message);
 
+  // Marks this choice. A scoring run only saves if this is still the latest choice.
+  const assignedAt = new Date().toISOString();
   const saved = await db.transaction(async (tx) => {
     const updated = await tx
       .update(callTranscriptsTable)
@@ -47,7 +49,7 @@ export async function assignAgentSpeaker(input: {
         transcriptEncrypted: seal({
           ...payload,
           utterances: applied.utterances,
-          speakerAssignment: { agentLabel: input.agentLabel, userId: input.userId, at: new Date().toISOString() },
+          speakerAssignment: { agentLabel: input.agentLabel, userId: input.userId, at: assignedAt },
         }),
         speakerMode: applied.speakerMode,
       })
@@ -87,7 +89,19 @@ export async function assignAgentSpeaker(input: {
       transcriptId: row.id,
       rubric: input.rubric,
       aiMode: input.aiMode,
+      // Two reviewers choosing at once: only the latest choice may save a score.
+      stillOwned: async (tx) => {
+        const [current] = await tx
+          .select({ sealed: callTranscriptsTable.transcriptEncrypted })
+          .from(callTranscriptsTable)
+          .where(and(eq(callTranscriptsTable.id, row.id), eq(callTranscriptsTable.orgId, input.orgId)))
+          .limit(1);
+        return open<TranscriptPayload>(current?.sealed)?.speakerAssignment?.at === assignedAt;
+      },
     });
+    if (result.kind === "duplicate") {
+      return fail(409, "superseded", "Someone else chose a different voice for this call just now. Reload the call to see the latest result.");
+    }
     return result.kind === "ok" ? result : notRescored;
   } catch (err) {
     logger.error({ err: err instanceof Error ? err.name : "unknown", transcriptId: row.id }, "call scoring: rescore after speaker choice failed");

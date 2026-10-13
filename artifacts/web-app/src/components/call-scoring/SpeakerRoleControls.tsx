@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { QK, apiMessage, fmtDate, type CsDetail } from "./shared";
 
 const SNIPPET = 90;
+/** Tolerance for the app and database clocks differing a little. */
+const STALE_AFTER_MS = 2000;
 
 function firstWords(detail: CsDetail, label: string): string {
   const turn = detail.utterances.find((u) => u.speaker === label);
@@ -40,6 +42,8 @@ export function SpeakerRoleControls({ detail }: { detail: CsDetail }) {
 
   if (!info?.assignable) return null;
   const assigned = detail.transcript.speakerAssignedAt;
+  // A choice newer than the score means scoring again failed; the same voice can be pressed again to retry.
+  const scoreStale = Boolean(assigned && detail.score && Date.parse(assigned) - Date.parse(detail.score.createdAt) > STALE_AFTER_MS);
 
   return (
     <section aria-label="Who is the agent" className="rounded-lg border border-border bg-muted/30 p-3 text-sm" data-testid="speaker-roles">
@@ -49,13 +53,18 @@ export function SpeakerRoleControls({ detail }: { detail: CsDetail }) {
           ? `A reviewer chose this on ${fmtDate(assigned)}. If it is wrong, pick the other voice and the call is scored again.`
           : "This recording has one audio track, so the voices could only be told apart, not named. Pick the agent and the call is scored again with the right person on each line."}
       </p>
+      {scoreStale && (
+        <p role="alert" className="mt-2 text-warning">
+          The score shown was made before this choice. Press the agent voice again to score the call again.
+        </p>
+      )}
       <ul className="mt-3 space-y-2">
         {info.speakers.map((s) => (
           <li key={s.label} className="flex flex-wrap items-center gap-3">
             <Button
               size="sm"
               variant={s.role === "agent" ? "default" : "outline"}
-              disabled={choose.isPending || s.role === "agent"}
+              disabled={choose.isPending || (s.role === "agent" && !scoreStale)}
               onClick={() => choose.mutate(s.label)}
               aria-label={`${s.label} is the agent`}
             >
