@@ -37,7 +37,7 @@
  * through the same `deriveEntitlements` that `getEntitlements` uses, so the two
  * can never disagree. Everything under a lock touches only that connection.
  */
-import { and, count, eq, gt, sql } from "drizzle-orm";
+import { and, count, eq, gt, ne, sql } from "drizzle-orm";
 import { type PlanTier } from "./plans";
 import {
   db,
@@ -80,10 +80,15 @@ export interface SeatUsage extends SeatCounts {
  * `expires_at` may not have been swept to `expired` yet (that happens lazily,
  * on read) but must not keep holding a seat, so the expiry is applied in the
  * predicate rather than trusting the status column alone.
+ *
+ * `excludeInvitationId` leaves one invitation out of the count. Accepting an
+ * invitation converts the seat it already holds into a member, so the accept
+ * path must not count that same reservation against itself.
  */
 export async function countSeatsUsed(
   orgId: string,
   conn: DbLike = db,
+  opts: { excludeInvitationId?: string } = {},
 ): Promise<SeatCounts> {
   // Sequential, not Promise.all: these may run inside a transaction, and a
   // single connection cannot serve two statements concurrently.
@@ -100,6 +105,9 @@ export async function countSeatsUsed(
         eq(userInvitationsTable.orgId, orgId),
         eq(userInvitationsTable.status, "pending"),
         gt(userInvitationsTable.expiresAt, sql`now()`),
+        opts.excludeInvitationId
+          ? ne(userInvitationsTable.id, opts.excludeInvitationId)
+          : undefined,
       ),
     );
 
@@ -147,13 +155,20 @@ export async function seatEntitlementOn(
  *
  * Both the limit and the count are read on `conn`, so a downgrade that commits
  * while this transaction waits on the lock is seen, not missed.
+ *
+ * Pass `excludeInvitationId` when the seat being claimed is the one that
+ * invitation already holds (accepting it). Without that, an invitation that
+ * filled the plan's last seat counts against itself and can never be accepted.
+ * A downgrade is still caught: if the plan shrank below the other members and
+ * reservations, there is no room even once this one is set aside.
  */
 export async function requireSeat(
   orgId: string,
   conn: DbLike,
+  opts: { excludeInvitationId?: string } = {},
 ): Promise<SeatCounts> {
   const { seats: limit, tier } = await seatEntitlementOn(orgId, conn);
-  const counts = await countSeatsUsed(orgId, conn);
+  const counts = await countSeatsUsed(orgId, conn, opts);
   if (counts.used < limit) return counts;
 
   throw new PlanLimitError(

@@ -15,7 +15,7 @@
  *    never rendered, never logged, and the preview response carries nothing
  *    about the organization beyond its name.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useUser, useAuth } from "@clerk/react";
 import { useSearch } from "wouter";
@@ -27,6 +27,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  clearPendingInvite,
+  rememberPendingInvite,
+} from "@/lib/pendingInvite";
 
 interface InvitationPreview {
   email: string;
@@ -64,6 +68,13 @@ export default function AcceptInvitePage() {
   const [fullName, setFullName] = useState("");
   const [touchedName, setTouchedName] = useState(false);
 
+  // Sign-up can drop this URL (the verification email opens another tab, MFA
+  // enrolment redirects). Remember the link so the provisioning gate can send
+  // the person back here instead of to "Create your agency".
+  useEffect(() => {
+    if (token) rememberPendingInvite(token);
+  }, [token]);
+
   const preview = useQuery({
     queryKey: ["invitation-preview", token],
     enabled: token.length > 0,
@@ -80,6 +91,8 @@ export default function AcceptInvitePage() {
       >;
       if (!res.ok) {
         const code = typeof body.code === "string" ? body.code : "invalid";
+        // A link that can never work must not keep pulling the person back.
+        clearPendingInvite();
         throw new Error(REASONS[code] ?? REASONS.invalid);
       }
       return body as unknown as InvitationPreview;
@@ -115,6 +128,7 @@ export default function AcceptInvitePage() {
       return res.json();
     },
     onSuccess: () => {
+      clearPendingInvite();
       // The caller had no org a moment ago; any cached 401 would bounce them
       // straight back out of the app they have just been let into.
       qc.clear();

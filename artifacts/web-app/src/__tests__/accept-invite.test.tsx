@@ -26,6 +26,7 @@ vi.mock("@clerk/react", () => ({
 }));
 
 import AcceptInvitePage from "@/pages/accept-invite";
+import { readPendingInvite } from "@/lib/pendingInvite";
 
 const PREVIEW = {
   email: "new.hire@alpha.test",
@@ -66,7 +67,10 @@ function renderAt(path: string) {
   );
 }
 
+const LONG_TOKEN = "test-invite-token-0123456789";
+
 beforeEach(() => {
+  window.localStorage.clear();
   clerkState.isSignedIn = false;
   clerkState.user = null;
   // wouter's memoryLocation does not touch window.location, which the page
@@ -215,5 +219,23 @@ describe("links that cannot work", () => {
       await screen.findByText(/Invitation link missing/i),
     ).toBeInTheDocument();
     await waitFor(() => expect(fetchMock).not.toHaveBeenCalled());
+  });
+});
+
+describe("keeping the invitation through sign-up", () => {
+  it("remembers the link so the app can bring the person back after sign-up", async () => {
+    vi.stubGlobal("fetch", mockLookup({ ok: true }));
+    renderAt(`/accept-invite?token=${LONG_TOKEN}`);
+
+    await screen.findByText(/Join Alpha Agency/);
+    expect(readPendingInvite()).toBe(LONG_TOKEN);
+  });
+
+  it("forgets a link that can never work, so it stops pulling the person back", async () => {
+    vi.stubGlobal("fetch", mockLookup({ ok: false, status: 410, code: "revoked" }));
+    renderAt(`/accept-invite?token=${LONG_TOKEN}`);
+
+    expect(await screen.findByText(/withdrawn by the agency/i)).toBeInTheDocument();
+    await waitFor(() => expect(readPendingInvite()).toBeNull());
   });
 });
