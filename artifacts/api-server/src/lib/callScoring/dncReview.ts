@@ -35,7 +35,7 @@ import { recordEmailOptOut, recordPhoneOptOut } from "../compliance/optOut";
 import { phoneMatchKey, phoneMatchKeySql } from "../compliance/phone";
 import { normalizePhone } from "../csvImport";
 import { MAX_PHONE_CANDIDATES, matchContactByPhone, matchContactsByPhoneKeys, openTranscript, type AnyDb } from "./store";
-import { open, seal } from "./seal";
+import { open, seal, type TranscriptPayload } from "./seal";
 
 export type DncAction = "add_opt_out" | "dismiss";
 export type DncStatus = "open" | "opt_out_added" | "dismissed";
@@ -326,31 +326,48 @@ export async function resolveDncFinding(args: {
     .limit(1);
   if (!transcript) return { ok: false, httpStatus: 404, code: "not_found", message: "Request not found." };
 
-  // A request that is no longer on the call's latest result (for example, after a reviewer
-  // named the agent and these words turned out to be the agent's) must not add an opt-out.
-  const [latestScore] = await db
-    .select({ id: callScoresTable.id })
-    .from(callScoresTable)
-    .where(and(eq(callScoresTable.transcriptId, transcript.id), eq(callScoresTable.orgId, orgId)))
-    .orderBy(desc(callScoresTable.createdAt), desc(callScoresTable.id))
-    .limit(1);
-  if (latestScore && latestScore.id !== finding.scoreId) {
-    const [stillThere] = await db
-      .select({ id: callScoreFindingsTable.id })
-      .from(callScoreFindingsTable)
-      .where(
-        and(
-          eq(callScoreFindingsTable.orgId, orgId),
-          eq(callScoreFindingsTable.scoreId, latestScore.id),
-          eq(callScoreFindingsTable.kind, "dnc"),
-          eq(callScoreFindingsTable.fingerprint, finding.fingerprint),
-        ),
-      )
+  // Is this request still what the call's latest result says? Run inside each action's own
+  // transaction with the transcript row locked, so a speaker choice or re-score cannot slip in
+  // between the check and the opt-out being recorded.
+  const staleCheck = async (h: AnyDb): Promise<ResolveResult | null> => {
+    const [locked] = await h
+      .select({ sealed: callTranscriptsTable.transcriptEncrypted })
+      .from(callTranscriptsTable)
+      .where(and(eq(callTranscriptsTable.id, transcript.id), eq(callTranscriptsTable.orgId, orgId)))
+      .for("share")
       .limit(1);
-    if (!stillThere) {
-      return { ok: false, httpStatus: 409, code: "out_of_date", message: "This request is out of date: the call was scored again and these words are no longer flagged. Reload the list." };
+    const assignment = open<TranscriptPayload>(locked?.sealed)?.speakerAssignment;
+    if (assignment && assignment.scoredId !== assignment.id) {
+      // A reviewer's choice is saved but the call has not been scored under it yet, so this list may be wrong.
+      return { ok: false, httpStatus: 409, code: "rescoring_pending", message: "The speakers on this call were just changed and it has not been scored again yet. Open the call, wait for the new result (or press the agent voice again), then reload this list." };
     }
-  }
+    const [latestScore] = await h
+      .select({ id: callScoresTable.id })
+      .from(callScoresTable)
+      .where(and(eq(callScoresTable.transcriptId, transcript.id), eq(callScoresTable.orgId, orgId)))
+      .orderBy(desc(callScoresTable.createdAt), desc(callScoresTable.id))
+      .limit(1);
+    if (latestScore && latestScore.id !== finding.scoreId) {
+      const [stillThere] = await h
+        .select({ id: callScoreFindingsTable.id })
+        .from(callScoreFindingsTable)
+        .where(
+          and(
+            eq(callScoreFindingsTable.orgId, orgId),
+            eq(callScoreFindingsTable.scoreId, latestScore.id),
+            eq(callScoreFindingsTable.kind, "dnc"),
+            eq(callScoreFindingsTable.fingerprint, finding.fingerprint),
+          ),
+        )
+        .limit(1);
+      if (!stillThere) {
+        return { ok: false, httpStatus: 409, code: "out_of_date", message: "This request is out of date: the call was scored again and these words are no longer flagged. Reload the list." };
+      }
+    }
+    return null;
+  };
+  const early = await staleCheck(db);
+  if (early) return early;
 
   const existingFor = async (h: AnyDb) => {
     const [row] = await h
@@ -413,6 +430,8 @@ export async function resolveDncFinding(args: {
       return { ok: false, httpStatus: 400, code: "note_required", message: "Say why this is not a do-not-contact request (a short note)." };
     }
     return db.transaction(async (tx): Promise<ResolveResult> => {
+      const staleNow = await staleCheck(tx);
+      if (staleNow) return staleNow;
       const [inserted] = await tx
         .insert(callScoreReviewsTable)
         .values({ id: randomUUID(), ...reviewBase, verdict: "dismissed", optOutRecorded: false })
@@ -458,6 +477,8 @@ export async function resolveDncFinding(args: {
     }
     const target = emailContact;
     return db.transaction(async (tx): Promise<ResolveResult> => {
+      const staleNow = await staleCheck(tx);
+      if (staleNow) return staleNow;
       const [inserted] = await tx
         .insert(callScoreReviewsTable)
         .values({ id: randomUUID(), ...reviewBase, verdict: "opt_out_added", contactId: target.id, optOutRecorded: true })
@@ -551,6 +572,8 @@ export async function resolveDncFinding(args: {
   const emailTarget = wantsEmail && contact && emailAddress ? { id: contact.id, email: emailAddress } : null;
 
   return db.transaction(async (tx): Promise<ResolveResult> => {
+    const staleNow = await staleCheck(tx);
+    if (staleNow) return staleNow;
     // The unique index makes this the single winner if two people click at once.
     const [inserted] = await tx
       .insert(callScoreReviewsTable)

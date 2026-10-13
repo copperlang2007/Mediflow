@@ -293,6 +293,50 @@ describe("choosing which voice is the agent", () => {
     expect(optOuts.filter((o) => o.phone === "+13105550199")).toHaveLength(0);
   });
 
+  it("while a saved speaker choice has not been scored yet, a stop-calling request cannot be dismissed or turned into an opt-out", async () => {
+    const id = await create(`${oneTrackCall()}\nSpeaker 1: Please stop calling me.`);
+    const [flag] = await handle.db
+      .select()
+      .from(schema.callScoreFindingsTable)
+      .where(and(eq(schema.callScoreFindingsTable.transcriptId, id), eq(schema.callScoreFindingsTable.kind, "dnc")));
+    const { assignAgentSpeaker } = await import("../../lib/callScoring/speakerAssign");
+    const { getRubric, DEFAULT_RUBRIC_ID } = await import("../../lib/callScoring/rubrics");
+
+    // The choice (Speaker 1 is the agent) is saved, but scoring again fails, so the old flag is still the "latest" one.
+    const failed = await assignAgentSpeaker({
+      orgId: org.id,
+      userId: admin.id,
+      userRole: "agency_admin",
+      transcriptId: id,
+      agentLabel: "Speaker 1",
+      rubric: getRubric(DEFAULT_RUBRIC_ID)!,
+      aiMode: "off",
+      rescore: async () => {
+        throw new Error("boom");
+      },
+    });
+    expect(failed).toMatchObject({ code: "rescore_failed" });
+
+    const resolveFlag = (body: Record<string, unknown>) => request(app).post(`/api/call-scoring/dnc-review/${flag!.id}/resolve`).set(withAuth(admin.id)).send(body);
+    const optOutsAdded = async () => (await handle.db.select().from(schema.optOutsTable).where(eq(schema.optOutsTable.orgId, org.id))).filter((o) => o.phone === "+13105550177");
+    for (const body of [
+      { action: "dismiss", note: "while the call was waiting to be scored" },
+      { action: "add_opt_out", phoneSource: "typed", phone: "+13105550177" },
+    ]) {
+      const res = await resolveFlag(body);
+      expect(res.status, JSON.stringify(res.body)).toBe(409);
+      expect(res.body.code).toBe("rescoring_pending");
+    }
+    expect(await optOutsAdded()).toHaveLength(0);
+
+    // Retrying the choice scores the call under it; the old request is then simply out of date.
+    await choose(admin.id, id, { agentSpeaker: "Speaker 1" }).expect(201);
+    const after = await resolveFlag({ action: "add_opt_out", phoneSource: "typed", phone: "+13105550177" });
+    expect(after.status).toBe(409);
+    expect(after.body.code).toBe("out_of_date");
+    expect(await optOutsAdded()).toHaveLength(0);
+  });
+
   it("refuses a voice that is not in the call, and a blank choice", async () => {
     const id = await create(oneTrackCall());
     await choose(admin.id, id, { agentSpeaker: "Speaker 9" }).expect(422);
