@@ -20,10 +20,17 @@ const clerkState = {
   user: null as { fullName?: string; primaryEmailAddress?: { emailAddress: string } } | null,
 };
 
+const getTokenMock = vi.hoisted(() =>
+  vi.fn(async (_opts?: { skipCache?: boolean }) => "clerk-token"),
+);
+
 vi.mock("@clerk/react", () => ({
   useUser: () => clerkState,
-  useAuth: () => ({ getToken: async () => "clerk-token" }),
+  useAuth: () => ({ getToken: getTokenMock }),
 }));
+
+const toastError = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { error: toastError } }));
 
 import AcceptInvitePage from "@/pages/accept-invite";
 import { readPendingInvite } from "@/lib/pendingInvite";
@@ -71,6 +78,7 @@ const LONG_TOKEN = "test-invite-token-0123456789";
 
 beforeEach(() => {
   window.localStorage.clear();
+  getTokenMock.mockClear();
   clerkState.isSignedIn = false;
   clerkState.user = null;
   // wouter's memoryLocation does not touch window.location, which the page
@@ -261,6 +269,55 @@ describe("keeping the invitation through sign-up", () => {
     vi.stubGlobal("location", { ...loc, href: loc.href });
     fireEvent.click(forget);
     expect(readPendingInvite()).toBeNull();
+  });
+
+  it("retries once with a fresh sign-in token when the first attempt is refused as unauthorized", async () => {
+    clerkState.isSignedIn = true;
+    clerkState.user = { fullName: "Nora", primaryEmailAddress: { emailAddress: "n@x.test" } };
+    const base = mockLookup({ ok: true });
+    let posts = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        posts += 1;
+        return posts === 1
+          ? ({ ok: false, status: 401, json: async () => ({ error: "Unauthorized" }) } as Response)
+          : ({ ok: true, status: 201, json: async () => ({}) } as Response);
+      }
+      return base(input);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    getTokenMock
+      .mockResolvedValueOnce("stale-token")
+      .mockResolvedValueOnce("fresh-token");
+    renderAt(`/accept-invite?token=${LONG_TOKEN}`);
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }));
+    await waitFor(() => expect(posts).toBe(2), { timeout: 4000 });
+
+    // The retry must ask Clerk for a brand-new token and actually send it.
+    expect(getTokenMock).toHaveBeenNthCalledWith(2, { skipCache: true });
+    const sent = fetchMock.mock.calls
+      .filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")
+      .map(([, init]) => (init as RequestInit).headers as Record<string, string>);
+    expect(sent[0].Authorization).toBe("Bearer stale-token");
+    expect(sent[1].Authorization).toBe("Bearer fresh-token");
+  });
+
+  it("explains a persistent 401 in plain words instead of just 'Unauthorized'", async () => {
+    clerkState.isSignedIn = true;
+    clerkState.user = { fullName: "Nora", primaryEmailAddress: { emailAddress: "n@x.test" } };
+    const base = mockLookup({ ok: true });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === "POST"
+        ? ({ ok: false, status: 401, json: async () => ({ error: "Unauthorized" }) } as Response)
+        : base(input)));
+    renderAt(`/accept-invite?token=${LONG_TOKEN}`);
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }));
+    await waitFor(
+      () => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/sign out, sign back in/i)),
+      { timeout: 4000 },
+    );
+    // A refused sign-in says nothing about the link, so it is kept.
+    expect(readPendingInvite()).toBe(LONG_TOKEN);
   });
 
   it("stops remembering the link when accepting it fails for good", async () => {

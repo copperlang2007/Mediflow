@@ -516,6 +516,16 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req);
     if (!auth?.userId) {
+      // Booleans only: enough to tell "no token sent" from "token rejected"
+      // without logging anything about the person or the invitation.
+      logger.warn(
+        {
+          hasBearer: /^Bearer\s+\S+/i.test(req.headers.authorization ?? ""),
+          hasSessionCookie: /(?:^|;\s*)__session=/.test(req.headers.cookie ?? ""),
+          host: req.headers["x-forwarded-host"] ?? req.headers.host,
+        },
+        "Invitation accept refused: no verified Clerk session",
+      );
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
