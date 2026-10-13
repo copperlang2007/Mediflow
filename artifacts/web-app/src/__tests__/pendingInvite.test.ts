@@ -15,7 +15,7 @@ import {
   PENDING_INVITE_TTL_MS,
 } from "@/lib/pendingInvite";
 
-const TOKEN = "q3Zk8mP0xV1nC7bR2tY6uHdLsA9eWfGj4oIiKlMnOpQ";
+const TOKEN = "test-invite-token-0123456789";
 
 beforeEach(() => {
   window.localStorage.clear();

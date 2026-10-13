@@ -67,7 +67,7 @@ function renderAt(path: string) {
   );
 }
 
-const LONG_TOKEN = "q3Zk8mP0xV1nC7bR2tY6uHdLsA9eWfGj4oIiKlMnOpQ";
+const LONG_TOKEN = "test-invite-token-0123456789";
 
 beforeEach(() => {
   window.localStorage.clear();
