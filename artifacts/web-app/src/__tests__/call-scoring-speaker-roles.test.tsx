@@ -41,7 +41,7 @@ const voices = (r1: Role = "unknown", r2: Role = "unknown") => [
   { label: "Speaker 2", turns: 3, role: r2 },
 ];
 
-function detail(over: { assignable?: boolean; speakers?: ReturnType<typeof voices>; assignedAt?: string | null; omit?: boolean; scoreCurrent?: boolean } = {}) {
+function detail(over: { assignable?: boolean; speakers?: ReturnType<typeof voices>; assignedAt?: string | null; omit?: boolean; scoreCurrent?: boolean; withCriterion?: boolean } = {}) {
   const assignable = over.assignable ?? true;
   const transcript: Record<string, unknown> = {
     id: "t1",
@@ -79,7 +79,25 @@ function detail(over: { assignable?: boolean; speakers?: ReturnType<typeof voice
       auto: { score: 50, compliance: "review", criticalFailures: [], needsReview: [] },
       effective: { score: 50, compliance: "review", criticalFailures: [], needsReview: [], openDnc: 0, meetsStandard: false },
     },
-    criteria: [],
+    criteria: over.withCriterion
+      ? [
+          {
+            criterionId: "tpmo_disclaimer",
+            name: "TPMO disclaimer",
+            kind: "required",
+            severity: "critical",
+            description: null,
+            citation: null,
+            status: "pass",
+            autoStatus: "pass",
+            source: "rules",
+            rationale: "",
+            coaching: null,
+            evidence: [],
+            human: null,
+          },
+        ]
+      : [],
     dnc: [],
     reviews: [],
     previousScores: [],
@@ -144,6 +162,19 @@ describe("which voice is the agent", () => {
     renderDetail();
     await screen.findByText("Who is the agent on this call?");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("offers grading while the score matches the saved choice", async () => {
+    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-02T12:00:00.000Z", scoreCurrent: true, withCriterion: true });
+    renderDetail();
+    expect(await screen.findByRole("button", { name: /Grade this item|Override the grade/ })).toBeInTheDocument();
+  });
+
+  it("does not offer grading while the score predates a saved speaker choice", async () => {
+    state.detail = detail({ speakers: voices("client", "agent"), assignedAt: "2026-09-02T12:00:00.000Z", scoreCurrent: false, withCriterion: true });
+    renderDetail();
+    await screen.findByText("TPMO disclaimer");
+    expect(screen.queryByRole("button", { name: /Grade this item|Override the grade/ })).not.toBeInTheDocument();
   });
 
   it("is hidden from people who cannot review", async () => {

@@ -334,7 +334,7 @@ export async function resolveDncFinding(args: {
       .select({ sealed: callTranscriptsTable.transcriptEncrypted })
       .from(callTranscriptsTable)
       .where(and(eq(callTranscriptsTable.id, transcript.id), eq(callTranscriptsTable.orgId, orgId)))
-      .for("share")
+      .for("update") // exclusive from the start: later steps in the same transaction update this row too, and a share-then-update upgrade can deadlock
       .limit(1);
     const assignment = open<TranscriptPayload>(locked?.sealed)?.speakerAssignment;
     if (assignment && assignment.scoredId !== assignment.id) {

@@ -39,6 +39,7 @@ import {
   callScoreFindingsTable,
   callScoreReviewsTable,
   callScoresTable,
+  callTranscriptsTable,
 
   db,
 } from "@workspace/db";
@@ -48,7 +49,7 @@ import { routerAuditMiddleware } from "../middlewares/auditMiddleware";
 import { isSelfScopedAgent } from "../middlewares/agentSelfScope";
 import { parseCsvTolerant, parseFlexibleDate, CsvFileError } from "../lib/csvImport";
 import { logger } from "../lib/logger";
-import { open, seal } from "../lib/callScoring/seal";
+import { open, seal, type TranscriptPayload } from "../lib/callScoring/seal";
 import { PARSE_LIMITS } from "../lib/callScoring/parse";
 import { DEFAULT_RUBRIC_ID, builtInRubrics, getRubric } from "../lib/callScoring/rubrics";
 import { resolveAiReviewer } from "../lib/callScoring/aiReviewer";
@@ -591,7 +592,21 @@ router.patch(
         return;
       }
     }
+    let rescoringPending = false;
     await db.transaction(async (tx) => {
+      // Locked, so a speaker choice cannot land between this check and the decision being recorded.
+      const [locked] = await tx
+        .select({ sealed: callTranscriptsTable.transcriptEncrypted })
+        .from(callTranscriptsTable)
+        .where(and(eq(callTranscriptsTable.id, transcript.id), eq(callTranscriptsTable.orgId, authReq.orgId)))
+        .for("share")
+        .limit(1);
+      const assignment = open<TranscriptPayload>(locked?.sealed)?.speakerAssignment;
+      if (assignment && assignment.scoredId !== assignment.id) {
+        // The speakers changed but the call was not scored under them yet: this score may be wrong.
+        rescoringPending = true;
+        return;
+      }
       await tx.insert(callScoreReviewsTable).values({
         id: randomUUID(),
         orgId: authReq.orgId,
@@ -617,6 +632,13 @@ router.patch(
         changes: { scoreId: score.id, criterionId, verdict },
       });
     });
+    if (rescoringPending) {
+      res.status(409).json({
+        error: "The speakers on this call were just changed and it has not been scored again yet. Wait for the new result (or press the agent voice again), then grade it.",
+        code: "rescoring_pending",
+      });
+      return;
+    }
     const detail = await buildDetail(authReq.orgId, transcript.id, undefined);
     res.json(detail);
   },

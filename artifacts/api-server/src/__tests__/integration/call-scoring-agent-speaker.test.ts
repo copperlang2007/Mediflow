@@ -337,6 +337,44 @@ describe("choosing which voice is the agent", () => {
     expect(await optOutsAdded()).toHaveLength(0);
   });
 
+  it("a reviewer cannot sign off criteria on a score that predates a saved speaker choice", async () => {
+    const id = await create(oneTrackCall());
+    const { assignAgentSpeaker } = await import("../../lib/callScoring/speakerAssign");
+    const { getRubric, DEFAULT_RUBRIC_ID } = await import("../../lib/callScoring/rubrics");
+    const detailBefore = await request(app).get(`/api/call-scoring/transcripts/${id}`).set(withAuth(admin.id)).expect(200);
+    const criterionId = detailBefore.body.criteria[0].criterionId as string;
+    const reviewsOf = async () => (await handle.db.select().from(schema.callScoreReviewsTable).where(eq(schema.callScoreReviewsTable.transcriptId, id))).length;
+    const override = () => request(app).patch(`/api/call-scoring/transcripts/${id}/criteria/${criterionId}`).set(withAuth(admin.id)).send({ verdict: "pass", note: "checked it" });
+
+    // Allowed before any speaker choice.
+    await override().expect(200);
+    const baseline = await reviewsOf();
+
+    // The choice is saved but scoring again fails: the score on screen is the old one.
+    const failed = await assignAgentSpeaker({
+      orgId: org.id,
+      userId: admin.id,
+      userRole: "agency_admin",
+      transcriptId: id,
+      agentLabel: "Speaker 2",
+      rubric: getRubric(DEFAULT_RUBRIC_ID)!,
+      aiMode: "off",
+      rescore: async () => {
+        throw new Error("boom");
+      },
+    });
+    expect(failed).toMatchObject({ code: "rescore_failed" });
+    const refused = await override();
+    expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+    expect(refused.body.code).toBe("rescoring_pending");
+    expect(await reviewsOf()).toBe(baseline);
+
+    // Once the call is scored under the choice, grading works again.
+    await choose(admin.id, id, { agentSpeaker: "Speaker 2" }).expect(201);
+    await override().expect(200);
+    expect(await reviewsOf()).toBe(baseline + 1);
+  });
+
   it("refuses a voice that is not in the call, and a blank choice", async () => {
     const id = await create(oneTrackCall());
     await choose(admin.id, id, { agentSpeaker: "Speaker 9" }).expect(422);
