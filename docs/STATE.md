@@ -8,7 +8,7 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-12 — EnrollHere call-log CSV import into call scoring (see session log)._
+_Last updated: 2026-10-13 — Agency invitation fixes, PR #291 (see session log)._
 
 ### Health dashboard
 
@@ -21,7 +21,7 @@ _Last updated: 2026-10-12 — EnrollHere call-log CSV import into call scoring (
 | Production deploy (GCP Cloud Run) | **Green** at `f821a54` (run 37867735824), `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
-| Open PRs | Query GitHub live | As of 2026-10-12: the EnrollHere call-log import PR (branch `claude/agencybridge-compliance-review-s3nc6l`; #287 and #288 merged). No other open PRs. |
+| Open PRs | Query GitHub live | As of 2026-10-13: #291 (agency invitation fixes, branch `claudemoogs/fix-agency-invite-clean`); also the EnrollHere call-log import PR (branch `claude/agencybridge-compliance-review-s3nc6l`; #287 and #288 merged). No other open PRs. |
 | Migration high-water mark | `0072_integration_payloads` on main (#288); `0073_call_recordings_fetching` on branch `claude/agencybridge-compliance-review-s3nc6l` | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
@@ -89,6 +89,15 @@ ones with no inbound references.
 ---
 
 ## Session log
+
+### 2026-10-13 — Fix agency invitations (last-seat accept, invite lost during sign-up) — Claude Code — branch `claudemoogs/fix-agency-invite-clean`
+- **Outcome:** partial (code done, PR #291 open and awaiting review/merge)
+- **Changed:** Two independent bugs. (1) The server counted an invitation's own reserved seat against the invitee, so accepting the invite that took an agency's last seat failed with 402; `requireSeat`/`countSeatsUsed` now exclude that invitation. (2) The invite link lived only in the page address, so sign-up (email verification in a new tab, MFA) dropped it and the new user landed on "Create your agency"; the link is now remembered in the browser (`web-app/src/lib/pendingInvite.ts`, bounded by the invite's real expiry) and the provisioning gate sends the person back to accept it. Review follow-ups: a temporary lookup failure (rate limit, server error, offline) keeps the link; only a dead link is forgotten; a "forget this invitation" option; clearing is token-specific.
+- **Verified:** `pnpm run typecheck` clean; full local suite 231 files / 2545 tests passed before the review fixes; web tests for `pendingInvite` and `accept-invite` 29/29 after them. GitHub CI "typecheck + test" for the new commit: NOT yet verified at time of writing.
+- **Left undone / broken:** If Morgan already created her own agency while stuck, accept returns 409 `already_provisioned`; moving an existing account between agencies touches tenant isolation and is NOT implemented. Open security review question on PR #291: the remembered link is a bearer token in browser storage and acceptance is not bound to the invited email address; escalated to the owner as a design decision.
+- **Decisions made:** none (no ADR).
+- **Next agent should:** get PR #291 merged after owner decides the email-binding question; then the call-log import access for super admins (options A/B/C put to the owner, awaiting answer).
+- **Needs a human:** Morgan: (a) the exact error text she saw and whether she already created her own agency; (b) go-ahead on option A for super-admin call-log import and the size of the backlog. Owner answers recorded 2026-10-13: Google Cloud/AWS BAAs in place; no PHI ever in texts/emails; move to production ASAP; branch cleanup approved for today; audit-log reads of contact PHI approved (not yet built).
 
 ### 2026-10-12 — EnrollHere call-log CSV import into call scoring — Claude Code — branch `claude/agencybridge-compliance-review-s3nc6l`
 - **Outcome:** done (pending PR review and deploy)
