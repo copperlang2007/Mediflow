@@ -20,11 +20,13 @@ interface ListenLink {
 export function RecordingPlayer({ transcriptId }: { transcriptId: string }) {
   const [link, setLink] = useState<ListenLink | null>(null);
   const [linkEnded, setLinkEnded] = useState(false);
+  const [unsupported, setUnsupported] = useState(false);
   const listen = useMutation({
     mutationFn: () => customFetch<ListenLink>(`/api/call-scoring/transcripts/${transcriptId}/audio`),
     onSuccess: (data) => {
       setLink(data);
       setLinkEnded(false);
+      setUnsupported(false);
     },
   });
 
@@ -38,9 +40,11 @@ export function RecordingPlayer({ transcriptId }: { transcriptId: string }) {
           src={link.url}
           aria-label="Call recording"
           className="w-full"
-          onError={() => {
+          onError={(e) => {
             setLink(null);
-            setLinkEnded(true);
+            // 4 = MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED (literal: jsdom may not define the constant)
+            if (e.currentTarget.error?.code === 4) setUnsupported(true);
+            else setLinkEnded(true);
           }}
         />
       ) : (
@@ -53,6 +57,11 @@ export function RecordingPlayer({ transcriptId }: { transcriptId: string }) {
       {listen.isError && (
         <p role="alert" className="text-sm text-destructive">
           {apiMessage(listen.error, "The recording could not be loaded. Nothing was changed.")}
+        </p>
+      )}
+      {unsupported && (
+        <p role="alert" className="text-sm text-warning">
+          This recording is in a format your browser cannot play (for example AMR). Ask your agency admin to open it in another player.
         </p>
       )}
       {linkEnded && (

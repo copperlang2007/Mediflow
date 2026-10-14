@@ -145,6 +145,17 @@ describe("listen to the recording", () => {
     expect(screen.queryByLabelText("Call recording")).not.toBeInTheDocument();
   });
 
+  it("says the format cannot be played (no retry wording) when the browser does not support it", async () => {
+    renderDetail();
+    await userEvent.click(await screen.findByRole("button", { name: /Listen to the recording/ }));
+    const player = await screen.findByLabelText("Call recording");
+    Object.defineProperty(player, "error", { value: { code: 4 }, configurable: true });
+    fireEvent.error(player);
+    expect(await screen.findByRole("alert")).toHaveTextContent("This recording is in a format your browser cannot play (for example AMR). Ask your agency admin to open it in another player.");
+    expect(screen.queryByText(/link ended/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Listen to the recording/ })).toBeInTheDocument();
+  });
+
   it("when the link ends, says so and a new press asks for a fresh link", async () => {
     renderDetail();
     await userEvent.click(await screen.findByRole("button", { name: /Listen to the recording/ }));
