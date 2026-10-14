@@ -3,8 +3,8 @@
  *
  *   POST /api/integrations/enrollhere/v1/:orgId/events
  *
- * Mounted OUTSIDE the Clerk-guarded `/api` router (like the dialer and queue
- * receivers) because EnrollHere has no Clerk session. Trust comes from a
+ * Mounted OUTSIDE the sign-in-guarded `/api` router (like the dialer and queue
+ * receivers) because EnrollHere has no sign-in session. Trust comes from a
  * per-tenant shared secret (`ENROLLHERE_WEBHOOK_SECRET[_<ORGID>]`), accepted
  * in either form so it works with whatever EnrollHere's webhook settings allow:
  *

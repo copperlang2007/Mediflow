@@ -14,14 +14,14 @@
  */
 import { vi, describe, it, expect, beforeAll, afterAll } from "vitest";
 
-const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
+const { dbF, authF, jobsF } = vi.hoisted(() => ({
   dbF: async (): Promise<Record<string, unknown>> => {
     const { dbMockFactory } = await import("../helpers/testApp");
     return dbMockFactory();
   },
-  clerkF: async (): Promise<Record<string, unknown>> => {
-    const { clerkMockFactory } = await import("../helpers/testApp");
-    return clerkMockFactory();
+  authF: async (): Promise<Record<string, unknown>> => {
+    const { identityMockFactory } = await import("../helpers/testApp");
+    return identityMockFactory();
   },
   jobsF: async (): Promise<Record<string, unknown>> => {
     const { jobsMockFactory } = await import("../helpers/testApp");
@@ -29,7 +29,7 @@ const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
   },
 }));
 vi.mock("@workspace/db", dbF);
-vi.mock("@clerk/express", clerkF);
+vi.mock("../../lib/auth/identity", authF);
 vi.mock("../../lib/jobs", jobsF);
 
 import { randomUUID } from "node:crypto";
@@ -108,7 +108,7 @@ function claimsForOrg() {
 }
 
 /**
- * Write an agent presence row directly (no Clerk user needed). A non-offline
+ * Write an agent presence row directly (no signed-in user needed). A non-offline
  * status with a future `expiresAt` makes the org "presence configured"; only
  * `available` puts the agent in the available set.
  */

@@ -1,7 +1,6 @@
-@layer theme, base, clerk, components, utilities;
+@layer theme, base, components, utilities;
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "@clerk/themes/shadcn.css";
 @plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
@@ -331,17 +330,6 @@
     background-attachment: fixed;
     background-repeat: no-repeat;
   }
-}
-
-/* Clerk pseudo-state styling — outside @layer so it takes effect */
-.cl-formFieldInput::placeholder {
-  color: hsl(215 16% 60%);
-  opacity: 1;
-}
-.cl-formFieldInput:focus {
-  border-color: hsl(210 60% 40%);
-  outline: none;
-  box-shadow: 0 0 0 3px hsl(210 60% 40% / 0.15);
 }
 
 @layer utilities {

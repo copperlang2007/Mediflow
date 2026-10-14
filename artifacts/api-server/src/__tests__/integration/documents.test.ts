@@ -3,14 +3,14 @@ import { vi, describe, it, expect, beforeAll, afterAll, beforeEach } from "vites
 // vi.mock is hoisted above all imports. Helper factories live in
 // ../helpers/testApp; we reference them through vi.hoisted so the helper
 // import inside the factory does not fight the TDZ.
-const { dbF, clerkF, jobsF, storageF, aclF } = vi.hoisted(() => ({
+const { dbF, authF, jobsF, storageF, aclF } = vi.hoisted(() => ({
   dbF: async (): Promise<Record<string, unknown>> => {
     const { dbMockFactory } = await import("../helpers/testApp");
     return dbMockFactory();
   },
-  clerkF: async (): Promise<Record<string, unknown>> => {
-    const { clerkMockFactory } = await import("../helpers/testApp");
-    return clerkMockFactory();
+  authF: async (): Promise<Record<string, unknown>> => {
+    const { identityMockFactory } = await import("../helpers/testApp");
+    return identityMockFactory();
   },
   jobsF: async (): Promise<Record<string, unknown>> => {
     const { jobsMockFactory } = await import("../helpers/testApp");
@@ -55,7 +55,7 @@ const { dbF, clerkF, jobsF, storageF, aclF } = vi.hoisted(() => ({
 }));
 
 vi.mock("@workspace/db", dbF);
-vi.mock("@clerk/express", clerkF);
+vi.mock("../../lib/auth/identity", authF);
 vi.mock("../../lib/jobs", jobsF);
 vi.mock("../../lib/objectStorage", storageF);
 vi.mock("../../lib/objectAcl", aclF);

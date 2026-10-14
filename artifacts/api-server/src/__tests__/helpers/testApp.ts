@@ -1,24 +1,24 @@
 /**
- * Wires the express `app` to a pglite-backed `db` and a synthetic Clerk
+ * Wires the express `app` to a pglite-backed `db` and a synthetic sign-in
  * auth header so integration tests can hit real route handlers without
- * a live Postgres or Clerk dependency.
+ * a live Postgres or Identity Platform dependency.
  *
  * Usage (every integration test file MUST follow this pattern because
  * vitest only hoists `vi.mock(...)` calls written literally at the top of
  * the test file — calls placed inside helper functions do NOT hoist):
  *
  *     import { vi } from "vitest";
- *     const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
+ *     const { dbF, authF, jobsF } = vi.hoisted(() => ({
  *       dbF: async () => (await import("../helpers/testApp")).dbMockFactory(),
- *       clerkF: async () => (await import("../helpers/testApp")).clerkMockFactory(),
+ *       authF: async () => (await import("../helpers/testApp")).identityMockFactory(),
  *       jobsF: async () => (await import("../helpers/testApp")).jobsMockFactory(),
  *     }));
  *     vi.mock("@workspace/db", dbF);
- *     vi.mock("@clerk/express", clerkF);
+ *     vi.mock("../../lib/auth/identity", authF);
  *     vi.mock("../../lib/jobs", jobsF);
  *
  * Auth synthesis:
- *   `clerkMiddleware` is mocked to a no-op and `getAuth(req)` is mocked to
+ *   `identityMiddleware` is mocked to a no-op and `getAuth(req)` is mocked to
  *   read the `x-test-user-id` and `x-test-session-id` headers. The
  *   downstream `requireAuth` middleware then loads the user row from
  *   pglite using that id, so RBAC behaves exactly as in production.
@@ -53,8 +53,6 @@ export function clearEnqueuedJobs(): void {
 export async function bootTestDb(): Promise<TestDbHandle> {
   if (!globalThis.__TEST_DB__) {
     process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";
-    process.env.CLERK_PUBLISHABLE_KEY ??= "pk_test_dummy";
-    process.env.CLERK_SECRET_KEY ??= "sk_test_dummy";
     process.env.ALLOWED_ORIGIN ??= "http://localhost";
     globalThis.__TEST_DB__ = await setupTestDb();
     globalThis.__TEST_ENQUEUED__ = [];
@@ -81,9 +79,8 @@ export function withAuth(
 
 /**
  * Synthetic auth headers that also flag the session as MFA-enrolled, for
- * tests of the requireMfa middleware. Real Clerk JWTs carry this in their
- * session claims; the test stub reads it from a header to keep the harness
- * dependency-free.
+ * tests of the requireMfa middleware. Real ID tokens carry this as
+ * `firebase.sign_in_second_factor`; the test stub reads it from a header.
  */
 export function withMfaAuth(
   userId: string,
@@ -120,59 +117,39 @@ export const dbMockFactory = async (): Promise<Record<string, unknown>> => {
 };
 
 /**
- * Clerk users' two-factor state as the backend API reports it, keyed by user
- * id. Used when a synthetic session token carries no MFA claim
- * (`x-test-mfa-enrolled: absent`), the fallback path in resolveMfaEnrolled.
+ * Mock for lib/auth/identity: the real module minus token verification.
+ * `identityMiddleware` is a no-op and `getAuth(req)` reads synthetic headers:
+ *   x-test-user-id       → the identity subject (equal to users.id for test users)
+ *   x-test-session-id    → the session id
+ *   x-test-mfa-enrolled  → "true" when this sign-in passed a second factor
+ *   x-test-email / x-test-email-verified → the token's email and whether it is verified
+ *   x-test-auth-time     → sign-in time in seconds (default: now)
  */
-export const clerkTwoFactorByUser = new Map<string, boolean>();
-
-export const clerkMockFactory = async (): Promise<Record<string, unknown>> => {
-  const actual = await import("@clerk/express");
+export const identityMockFactory = async (): Promise<Record<string, unknown>> => {
+  const actual = await import("../../lib/auth/identity");
   return {
     ...actual,
-    // Only users.getUser is faked; everything else stays the real client.
-    clerkClient: new Proxy(actual.clerkClient, {
-      get: (target, prop, receiver) =>
-        prop === "users"
-          ? {
-              getUser: async (id: string) => {
-                if (!clerkTwoFactorByUser.has(id)) throw new Error(`No Clerk user ${id}`);
-                return { id, twoFactorEnabled: clerkTwoFactorByUser.get(id) };
-              },
-            }
-          : Reflect.get(target, prop, receiver),
-    }),
-    clerkMiddleware:
+    identityMiddleware:
       () =>
-      (
-        _req: unknown,
-        _res: unknown,
-        next: () => void,
-      ): void => {
+      (_req: unknown, _res: unknown, next: () => void): void => {
         next();
       },
-    getAuth: (req: {
-      headers: Record<string, string | string[] | undefined>;
-    }): {
-      userId: string | null;
-      sessionId: string | null;
-      sessionClaims: { iat: number; two_factor?: boolean | string };
-    } => {
-      const userId = req.headers["x-test-user-id"];
-      const sessionId = req.headers["x-test-session-id"];
-      const mfa = req.headers["x-test-mfa-enrolled"];
+    getAuth: (req: { headers: Record<string, string | string[] | undefined> }) => {
+      const h = (k: string) => {
+        const v = req.headers[k];
+        return typeof v === "string" ? v : null;
+      };
+      const subject = h("x-test-user-id");
+      const now = Math.floor(Date.now() / 1000);
       return {
-        userId: typeof userId === "string" ? userId : null,
-        sessionId: typeof sessionId === "string" ? sessionId : null,
-        // Always treat the synthetic JWT as freshly minted so requireRecentAuth passes.
-        sessionClaims: mfa === "absent"
-          // No session-token template: the token carries no MFA claim at all.
-          ? { iat: Math.floor(Date.now() / 1000) }
-          : {
-              iat: Math.floor(Date.now() / 1000),
-              // "as-string" mimics a Clerk template shortcode rendered as text.
-              two_factor: mfa === "as-string" ? "true" : mfa === "true",
-            },
+        subject,
+        sessionId: subject ? (h("x-test-session-id") ?? `session-${subject}`) : null,
+        email: h("x-test-email"),
+        emailVerified: h("x-test-email-verified") !== "false",
+        mfa: h("x-test-mfa-enrolled") === "true",
+        // Treat the synthetic token as freshly minted so requireRecentAuth passes;
+        // x-test-auth-time (seconds) sets an older sign-in time.
+        sessionClaims: subject ? { iat: now, auth_time: Number(h("x-test-auth-time") ?? now) } : null,
       };
     },
   };

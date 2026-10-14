@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ensureFreshSession } from "@/lib/auth";
 import { useQuery } from "@tanstack/react-query";
 import { useGetMe } from "@workspace/api-client-react";
 import {
@@ -879,6 +880,8 @@ function dateOffset(days: number) { return new Date(Date.now() - days * 24 * 60 
 
 async function downloadCsv(url: string, filename: string) {
   const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+  // The step-up gate wants a recently issued token in the session cookie.
+  await ensureFreshSession();
   const res = await fetch(`${base}${url}`, {
     credentials: "include",
     headers: { "X-Confirm-Export": "true" },
@@ -886,7 +889,7 @@ async function downloadCsv(url: string, filename: string) {
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { error?: string; code?: string };
     if (body.code === "STEP_UP_REQUIRED") {
-      // Signal the UI; Clerk session refresh happens on next request
+      // Signal the UI; the sign-in token is refreshed on the next request
       alert("Your session needs to be refreshed. Please reload the page and try again.");
     } else {
       alert(body.error ?? `Export failed (${res.status})`);

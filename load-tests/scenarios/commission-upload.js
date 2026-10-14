@@ -16,7 +16,7 @@
 // properly-scoped token.
 //
 // Required env:
-//   API_TOKEN    MFA-enrolled admin Clerk JWT.
+//   API_TOKEN    ID token of an admin who signed in with MFA.
 //   CARRIER_ID   A carrier id in the target org (statement upload validates
 //                the carrier belongs to the org).
 //

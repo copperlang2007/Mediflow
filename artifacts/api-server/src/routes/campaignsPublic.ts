@@ -1,6 +1,6 @@
 /**
  * Public (unauthenticated) campaign endpoints. Mounted in app.ts ABOVE the
- * Clerk-guarded `/api` router, like the dialer and EnrollHere receivers —
+ * sign-in-guarded `/api` router, like the dialer and EnrollHere receivers —
  * trust comes from a signature, never from a session.
  *
  *   POST /api/campaigns/v1/webhooks/resend      Resend events (svix-signed)

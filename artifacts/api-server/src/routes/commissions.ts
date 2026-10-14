@@ -985,7 +985,7 @@ router.post(
 // gated on `commission:read` (agents don't hold that permission); the
 // authorization model is "your own agentId". We resolve the caller's
 // agent row the same way the queue heartbeat does (agentsTable where
-// userId + orgId match the Clerk session) so an agent can only ever see
+// userId + orgId match the signed-in user) so an agent can only ever see
 // their own payouts. Returns 404 when the caller has no linked agent.
 //
 // The per-agent "statement" here is a row in agent_commission_payouts

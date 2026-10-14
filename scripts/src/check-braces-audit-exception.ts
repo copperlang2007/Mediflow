@@ -10,12 +10,14 @@ const repoRoot = path.resolve(
   "..",
 );
 const apiSourceDir = path.join(repoRoot, "artifacts", "api-server", "src");
-const expectedBracesPath = [
-  "@workspace/api-server",
-  "http-proxy-middleware@3.0.7",
-  "micromatch@4.0.8",
-  "braces@3.0.3",
-];
+/**
+ * GHSA-vfj7-8cjw-p6xm (`braces`) is ignored in the audit (ADR 0007). Since the
+ * move off Clerk (ADR 0006) the only remaining path is development tooling
+ * (`mockup-sandbox > fast-glob`); the production API has no `braces` and no
+ * proxy. This guard keeps it that way: any `braces` in the API's production
+ * tree, or any `createProxyMiddleware` in API source, fails CI so the
+ * exception is reassessed before it can cover production code again.
+ */
 
 interface Dependency {
   version: string;
@@ -41,30 +43,6 @@ function getBracesPaths(
   return paths;
 }
 
-function hasProperty(
-  property: ts.ObjectLiteralElementLike,
-  name: string,
-): boolean {
-  if (ts.isSpreadAssignment(property)) {
-    return true;
-  }
-  if (
-    ts.isPropertyAssignment(property) ||
-    ts.isShorthandPropertyAssignment(property) ||
-    ts.isMethodDeclaration(property)
-  ) {
-    const propertyName = ts.getNameOfDeclaration(property);
-    if (
-      !propertyName ||
-      (!ts.isIdentifier(propertyName) && !ts.isStringLiteralLike(propertyName))
-    ) {
-      return true;
-    }
-    return propertyName.text === name;
-  }
-  return false;
-}
-
 async function listTypeScriptFiles(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
   const nested = await Promise.all(
@@ -79,10 +57,9 @@ async function listTypeScriptFiles(directory: string): Promise<string[]> {
   return nested.flat();
 }
 
-async function checkNoGlobProxyFilters(): Promise<void> {
+async function checkNoProxyMiddleware(): Promise<void> {
   const files = await listTypeScriptFiles(apiSourceDir);
   const errors: string[] = [];
-  let proxyCalls = 0;
 
   for (const file of files) {
     const source = ts.createSourceFile(
@@ -98,21 +75,9 @@ async function checkNoGlobProxyFilters(): Promise<void> {
         ts.isIdentifier(node.expression) &&
         node.expression.text === "createProxyMiddleware"
       ) {
-        proxyCalls++;
-        const options = node.arguments[0];
-        if (!options || !ts.isObjectLiteralExpression(options)) {
-          errors.push(
-            `${path.relative(repoRoot, file)}: proxy options must remain an inline object so the guard can verify them`,
-          );
-        } else if (
-          options.properties.some((property) =>
-            hasProperty(property, "pathFilter"),
-          )
-        ) {
-          errors.push(
-            `${path.relative(repoRoot, file)}: createProxyMiddleware must not use pathFilter while the braces advisory is ignored`,
-          );
-        }
+        errors.push(
+          `${path.relative(repoRoot, file)}: createProxyMiddleware is back in the API; reassess the ignored braces advisory (ADR 0007) first`,
+        );
       }
       ts.forEachChild(node, visit);
     }
@@ -120,11 +85,6 @@ async function checkNoGlobProxyFilters(): Promise<void> {
     visit(source);
   }
 
-  if (proxyCalls !== 1) {
-    errors.push(
-      `Expected one createProxyMiddleware call in API source, found ${proxyCalls}`,
-    );
-  }
   if (errors.length > 0) {
     throw new Error(errors.join("\n"));
   }
@@ -155,22 +115,17 @@ function checkProductionDependencyPaths(): void {
   }
 
   const bracesPaths = getBracesPaths(apiPackage, [apiPackage.name]);
-  const actualPaths = bracesPaths.map((dependencyPath) =>
-    dependencyPath.join(" > "),
-  );
-  const expectedPath = expectedBracesPath.join(" > ");
-  if (actualPaths.length !== 1 || actualPaths[0] !== expectedPath) {
+  if (bracesPaths.length > 0) {
     throw new Error(
       [
-        "The production path to the ignored braces advisory changed.",
-        `Expected: ${expectedPath}`,
-        `Found: ${actualPaths.length > 0 ? actualPaths.join("\n") : "(none)"}`,
-        "Reassess the advisory and update or remove the exception before changing this guard.",
+        "The production API depends on braces again, which the audit exception no longer covers:",
+        ...bracesPaths.map((dependencyPath) => dependencyPath.join(" > ")),
+        "Reassess the advisory (ADR 0007) and update or remove the exception before changing this guard.",
       ].join("\n"),
     );
   }
 }
 
-await checkNoGlobProxyFilters();
+await checkNoProxyMiddleware();
 checkProductionDependencyPaths();
 console.log("braces audit exception guard passed");

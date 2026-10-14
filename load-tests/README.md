@@ -43,7 +43,7 @@ k6 run -e BASE_URL=http://localhost:3000 -e API_TOKEN=<jwt> load-tests/smoke.js
 | Var | Required | Used by | Notes |
 | --- | --- | --- | --- |
 | `BASE_URL` | yes | all | API host root **without** `/api` (the API mounts authed routes under `/api` itself). Default `http://localhost:3000`. |
-| `API_TOKEN` | yes (except webhook-only runs) | all `/api` scenarios | A valid Clerk **session JWT**. See "Auth" below. |
+| `API_TOKEN` | yes (except webhook-only runs) | all `/api` scenarios | A valid Identity Platform **ID token**. See "Auth" below. |
 | `AGENT_ID` | for commissions | `commissions.js`, smoke/stress | An agent id in the target org. |
 | `CONTACT_ID` | optional | `contact-detail.js` | Pin the detail read to a known contact. If unset, discovered from `GET /contacts`. |
 | `CARRIER_ID` | for commission upload | `commission-upload.js` | A carrier id in the target org. |
@@ -58,25 +58,22 @@ k6 run -e BASE_URL=http://localhost:3000 -e API_TOKEN=<jwt> load-tests/smoke.js
 
 ## Auth — how the token works
 
-The API authenticates every `/api/*` route with **Clerk**
-(`artifacts/api-server/src/app.ts` mounts `clerkMiddleware`;
-`middlewares/requireAuth.ts` calls `getAuth(req)`). It accepts the Clerk
-session JWT as either an `Authorization: Bearer <jwt>` header or a `__session`
+The API authenticates every `/api/*` route with a **Google Cloud Identity
+Platform ID token** (`artifacts/api-server/src/lib/auth/identity.ts`, ADR 0006).
+It accepts the token as either an `Authorization: Bearer <jwt>` header or a `__session`
 cookie — the scripts send **both** (`load-tests/lib/auth.js`) so they work
 regardless of deployment config.
 
-k6 cannot run Clerk's browser sign-in flow, so the JWT must be minted out of
-band and passed via `API_TOKEN`. Options:
+k6 cannot run the browser sign-in (password + authenticator code), so the
+token must be minted out of band and passed via `API_TOKEN`. Options:
 
 1. **From a browser session (quickest):** sign in to the web app, open
-   DevTools → Application → Cookies, copy the `__session` value. These JWTs
-   are short-lived (~1 min by default) — fine for a smoke run, refresh for
-   longer runs.
-2. **Clerk backend API / testing tokens:** use Clerk's
-   [testing tokens](https://clerk.com/docs/testing/overview) or a long-lived
-   session created via the Clerk backend SDK against the staging instance.
-3. **Staging service user:** provision a dedicated load-test user in the
-   staging Clerk instance and script token minting with the Clerk backend API.
+   DevTools → Application → Cookies, copy the `__session` value. ID tokens
+   last an hour — fine for most runs; copy a fresh one for longer runs.
+2. **Staging service user:** create a dedicated load-test login in the
+   staging Identity Platform project (with two-step verification) and script
+   sign-in with the Identity Toolkit REST API (`accounts:signInWithPassword`,
+   then `mfaSignIn:finalize` with a TOTP code).
 
 The token's user determines org scoping and permissions, and must be
 **MFA-enrolled**: every authenticated route answers 403 `mfa_required`

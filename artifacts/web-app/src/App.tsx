@@ -1,7 +1,7 @@
 import { lazy, Suspense } from "react";
-import { ClerkProvider, SignIn, SignUp, Show, useClerk, useUser, useAuth } from "@clerk/react";
-import { publishableKeyFromHost } from "@clerk/react/internal";
-import { shadcn } from "@clerk/themes";
+import { AuthProvider, Show, authConfigured, useAuth, useSignOut, useUser } from "@/lib/auth";
+import { IS_DEMO_BUILD } from "@/lib/demo/isDemo";
+import { VerifyEmailNotice } from "@/components/auth/VerifyEmailNotice";
 import { Switch, Route, useLocation, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClientProvider, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
@@ -67,6 +67,8 @@ const BillingPage = lazy(() => import("@/pages/billing"));
 const TeamPage = lazy(() => import("@/pages/team"));
 const AcceptInvitePage = lazy(() => import("@/pages/accept-invite"));
 const CreateOrganizationPage = lazy(() => import("@/pages/create-organization"));
+const SignInPage = lazy(() => import("@/pages/sign-in"));
+const SignUpPage = lazy(() => import("@/pages/sign-up"));
 // --- stage2/portal-dialer ---
 const ClientPortalPage = lazy(() => import("@/pages/ClientPortalPage"));
 const DialerPage = lazy(() => import("@/pages/DialerPage"));
@@ -102,70 +104,7 @@ const DevFeatureBuilderPage = DEV_CONSOLE_ENABLED
   ? lazy(() => import("@/pages/dev/feature-builder"))
   : null;
 
-const clerkPubKey = publishableKeyFromHost(
-  window.location.hostname,
-  import.meta.env.VITE_CLERK_PUBLISHABLE_KEY,
-);
-
-const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
-
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
-
-function stripBase(path: string): string {
-  return basePath && path.startsWith(basePath)
-    ? path.slice(basePath.length) || "/"
-    : path;
-}
-
-const clerkAppearance = {
-  theme: shadcn,
-  cssLayerName: "clerk",
-  options: {
-    logoPlacement: "inside" as const,
-    logoLinkUrl: basePath || "/",
-    logoImageUrl: `${window.location.origin}${basePath}/logo.svg`,
-    socialButtonsPlacement: "bottom" as const,
-    socialButtonsVariant: "blockButton" as const,
-  },
-  variables: {
-    colorPrimary: "hsl(222, 62%, 15%)",
-    colorForeground: "hsl(222, 47%, 11%)",
-    colorMutedForeground: "hsl(215, 16%, 42%)",
-    colorDanger: "hsl(0, 84%, 60%)",
-    colorBackground: "hsl(0, 0%, 100%)",
-    colorInput: "hsl(214, 25%, 88%)",
-    colorInputForeground: "hsl(222, 47%, 11%)",
-    colorNeutral: "hsl(214, 25%, 88%)",
-    fontFamily: "'Figtree', system-ui, sans-serif",
-    borderRadius: "0.625rem",
-  },
-  elements: {
-    rootBox: "w-full flex justify-center",
-    cardBox: "bg-white/95 backdrop-blur-xl rounded-2xl w-[440px] max-w-full overflow-hidden shadow-2xl border border-white/10",
-    card: "!shadow-none !border-0 !bg-transparent !rounded-none",
-    footer: "!shadow-none !border-0 !bg-transparent !rounded-none",
-    headerTitle: "text-foreground font-display font-bold text-xl",
-    headerSubtitle: "text-muted-foreground text-sm",
-    socialButtonsBlockButtonText: "text-foreground font-medium",
-    formFieldLabel: "text-foreground text-sm font-medium",
-    footerActionLink: "text-accent font-semibold hover:text-accent/80",
-    footerActionText: "text-muted-foreground",
-    dividerText: "text-muted-foreground text-xs",
-    identityPreviewEditButton: "text-accent",
-    formFieldSuccessText: "text-green-600",
-    alertText: "text-foreground",
-    logoBox: "!hidden",
-    logoImage: "h-12 w-auto",
-    socialButtonsBlockButton: "border border-border hover:bg-secondary transition-colors",
-    formButtonPrimary: "bg-gradient-to-r from-navy-700 to-navy-900 text-white hover:from-navy-800 hover:to-navy-950 font-semibold shadow-md transition-colors",
-    formFieldInput: "border-input bg-background text-foreground rounded-md",
-    footerAction: "border-t border-border bg-muted/30",
-    dividerLine: "bg-border",
-    alert: "border border-border rounded-lg",
-    otpCodeFieldInput: "border-input bg-background text-foreground",
-    main: "px-8 py-6",
-  },
-};
 
 function PageLoadingFallback() {
   return (
@@ -182,59 +121,6 @@ function PageLoadingFallback() {
   );
 }
 
-/**
- * Navy backdrop + brand header shared by the Clerk sign-in / sign-up screens
- * (agencyBRIDGE login look). Clerk's own card renders in the middle, so
- * MFA, password reset and every other Clerk step keep working unchanged.
- */
-function AuthFrame({ subtitle, children }: { subtitle: string; children: React.ReactNode }) {
-  return (
-    <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-gradient-to-br from-navy-900 via-navy-800 to-navy-950 px-4 py-10">
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 h-96 w-96 rounded-full bg-indigo-500/10 blur-3xl" />
-      </div>
-      <div className="relative flex w-full max-w-md flex-col items-center">
-        <a href={basePath || "/"} className="mb-8 flex flex-col items-center text-center" aria-label="agencyBRIDGE home">
-          <BrandMark size={64} tone="light" decorative className="mb-4 rounded-2xl shadow-lg shadow-blue-500/30" />
-          <span className="font-display text-2xl font-bold tracking-tight text-white">
-            agency<span className="font-extrabold">BRIDGE</span>
-          </span>
-          <span className="mt-1 text-sm text-blue-200/70">{subtitle}</span>
-        </a>
-        {children}
-        <p className="mt-6 text-center text-xs text-blue-200/60">
-          Your agency administrator manages who can sign in and what they can see.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function SignInPage() {
-  return (
-    <AuthFrame subtitle="Medicare Agency Management Platform">
-      <SignIn
-        routing="path"
-        path={`${basePath}/sign-in`}
-        signUpUrl={`${basePath}/sign-up`}
-      />
-    </AuthFrame>
-  );
-}
-
-function SignUpPage() {
-  return (
-    <AuthFrame subtitle="Set up your agency workspace">
-      <SignUp
-        routing="path"
-        path={`${basePath}/sign-up`}
-        signInUrl={`${basePath}/sign-in`}
-      />
-    </AuthFrame>
-  );
-}
-
 function DeploymentConfigRequired() {
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-gradient-to-br from-navy-900 via-navy-800 to-navy-950 px-4">
@@ -245,13 +131,16 @@ function DeploymentConfigRequired() {
         <p className="mb-3 text-sm font-semibold uppercase tracking-[0.24em] text-blue-200">Early access deployment</p>
         <h1 className="mb-4 text-4xl font-bold tracking-tight">agencyBRIDGE is deployed</h1>
         <p className="mb-6 text-base leading-7 text-blue-100">
-          The web shell is rendering. Add <code className="rounded bg-black/30 px-2 py-1 text-blue-50">VITE_CLERK_PUBLISHABLE_KEY</code>
-          {" "}in the deployment environment to enable the authenticated walkthrough.
+          The web shell is rendering. Add the sign-in settings{" "}
+          <code className="rounded bg-black/30 px-2 py-1 text-blue-50">VITE_FIREBASE_API_KEY</code>,{" "}
+          <code className="rounded bg-black/30 px-2 py-1 text-blue-50">VITE_FIREBASE_AUTH_DOMAIN</code> and{" "}
+          <code className="rounded bg-black/30 px-2 py-1 text-blue-50">VITE_FIREBASE_PROJECT_ID</code>{" "}
+          to the build to enable sign-in.
         </p>
         <div className="rounded-xl border border-blue-300/20 bg-blue-950/50 p-4 text-left text-sm text-blue-100">
           <p className="font-semibold text-white">Demo readiness checklist</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
-            <li>Set Clerk publishable and secret keys.</li>
+            <li>Set up Identity Platform (email/password, TOTP) in the Google Cloud project.</li>
             <li>Point <code>ALLOWED_ORIGIN</code> at the Render URL.</li>
             <li>Attach the demo database before exercising API-backed pages.</li>
           </ul>
@@ -290,7 +179,7 @@ function usePlatformState() {
 }
 
 function AccountLoadError({ onRetry }: { onRetry: () => void }) {
-  const { signOut } = useClerk();
+  const { signOut } = useSignOut();
   return (
     <div role="alert" className="p-8 text-center text-sm text-muted-foreground">
       Could not load your account.{" "}
@@ -329,7 +218,7 @@ function Dashboard() {
 
 function HomeRedirect() {
   const { isLoaded, isSignedIn } = useAuth();
-  // Clerk can be slow or unreachable; the public entry page must still render.
+  // Sign-in state can take a moment; the public entry page must still render.
   if (!isLoaded) return <Landing />;
   return isSignedIn ? <Redirect to="/dashboard" /> : <Landing />;
 }
@@ -399,10 +288,11 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
 /**
  * Provisioning gate.
  *
- * Sits between Clerk sign-in and the app shell. A Clerk user with no agencyBRIDGE
- * account is sent to the create-your-agency screen instead of being silently
- * provisioned into an auto-named org — that screen is what makes sign-up
- * genuinely self-serve.
+ * Sits between sign-in and the app shell. A signed-in person with no
+ * agencyBRIDGE account is sent to the create-your-agency screen instead of
+ * being silently provisioned into an auto-named org — that screen is what
+ * makes sign-up genuinely self-serve. An email that is not verified yet comes
+ * first: the server creates or links an account only for a verified email.
  *
  * Renders nothing but a spinner while the status call is in flight, so the
  * shell never flashes for a user who is about to be redirected.
@@ -427,7 +317,7 @@ function ProvisioningGate({ children }: { children: React.ReactNode }) {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!res.ok) throw new Error("Could not load account status");
-      return res.json() as Promise<{ provisioned: boolean; active: boolean; mfaRequired?: boolean; mfaEnrolled?: boolean }>;
+      return res.json() as Promise<{ provisioned: boolean; active: boolean; emailVerified?: boolean; mfaRequired?: boolean; mfaEnrolled?: boolean }>;
     },
   });
 
@@ -445,6 +335,15 @@ function ProvisioningGate({ children }: { children: React.ReactNode }) {
     // here would make the invitation unusable ("already belongs to an agency").
     const inviteBack = pendingInvitePath();
     if (inviteBack) return <Redirect to={inviteBack} />;
+    if (!data.emailVerified) {
+      return (
+        <div className="flex min-h-[100dvh] items-center justify-center bg-gradient-to-br from-navy-900 via-navy-800 to-navy-950 px-4">
+          <div className="w-full max-w-md rounded-2xl border bg-card p-6 text-card-foreground shadow-2xl">
+            <VerifyEmailNotice onVerified={() => void refetch()} />
+          </div>
+        </div>
+      );
+    }
     return (
       <Suspense fallback={<PageLoadingFallback />}>
         <CreateOrganizationPage />
@@ -455,74 +354,44 @@ function ProvisioningGate({ children }: { children: React.ReactNode }) {
   // Mandatory MFA: the API refuses every authenticated route until the user
   // has a second factor, so show enrollment instead of an app full of 403s.
   if (data?.mfaRequired && !data.mfaEnrolled) {
-    return (
-      <MfaEnrollmentGate
-        onEnrolled={async () => {
-          const next = await refetch();
-          return Boolean(next.data?.mfaEnrolled);
-        }}
-      />
-    );
+    return <MfaEnrollmentGate />;
   }
 
   return <>{children}</>;
 }
 
-function ClerkQueryClientCacheInvalidator() {
-  const { addListener } = useClerk();
+/** Drops every cached answer when the signed-in person changes, so nobody sees the previous user's data. */
+function SignedInUserCacheInvalidator() {
+  const { userId } = useAuth();
   const qc = useQueryClient();
   const prevUserIdRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
-    const unsubscribe = addListener(({ user }) => {
-      const userId = user?.id ?? null;
-      if (prevUserIdRef.current !== undefined && prevUserIdRef.current !== userId) {
-        qc.clear();
-      }
-      prevUserIdRef.current = userId;
-    });
-    return unsubscribe;
-  }, [addListener, qc]);
+    if (prevUserIdRef.current !== undefined && prevUserIdRef.current !== userId) {
+      qc.clear();
+    }
+    prevUserIdRef.current = userId;
+  }, [userId, qc]);
 
   return null;
 }
 
-function ClerkProviderWithRoutes() {
-  const [, setLocation] = useLocation();
-
+function AppRoutes() {
   return (
-    <ClerkProvider
-      publishableKey={clerkPubKey}
-      proxyUrl={clerkProxyUrl}
-      appearance={clerkAppearance}
-      signInUrl={`${basePath}/sign-in`}
-      signUpUrl={`${basePath}/sign-up`}
-      localization={{
-        signIn: {
-          start: {
-            title: "Welcome back",
-            subtitle: "Sign in to agencyBRIDGE to continue",
-          },
-        },
-        signUp: {
-          start: {
-            title: "Create your account",
-            subtitle: "Start managing your Medicare agency",
-          },
-        },
-      }}
-      routerPush={(to) => setLocation(stripBase(to))}
-      routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
-    >
+    <AuthProvider>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
-          <ClerkQueryClientCacheInvalidator />
+          <SignedInUserCacheInvalidator />
           <ErrorBoundary>
             <SessionGuard>
             <Switch>
               <Route path="/" component={HomeRedirect} />
-              <Route path="/sign-in/*?" component={SignInPage} />
-              <Route path="/sign-up/*?" component={SignUpPage} />
+              <Route path="/sign-in/*?">
+                <Suspense fallback={null}><SignInPage /></Suspense>
+              </Route>
+              <Route path="/sign-up/*?">
+                <Suspense fallback={null}><SignUpPage /></Suspense>
+              </Route>
               {/*
                 Deliberately OUTSIDE ProtectedLayout. An invitee has no agencyBRIDGE
                 account yet, so the provisioning gate would send them to the
@@ -744,7 +613,7 @@ function ClerkProviderWithRoutes() {
           <SonnerToaster />
         </TooltipProvider>
       </QueryClientProvider>
-    </ClerkProvider>
+    </AuthProvider>
   );
 }
 
@@ -759,7 +628,7 @@ function App() {
     }
   }, []);
 
-  if (!clerkPubKey) {
+  if (!authConfigured && !IS_DEMO_BUILD) {
     return (
       <ThemeProvider>
         <DeploymentConfigRequired />
@@ -770,7 +639,7 @@ function App() {
   return (
     <ThemeProvider>
       <WouterRouter base={basePath}>
-        <ClerkProviderWithRoutes />
+        <AppRoutes />
       </WouterRouter>
     </ThemeProvider>
   );

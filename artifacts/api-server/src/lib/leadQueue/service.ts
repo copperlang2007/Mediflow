@@ -1,6 +1,6 @@
 /**
  * Shared "resolve a carrier + state, then route to the best ready-to-sell and
- * available agent" service. Both the Clerk-authed route (routes/queue.ts) and
+ * available agent" service. Both the signed-in route (routes/queue.ts) and
  * the HMAC-authed public route (routes/queuePublic.ts) call this so the
  * routing policy can never drift between them — they differ only in how the
  * caller is authenticated and how `orgId` is established.

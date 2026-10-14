@@ -15,7 +15,7 @@
 import { vi, describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 
 // Capture every sendEmail call. Hoisted so the vi.mock below sees it.
-const { dbF, clerkF, jobsF, emailF, emailCalls, emailResultRef } = vi.hoisted(() => {
+const { dbF, authF, jobsF, emailF, emailCalls, emailResultRef } = vi.hoisted(() => {
   // Use plain arrays + a ref-object so the test bodies can mutate them and
   // the hoisted vi.mock factory still reads the latest values.
   const calls: Array<{ opts: unknown }> = [];
@@ -27,9 +27,9 @@ const { dbF, clerkF, jobsF, emailF, emailCalls, emailResultRef } = vi.hoisted(()
       const { dbMockFactory } = await import("../helpers/testApp");
       return dbMockFactory();
     },
-    clerkF: async (): Promise<Record<string, unknown>> => {
-      const { clerkMockFactory } = await import("../helpers/testApp");
-      return clerkMockFactory();
+    authF: async (): Promise<Record<string, unknown>> => {
+      const { identityMockFactory } = await import("../helpers/testApp");
+      return identityMockFactory();
     },
     jobsF: async (): Promise<Record<string, unknown>> => {
       const { jobsMockFactory } = await import("../helpers/testApp");
@@ -54,7 +54,7 @@ const { dbF, clerkF, jobsF, emailF, emailCalls, emailResultRef } = vi.hoisted(()
   };
 });
 vi.mock("@workspace/db", dbF);
-vi.mock("@clerk/express", clerkF);
+vi.mock("../../lib/auth/identity", authF);
 vi.mock("../../lib/jobs", jobsF);
 vi.mock("../../lib/email", emailF);
 

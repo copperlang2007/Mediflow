@@ -37,7 +37,7 @@ const REPO_ROOT = join(__dirname, "..", "..", "..", "..", "..");
  */
 const GLOBAL_TABLES = new Set([
   "organizationsTable", // the tenant root itself, scoped by its own PK
-  "sessionActivityTable", // keyed by Clerk session id
+  "sessionActivityTable", // keyed by sign-in session id (identity:sign-in time)
   "billingEventsTable", // webhook ledger, keyed by the provider's event id
   // Platform-wide Knowledge Base articles: no org_id by design. Only super_admin
   // (MFA) can write them; agencies read them and record their own choices in

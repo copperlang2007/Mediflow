@@ -1,14 +1,14 @@
 /**
  * Create your agency — the self-serve onboarding step.
  *
- * Shown once, to a Clerk-authenticated user who has no agencyBRIDGE account yet.
+ * Shown once, to a signed-in user who has no agencyBRIDGE account yet.
  * Submitting calls `POST /auth/provision`, which creates the organization and
  * makes this user its `agency_admin`. Until this screen existed, an org could
  * only be named by whoever ran the provisioning call by hand — which is what
  * made the product an agency-by-agency deployment rather than a self-serve SaaS.
  */
 import { useState } from "react";
-import { useUser, useAuth } from "@clerk/react";
+import { useUser, useAuth } from "@/lib/auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { Building2, Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
@@ -59,8 +59,8 @@ export default function CreateOrganizationPage() {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
+        // The server takes the email from the verified sign-in, not from here.
         body: JSON.stringify({
-          email: user.primaryEmailAddress?.emailAddress ?? "",
           fullName:
             user.fullName ??
             `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim(),

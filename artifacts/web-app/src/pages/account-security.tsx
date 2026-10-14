@@ -1,70 +1,178 @@
-import { UserProfile, useUser } from "@clerk/react";
-import { ShieldCheck, ShieldAlert } from "lucide-react";
+/**
+ * Account security (ADR 0006: Identity Platform): two-step verification and
+ * password.
+ *
+ * Every user must sign in with a second factor before the server answers any
+ * authenticated route (middlewares/requireAuth.ts); until then the app shows
+ * MfaEnrollmentGate instead of this page. Here a user can replace their
+ * authenticator app (new phone) and change their password. Both need a recent
+ * sign-in, which <Reauthenticate> provides.
+ */
+import { useState } from "react";
+import { multiFactor, updatePassword } from "@firebase/auth";
+import { KeyRound, Loader2, ShieldCheck, ShieldAlert, Smartphone } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Reauthenticate, TotpEnrollment } from "@/components/auth/TotpEnrollment";
+import { authErrorMessage } from "@/lib/auth/firebase";
+import { useSignOut, useUser } from "@/lib/auth";
+import { MIN_PASSWORD_LENGTH } from "@/pages/sign-up";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
+const signInAgain = `${basePath}/sign-in?notice=mfa-on&redirect_url=${encodeURIComponent(`${basePath}/settings/security`)}`;
 
-// The app-wide Clerk appearance (App.tsx) pins cardBox to 440px for the
-// sign-in card. UserProfile has a sidebar plus a content pane, so at that
-// width it collapses and truncates. Let it fill the page column instead.
-// Classes from both appearances are applied, hence the `!` overrides.
-const userProfileAppearance = {
-  elements: {
-    rootBox: "!w-full !block",
-    cardBox: "!w-full !max-w-none min-h-[40rem] !rounded-xl !shadow-sm",
-  },
-};
+function Section({ icon: Icon, title, children }: { icon: typeof KeyRound; title: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-4 rounded-xl border bg-card p-6 text-card-foreground shadow-sm">
+      <h2 className="flex items-center gap-2 text-base font-semibold">
+        <Icon className="h-4 w-4 text-accent" aria-hidden="true" /> {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
 
-/**
- * Account security: where a user enrolls MFA.
- *
- * Every user must have MFA enrolled in agencyBRIDGE's sign-in provider (Clerk)
- * before the server answers any authenticated route (middlewares/requireAuth.ts);
- * until then the app shows MfaEnrollmentGate instead of this page. A second
- * factor on the Google account used to sign in does not count: the server
- * reads Clerk's own two-factor flag, so the factor has to be added here.
- */
-export default function AccountSecurityPage() {
-  const { user } = useUser();
-  const enrolled = Boolean(user?.twoFactorEnabled);
+function TwoStep() {
+  const { firebaseUser } = useUser();
+  const { signOut } = useSignOut();
+  const [mode, setMode] = useState<"view" | "confirm" | "enrol">("view");
+  const [error, setError] = useState<string | null>(null);
+  if (!firebaseUser) return null;
+  const factors = multiFactor(firebaseUser).enrolledFactors;
+
+  // Replace = add the new authenticator first, then remove the old ones, so a
+  // failure part-way never leaves the account without a second step. If any
+  // old one could not be removed (network error, or removing one ended this
+  // sign-in), say so instead of claiming success: an old, possibly lost
+  // authenticator would still work.
+  async function replaceDone(oldFactorUids: string[]) {
+    let failed = 0;
+    for (const uid of oldFactorUids) {
+      try {
+        await multiFactor(firebaseUser!).unenroll(uid);
+      } catch {
+        failed += 1;
+      }
+    }
+    if (failed) {
+      setMode("view");
+      setError(
+        "Your new authenticator app is set up, but the old one could not be removed, so it still works. Sign out, sign in with the new app, then choose Replace authenticator app again to remove it.",
+      );
+      return;
+    }
+    await signOut({ redirectUrl: signInAgain });
+  }
+
+  if (mode === "enrol") {
+    const oldUids = factors.map((f) => f.uid);
+    return <TotpEnrollment user={firebaseUser} onEnrolled={() => void replaceDone(oldUids)} />;
+  }
+  if (mode === "confirm") return <Reauthenticate user={firebaseUser} action="Set up the new one" onDone={() => setMode("enrol")} />;
+
+  return factors.length ? (
+    <div className="space-y-3">
+      <div className="flex items-start gap-3 rounded-lg border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+        <div>
+          <p className="font-medium">Two-step verification is on.</p>
+          <ul className="mt-1 list-disc pl-5">
+            {factors.map((f) => (
+              <li key={f.uid}>
+                {f.displayName ?? "Authenticator app"}, added {new Date(f.enrollmentTime).toLocaleDateString()}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+      <Button variant="outline" size="sm" onClick={() => setMode("confirm")}>
+        <Smartphone className="mr-1.5 h-4 w-4" aria-hidden="true" /> New phone? Replace authenticator app
+      </Button>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  ) : (
+    <div className="space-y-4">
+      <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+        <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+        <p>Two-step verification is not set up. agencyBRIDGE requires it for every account.</p>
+      </div>
+      <TotpEnrollment user={firebaseUser} onEnrolled={() => void signOut({ redirectUrl: signInAgain })} />
+    </div>
+  );
+}
+
+function ChangePassword() {
+  const { firebaseUser } = useUser();
+  const [confirmed, setConfirmed] = useState(false);
+  const [password, setPassword] = useState("");
+  const [again, setAgain] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  if (!firebaseUser) return null;
+  if (!confirmed) return <Reauthenticate user={firebaseUser} action="Continue" onDone={() => setConfirmed(true)} />;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (password.length < MIN_PASSWORD_LENGTH) return setMessage({ ok: false, text: `Use at least ${MIN_PASSWORD_LENGTH} characters.` });
+    if (password !== again) return setMessage({ ok: false, text: "The two passwords don't match." });
+    setBusy(true);
+    setMessage(null);
+    try {
+      await updatePassword(firebaseUser!, password);
+      setPassword("");
+      setAgain("");
+      setMessage({ ok: true, text: "Password changed." });
+    } catch (err) {
+      setMessage({ ok: false, text: authErrorMessage(err, "Couldn't change the password. Try again.") });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
+    <form className="max-w-sm space-y-3" onSubmit={submit}>
+      <div className="space-y-1.5">
+        <Label htmlFor="new-password">New password</Label>
+        <Input id="new-password" type="password" autoComplete="new-password" required minLength={MIN_PASSWORD_LENGTH} value={password} onChange={(e) => setPassword(e.target.value)} />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="new-password-again">Confirm new password</Label>
+        <Input id="new-password-again" type="password" autoComplete="new-password" required value={again} onChange={(e) => setAgain(e.target.value)} />
+      </div>
+      {message && (
+        <p role={message.ok ? "status" : "alert"} className={message.ok ? "text-sm text-emerald-700" : "text-sm text-destructive"}>
+          {message.text}
+        </p>
+      )}
+      <Button type="submit" disabled={busy}>
+        {busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" />}
+        Change password
+      </Button>
+    </form>
+  );
+}
+
+export default function AccountSecurityPage() {
+  const { user } = useUser();
+  return (
+    <div className="mx-auto max-w-3xl space-y-6 p-4 md:p-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Account security</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Manage your password, connected accounts and two-step verification.
+          Signed in as <span className="font-medium text-foreground">{user?.primaryEmailAddress?.emailAddress}</span>.
         </p>
       </div>
-
-      {enrolled ? (
-        <div className="flex items-start gap-3 rounded-lg border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
-          <div>
-            <p className="font-medium">Two-step verification is on for your agencyBRIDGE account.</p>
-            <p className="mt-1">
-              If a page still asks you to enable MFA, sign out and back in once so your session picks it up.
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0" />
-          <div>
-            <p className="font-medium">Two-step verification is not set up for your agencyBRIDGE account.</p>
-            <p className="mt-1">
-              agencyBRIDGE requires it for every account. The code Google sends when you sign in with Google
-              protects your Google account only; it does not count here. Open <strong>Security</strong> below,
-              add an authenticator app under <strong>Two-step verification</strong>, then sign out and back in.
-            </p>
-          </div>
-        </div>
-      )}
-
-      <UserProfile
-        routing="path"
-        path={`${basePath}/settings/security`}
-        appearance={userProfileAppearance}
-      />
+      <Section icon={ShieldCheck} title="Two-step verification">
+        <TwoStep />
+      </Section>
+      <Section icon={KeyRound} title="Password">
+        <ChangePassword />
+      </Section>
     </div>
   );
 }

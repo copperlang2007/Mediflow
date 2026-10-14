@@ -2,7 +2,7 @@
 /**
  * Form validation + patch-shape tests for the onboarding wizard's
  * ProfileStep. We don't render the full step here (that would require
- * mocking the API client + ReactQuery provider + Clerk auth) — instead we
+ * mocking the API client + ReactQuery provider + sign-in) — instead we
  * test the two pure exported helpers: the zod schema and `formToPatch`.
  *
  * Those two are the safety-critical surfaces: zod validates user input

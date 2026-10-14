@@ -37,14 +37,14 @@
  */
 import { vi, describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 
-const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
+const { dbF, authF, jobsF } = vi.hoisted(() => ({
   dbF: async (): Promise<Record<string, unknown>> => {
     const { dbMockFactory } = await import("../helpers/testApp");
     return dbMockFactory();
   },
-  clerkF: async (): Promise<Record<string, unknown>> => {
-    const { clerkMockFactory } = await import("../helpers/testApp");
-    return clerkMockFactory();
+  authF: async (): Promise<Record<string, unknown>> => {
+    const { identityMockFactory } = await import("../helpers/testApp");
+    return identityMockFactory();
   },
   jobsF: async (): Promise<Record<string, unknown>> => {
     const { jobsMockFactory } = await import("../helpers/testApp");
@@ -53,7 +53,7 @@ const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
 }));
 
 vi.mock("@workspace/db", dbF);
-vi.mock("@clerk/express", clerkF);
+vi.mock("../../lib/auth/identity", authF);
 vi.mock("../../lib/jobs", jobsF);
 
 import { and, eq } from "drizzle-orm";

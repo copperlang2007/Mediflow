@@ -4,7 +4,7 @@
  * Lets an agent see THEIR OWN commission statements (rows from
  * agent_commission_payouts) and a paid-vs-pending summary — data that was
  * previously only visible to admins/managers on /commissions. The server
- * resolves the agent from the Clerk session (agentsTable.userId + orgId)
+ * resolves the agent from the signed-in user (agentsTable.userId + orgId)
  * and only ever returns that agent's payouts.
  *
  * Gated to the `agent` role (the agent-facing counterpart to the admin

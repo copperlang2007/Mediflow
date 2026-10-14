@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Link } from "wouter";
-import { useUser } from "@clerk/react";
+import { useUser } from "@/lib/auth";
 import {
   useGetMe,
   useGetDashboardStats,

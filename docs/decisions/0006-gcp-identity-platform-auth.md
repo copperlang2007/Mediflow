@@ -1,6 +1,6 @@
 # GCP Identity Platform authentication migration
 
-Status: Proposed. Production still uses Clerk. No PHI launch until the BAA and end-to-end auth gates pass.
+Status: Accepted (owner go-ahead 2026-10-14: "complete the crossover to google auth and eliminate clerk"). Implemented in code; production switches when the owner finishes the setup in [`docs/AUTH_IDENTITY_PLATFORM.md`](../AUTH_IDENTITY_PLATFORM.md) (the deploy waits for `IDENTITY_PLATFORM_API_KEY`). No PHI launch until the BAA and end-to-end auth gates pass.
 
 ## Decision
 
@@ -31,3 +31,12 @@ Google's Identity Platform HIPAA guide requires a signed Google BAA when using G
 - Review existing Clerk user export and count without printing user emails or PHI in logs; choose account-link handoff and rollout window.
 - Configure cost alert for Identity Platform usage above the free tier. Do not claim an unlimited free service.
 - Complete implementation and full tests before changing the production auth mode. Do not turn on the demo bypass in production.
+
+## Implementation (2026-10-14)
+
+- **Browser:** `@firebase/app` + `@firebase/auth` only (not the `firebase` bundle, which pulls Firestore/gRPC and a vulnerable `@grpc/grpc-js`). `artifacts/web-app/src/lib/auth/` holds the provider and hooks; own screens for sign-in (password, then TOTP), create login + email verification, password reset, TOTP enrollment (QR + key) and account security. The ID token goes to the API as a Bearer header and in the same-origin `__session` cookie, refreshed before expiry.
+- **API:** `lib/auth/identity.ts` verifies ID tokens with `jose` against Google's securetoken JWKS, issuer `https://securetoken.google.com/<project>` and audience `<project>` (`IDENTITY_PLATFORM_PROJECT_ID`, boot fails in production without it). Only verified facts are used: subject, email + `email_verified`, `firebase.sign_in_second_factor`, `iat`, `auth_time`. Clerk middleware, proxy (`/api/__clerk`), CSP hosts and the `http-proxy-middleware` dependency are gone.
+- **Accounts (step 4):** table `user_identities (provider, subject) → users.id` (migration 0074). New users get `users.id = subject`. A Clerk-era user (`users.id` = `user_…`) is linked once, on first sign-in, only when Identity Platform has **verified** the email and exactly one unlinked Clerk-era user has it. Provisioning and invitation accept require a verified email and take it from the token, never the request.
+- **MFA (step 5):** `requireAuth` reads `firebase.sign_in_second_factor`; a sign-in without it is refused (403 `mfa_required`). After enrolling, the user signs in again so the token carries it.
+- **Sessions:** session id = `<subject>:<auth_time>` (one sign-in), so the idle timeout and admin revoke work on `session_activity`; force-logout also revokes refresh tokens through the Identity Toolkit API (`accounts:update validSince`, role *Firebase Authentication Admin* on the run service account).
+- **Not done here:** importing Clerk password hashes. Users create a login again with the same email; the verified-email link restores their account.

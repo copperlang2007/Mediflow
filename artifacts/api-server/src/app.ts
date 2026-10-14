@@ -5,13 +5,7 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-import { clerkMiddleware, getAuth } from "@clerk/express";
-import { publishableKeyFromHost } from "@clerk/shared/keys";
-import {
-  CLERK_PROXY_PATH,
-  clerkProxyMiddleware,
-  getClerkProxyHost,
-} from "./middlewares/clerkProxyMiddleware";
+import { getAuth, identityMiddleware } from "./lib/auth/identity";
 import router from "./routes";
 import webhooksRouter from "./routes/webhooks";
 import voiceWebhooksRouter from "./routes/voiceWebhooks";
@@ -94,31 +88,16 @@ app.use(
   }),
 );
 
-// Clerk's frontend API loads its JavaScript and session endpoints from the
-// instance domain encoded in the publishable key. Keep CSP restricted to that
-// host rather than blocking authentication on the production origin.
-const clerkDomain = (() => {
-  const key = process.env.CLERK_PUBLISHABLE_KEY;
-  if (!key) return undefined;
-  try {
-    const domain = Buffer.from(key.split("_").slice(2).join("_"), "base64")
-      .toString("utf8").replace(/\$/, "");
-    return /^[a-z0-9.-]+$/i.test(domain) ? `https://${domain}` : undefined;
-  } catch {
-    return undefined;
-  }
-})();
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   contentSecurityPolicy: {
     directives: {
-      "script-src": [
-        "'self'", ...(clerkDomain ? [clerkDomain] : []),
-        "https://challenges.cloudflare.com", "https://*.protect.clerk.com",
-      ],
+      "script-src": ["'self'"],
       "connect-src": [
-        "'self'", ...(clerkDomain ? [clerkDomain] : []),
-        "https://*.protect.clerk.com:*",
+        "'self'",
+        // Sign-in (Google Cloud Identity Platform, ADR 0006): password,
+        // second-factor and token-refresh calls from the browser SDK.
+        "https://identitytoolkit.googleapis.com", "https://securetoken.googleapis.com",
         // Twilio Voice SDK signalling (browser calling): HTTPS + secure WebSocket.
         "https://*.twilio.com", "wss://*.twilio.com",
         // Call recordings upload straight to Cloud Storage with a signed URL.
@@ -126,14 +105,8 @@ app.use(helmet({
       ],
       // The Voice SDK plays its ring / disconnect tones from Twilio's CDN.
       "media-src": ["'self'", "https://sdk.twilio.com", "https://storage.googleapis.com", "data:", "blob:"],
-      "frame-src": [
-        "'self'", ...(clerkDomain ? [clerkDomain] : []),
-        "https://challenges.cloudflare.com", "https://*.protect.clerk.com",
-      ],
-      "img-src": [
-        "'self'", "data:", "https://img.clerk.com",
-        ...(clerkDomain ? [clerkDomain] : []),
-      ],
+      "frame-src": ["'self'"],
+      "img-src": ["'self'", "data:"],
       "worker-src": ["'self'", "blob:"],
     },
   },
@@ -215,8 +188,6 @@ app.use("/api/invitations/lookup", authLimiter);
 app.use("/api/invitations/accept", authLimiter);
 
 
-app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
-
 // Capture the raw request body so signed webhooks (the dialer event
 // receiver) can recompute their HMAC over the exact bytes received. The
 // hook runs for every JSON request but only stashes a Buffer — negligible
@@ -263,7 +234,7 @@ if (webStaticDir) {
   });
 
   // SPA fallback for client-side routes on single-service hosts (Render,
-  // Fly, Railway). Register before Clerk's API middleware so the shell can
+  // Fly, Railway). Register before the sign-in middleware so the shell can
   // render even when API credentials are still being wired. Keep API/ops
   // endpoints and /assets out so failed API/asset paths surface as their own
   // failures rather than index.html.
@@ -277,27 +248,18 @@ if (webStaticDir) {
   );
 }
 
-// Demo mode bypasses Clerk entirely (requireAuth injects the seeded demo
-// user). Mounting clerkMiddleware without a secret key throws per-request, so
-// skip it. isDemoMode() is a hard no-op under NODE_ENV=production.
-if (!isDemoMode()) {
-  app.use(
-    clerkMiddleware((req) => ({
-      publishableKey: publishableKeyFromHost(
-        getClerkProxyHost(req) ?? "",
-        process.env.CLERK_PUBLISHABLE_KEY,
-      ),
-    })),
-  );
-}
+// Verify the sign-in token (Identity Platform ID token) once per request; see
+// lib/auth/identity.ts. Demo mode has no sign-in (requireAuth injects the
+// seeded demo user); isDemoMode() is a hard no-op under NODE_ENV=production.
+if (!isDemoMode()) app.use(identityMiddleware());
 
-// Per-user rate limit: 100 requests / minute, keyed by Clerk userId.
-// Applied AFTER clerkMiddleware so getAuth(req) is populated.
+// Per-user rate limit: 100 requests / minute, keyed by the signed-in identity.
+// Applied AFTER identityMiddleware so getAuth(req) is populated.
 // Falls back to IP for unauthenticated requests.
 const userLimiter = rateLimit({
   skip: isVoiceWebhook,
   windowMs: 60 * 1000,
-  // Demo mode keys by IP (no Clerk userId), so multiple walkthrough viewers
+  // Demo mode keys by IP (no signed-in identity), so multiple walkthrough viewers
   // behind one office/VPN egress share a budget — raise it so they aren't
   // throttled. Real deploys key by userId and keep the tighter per-user cap.
   max: isDemoMode() ? 2000 : 100,
@@ -305,11 +267,10 @@ const userLimiter = rateLimit({
   legacyHeaders: false,
   validate: { keyGeneratorIpFallback: false },
   keyGenerator: (req) => {
-    // In demo mode clerkMiddleware is not mounted, so getAuth() is unavailable
-    // — key by IP. Real deploys key by Clerk userId.
+    // Demo mode keys by IP; real deploys key by the signed-in identity.
     if (!isDemoMode()) {
-      const { userId } = getAuth(req);
-      if (userId) return `user:${userId}`;
+      const { subject } = getAuth(req);
+      if (subject) return `user:${subject}`;
     }
 
     // FAIL CLOSED: require valid IP from reverse proxy
@@ -336,40 +297,40 @@ app.use("/api", userLimiter);
 app.use(webhooksRouter);
 
 // Twilio Voice (native browser calling): TwiML webhook + status callbacks.
-// Same posture as the SMS receiver above — signature-verified, no Clerk.
+// Same posture as the SMS receiver above — signature-verified, no sign-in.
 app.use(voiceWebhooksRouter);
 
 // Stripe billing webhooks — mounted at root alongside the Twilio receiver and
-// for the same reason: Stripe has no Clerk session. Trust comes from the
+// for the same reason: Stripe has no sign-in session. Trust comes from the
 // `stripe-signature` HMAC verified against STRIPE_WEBHOOK_SECRET inside the
 // handler, over the raw bytes captured by the express.json verify hook above.
 app.use(stripeWebhookRouter);
 
 // masterBRIDGE dialer event receiver (spec §6). Path lives under /api/dialer/v1
 // to match the contract's callbackUrl, but is mounted HERE — above the
-// Clerk-guarded `/api` router below — because trust is established by the
-// X-MB-Signature HMAC, not a Clerk session.
+// sign-in-guarded `/api` router below — because trust is established by the
+// X-MB-Signature HMAC, not a sign-in session.
 app.use(dialerEventsRouter);
 
 // Public inbound-lead routing for GoHighLevel / the Atlas proxy. Mounted here
 // (path `/api/queue/v1/route-inbound`) for the same reason as the dialer
 // receiver: external callers authenticate with an X-MB-Signature HMAC, not a
-// Clerk session. See routes/queuePublic.ts.
+// sign-in session. See routes/queuePublic.ts.
 app.use(queuePublicRouter);
 
 // EnrollHere inbound call/contact webhook. Same posture: mounted above the
-// Clerk-guarded `/api` router, trust from a per-tenant shared secret or
+// sign-in-guarded `/api` router, trust from a per-tenant shared secret or
 // X-MB-Signature HMAC. See routes/enrollhereWebhook.ts.
 app.use(enrollhereWebhookRouter);
 
 // Omnichannel campaigns: Resend (svix-signed) / Twilio (X-Twilio-Signature)
-// delivery webhooks. Same posture as the receivers above: no Clerk session,
+// delivery webhooks. Same posture as the receivers above: no sign-in session,
 // trust from a signature. Campaign email unsubscribes go through the shared
 // endpoint below. See routes/campaignsPublic.ts.
 app.use(campaignsPublicRouter);
 
 // Public email unsubscribe (CAN-SPAM opt-out). Trust comes from the signed
-// token in the link, not a Clerk session. See routes/unsubscribe.ts.
+// token in the link, not a sign-in session. See routes/unsubscribe.ts.
 app.use(unsubscribeRouter);
 
 /**

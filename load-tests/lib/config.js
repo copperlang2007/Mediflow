@@ -9,9 +9,9 @@
 //               be the host root, e.g. https://staging.mediflow.example
 //               (NOT .../api). Default: http://localhost:3000
 //
-//   API_TOKEN   A valid Clerk session JWT. The API uses Clerk for auth
+//   API_TOKEN   A valid Identity Platform ID token (ADR 0006). It expires after an hour
 //               (see middlewares/requireAuth.ts -> getAuth(req)); k6 cannot
-//               run Clerk's browser SDK, so a token must be minted out of
+//               run the browser sign-in, so a token must be minted out of
 //               band and supplied here. See load-tests/README.md for how.
 //
 //   AGENT_ID    An agent id in the target org, used by the commissions

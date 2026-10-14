@@ -9,7 +9,7 @@ import { useBranding } from "@/lib/branding/BrandingProvider";
  * Drawn as SVG geometry (not type) so it renders identically without a
  * webfont and stays legible at favicon sizes. `public/logo.svg` and
  * `public/favicon.svg` are the same drawing for places that need a URL
- * (Clerk's logo slot, the browser tab).
+ * (the sign-in screens, the browser tab).
  */
 
 export type BrandMarkTone = "brand" | "light" | "dark" | "mono";

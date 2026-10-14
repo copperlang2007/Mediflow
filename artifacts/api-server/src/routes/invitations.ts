@@ -13,7 +13,8 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { randomBytes, createHash, randomUUID } from "node:crypto";
-import { getAuth } from "@clerk/express";
+import { getAuth } from "../lib/auth/identity";
+import { linkNewUser, resolveUserId } from "../lib/auth/users";
 import {
   db,
   userInvitationsTable,
@@ -497,8 +498,9 @@ router.get(
 /**
  * POST /invitations/accept — join the org named by the token.
  *
- * Requires a signed-in Clerk identity (that id becomes `users.id`) but not a
- * agencyBRIDGE account, which is precisely what this creates. The account's email
+ * Requires a signed-in identity whose email Identity Platform has verified
+ * (its subject becomes `users.id`) but not an agencyBRIDGE account, which is
+ * precisely what this creates. The account's email
  * comes from the invitation, never from the request: the admin invited a
  * specific address and that is what the seat list must show.
  *
@@ -515,7 +517,7 @@ router.post(
   "/invitations/accept",
   async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req);
-    if (!auth?.userId) {
+    if (!auth.subject) {
       // Booleans only: enough to tell "no token sent" from "token rejected"
       // without logging anything about the person or the invitation.
       logger.warn(
@@ -524,12 +526,20 @@ router.post(
           hasSessionCookie: /(?:^|;\s*)__session=/.test(req.headers.cookie ?? ""),
           host: req.headers["x-forwarded-host"] ?? req.headers.host,
         },
-        "Invitation accept refused: no verified Clerk session",
+        "Invitation accept refused: no verified sign-in",
       );
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    const clerkUserId = auth.userId;
+    const subject = auth.subject;
+
+    if (!auth.emailVerified) {
+      res.status(403).json({
+        error: "Verify your email address first: open the link we sent you, then accept the invitation again.",
+        code: "EMAIL_NOT_VERIFIED",
+      });
+      return;
+    }
 
     const parsed = AcceptInvitationSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -542,11 +552,7 @@ router.post(
 
     // Already provisioned? Accepting would either move them between orgs or
     // duplicate them. Both are worse than saying no.
-    const [already] = await db
-      .select({ orgId: usersTable.orgId })
-      .from(usersTable)
-      .where(eq(usersTable.id, clerkUserId))
-      .limit(1);
+    const already = await resolveUserId(auth);
 
     if (already) {
       res.status(409).json({
@@ -576,20 +582,20 @@ router.post(
         await requireSeat(invite.orgId, tx, { excludeInvitationId: invite.id });
 
         // Re-checked inside the transaction, not only before it: two concurrent
-        // accepts by the same Clerk identity would both pass an outside check
+        // accepts by the same identity would both pass an outside check
         // and the loser would hit the users primary key, surfacing as a 500
         // rather than the documented conflict.
         const [raced] = await tx
           .select({ id: usersTable.id })
           .from(usersTable)
-          .where(eq(usersTable.id, clerkUserId))
+          .where(eq(usersTable.id, subject))
           .limit(1);
         if (raced) throw new AlreadyProvisionedError();
 
         const [user] = await tx
           .insert(usersTable)
           .values({
-            id: clerkUserId,
+            id: subject,
             orgId: invite.orgId,
             email: invite.email,
             fullName,
@@ -598,6 +604,7 @@ router.post(
             lastLoginAt: new Date(),
           })
           .returning();
+        await linkNewUser(tx, subject, user.id, "invitation");
 
         // Conditional on `pending` so two simultaneous accepts of the same
         // link cannot both claim it — the loser updates zero rows.
@@ -606,7 +613,7 @@ router.post(
           .set({
             status: "accepted",
             acceptedAt: new Date(),
-            acceptedUserId: clerkUserId,
+            acceptedUserId: subject,
           })
           .where(
             and(

@@ -17,7 +17,8 @@
  */
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useUser, useAuth } from "@clerk/react";
+import { useUser, useAuth } from "@/lib/auth";
+import { VerifyEmailNotice } from "@/components/auth/VerifyEmailNotice";
 import { useSearch } from "wouter";
 import { toast } from "sonner";
 import { Building2, Loader2, ShieldAlert, Check } from "lucide-react";
@@ -145,13 +146,13 @@ export default function AcceptInvitePage() {
     // editing the prefilled name.
     mutationFn: async (name: string) => {
       const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
-      const post = async (clerkToken: string | null) =>
+      const post = async (idToken: string | null) =>
         fetch(`${base}/api/invitations/accept`, {
           method: "POST",
           credentials: "include",
           headers: {
             "Content-Type": "application/json",
-            ...(clerkToken ? { Authorization: `Bearer ${clerkToken}` } : {}),
+            ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
           },
           body: JSON.stringify({ token, fullName: name.trim() }),
         });
@@ -159,7 +160,7 @@ export default function AcceptInvitePage() {
       if (res.status === 401) {
         // A session minted moments ago can present a token the server does
         // not yet accept (clock skew, or a sign-in step still finishing).
-        // Ask Clerk for a brand-new one and try once more before giving up.
+        // Ask for a brand-new token and try once more before giving up.
         await new Promise((r) => setTimeout(r, 1500));
         res = await post(await getToken({ skipCache: true }));
       }
@@ -308,6 +309,8 @@ export default function AcceptInvitePage() {
               </Button>
             </div>
           </>
+        ) : user && !user.emailVerified ? (
+          <VerifyEmailNotice onVerified={() => undefined} />
         ) : (
           <form
             className="space-y-4"

@@ -3,7 +3,7 @@
  *
  * requireAuth (and requireMfa on the most sensitive routes) returns 403 with
  * body { error: "mfa_required" } when the caller, whatever their role, has no
- * MFA factor enrolled on their Clerk account. The middleware defaults to a NOP in
+ * MFA factor enrolled on their sign-in account. The middleware defaults to a NOP in
  * NODE_ENV=test so the rest of the suite doesn't have to know about MFA;
  * this test flips NODE_ENV for the duration of the file to exercise the
  * production code path end-to-end.
@@ -17,14 +17,14 @@ import {
   afterAll,
 } from "vitest";
 
-const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
+const { dbF, authF, jobsF } = vi.hoisted(() => ({
   dbF: async (): Promise<Record<string, unknown>> => {
     const { dbMockFactory } = await import("../helpers/testApp");
     return dbMockFactory();
   },
-  clerkF: async (): Promise<Record<string, unknown>> => {
-    const { clerkMockFactory } = await import("../helpers/testApp");
-    return clerkMockFactory();
+  authF: async (): Promise<Record<string, unknown>> => {
+    const { identityMockFactory } = await import("../helpers/testApp");
+    return identityMockFactory();
   },
   jobsF: async (): Promise<Record<string, unknown>> => {
     const { jobsMockFactory } = await import("../helpers/testApp");
@@ -33,10 +33,10 @@ const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
 }));
 
 vi.mock("@workspace/db", dbF);
-vi.mock("@clerk/express", clerkF);
+vi.mock("../../lib/auth/identity", authF);
 vi.mock("../../lib/jobs", jobsF);
 
-import { bootTestDb, shutdownTestDb, withMfaAuth, clerkTwoFactorByUser } from "../helpers/testApp";
+import { bootTestDb, shutdownTestDb, withMfaAuth } from "../helpers/testApp";
 import { seedOrg, seedUser } from "../helpers/testDb";
 
 import type { Express } from "express";
@@ -102,14 +102,6 @@ describe("MFA required for every user (HIPAA technical safeguard)", () => {
     expect(res.status).toBe(403);
     expect(res.body).toMatchObject({ error: "mfa_required" });
     expect(res.body.message).toMatch(/multi-factor/i);
-  });
-
-  it("accepts the Clerk template claim when it arrives as the string \"true\"", async () => {
-    const res = await request(app)
-      .post("/api/automations/rules")
-      .set({ ...withMfaAuth(adminWithMfa.id, true), "x-test-mfa-enrolled": "as-string" })
-      .send({ name: "String-claim rule", triggerType: "lead_created", actions: [{ type: "create_task", config: { title: "x" } }] });
-    expect(res.body.error).not.toBe("mfa_required");
   });
 
   it("ignores MFA_REQUIRED=false in production: MFA is still enforced", async () => {
@@ -188,48 +180,14 @@ describe("MFA required for every user (HIPAA technical safeguard)", () => {
     expect(res.body.error).not.toBe("mfa_required");
   });
 
-  it("falls back to Clerk's API when the session token has no MFA claim (template missing)", async () => {
-    const { db } = await bootTestDb();
-    const enrolled = await seedUser(db, { orgId: org.id, role: "agent" });
-    const notEnrolled = await seedUser(db, { orgId: org.id, role: "agent" });
-    clerkTwoFactorByUser.set(enrolled.id, true);
-    clerkTwoFactorByUser.set(notEnrolled.id, false);
-    const absent = (id: string) => ({ ...withMfaAuth(id, false), "x-test-mfa-enrolled": "absent" });
-
-    const ok = await request(app).get("/api/agents/me/clients").set(absent(enrolled.id));
-    expect(ok.body.error).not.toBe("mfa_required");
-    const status = await request(app).get("/api/auth/status").set(absent(enrolled.id));
-    expect(status.body).toMatchObject({ mfaEnrolled: true });
-
-    const denied = await request(app).get("/api/agents/me/clients").set(absent(notEnrolled.id));
-    expect(denied.status).toBe(403);
-    expect(denied.body).toMatchObject({ error: "mfa_required" });
-  });
-
-  it("re-asks Clerk a few seconds after a 'not enrolled' answer, so a fresh enrollment is seen", async () => {
+  it("takes MFA only from the verified sign-in: a sign-in without a second factor is refused", async () => {
     const { db } = await bootTestDb();
     const u = await seedUser(db, { orgId: org.id, role: "agent" });
-    clerkTwoFactorByUser.set(u.id, false);
-    const absent = { ...withMfaAuth(u.id, false), "x-test-mfa-enrolled": "absent" };
-    expect((await request(app).get("/api/auth/status").set(absent)).body).toMatchObject({ mfaEnrolled: false });
-
-    clerkTwoFactorByUser.set(u.id, true);
-    const realNow = Date.now();
-    const clock = vi.spyOn(Date, "now").mockReturnValue(realNow + 6_000);
-    try {
-      expect((await request(app).get("/api/auth/status").set(absent)).body).toMatchObject({ mfaEnrolled: true });
-    } finally {
-      clock.mockRestore();
-    }
-  });
-
-  it("does not consult Clerk when the claim is present and false", async () => {
-    const { db } = await bootTestDb();
-    const u = await seedUser(db, { orgId: org.id, role: "agent" });
-    clerkTwoFactorByUser.set(u.id, true);
     const res = await request(app).get("/api/agents/me/clients").set(withMfaAuth(u.id, false));
     expect(res.status).toBe(403);
     expect(res.body).toMatchObject({ error: "mfa_required" });
+    const ok = await request(app).get("/api/agents/me/clients").set(withMfaAuth(u.id, true));
+    expect(ok.body.error).not.toBe("mfa_required");
   });
 
   it("reports MFA state on /auth/status, which stays reachable without MFA", async () => {

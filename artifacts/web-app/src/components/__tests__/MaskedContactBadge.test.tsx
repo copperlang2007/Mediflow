@@ -2,7 +2,7 @@
 /**
  * Substitution note: there is no `MaskedContactBadge` component in the
  * codebase, and the contact-display logic in pages/contacts.tsx is wired up
- * to React Query, Wouter routes, and Clerk auth — too tangled to render in
+ * to React Query, Wouter routes, and sign-in — too tangled to render in
  * isolation without elaborate mocking. Per the task's substitution clause,
  * this file tests the UI Badge primitive (components/ui/badge.tsx) instead,
  * since it's the building block every status/PHI badge in the app composes

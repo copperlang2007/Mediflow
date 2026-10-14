@@ -7,7 +7,7 @@
  *
  * It returns the caller's OWN commission statements (rows from
  * agent_commission_payouts) plus a paid-vs-pending summary. The server
- * resolves the agent from the Clerk session and 404s when no agent row is
+ * resolves the agent from the signed-in user and 404s when no agent row is
  * linked to the user.
  */
 import { useQuery } from "@tanstack/react-query";

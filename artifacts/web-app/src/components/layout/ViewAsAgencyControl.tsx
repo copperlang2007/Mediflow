@@ -77,7 +77,7 @@ function useViewAsAgencies(enabled: boolean) {
   return { agencies, error, mfaRequired, activeOrgId, supportReason, setView, exitView, enableSupportEdit, disableSupportEdit };
 }
 
-/** Viewing agencies needs Clerk MFA; this points at the page that enrolls it. */
+/** Viewing agencies needs two-step verification; this points at the page that enrolls it. */
 function MfaLink({ className, onNavigate }: { className?: string; onNavigate?: () => void }) {
   return (
     <Link href="/settings/security" className={cn("underline underline-offset-2", className)} onClick={onNavigate}>

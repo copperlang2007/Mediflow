@@ -1,5 +1,5 @@
 /**
- * Inbound lead queue API (Clerk-authed, in-app surface).
+ * Inbound lead queue API (signed-in, in-app surface).
  *
  * Replaces the standalone `atlas-call-router` stub (which returned a
  * hard-coded number) with a real, data-backed router that filters agents by
@@ -12,7 +12,7 @@
  *   POST /api/queue/presence/heartbeat — agent reports availability (self)
  *
  * The EXTERNAL GHL/Atlas entry point is the HMAC-authed sibling in
- * routes/queuePublic.ts (`POST /api/queue/v1/route-inbound`); GHL has no Clerk
+ * routes/queuePublic.ts (`POST /api/queue/v1/route-inbound`); GHL has no sign-in
  * session. Both share lib/leadQueue/service.ts so routing can't drift.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -208,7 +208,7 @@ router.post(
       return;
     }
 
-    // Map the Clerk user to their agent record (presence is per-agent).
+    // Map the signed-in user to their agent record (presence is per-agent).
     const [agent] = await db
       .select({ id: agentsTable.id })
       .from(agentsTable)

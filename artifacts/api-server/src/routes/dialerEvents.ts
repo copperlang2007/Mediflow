@@ -1,6 +1,6 @@
 /**
  * Inbound dialer event receiver (spec §6) — sibling to the Twilio webhook
- * route. Mounted OUTSIDE `/api` (no Clerk auth); trust comes from the
+ * route. Mounted OUTSIDE `/api` (no sign-in); trust comes from the
  * `X-MB-Signature` HMAC instead.
  *
  * POST /api/dialer/v1/events
@@ -16,7 +16,7 @@
  *
  * The route is mounted at `/api/dialer/v1` so the path matches the spec
  * (`callbackUrl: .../api/dialer/v1/events`) while still living above the
- * Clerk-guarded `/api` router. It is registered before `app.use("/api", ...)`.
+ * sign-in-guarded `/api` router. It is registered before `app.use("/api", ...)`.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "crypto";

@@ -1,13 +1,12 @@
 // Auth helpers for k6 scripts.
 //
-// The agencyBRIDGE API authenticates every `/api/*` route with Clerk
-// (artifacts/api-server/src/app.ts mounts `clerkMiddleware`, and
-// `requireAuth` calls `getAuth(req)`). Clerk verifies a session JWT that
-// normally rides in either:
+// The agencyBRIDGE API authenticates every `/api/*` route with a Google Cloud
+// Identity Platform ID token (artifacts/api-server/src/lib/auth/identity.ts,
+// ADR 0006). The token normally rides in either:
 //   - the `Authorization: Bearer <jwt>` header, or
 //   - the `__session` cookie.
 //
-// k6 cannot perform an interactive Clerk sign-in, so the JWT must be minted
+// k6 cannot perform an interactive sign-in (password + authenticator code), so the token must be minted
 // out of band (see load-tests/README.md) and passed via the API_TOKEN env
 // var. These helpers turn that token into request headers and fail fast with
 // a clear message if it is missing.
@@ -26,7 +25,7 @@ export function hasToken() {
 export function requireToken() {
   if (!hasToken()) {
     throw new Error(
-      'API_TOKEN is not set. The agencyBRIDGE API requires a Clerk session JWT. ' +
+      'API_TOKEN is not set. The agencyBRIDGE API requires an Identity Platform ID token. ' +
         'Mint one (see load-tests/README.md) and pass it with ' +
         '`-e API_TOKEN=<jwt>`.',
     );
@@ -40,9 +39,8 @@ export function authHeaders(extra) {
       'Content-Type': 'application/json',
       Accept: 'application/json',
       Authorization: `Bearer ${API_TOKEN}`,
-      // Belt-and-suspenders: also send the cookie form so the script works
-      // regardless of how the target deployment is configured to read the
-      // Clerk session.
+      // Belt-and-suspenders: also send the cookie form, which the API reads
+      // for browser-initiated requests (downloads, live streams).
       Cookie: `__session=${API_TOKEN}`,
     },
     extra || {},

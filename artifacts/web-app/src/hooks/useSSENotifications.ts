@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useAuth } from "@clerk/react";
+import { useAuth } from "@/lib/auth";
 
 interface NotificationEvent {
   type: "notification" | "unread_count";
@@ -44,7 +44,7 @@ export function useSSENotifications(
   const connect = useCallback(async () => {
     if (unmountedRef.current || !isSignedIn || !enabled) return;
 
-    // SSE can't set headers directly — we rely on Clerk's session cookie
+    // SSE can't set headers directly — we rely on the session cookie (lib/auth)
     // which is automatically sent with same-origin requests.
     const url = SSE_PATH;
     const es = new EventSource(url, { withCredentials: true });

@@ -1,5 +1,5 @@
 /**
- * Inbound webhook routes (not under /api — no Clerk auth middleware).
+ * Inbound webhook routes (not under /api — no sign-in middleware).
  *
  * POST /webhooks/twilio/sms — Twilio inbound SMS (HMAC-SHA1 signature validated)
  *

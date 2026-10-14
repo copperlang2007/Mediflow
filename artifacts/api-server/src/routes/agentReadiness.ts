@@ -1,5 +1,5 @@
 /**
- * Agent "Ready to Sell" readiness board API (Clerk-authed admin surface).
+ * Agent "Ready to Sell" readiness board API (signed-in admin surface).
  *
  * The admin-facing inverse of the inbound router: instead of "who can sell THIS
  * lead", it reports — for every agent in the org — what makes them ready to

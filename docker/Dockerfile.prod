@@ -1,7 +1,7 @@
 # agencyBRIDGE — GCP Cloud Run PRODUCTION image.
 #
 # Unlike the repo-root Dockerfile (an auth-bypassed demo build), this image
-# builds the web-app with real Clerk auth baked in and never seeds demo data.
+# builds the web-app with real sign-in (Identity Platform) baked in and never seeds demo data.
 # It is the container Cloud Run runs in production — see
 # scripts/deploy/gcp-deploy.sh and docs/DEPLOY_GCP_PRODUCTION.md.
 FROM node:24-slim AS app
@@ -30,11 +30,15 @@ RUN pnpm install --frozen-lockfile
 
 COPY . .
 
-# VITE_CLERK_PUBLISHABLE_KEY is a publishable (public-by-design) key that Vite
-# inlines into the static web bundle at build time — safe as a build arg, not
-# a secret. No VITE_DEMO_MODE: this is the real authenticated build.
-ARG VITE_CLERK_PUBLISHABLE_KEY
-ENV VITE_CLERK_PUBLISHABLE_KEY=${VITE_CLERK_PUBLISHABLE_KEY}
+# Identity Platform web config (ADR 0006): public-by-design values that Vite
+# inlines into the static web bundle at build time — safe as build args, not
+# secrets. No VITE_DEMO_MODE: this is the real authenticated build.
+ARG VITE_FIREBASE_API_KEY
+ARG VITE_FIREBASE_AUTH_DOMAIN
+ARG VITE_FIREBASE_PROJECT_ID
+ENV VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY} \
+    VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN} \
+    VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}
 
 RUN pnpm --filter @workspace/web-app run build \
   && pnpm --filter @workspace/api-server run build

@@ -9,14 +9,14 @@
 import { vi, describe, it, expect, beforeAll, afterAll } from "vitest";
 import crypto from "node:crypto";
 
-const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
+const { dbF, authF, jobsF } = vi.hoisted(() => ({
   dbF: async (): Promise<Record<string, unknown>> => {
     const { dbMockFactory } = await import("../helpers/testApp");
     return dbMockFactory();
   },
-  clerkF: async (): Promise<Record<string, unknown>> => {
-    const { clerkMockFactory } = await import("../helpers/testApp");
-    return clerkMockFactory();
+  authF: async (): Promise<Record<string, unknown>> => {
+    const { identityMockFactory } = await import("../helpers/testApp");
+    return identityMockFactory();
   },
   jobsF: async (): Promise<Record<string, unknown>> => {
     const { jobsMockFactory } = await import("../helpers/testApp");
@@ -24,7 +24,7 @@ const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
   },
 }));
 vi.mock("@workspace/db", dbF);
-vi.mock("@clerk/express", clerkF);
+vi.mock("../../lib/auth/identity", authF);
 vi.mock("../../lib/jobs", jobsF);
 
 import { randomUUID } from "node:crypto";
@@ -92,7 +92,7 @@ async function makeReadyAgent(
 }
 
 async function heartbeat(agentId: string, status: string): Promise<void> {
-  // Insert directly to avoid needing a Clerk user per agent in these helpers.
+  // Insert directly to avoid needing a signed-in user per agent in these helpers.
   await testDb
     .insert(agentPresenceTable)
     .values({

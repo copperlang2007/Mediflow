@@ -1,5 +1,5 @@
 /**
- * Agent activity leaderboard / scorecard API (Clerk-authed admin surface).
+ * Agent activity leaderboard / scorecard API (signed-in admin surface).
  *
  * Ranks the org's active agents by inbound-routing activity over a rolling
  * window — inbounds routed, callbacks resolved, current open-lead load, and the

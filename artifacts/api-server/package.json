@@ -17,8 +17,6 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
-    "@clerk/express": "^2.1.12",
-    "@clerk/shared": "^4.9.0",
     "@google-cloud/storage": "^7.19.0",
     "@sentry/node": "^10.69.0",
     "@signpdf/placeholder-plain": "3.3.0",
@@ -40,7 +38,7 @@
     "express-rate-limit": "^8.4.1",
     "google-auth-library": "^10.6.2",
     "helmet": "^8.1.0",
-    "http-proxy-middleware": "^3.0.5",
+    "jose": "^6.2.12",
     "multer": "^2.4.0",
     "node-forge": "1.4.0",
     "openai": "^6.35.0",

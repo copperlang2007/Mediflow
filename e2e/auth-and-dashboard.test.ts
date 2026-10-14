@@ -3,19 +3,17 @@ import { signIn } from "./_helpers/auth";
 
 test.skip(!process.env.E2E_ENABLED, "set E2E_ENABLED=true to run");
 
-test("redirects unauthenticated visitors to Clerk sign-in", async ({
+test("sends unauthenticated visitors away from the app to sign in", async ({
   page,
 }) => {
   await page.goto("/");
   await expect(page).toHaveURL(/\/sign-in/);
 });
 
-test("signs in with a Clerk test user and lands on the dashboard", async ({
+test("signs in with a test user (password + authenticator code) and lands on the dashboard", async ({
   page,
 }) => {
-  // NOTE: if Clerk programmatic sign-in is too brittle in your environment
-  // (captcha, bot detection, MFA), swap this for a `storageState`-based
-  // pre-authenticated context. See e2e/_helpers/auth.ts for details.
+  // Needs E2E_TEST_EMAIL, E2E_TEST_PASSWORD and E2E_TEST_TOTP_SECRET; see e2e/_helpers/auth.ts.
   await signIn(page);
 
   await expect(page).toHaveURL(/\/(dashboard)?$/);

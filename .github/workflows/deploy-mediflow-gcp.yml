@@ -41,8 +41,7 @@ jobs:
           GCP_RUN_SA_EMAIL: ${{ secrets.GCP_RUN_SA_EMAIL }}
           GCP_CLOUDSQL_CONNECTION: ${{ secrets.GCP_CLOUDSQL_CONNECTION }}
           GCP_PHI_BUCKET: ${{ secrets.GCP_PHI_BUCKET }}
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
-          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          IDENTITY_PLATFORM_API_KEY: ${{ secrets.IDENTITY_PLATFORM_API_KEY }}
           AI_INTEGRATIONS_BEDROCK_API_KEY: ${{ secrets.AI_INTEGRATIONS_BEDROCK_API_KEY }}
           AI_INTEGRATIONS_OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY }}
           AI_INTEGRATIONS_BEDROCK_BASE_URL: ${{ secrets.AI_INTEGRATIONS_BEDROCK_BASE_URL }}
@@ -63,7 +62,7 @@ jobs:
           fi
           missing=()
           for v in GCP_PROJECT_ID GCP_WIF_PROVIDER GCP_DEPLOY_SA_EMAIL GCP_RUN_SA_EMAIL \
-                   GCP_CLOUDSQL_CONNECTION GCP_PHI_BUCKET CLERK_SECRET_KEY CLERK_PUBLISHABLE_KEY \
+                   GCP_CLOUDSQL_CONNECTION GCP_PHI_BUCKET IDENTITY_PLATFORM_API_KEY \
                    AI_INTEGRATIONS_BEDROCK_API_KEY AI_INTEGRATIONS_BEDROCK_BASE_URL; do
             # Trim before testing: the app trims these values and treats
             # whitespace as unset, so a gate using bare -z would pass a
@@ -99,8 +98,11 @@ jobs:
           GCP_CLOUDSQL_CONNECTION: ${{ secrets.GCP_CLOUDSQL_CONNECTION }}
           GCP_PHI_BUCKET: ${{ secrets.GCP_PHI_BUCKET }}
 
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
-          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          # Sign-in: Google Cloud Identity Platform (ADR 0006). The web API
+          # key is public by design (it identifies the project to the browser
+          # SDK); kept as a secret so the deploy waits until it is set.
+          IDENTITY_PLATFORM_API_KEY: ${{ secrets.IDENTITY_PLATFORM_API_KEY }}
+          IDENTITY_PLATFORM_AUTH_DOMAIN: ${{ secrets.IDENTITY_PLATFORM_AUTH_DOMAIN }}
           # AI on AWS Bedrock (unchanged — covered by your AWS BAA). The API
           # key is a Bedrock Bearer token; the base URL is Bedrock's
           # ANTHROPIC MESSAGES endpoint, e.g.

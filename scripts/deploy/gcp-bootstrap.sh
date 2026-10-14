@@ -85,6 +85,7 @@ gcloud services enable \
   sts.googleapis.com \
   storage.googleapis.com \
   speech.googleapis.com \
+  identitytoolkit.googleapis.com \
   compute.googleapis.com \
   servicenetworking.googleapis.com \
   vpcaccess.googleapis.com
@@ -262,8 +263,7 @@ done
 # AI_INTEGRATIONS_BEDROCK_BASE_URL, but the Secret Manager RESOURCE name stays
 # mediflow-ai-openai-base-url for backward compatibility with already-
 # bootstrapped projects. The rename lives only at the GitHub/app env layer.
-REQUIRED_CREDENTIAL_SECRETS="mediflow-clerk-secret-key mediflow-clerk-publishable-key \
-mediflow-ai-openai-api-key mediflow-ai-openai-base-url"
+REQUIRED_CREDENTIAL_SECRETS="mediflow-ai-openai-api-key mediflow-ai-openai-base-url"
 OPTIONAL_CREDENTIAL_SECRETS="mediflow-twilio-account-sid mediflow-twilio-auth-token \
 mediflow-twilio-from-number mediflow-twilio-webhook-host mediflow-resend-api-key \
 mediflow-sentry-dsn mediflow-esign-cert-pem mediflow-esign-key-pem \
@@ -301,6 +301,10 @@ gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
 # Call recordings are transcribed with Speech-to-Text (SPEECH_TO_TEXT_PROVIDER=google).
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/speech.client" >/dev/null
+# Sign-in (ADR 0006): admin force-logout cancels a user's Identity Platform
+# refresh tokens (accounts:update), which needs Firebase Authentication Admin.
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${RUN_SA_EMAIL}" --role="roles/firebaseauth.admin" >/dev/null
 # Signed upload URLs (call recordings) are signed as the runtime SA through the
 # IAM signBlob API, which needs Token Creator on itself.
 gcloud iam service-accounts add-iam-policy-binding "${RUN_SA_EMAIL}" \
@@ -380,7 +384,7 @@ Add these as GitHub Actions SECRETS on ${GITHUB_REPO}
   GCP_NETWORK                 ${NETWORK}
 
 Plus the third-party credentials listed in docs/DEPLOY_GCP_PRODUCTION.md
-(CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY, AI_INTEGRATIONS_BEDROCK_API_KEY,
+(IDENTITY_PLATFORM_API_KEY, AI_INTEGRATIONS_BEDROCK_API_KEY,
 AI_INTEGRATIONS_BEDROCK_BASE_URL, and any optional ones you use; the legacy
 AI_INTEGRATIONS_OPENAI_BASE_URL name is still accepted as a fallback).
 

@@ -2,7 +2,7 @@
  * Team invitations and seat accounting.
  *
  * Before this feature an organization could only ever contain the one user who
- * created it — every Clerk sign-up ran `POST /auth/provision`, which minted a
+ * created it — every sign-up ran `POST /auth/provision`, which minted a
  * fresh org unconditionally. The properties worth pinning are therefore the
  * ones that make an agency a *shared* workspace, plus the arithmetic the
  * per-seat invoice depends on:
@@ -16,14 +16,14 @@
  */
 import { vi, describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 
-const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
+const { dbF, authF, jobsF } = vi.hoisted(() => ({
   dbF: async (): Promise<Record<string, unknown>> => {
     const { dbMockFactory } = await import("../helpers/testApp");
     return dbMockFactory();
   },
-  clerkF: async (): Promise<Record<string, unknown>> => {
-    const { clerkMockFactory } = await import("../helpers/testApp");
-    return clerkMockFactory();
+  authF: async (): Promise<Record<string, unknown>> => {
+    const { identityMockFactory } = await import("../helpers/testApp");
+    return identityMockFactory();
   },
   jobsF: async (): Promise<Record<string, unknown>> => {
     const { jobsMockFactory } = await import("../helpers/testApp");
@@ -32,7 +32,7 @@ const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
 }));
 
 vi.mock("@workspace/db", dbF);
-vi.mock("@clerk/express", clerkF);
+vi.mock("../../lib/auth/identity", authF);
 vi.mock("../../lib/jobs", jobsF);
 
 import { eq, inArray, notInArray } from "drizzle-orm";
@@ -162,10 +162,10 @@ describe("invitation lifecycle", () => {
     expect(preview.body.organizationName).toBe("Alpha Agency");
     expect(preview.body.role).toBe("compliance_manager");
 
-    const newClerkId = `clerk-${randomUUID()}`;
+    const newIdentityId = `identity-${randomUUID()}`;
     const accepted = await request(app)
       .post("/api/invitations/accept")
-      .set(withAuth(newClerkId))
+      .set(withAuth(newIdentityId))
       .send({ token, fullName: "Nora Newhire" });
 
     expect(accepted.status).toBe(201);
@@ -181,13 +181,13 @@ describe("invitation lifecycle", () => {
 
     const first = await request(app)
       .post("/api/invitations/accept")
-      .set(withAuth(`clerk-${randomUUID()}`))
+      .set(withAuth(`identity-${randomUUID()}`))
       .send({ token, fullName: "First Arrival" });
     expect(first.status).toBe(201);
 
     const second = await request(app)
       .post("/api/invitations/accept")
-      .set(withAuth(`clerk-${randomUUID()}`))
+      .set(withAuth(`identity-${randomUUID()}`))
       .send({ token, fullName: "Second Arrival" });
     expect(second.status).toBe(410);
     expect(second.body.code).toBe("accepted");
@@ -206,7 +206,7 @@ describe("invitation lifecycle", () => {
 
     const accepted = await request(app)
       .post("/api/invitations/accept")
-      .set(withAuth(`clerk-${randomUUID()}`))
+      .set(withAuth(`identity-${randomUUID()}`))
       .send({ token, fullName: "Too Late" });
 
     expect(accepted.status).toBe(410);
@@ -310,7 +310,7 @@ describe("seat accounting", () => {
 
     const accepted = await request(app)
       .post("/api/invitations/accept")
-      .set(withAuth(`clerk-${randomUUID()}`))
+      .set(withAuth(`identity-${randomUUID()}`))
       .send({ token, fullName: "Late Joiner" });
 
     expect(accepted.status).toBe(402);
@@ -330,7 +330,7 @@ describe("seat accounting", () => {
 
     const accepted = await request(app)
       .post("/api/invitations/accept")
-      .set(withAuth(`clerk-${randomUUID()}`))
+      .set(withAuth(`identity-${randomUUID()}`))
       .send({ token, fullName: "Last Seat" });
 
     expect(accepted.status).toBe(201);
@@ -351,7 +351,7 @@ describe("seat accounting", () => {
     const accept = (token: string) =>
       request(app)
         .post("/api/invitations/accept")
-        .set(withAuth(`clerk-${randomUUID()}`))
+        .set(withAuth(`identity-${randomUUID()}`))
         .send({ token, fullName: "Joiner" });
 
     // Still over the plan (adminA + two reservations = 3 > 2): refuse both,
@@ -551,9 +551,8 @@ describe("tenancy", () => {
 
     const res = await request(app)
       .post("/api/auth/provision")
-      .set(withAuth(`clerk-${randomUUID()}`))
+      .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": "invited-elsewhere@alpha.test" })
       .send({
-        email: "Invited-Elsewhere@alpha.test",
         fullName: "Confused Signup",
         orgName: "Accidental Agency",
       });

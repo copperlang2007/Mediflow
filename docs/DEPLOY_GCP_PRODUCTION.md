@@ -1,6 +1,6 @@
 # agencyBRIDGE — Production deploy to Google Cloud Run
 
-This deploys agencyBRIDGE to **Cloud Run** in production mode (real Clerk auth +
+This deploys agencyBRIDGE to **Cloud Run** in production mode (real sign-in with Google Cloud Identity Platform +
 PHI encryption, `NODE_ENV=production`) on Cloud SQL for PostgreSQL. After a
 one-time setup, every push to `claude/google-cloud-deployment-ml41c2` builds
 the production image and deploys it — no GCP console clicking, no long-lived
@@ -77,8 +77,8 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 
 | Secret | Where to get it |
 | --- | --- |
-| `CLERK_SECRET_KEY` | Clerk dashboard → API Keys. Must be **live** (`sk_live_…`). |
-| `CLERK_PUBLISHABLE_KEY` | Clerk dashboard → API Keys. Must be **live** (`pk_live_…`). Baked into the web bundle at image build time. |
+| `IDENTITY_PLATFORM_API_KEY` | Identity Platform browser API key (APIs & Services → Credentials), restricted to the Identity Toolkit API and your site. Public by design; baked into the web bundle at image build time. Setup: [`AUTH_IDENTITY_PLATFORM.md`](AUTH_IDENTITY_PLATFORM.md). |
+| `IDENTITY_PLATFORM_AUTH_DOMAIN` | Optional. Defaults to `<GCP_PROJECT_ID>.firebaseapp.com`. |
 | `AI_INTEGRATIONS_BEDROCK_API_KEY` | Your Amazon Bedrock API key. Sent as `x-api-key` by `@anthropic-ai/sdk` against the Bedrock Anthropic Messages endpoint (see `lib/ai/bedrockAnthropicClient.ts`) — not an OpenAI credential. |
 | `AI_INTEGRATIONS_BEDROCK_BASE_URL` | Bedrock's **Anthropic Messages** endpoint for your region. Either host works with an Amazon Bedrock API key: `https://bedrock-runtime.us-east-1.amazonaws.com/anthropic` (AWS's recommendation for new applications) or `https://bedrock-mantle.us-east-1.api.aws/anthropic`. **Not** `/openai/v1`: AWS's API-compatibility matrix lists Chat Completions as unsupported for every Anthropic model, so Claude is unreachable over the OpenAI path. The legacy `AI_INTEGRATIONS_OPENAI_BASE_URL` name is still read as a fallback so a pre-rename environment keeps booting. |
 | `AI_INTEGRATIONS_MODEL` | Optional. The Claude model to call. Defaults to `us.anthropic.claude-haiku-4-5-20251001-v1:0` (verified live; `claude-sonnet-5` is not enabled on the current AWS account). Bedrock model ids carry a provider prefix that differs by endpoint — `global.anthropic.claude-sonnet-5` on `bedrock-runtime`, `anthropic.claude-sonnet-5` on `bedrock-mantle` — so a bare `claude-…` id is prefixed automatically for whichever host the base URL names. Set a fully-prefixed id here to pin a specific routing (e.g. `us.anthropic.claude-sonnet-5` for US-only inference). |
@@ -113,8 +113,9 @@ incremental setup.
 - **`ALLOWED_ORIGIN`** is set to the Cloud Run service's own URL after the
   first deploy (override with the `APP_ORIGIN` repository variable for a
   custom domain).
-- **`VITE_CLERK_PUBLISHABLE_KEY`** is baked into the web bundle from the same
-  `CLERK_PUBLISHABLE_KEY` secret used at runtime.
+- **`VITE_FIREBASE_*`** (API key, auth domain, project id) are baked into the
+  web bundle; the API verifies sign-in tokens for `IDENTITY_PLATFORM_PROJECT_ID`
+  (= `GCP_PROJECT_ID`) and refuses to start without it.
 - **Migrations** run at container start under a Postgres advisory lock
   (`lib/db/src/migrate-locked.ts`), so Cloud Run's concurrent cold starts
   race harmlessly instead of double-applying the migration journal.

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useUser } from "@clerk/react";
+import { useUser } from "@/lib/auth";
 import { useGetMe, useGetMyOrganization, useGetOrgSettings, useUpdateOrgSettings, getGetOrgSettingsQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -363,7 +363,7 @@ export function ImportedClientConsentCard({ isAdmin }: { isAdmin: boolean }) {
 }
 
 export default function SettingsPage() {
-  const { user: clerkUser } = useUser();
+  const { user: authUser } = useUser();
   const { data: me, isLoading: meLoading } = useGetMe();
   const { data: org, isLoading: orgLoading } = useGetMyOrganization();
   const isAdmin = !!me && (me.role === "super_admin" || me.role === "agency_admin");
@@ -387,7 +387,7 @@ export default function SettingsPage() {
           ) : me ? (
             <div className="flex items-center gap-4">
               <Avatar className="h-16 w-16">
-                <AvatarImage src={clerkUser?.imageUrl} />
+                <AvatarImage src={authUser?.imageUrl} />
                 <AvatarFallback className="text-lg bg-navy-800 text-white">
                   {me.fullName.split(" ").map((n) => n[0]).join("").slice(0, 2)}
                 </AvatarFallback>
@@ -463,7 +463,7 @@ export default function SettingsPage() {
             Manage your password, MFA, and active sessions from your account menu.
           </p>
           <div className="mt-3 p-3 rounded-lg bg-muted/50 text-xs text-muted-foreground">
-            Authentication is managed by Clerk. All sessions are secured with HTTPS and short-lived tokens.
+            Sign-in is managed by Google Cloud Identity Platform. All sessions are secured with HTTPS and short-lived tokens.
           </div>
       </SectionCard>
         </div>

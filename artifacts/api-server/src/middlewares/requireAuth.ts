@@ -1,12 +1,13 @@
 import { type Request, type Response, type NextFunction } from "express";
-import { getAuth, clerkClient } from "@clerk/express";
+import { getAuth } from "../lib/auth/identity";
+import { resolveUserId } from "../lib/auth/users";
 import { randomUUID } from "node:crypto";
 import { db, usersTable, organizationsTable, orgSettingsTable, sessionActivityTable, auditLogTable } from "@workspace/db";
-import { eq, lt } from "drizzle-orm";
+import { eq, gt, inArray, lt, sql } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
 import { isDemoMode, demoUserId } from "../lib/demoMode";
 import { logger } from "../lib/logger";
-import { mfaEnforced, mfaEnrolledFromAuth, resolveMfaEnrolled, MFA_REQUIRED_MESSAGE } from "./requireMfa";
+import { mfaEnforced, MFA_REQUIRED_MESSAGE } from "./requireMfa";
 
 // TTL cache for org session timeout settings (refresh every 60 s)
 const orgTimeoutCache = new Map<string, { timeoutMinutes: number; fetchedAt: number }>();
@@ -38,27 +39,22 @@ export async function getOrgSessionTimeout(orgId: string): Promise<number> {
  * - On startup the DB provides authoritative last-active timestamps.
  */
 const sessionLocalCache = new Map<string, { lastActiveAt: number; syncedAt: number; expired?: boolean }>();
+/**
+ * How long an ended session's row is kept, and so the oldest sign-in that is
+ * accepted at all: a sign-in older than this can no longer prove (by its row)
+ * that it was not ended, so it must sign in again.
+ */
+export const SESSION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SESSION_CACHE_SYNC_MS = 60_000; // re-read from DB after 60 s
 
 /**
- * Mark a session dead for good: remember it in the cache (so a later, longer
- * agency timeout cannot revive it) and end it at Clerk, so it cannot sign in
- * again even after the expired row is eventually cleaned up. Clerk failures
- * are non-fatal: the expired row still refuses the session.
+ * Mark a session dead for good: remember it in the cache so a later, longer
+ * agency timeout cannot revive it. A session id is one sign-in (identity +
+ * sign-in time), which token refreshes keep, so the expired row refuses every
+ * further request of that sign-in; signing in again starts a new session.
  */
-function markExpired(sessionId: string, lastActiveAt: number, firstTime: boolean): "expired" {
+function markExpired(sessionId: string, lastActiveAt: number): "expired" {
   sessionLocalCache.set(sessionId, { lastActiveAt, syncedAt: Date.now(), expired: true });
-  if (firstTime) {
-    void (async () => {
-      try {
-        await clerkClient.sessions.revokeSession(sessionId);
-      } catch (err) {
-        // Non-fatal: the expired row still refuses this session. Logged so
-        // persistent Clerk failures are visible to operators.
-        logger.warn({ err, sessionId }, "Clerk revokeSession failed; relying on the session_activity row");
-      }
-    })();
-  }
   return "expired";
 }
 
@@ -86,7 +82,7 @@ async function checkAndUpdateSessionActivity(
       if (now > row.expiresAt.getTime()) {
         // Already expired. Keep the row: deleting it would make the very next
         // request look like a brand-new session and let it straight back in.
-        return markExpired(sessionId, lastActiveAt, true);
+        return markExpired(sessionId, lastActiveAt);
       }
     } else {
       // First time seeing this session — treat as fresh
@@ -101,31 +97,41 @@ async function checkAndUpdateSessionActivity(
     // Timed out. The row stays (with its old last-active time) so this
     // session keeps being refused until the user signs in again, which
     // creates a new session id. The cleanup job below removes old rows.
-    return markExpired(sessionId, lastActiveAt, true);
+    return markExpired(sessionId, lastActiveAt);
   }
 
-  // Active — upsert new last-active timestamp into DB
+  // Active — upsert new last-active timestamp into DB. Conditional: a row that
+  // has expired meanwhile (timed out, or ended by an admin on another
+  // instance) is never brought back; the write is refused and so is the request.
   const expiresAt = new Date(now + timeoutMs);
-  await db
+  const written = await db
     .insert(sessionActivityTable)
     .values({ sessionId, orgId, lastActiveAt: new Date(now), expiresAt })
     .onConflictDoUpdate({
       target: sessionActivityTable.sessionId,
       set: { lastActiveAt: new Date(now), expiresAt },
-    });
-  sessionLocalCache.set(sessionId, { lastActiveAt: now, syncedAt: now });
+      // Database clock, not this request's: a revoke committed on another
+      // server a moment after this request started must still win.
+      setWhere: gt(sessionActivityTable.expiresAt, sql`now()`),
+    })
+    .returning({ sessionId: sessionActivityTable.sessionId });
+  if (!written.length) return markExpired(sessionId, lastActiveAt);
+  // syncedAt moves only when this request read the row, so a busy session is
+  // still re-read from the database once a minute (not on every request).
+  sessionLocalCache.set(sessionId, { lastActiveAt: now, syncedAt: needsDbRead ? now : cached!.syncedAt });
 
   return "ok";
 }
 
 // Periodic cleanup of long-dead session rows and stale local cache entries.
-// Expired rows are kept for 30 days, and the Clerk session is revoked when it
-// expires, so an expired session can never be mistaken for a new one.
+// Expired rows are kept for SESSION_RETENTION_MS, and requireAuth refuses any
+// sign-in older than that, so an expired session can never come back as a
+// "new" one after its row is gone.
 // Runs every 15 minutes; won't block process exit.
 setInterval(
   async () => {
     try {
-      await db.delete(sessionActivityTable).where(lt(sessionActivityTable.expiresAt, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)));
+      await db.delete(sessionActivityTable).where(lt(sessionActivityTable.expiresAt, new Date(Date.now() - SESSION_RETENTION_MS)));
     } catch {
       // non-fatal
     }
@@ -284,7 +290,7 @@ export const requireAuth = async (
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
-  // Demo mode: bypass Clerk entirely and resolve every request to the seeded
+  // Demo mode: bypass sign-in entirely and resolve every request to the seeded
   // demo user. Gated by isDemoMode() which is a hard no-op under
   // NODE_ENV=production, so this branch can never run in a real deploy.
   if (isDemoMode()) {
@@ -317,21 +323,17 @@ export const requireAuth = async (
   }
 
   const auth = getAuth(req);
-  const clerkUserId = auth?.userId;
-
-  if (!clerkUserId) {
+  if (!auth.subject) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
-
-  const [user] = await db
-    .select()
-    .from(usersTable)
-    .where(eq(usersTable.id, clerkUserId))
-    .limit(1);
+  const userId = await resolveUserId(auth);
+  const [user] = userId
+    ? await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1)
+    : [];
 
   if (!user || !user.isActive) {
-    // Distinguish "signed in to Clerk but has no agencyBRIDGE account yet" from
+    // Distinguish "signed in but has no agencyBRIDGE account yet" from
     // "deactivated". The first is the normal state immediately after sign-up
     // and the web app answers it by showing the create-your-agency screen;
     // the second must bounce to sign-in. Both stay 401 — the code is what the
@@ -348,9 +350,19 @@ export const requireAuth = async (
   // session-activity write and the view-as lookup, so a locked-out request
   // costs nothing further. The web app reads /auth/status (not behind this
   // middleware) and shows the enrollment screen.
-  const mfaEnrolled = mfaEnforced() ? await resolveMfaEnrolled(auth) : mfaEnrolledFromAuth(auth);
+  // The token says whether this sign-in passed a second factor: an enrolled
+  // user cannot sign in without one, so a sign-in without it is not enrolled.
+  const mfaEnrolled = auth.mfa;
   if (mfaEnforced() && !mfaEnrolled) {
     res.status(403).json({ error: "mfa_required", code: "MFA_REQUIRED", message: MFA_REQUIRED_MESSAGE });
+    return;
+  }
+
+  // A sign-in older than the retention window has no row left to say whether
+  // it was ended or timed out; sign in again.
+  const authTime = auth.sessionClaims?.auth_time;
+  if (authTime && Date.now() - authTime * 1000 > SESSION_RETENTION_MS) {
+    res.status(401).json({ error: "Session expired due to inactivity", code: "SESSION_TIMEOUT" });
     return;
   }
 
@@ -409,13 +421,13 @@ export function requirePermission(
 }
 
 /**
- * Step-up authentication gate — verifies the caller's Clerk JWT was issued
+ * Step-up authentication gate — verifies the caller's ID token was issued
  * within `maxAgeSeconds` (default 15 min). Forces token freshness rather than
  * relying on a client-supplied header, providing cryptographic evidence for
  * HIPAA/SOC 2 audit trails.
  *
- * Frontend handling: on 401 { code: "STEP_UP_REQUIRED" }, call
- * `clerk.session.touch()` (or Clerk's re-auth flow) then retry the request.
+ * Frontend handling: on 401 { code: "STEP_UP_REQUIRED" }, refresh the ID
+ * token (getIdToken(true)) then retry the request.
  */
 export function requireRecentAuth(maxAgeSeconds = 900): (req: Request, res: Response, next: NextFunction) => void {
   return (req: Request, res: Response, next: NextFunction): void => {
@@ -480,4 +492,21 @@ export function requireDestructiveConfirm(req: Request, res: Response, next: Nex
     return;
   }
   next();
+}
+
+/**
+ * End sessions now (admin revoke / force-logout). Their activity rows are
+ * marked expired, which every instance honours within its 60 s cache sync
+ * and this one at once; the user must sign in again.
+ */
+export async function expireSessions(sessionIds: string[]): Promise<void> {
+  if (!sessionIds.length) return;
+  const now = new Date();
+  // Expired as of now (not epoch): the row is kept for the full retention
+  // window like any ended session, and the conditional upsert never revives it.
+  await db
+    .update(sessionActivityTable)
+    .set({ expiresAt: now })
+    .where(inArray(sessionActivityTable.sessionId, sessionIds));
+  for (const id of sessionIds) markExpired(id, now.getTime());
 }

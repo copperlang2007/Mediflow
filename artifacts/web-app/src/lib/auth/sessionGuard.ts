@@ -1,7 +1,7 @@
 /**
  * Browser-side session rules.
  *
- * Clerk keeps its sign-in cookie for days, and the API only notices
+ * The browser keeps a sign-in for days, and the API only notices
  * inactivity when a request is made. Without these rules, typing the site
  * address in a new tab finds a still-valid cookie and goes straight to the
  * dashboard. The rules below make the browser end the session itself:

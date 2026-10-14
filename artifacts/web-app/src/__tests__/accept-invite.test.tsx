@@ -14,19 +14,20 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
 
-const clerkState = {
+const authState = {
   isLoaded: true,
   isSignedIn: false as boolean,
-  user: null as { fullName?: string; primaryEmailAddress?: { emailAddress: string } } | null,
+  user: null as { fullName?: string; primaryEmailAddress?: { emailAddress: string }; emailVerified?: boolean } | null,
 };
 
 const getTokenMock = vi.hoisted(() =>
-  vi.fn(async (_opts?: { skipCache?: boolean }) => "clerk-token"),
+  vi.fn(async (_opts?: { skipCache?: boolean }) => "id-token"),
 );
 
-vi.mock("@clerk/react", () => ({
-  useUser: () => clerkState,
+vi.mock("@/lib/auth", () => ({
+  useUser: () => ({ ...authState, firebaseUser: null, refresh: vi.fn() }),
   useAuth: () => ({ getToken: getTokenMock }),
+  useSignOut: () => ({ signOut: vi.fn() }),
 }));
 
 const toastError = vi.hoisted(() => vi.fn());
@@ -79,8 +80,8 @@ const LONG_TOKEN = "test-invite-token-0123456789";
 beforeEach(() => {
   window.localStorage.clear();
   getTokenMock.mockClear();
-  clerkState.isSignedIn = false;
-  clerkState.user = null;
+  authState.isSignedIn = false;
+  authState.user = null;
   // wouter's memoryLocation does not touch window.location, which the page
   // reads to build its post-sign-in redirect.
   window.history.replaceState({}, "", "/accept-invite?token=abc123");
@@ -136,11 +137,20 @@ describe("before signing in", () => {
 
 describe("when signed in", () => {
   beforeEach(() => {
-    clerkState.isSignedIn = true;
-    clerkState.user = {
+    authState.isSignedIn = true;
+    authState.user = {
       fullName: "Nora Newhire",
       primaryEmailAddress: { emailAddress: "nora@personal.test" },
+      emailVerified: true,
     };
+  });
+
+  it("asks to verify the email before offering to accept", async () => {
+    authState.user = { ...authState.user!, emailVerified: false };
+    vi.stubGlobal("fetch", mockLookup({ ok: true }));
+    renderAt("/accept-invite?token=abc123");
+    expect(await screen.findByText(/verify your email address/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /accept invitation/i })).toBeNull();
   });
 
   it("offers to accept, prefilled with the signed-in name", async () => {
@@ -259,8 +269,8 @@ describe("keeping the invitation through sign-up", () => {
   });
 
   it("lets a signed-in person drop the remembered invitation", async () => {
-    clerkState.isSignedIn = true;
-    clerkState.user = { fullName: "Nora", primaryEmailAddress: { emailAddress: "n@x.test" } };
+    authState.isSignedIn = true;
+    authState.user = { fullName: "Nora", primaryEmailAddress: { emailAddress: "n@x.test" }, emailVerified: true };
     vi.stubGlobal("fetch", mockLookup({ ok: true }));
     renderAt(`/accept-invite?token=${LONG_TOKEN}`);
     const forget = await screen.findByRole("button", { name: /forget this invitation/i });
@@ -272,8 +282,8 @@ describe("keeping the invitation through sign-up", () => {
   });
 
   it("retries once with a fresh sign-in token when the first attempt is refused as unauthorized", async () => {
-    clerkState.isSignedIn = true;
-    clerkState.user = { fullName: "Nora", primaryEmailAddress: { emailAddress: "n@x.test" } };
+    authState.isSignedIn = true;
+    authState.user = { fullName: "Nora", primaryEmailAddress: { emailAddress: "n@x.test" }, emailVerified: true };
     const base = mockLookup({ ok: true });
     let posts = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -293,7 +303,7 @@ describe("keeping the invitation through sign-up", () => {
     fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }));
     await waitFor(() => expect(posts).toBe(2), { timeout: 4000 });
 
-    // The retry must ask Clerk for a brand-new token and actually send it.
+    // The retry must ask for a brand-new token and actually send it.
     expect(getTokenMock).toHaveBeenNthCalledWith(2, { skipCache: true });
     const sent = fetchMock.mock.calls
       .filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")
@@ -303,8 +313,8 @@ describe("keeping the invitation through sign-up", () => {
   });
 
   it("explains a persistent 401 in plain words instead of just 'Unauthorized'", async () => {
-    clerkState.isSignedIn = true;
-    clerkState.user = { fullName: "Nora", primaryEmailAddress: { emailAddress: "n@x.test" } };
+    authState.isSignedIn = true;
+    authState.user = { fullName: "Nora", primaryEmailAddress: { emailAddress: "n@x.test" }, emailVerified: true };
     const base = mockLookup({ ok: true });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
       init?.method === "POST"
@@ -321,8 +331,8 @@ describe("keeping the invitation through sign-up", () => {
   });
 
   it("stops remembering the link when accepting it fails for good", async () => {
-    clerkState.isSignedIn = true;
-    clerkState.user = { fullName: "Nora", primaryEmailAddress: { emailAddress: "n@x.test" } };
+    authState.isSignedIn = true;
+    authState.user = { fullName: "Nora", primaryEmailAddress: { emailAddress: "n@x.test" }, emailVerified: true };
     const base = mockLookup({ ok: true });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "POST") {

@@ -30,6 +30,8 @@ import {
   resolveAiBaseUrl,
 } from "./lib/aiProvider";
 import { assertStorageBackendHipaaCompliant } from "./lib/objectStorage";
+import { identityProjectId } from "./lib/auth/identity";
+import { isDemoMode } from "./lib/demoMode";
 import { assertEsignProviderHipaaCompliant } from "./lib/esign/factory";
 import { assertEsignSigningCredsAreProd } from "./lib/esign/pkiSigner";
 
@@ -59,6 +61,13 @@ async function bootstrap(): Promise<void> {
   // dies at boot rather than leaking PHI on the first patient
   // interaction. Mirrors the PHI_ENCRYPTION_KEY boot check (PR #64).
   assertAiProviderHipaaCompliant();
+
+  // Sign-in guard (ADR 0006): without an Identity Platform project no token
+  // can be verified, so every user would be refused. Fail the boot instead,
+  // so a misconfigured revision never takes traffic from the working one.
+  if (process.env.NODE_ENV === "production" && !isDemoMode() && !identityProjectId()) {
+    throw new Error("IDENTITY_PLATFORM_PROJECT_ID (or GOOGLE_CLOUD_PROJECT) must be set in production: sign-in tokens cannot be verified without it.");
+  }
 
   // Routing problems are NOT a boot failure. They stop AI from working, not
   // from being safe -- and a Medicare CRM should not lose contacts, e-sign and

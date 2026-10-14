@@ -28,8 +28,8 @@ authoritative, dated version lives in [`docs/STATE.md`](docs/STATE.md).
 | Application code | Feature-rich and tested: 86 API route modules, ~63 web pages, 69 database migrations, 164 API test files and 58 web test files. |
 | `main` CI | **Green** at `4911b43` (typecheck, tests, migration journal, `pnpm audit`). It had been red on `pnpm audit` over advisory `GHSA-vfj7-8cjw-p6xm` (`braces`, no upstream patch) until the documented suppression landed in #272. |
 | Production deploy | **Green** at `4911b43`: the Cloud Run deploy ran and the post-deploy Chromium check of the live page passed. It had failed on every push since 2026-10-02 (Secret Manager IAM gap). Passing a deploy does not by itself clear PHI — see next row. |
-| PHI readiness | **Not cleared.** ADR 0004 (GCP production) is still "Proposed" and should be promoted by the owner now that a deploy has succeeded. Production reportedly uses a Clerk development-mode key (verify), several vendor BAAs are unconfirmed (see [Compliance](#compliance-and-phi)), and contact PHI reads are not audit-logged (see Known gaps). |
-| Auth | **Clerk** in production, MFA mandatory for everyone. Migration to GCP Identity Platform is *proposed only* (ADR 0006). |
+| PHI readiness | **Not cleared.** ADR 0004 (GCP production) is still "Proposed" and should be promoted by the owner now that a deploy has succeeded. Sign-in moves from Clerk to Google Cloud Identity Platform once its setup is done (see Auth row), several vendor BAAs are unconfirmed (see [Compliance](#compliance-and-phi)), and contact PHI reads are not audit-logged (see Known gaps). |
+| Auth | **Google Cloud Identity Platform** (ADR 0006, accepted 2026-10-14): email + password and an authenticator app, MFA mandatory for everyone. Production keeps running the last Clerk build until the owner finishes [`docs/AUTH_IDENTITY_PLATFORM.md`](docs/AUTH_IDENTITY_PLATFORM.md). |
 | AI | **Claude on AWS Bedrock** (Anthropic Messages API). Azure OpenAI is a supported alternate. Plain OpenAI is dev/test only. |
 | Unmerged work | Open PRs change daily (list them on GitHub; do not trust a snapshot). At the 2026-10-04 snapshot the only branch with unlanded work was PR #272; the other ~155 had landed or add nothing, **but** two of them (`claudemoogs/practical-thompson-09n6cr`, `claudemoogs/dreamy-ptolemy-2ho4s0`) were reused for new open PRs #273 and #275 right afterwards and must not be deleted — see [`docs/BRANCH_AUDIT_2026-10-04.md`](docs/BRANCH_AUDIT_2026-10-04.md). |
 
@@ -81,7 +81,7 @@ flowchart LR
     D[(Cloud SQL<br/>Postgres 16)]
     S[(GCS private bucket<br/>PHI documents)]
   end
-  W -- "/api (Clerk session)" --> A
+  W -- "/api (Identity Platform ID token)" --> A
   A --> D
   A --> S
   A -- "Anthropic Messages API" --> B[AWS Bedrock]
@@ -131,7 +131,7 @@ clients, and keep `lib/api-zod/src/index.ts` as the single line
 - **Boot guards** refuse to start in production with: a non-HIPAA AI provider,
   non-GCS storage, the Beta e-sign provider, an ephemeral signing cert, or demo
   mode paired with live credentials.
-- **Auth:** Clerk, MFA required for all users (cannot be disabled in
+- **Auth:** Google Cloud Identity Platform (email + password, authenticator-app MFA), MFA required for all users (cannot be disabled in
   production), per-org inactivity timeout (default 30 min), rate limits on auth.
 - **Auditing:** automatic audit-log rows for writes and admin actions; super-admin
   view-as-agency is read-only by default and always logged; the narrow audited
@@ -166,7 +166,8 @@ pnpm seed:demo                                 # optional sample data
 
 # Build the web bundle (the API serves artifacts/web-app/dist/public itself).
 # Demo, no accounts:  VITE_DEMO_MODE=true  here AND  DEMO_MODE=true  on the API.
-# Real auth: set VITE_CLERK_PUBLISHABLE_KEY and the Clerk keys on the API.
+# Real auth: set VITE_FIREBASE_API_KEY / _AUTH_DOMAIN / _PROJECT_ID here and
+# IDENTITY_PLATFORM_PROJECT_ID on the API (docs/AUTH_IDENTITY_PLATFORM.md).
 VITE_DEMO_MODE=true pnpm --filter @workspace/web-app run build
 
 # API (builds, then starts; no hot reload) → http://localhost:8080
@@ -190,7 +191,7 @@ node --test tests/*.test.mjs    # dependency-free quality smoke test
 pnpm audit --audit-level moderate
 ```
 
-Opt-in: `pnpm e2e` (needs Clerk keys + running app), `pnpm evidence` (records
+Opt-in: `pnpm e2e` (needs Identity Platform config, a test login + running app), `pnpm evidence` (records
 role-journey videos), `load-tests/` (k6), `pnpm --filter @workspace/scripts run smoke:bedrock`.
 
 ---
@@ -244,7 +245,7 @@ Architecture decision records live in [`docs/decisions/`](docs/decisions/).
 | 0003 | Railway `mediflow-prod` is a demo, not production | Accepted |
 | 0004 | GCP Cloud Run + Cloud SQL is the production target | **Proposed** — promote after a real deploy |
 | 0005 | Bedrock is called via the Anthropic Messages API | Accepted |
-| 0006 (identity) | Move from Clerk to GCP Identity Platform | **Proposed** |
+| 0006 (identity) | Move from Clerk to GCP Identity Platform | **Accepted** (2026-10-14) |
 | 0006 (SOA) | Scope of Appointment is captured on the call recording | Accepted |
 
 Two files share the number 0006; renumber one when next editing the ADRs.
