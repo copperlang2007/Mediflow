@@ -22,7 +22,7 @@ _Last updated: 2026-10-14 — Recording player failure message (see session log)
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
 | Open PRs | Query GitHub live | As of 2026-10-14: #298 (recording player failure message, branch `claudemoogs/recording-player-message`). #297 (recording playback) merged as `c37dadb`; #293, #294 merged earlier. |
-| Migration high-water mark | `0072_integration_payloads` on main (#288); `0073_call_recordings_fetching` on branch `claude/agencybridge-compliance-review-s3nc6l` | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
+| Migration high-water mark | `0073_call_recordings_fetching` on main (landed with #289; checked on `origin/main` 2026-10-14). Next free number is 0074 unless an open PR claims it | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
 ### Owner-only actions
@@ -95,7 +95,7 @@ ones with no inbound references.
 ### 2026-10-14 — Recording player: honest message when playback fails — Claude Code — branch `claudemoogs/recording-player-message` (PR #298)
 - **Outcome:** done
 - **Changed:** follow-up to #297 (merged as `c37dadb` just before this fix was pushed). `RecordingPlayer.tsx` now shows the "format your browser cannot play" message only when the media error is code 4 AND the server gave a content type AND `canPlayType()` returns an empty string. Every other failure (403/404/expired link, CSP block, or a codec the browser says "maybe" to) shows a neutral message that names both causes and says to ask the agency admin if a second try also fails.
-- **Verified:** player tests 9/9; `pnpm --filter @workspace/web-app run typecheck` clean; full `pnpm test` 238 files / 2645 tests passed before the last wording change.
+- **Verified:** at `f5d19bd` (final player code): player tests 10/10; `pnpm --filter @workspace/web-app run typecheck` clean; full `pnpm test` 238 files / 2646 tests passed. This state-log commit changes docs only.
 - **Left undone / broken:** same follow-ups as the #297 entry below (no-store on recording objects, index on `call_recordings`, link refresh on long calls, OpenAPI, agent access to EnrollHere recordings). Still not tried on a real recording.
 - **Decisions made:** none
 - **Next agent should:** see the #297 entry below.
