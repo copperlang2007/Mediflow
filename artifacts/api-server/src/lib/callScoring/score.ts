@@ -131,6 +131,11 @@ function result(
   source: ResultSource,
   extra: Partial<CriterionResult> = {},
 ): CriterionResult {
+  // Zero-tolerance items: anything short of full credit is a fail.
+  if (c.allOrNothing && status === "partial") {
+    status = "fail";
+    fraction = 0;
+  }
   const counted = status === "pass" || status === "partial" || status === "fail";
   const f = counted ? Math.min(1, Math.max(0, fraction)) : 0;
   const failing = status === "fail" || status === "partial" || status === "needs_review";
@@ -208,20 +213,7 @@ function judgeByAi(
       "llm",
     );
   }
-  if (ai.status === "na") {
-    // An AI alone cannot take a critical item out of the score and the gate.
-    if (c.severity === "critical") {
-      return result(
-        c,
-        "needs_review",
-        0,
-        [],
-        `The AI reviewer marked this not applicable. A person must confirm that before a critical item is left out. ${ai.rationale}`,
-        "llm",
-      );
-    }
-    return result(c, "na", 0, [], ai.rationale, "llm");
-  }
+  if (ai.status === "na") return judgeNa(c, ai, byUtt, [], "llm");
   const verified = verifyEvidence(ai, byUtt);
   const evidence = fromExpectedSpeaker(c, verified);
   if (!evidence.length) {
@@ -240,6 +232,36 @@ function judgeByAi(
   return result(c, ai.status, aiFraction(ai), evidence, ai.rationale, "llm", {
     ...(ai.coaching ? { coaching: ai.coaching } : {}),
   });
+}
+
+/**
+ * The AI says the item does not apply to this call. An AI alone never takes a
+ * critical item out of the score and the gate: a person confirms. (A quote
+ * that merely exists in the transcript does not prove non-applicability, and
+ * the transcript is untrusted text.) The AI's reason and any verified quotes
+ * are kept so the person can confirm quickly.
+ */
+function judgeNa(
+  c: Criterion,
+  ai: AiJudgement,
+  byUtt: Map<number, Utterance>,
+  ruleEvidence: Evidence[],
+  source: ResultSource,
+  extra: Partial<CriterionResult> = {},
+  prefix = "",
+): CriterionResult {
+  if (c.severity !== "critical") return result(c, "na", 0, [], ai.rationale, source, extra);
+  // Either party's words may support the reason (e.g. the client declining to enroll).
+  const shown = c.conditional ? verifyEvidence(ai, byUtt) : [];
+  return result(
+    c,
+    "needs_review",
+    0,
+    shown.length ? shown : ruleEvidence,
+    `${prefix}The AI reviewer marked this not applicable. A person must confirm that before a critical item is left out. ${ai.rationale}`,
+    source,
+    extra,
+  );
 }
 
 function judgeRequired(
@@ -311,21 +333,7 @@ function judgeRequired(
     return result(c, rulesStatus, rulesFraction, f.evidence, rulesRationale + note, "rules", extra);
   }
 
-  if (ai.status === "na") {
-    // An AI must not quietly clear a critical disclosure.
-    if (c.severity === "critical") {
-      return result(
-        c,
-        "needs_review",
-        0,
-        f.evidence,
-        `${rulesRationale} The AI reviewer marked this not applicable: a person must confirm before a critical item is cleared. ${ai.rationale}`,
-        "rules+llm",
-        extra,
-      );
-    }
-    return result(c, "na", 0, [], ai.rationale, "rules+llm", extra);
-  }
+  if (ai.status === "na") return judgeNa(c, ai, byUtt, f.evidence, "rules+llm", extra, `${rulesRationale} `);
 
   const aiSpoken = fromExpectedSpeaker(c, verifyEvidence(ai, byUtt));
   // The stated deadline applies in both timing modes; no slack is added.
@@ -459,14 +467,22 @@ function judgeProhibited(
  */
 export function summarize(rubric: Rubric, criteria: CriterionResult[], unresolvedDnc = 0): ScoreTotals {
   const critical = new Set(rubric.criteria.filter((c) => c.severity === "critical").map((c) => c.id));
-  return summarizeWith(critical, criteria, unresolvedDnc);
+  return summarizeWith(critical, criteria, unresolvedDnc, { naCredit: rubric.naCredit });
 }
 
 /** Same maths, with the critical criterion ids supplied (used when re-reading a stored score). */
-export function summarizeWith(critical: Set<string>, criteria: CriterionResult[], unresolvedDnc = 0): ScoreTotals {
-  const counted = criteria.filter((r) => r.status === "pass" || r.status === "partial" || r.status === "fail");
+export function summarizeWith(
+  critical: Set<string>,
+  criteria: CriterionResult[],
+  unresolvedDnc = 0,
+  opts: { naCredit?: Rubric["naCredit"] } = {},
+): ScoreTotals {
+  const graded = (r: CriterionResult) => r.status === "pass" || r.status === "partial" || r.status === "fail";
+  // "full": a not-applicable item earns its points, so the agent is not penalized for a step that did not apply.
+  const fullNa = opts.naCredit === "full";
+  const counted = criteria.filter((r) => graded(r) || (fullNa && r.status === "na"));
   const max = counted.reduce((s, r) => s + r.maxPoints, 0);
-  const earned = counted.reduce((s, r) => s + r.earned, 0);
+  const earned = counted.reduce((s, r) => s + (r.status === "na" ? r.maxPoints : r.earned), 0);
   const score = max > 0 ? Math.round((earned / max) * 100) : 0;
 
   const criticalFailures = criteria
@@ -478,10 +494,17 @@ export function summarizeWith(critical: Set<string>, criteria: CriterionResult[]
     : needsReview.some((id) => critical.has(id)) || unresolvedDnc > 0
       ? "review"
       : "pass";
-  return { score, compliance, criticalFailures, needsReview };
+  const round = (n: number) => Math.round(n * 10) / 10;
+  return { score, points: { earned: round(earned), possible: round(max) }, compliance, criticalFailures, needsReview };
 }
 
-/** True when the call is clean AND meets the rubric's quality bar. */
+/**
+ * True when the call is clean AND meets the rubric's quality bar. Compared on
+ * the points, not the rounded score: 119.4 of 150 is below an 80% bar even
+ * though it rounds to 80.
+ */
 export function meetsStandard(rubric: Rubric, totals: ScoreTotals): boolean {
-  return totals.compliance === "pass" && totals.score >= rubric.passThreshold;
+  if (totals.compliance !== "pass") return false;
+  const { earned, possible } = totals.points ?? { earned: 0, possible: 0 };
+  return possible > 0 ? earned * 100 >= rubric.passThreshold * possible : totals.score >= rubric.passThreshold;
 }

@@ -315,6 +315,56 @@ describe("seat accounting", () => {
 
     expect(accepted.status).toBe(402);
   });
+
+  it("lets the invitee accept the invitation that took the agency's last seat", async () => {
+    // adminA + exactly one more: the invitation below fills the plan. Its seat
+    // was checked and reserved when it was issued, so accepting it must turn
+    // that reservation into a member — not count the reservation against itself
+    // and then report that the agency has "no seats available".
+    await setSeats(orgA.id, 2);
+
+    const created = await invite(adminA, { email: "last-seat@alpha.test" });
+    expect(created.status).toBe(201);
+    expect(created.body.seats.available).toBe(0);
+    const token = new URL(created.body.acceptUrl).searchParams.get("token")!;
+
+    const accepted = await request(app)
+      .post("/api/invitations/accept")
+      .set(withAuth(`clerk-${randomUUID()}`))
+      .send({ token, fullName: "Last Seat" });
+
+    expect(accepted.status).toBe(201);
+    expect(accepted.body.user.orgId).toBe(orgA.id);
+  });
+
+  it("does not let an accepted invitation take a seat beyond the plan", async () => {
+    // Two invitations hold the two free seats; a downgrade then removes one.
+    // Plan = 2 now covers adminA + ONE invitee, so only one of the two can join.
+    await setSeats(orgA.id, 3);
+    const first = await invite(adminA, { email: "first-in@alpha.test" });
+    const second = await invite(adminA, { email: "second-in@alpha.test" });
+    const tokenOf = (res: { body: { acceptUrl: string } }) =>
+      new URL(res.body.acceptUrl).searchParams.get("token")!;
+
+    await setSeats(orgA.id, 2);
+
+    const accept = (token: string) =>
+      request(app)
+        .post("/api/invitations/accept")
+        .set(withAuth(`clerk-${randomUUID()}`))
+        .send({ token, fullName: "Joiner" });
+
+    // Still over the plan (adminA + two reservations = 3 > 2): refuse both,
+    // rather than let a reservation quietly become an over-limit member.
+    expect((await accept(tokenOf(first))).status).toBe(402);
+    expect((await accept(tokenOf(second))).status).toBe(402);
+
+    // Free one reservation: now exactly one seat's worth of room remains.
+    await request(app)
+      .delete(`/api/invitations/${second.body.invitation.id}`)
+      .set(withAuth(adminA.id));
+    expect((await accept(tokenOf(first))).status).toBe(201);
+  });
 });
 
 describe("resend", () => {

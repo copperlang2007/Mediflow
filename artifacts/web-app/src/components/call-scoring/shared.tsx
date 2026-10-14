@@ -116,6 +116,12 @@ export interface CsCriterion {
   severity: "critical" | "major" | "minor";
   description: string | null;
   citation: string | null;
+  sectionId?: string | null;
+  /** Zero-tolerance item: graded pass or fail only. */
+  allOrNothing?: boolean;
+  /** The rubric's required disposition wording when this item fails. */
+  autoFailNote?: string | null;
+  points?: number;
   status: CriterionStatus;
   autoStatus: CriterionStatus;
   source: string;
@@ -160,6 +166,11 @@ export interface CsDetail {
     timing: "recorded" | "estimated";
     filename: string | null;
     textAvailable: boolean;
+    /** Voices a reviewer can choose between on a one-track recording. Absent on older responses. */
+    speakers?: { assignable: boolean; speakers: Array<{ label: string; turns: number; role: "agent" | "client" | "unknown" }> };
+    speakerAssignedAt?: string | null;
+    /** False when a choice was saved but the call was not scored again under it. Absent on older responses. */
+    speakerScoreCurrent?: boolean;
     contact: { id: string; name: string } | null;
     contactMatch: string;
     agent: { id: string; name: string } | null;
@@ -169,10 +180,19 @@ export interface CsDetail {
   score: null | {
     id: string;
     createdAt: string;
-    rubric: { id: string; version: string; name: string; passThreshold: number | null };
+    rubric: {
+      id: string;
+      version: string;
+      name: string;
+      passThreshold: number | null;
+      outcomeLabels?: OutcomeLabels | null;
+      sections?: Array<{ id: string; name: string }>;
+    };
     ai: { status: "used" | "needs_setup" | "failed" | "skipped"; model: string | null; error: string | null };
-    auto: { score: number; compliance: Compliance; criticalFailures: string[]; needsReview: string[] };
-    effective: { score: number; compliance: Compliance; criticalFailures: string[]; needsReview: string[]; openDnc: number; meetsStandard: boolean | null };
+    /** Who was identified when this score was made. Absent on older responses. */
+    speakerMode?: "labelled" | "partial" | "unlabelled";
+    auto: { score: number; points?: ScorePoints; compliance: Compliance; criticalFailures: string[]; needsReview: string[] };
+    effective: { score: number; points?: ScorePoints; compliance: Compliance; criticalFailures: string[]; needsReview: string[]; openDnc: number; meetsStandard: boolean | null };
   };
   criteria: CsCriterion[];
   dnc: CsDncFinding[];
@@ -205,6 +225,29 @@ export interface CsDncItem {
 }
 
 export const QK = ["call-scoring"] as const;
+
+export interface ScorePoints {
+  earned: number;
+  possible: number;
+}
+
+/** A rubric's own outcome wording (e.g. a QA scorecard's "AUTOMATIC FAIL – NON-COMPLIANT"). */
+export interface OutcomeLabels {
+  pass: string;
+  belowThreshold: string;
+  autoFail: string;
+  review: string;
+}
+
+/** The rubric's disposition for a result: auto-fail beats points; points decide the rest. */
+export function outcomeOf(
+  labels: OutcomeLabels,
+  e: { compliance: Compliance; meetsStandard: boolean | null },
+): { label: string; tone: StatusTone } {
+  if (e.compliance === "fail") return { label: labels.autoFail, tone: "danger" };
+  if (e.compliance === "review" || e.meetsStandard === null) return { label: labels.review, tone: "warning" };
+  return e.meetsStandard ? { label: labels.pass, tone: "success" } : { label: labels.belowThreshold, tone: "danger" };
+}
 
 export const COMPLIANCE_TONE: Record<Compliance, { label: string; tone: StatusTone }> = {
   pass: { label: "Passed", tone: "success" },

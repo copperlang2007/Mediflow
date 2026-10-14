@@ -6,7 +6,7 @@
  * like lib/queue/api.ts and lib/crm/callSummaries.ts — these wrap `apiFetch`
  * in react-query directly.
  */
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 
 // ---- Roles (UX only — the API enforces the real gate) ----------------------
@@ -459,6 +459,79 @@ export function searchProviders(q: ProviderQuery): Promise<{ data: ProviderResul
   if (q.state?.trim()) p.set("state", q.state.trim());
   if (q.zip?.trim()) p.set("zip", q.zip.trim());
   return apiFetch(`/api/quoting/providers?${p.toString()}`);
+}
+
+// ---- CMS plan data (public, by county) --------------------------------------
+
+export interface PlanSummary {
+  bidId: string;
+  contractId: string;
+  planId: string;
+  segmentId: string;
+  planName: string | null;
+  orgName: string | null;
+  orgMarketingName: string | null;
+  planTypeLabel: string | null;
+  isSnp: boolean;
+  snpType: string | null;
+  orgWebsite: string | null;
+  partial: boolean;
+}
+export interface PlanSearchResult {
+  data: PlanSummary[];
+  total: number;
+  truncated: boolean;
+  planYear: number | null;
+  source?: string;
+}
+export interface PlanDetail {
+  plan: PlanSummary & { planYear: number; geographyName: string | null };
+  sections: { section: string; rows: Record<string, string>[] }[];
+  planYear: number;
+}
+export type SnpFilter = "all" | "only" | "exclude";
+
+export function usePlanStates() {
+  return useQuery({
+    queryKey: ["/api/quoting/plan-areas/states"],
+    queryFn: ({ signal }) =>
+      apiFetch<{ data: { stateCode: string }[]; planYear: number | null }>("/api/quoting/plan-areas/states", { signal }),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function usePlanCounties(state: string) {
+  return useQuery({
+    queryKey: ["/api/quoting/plan-areas/counties", state],
+    enabled: /^[A-Z]{2}$/.test(state),
+    queryFn: ({ signal }) =>
+      apiFetch<{ data: { countyCode: string; countyName: string | null }[]; planYear: number | null }>(
+        `/api/quoting/plan-areas/counties?state=${encodeURIComponent(state)}`,
+        { signal },
+      ),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function usePlanSearch(q: { state: string; countyCode: string; q?: string; snp?: SnpFilter }) {
+  const p = new URLSearchParams({ state: q.state, countyCode: q.countyCode, snp: q.snp ?? "all" });
+  if (q.q?.trim()) p.set("q", q.q.trim());
+  return useQuery({
+    queryKey: ["/api/quoting/plans", p.toString()],
+    enabled: !!q.state && /^\d{5}$/.test(q.countyCode),
+    queryFn: ({ signal }) => apiFetch<PlanSearchResult>(`/api/quoting/plans?${p.toString()}`, { signal }),
+    placeholderData: keepPreviousData,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function usePlanDetail(bidId: string | null) {
+  return useQuery({
+    queryKey: ["/api/quoting/plans", "detail", bidId],
+    enabled: !!bidId,
+    queryFn: ({ signal }) => apiFetch<PlanDetail>(`/api/quoting/plans/${encodeURIComponent(bidId!)}`, { signal }),
+    staleTime: 5 * 60_000,
+  });
 }
 
 // ---- Small shared formatters ----------------------------------------------

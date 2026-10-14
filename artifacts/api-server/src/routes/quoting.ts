@@ -4,8 +4,8 @@
  *   GET /quoting/providers?lastName=&firstName=&state=&zip=
  *
  * Doctor lookup through the public CMS NPPES NPI Registry
- * (https://npiregistry.cms.hhs.gov/api/). Plan / premium / formulary data is
- * NOT connected yet, so this is the only live piece of the quoting page.
+ * (https://npiregistry.cms.hhs.gov/api/). Plan lookup by county lives in
+ * quotingPlans.ts; premium / formulary data is NOT connected yet.
  *
  * Server-side proxy on purpose, so the browser never talks to a third party
  * and the request is controlled here:

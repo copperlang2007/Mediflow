@@ -194,8 +194,9 @@ describe("Supervisor page", () => {
 describe("Quoting page", () => {
   it("never shows sample plans and lists real carriers", async () => {
     routes["/api/carriers"] = () => json([{ id: "car-1", name: "Acme Health", cmsContractNumber: "H1234", isActive: true }]);
+    routes["/api/quoting/plan-areas/states"] = () => json({ data: [], planYear: null });
     renderAt("/quoting", <QuotingPage />);
-    expect(screen.getByText("Plan data isn't connected yet")).toBeInTheDocument();
+    expect(screen.getByText(/Pick a state and county to list the plans/)).toBeInTheDocument();
     expect(await screen.findByText("Acme Health")).toBeInTheDocument();
     expect(screen.queryByText(/\$\d/)).not.toBeInTheDocument();
   });

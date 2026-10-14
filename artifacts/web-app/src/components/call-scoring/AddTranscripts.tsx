@@ -16,6 +16,7 @@ import { MiniStat, SectionCard, StatusPill } from "@/components/shared";
 import { AlertTriangle, CheckCircle2, FileAudio, PhoneOff, Upload } from "lucide-react";
 import { COMPLIANCE_TONE, QK, apiMessage, type CsConfig, type Compliance } from "./shared";
 import { RecordingUpload } from "./RecordingUpload";
+import { EnrollhereCallLogImport } from "./EnrollhereCallLogImport";
 
 interface ScoreSummary {
   transcriptId: string;
@@ -337,6 +338,7 @@ export function AddTranscripts({
 }) {
   return (
     <div className="space-y-6">
+      <EnrollhereCallLogImport config={config} />
       <RecordingUpload config={config} onOpen={onOpen} />
       <SingleUpload config={config} onOpen={onOpen} onDone={() => undefined} />
       <BulkImport config={config} onShowDnc={onShowDnc} />

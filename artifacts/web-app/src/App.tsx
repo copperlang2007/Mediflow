@@ -15,6 +15,7 @@ import { effectiveViewAsOrg, isPlatformView, isPlatformPath, type Role } from "@
 import AppShell from "@/components/layout/AppShell";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { DEV_CONSOLE_ENABLED } from "@/lib/devEnabled";
+import { pendingInvitePath } from "@/lib/pendingInvite";
 import { ThemeProvider } from "@/components/theme/ThemeToggle";
 import { BrandMark } from "@/components/brand/BrandMark";
 import Landing from "@/pages/landing";
@@ -439,6 +440,11 @@ function ProvisioningGate({ children }: { children: React.ReactNode }) {
   if (isError) return <>{children}</>;
 
   if (data && !data.provisioned) {
+    // Someone who followed an invitation link and then signed up has not lost
+    // their invitation just because sign-up dropped the URL. Creating an agency
+    // here would make the invitation unusable ("already belongs to an agency").
+    const inviteBack = pendingInvitePath();
+    if (inviteBack) return <Redirect to={inviteBack} />;
     return (
       <Suspense fallback={<PageLoadingFallback />}>
         <CreateOrganizationPage />

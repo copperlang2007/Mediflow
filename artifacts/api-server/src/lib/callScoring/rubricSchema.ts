@@ -37,6 +37,9 @@ const CriterionSchema = z
     mustPrecede: z.array(Pattern).min(1).max(50).optional(),
     guidance: z.string().max(2000).optional(),
     hint: z.string().max(300).optional(),
+    allOrNothing: z.boolean().optional(),
+    conditional: z.boolean().optional(),
+    autoFailNote: z.string().max(600).optional(),
   })
   .superRefine((c, ctx) => {
     const hasRules = (c.patterns?.length ?? 0) > 0 || (c.components?.length ?? 0) > 0;
@@ -58,6 +61,10 @@ export const RubricSchema = z
     version: z.string().min(1).max(40),
     description: z.string().max(2000),
     passThreshold: z.number().min(0).max(100),
+    naCredit: z.enum(["exclude", "full"]).optional(),
+    outcomeLabels: z
+      .object({ pass: z.string().min(1).max(60), belowThreshold: z.string().min(1).max(60), autoFail: z.string().min(1).max(60), review: z.string().min(1).max(60) })
+      .optional(),
     sections: z
       .array(z.object({ id: Id, name: z.string().min(1).max(200), description: z.string().max(1000).optional() }))
       .min(1),

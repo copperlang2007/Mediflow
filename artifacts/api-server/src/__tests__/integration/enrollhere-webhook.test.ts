@@ -394,3 +394,56 @@ describe("header recognition for compound address columns (CSV and webhook)", ()
     for (const [header, field] of Object.entries(cases)) expect([header, suggestContactField(header)]).toEqual([header, field]);
   });
 });
+
+describe("every value is kept in Mediflow (integration_payloads)", () => {
+  it("stores the whole call delivery encrypted, links it from the call log, and shows it only to admins, audited", async () => {
+    const { integrationPayloadsTable, auditLogTable } = await import("@workspace/db/schema");
+    const { decryptPii } = await import("@workspace/db");
+    const { withAuth } = await import("../helpers/testApp");
+    const { seedUser } = await import("../helpers/testDb");
+    const body = {
+      call_id: "full-1",
+      first_name: "Dolores",
+      last_name: "Keeper",
+      phone: "512-555-0199",
+      recording_url: "https://recordings.example/abc.mp3",
+      campaign: "AEP inbound",
+      some_unmapped_field: "kept too",
+      headers: { "x-forwarded-for": "10.0.0.1" },
+    };
+    const res = await signed(body);
+    expect(res.status).toBe(200);
+
+    const [row] = await tdb.select().from(integrationPayloadsTable).where(eq(integrationPayloadsTable.externalId, "full-1"));
+    expect(row).toBeTruthy();
+    expect(row!.contactId).toBe(res.body.contactId);
+    expect(row!.activityId).toBe(res.body.activityId);
+    expect(row!.retainUntil.getTime()).toBeGreaterThan(Date.now() + 3649 * 86_400_000);
+    // Encrypted at rest; every value except the relay's request headers.
+    expect(Buffer.from(row!.payloadEncrypted).toString("latin1")).not.toContain("Dolores");
+    const stored = JSON.parse(decryptPii(row!.payloadEncrypted));
+    expect(stored).toMatchObject({ first_name: "Dolores", campaign: "AEP inbound", some_unmapped_field: "kept too", recording_url: body.recording_url });
+    expect(stored.headers).toBeUndefined();
+    const [act] = await tdb.select().from(activitiesTable).where(eq(activitiesTable.id, res.body.activityId));
+    expect((act!.metadata as { payloadId?: string }).payloadId).toBe(row!.id);
+
+    // A redelivery keeps one record.
+    expect((await signed(body)).body.duplicate).toBe(true);
+    expect(await tdb.select().from(integrationPayloadsTable).where(eq(integrationPayloadsTable.externalId, "full-1"))).toHaveLength(1);
+
+    const admin = await seedUser(tdb, { orgId: org.id, role: "agency_admin" });
+    const agentUser = await seedUser(tdb, { orgId: org.id, role: "agent" });
+    const otherOrg = await seedOrg(tdb, { id: "eh-other-org" });
+    const otherAdmin = await seedUser(tdb, { orgId: otherOrg.id, role: "agency_admin" });
+
+    const view = await request(app).get(`/api/integration-payloads/${row!.id}`).set(withAuth(admin.id)).expect(200);
+    expect(view.body.payload).toMatchObject({ campaign: "AEP inbound", some_unmapped_field: "kept too" });
+    expect(view.headers["cache-control"]).toBe("no-store");
+    const audits = await tdb.select().from(auditLogTable).where(and(eq(auditLogTable.resourceId, row!.id), eq(auditLogTable.action, "view_integration_payload")));
+    expect(audits).toHaveLength(1);
+    expect(JSON.stringify(audits[0]!.changes)).not.toContain("Dolores");
+
+    await request(app).get(`/api/integration-payloads/${row!.id}`).set(withAuth(agentUser.id)).expect(403);
+    await request(app).get(`/api/integration-payloads/${row!.id}`).set(withAuth(otherAdmin.id)).expect(404);
+  });
+});
