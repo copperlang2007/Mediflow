@@ -224,6 +224,96 @@ describe("listening to a recording", () => {
     expect(await listenAudits(transcriptId)).toHaveLength(0);
   });
 
+  it("never writes the recording's object key to the server log when playback fails", async () => {
+    const { logger } = await import("../../lib/logger");
+    const captured: unknown[] = [];
+    // Errors stringify to {} by default, so keep message, stack, cause and own fields.
+    // pino-http hands over raw req/res (sockets, circular); real pino serializes them to method/url/status only.
+    const record = (args: unknown[]) => {
+      const seen = new WeakSet<object>();
+      captured.push(
+        JSON.stringify(args, (k, v) => {
+          if (k === "req" || k === "res") return undefined;
+          if (v && typeof v === "object") {
+            if (seen.has(v)) return "[circular]";
+            seen.add(v);
+          }
+          return v instanceof Error ? { ...v, name: v.name, message: v.message, stack: v.stack, cause: v.cause } : v;
+        }),
+      );
+    };
+    const levels = ["trace", "debug", "info", "warn", "error", "fatal"] as const;
+    const spies: Array<{ mockRestore: () => void }> = [];
+    const wrap = (l: any) => {
+      for (const level of levels) {
+        spies.push(vi.spyOn(l, level).mockImplementation(((...args: unknown[]) => record(args)) as never));
+      }
+    };
+    wrap(logger);
+    // Each request's logger (req.log) is a child of the app logger.
+    const realChild = logger.child.bind(logger);
+    spies.push(
+      vi.spyOn(logger, "child").mockImplementation(((...a: unknown[]) => {
+        const c = (realChild as (...x: unknown[]) => unknown)(...a);
+        wrap(c);
+        return c;
+      }) as never),
+    );
+
+    const g = globalThis as { __PB_FAIL__?: Map<string, string> };
+    const realInsert = handle.db.insert.bind(handle.db) as (table: unknown) => any;
+    const bodies: string[] = [];
+    let objectKeys: string[] = [];
+    try {
+      // (a) The listen cannot be logged; the database error carries real ids, as drizzle's does.
+      const a = await makeCall();
+      const keyA = `call-recordings/${org.id}/${a.recordingId}`;
+      const insertSpy = vi.spyOn(handle.db, "insert").mockImplementation(((table: unknown) => {
+        const builder = realInsert(table);
+        if (table !== schema.auditLogTable) return builder;
+        return {
+          values: (v: { action?: string }) =>
+            v?.action === "call_recording_listen"
+              ? Promise.reject(
+                  new Error(
+                    `Failed query: insert into "audit_log" ("id", "org_id", "user_id", "action", "resource_id") values (default, $1, $2, $3, $4)\nparams: ${org.id},${admin.id},call_recording_listen,${a.transcriptId}`,
+                  ),
+                )
+              : builder.values(v),
+        };
+      }) as never);
+      spies.push(insertSpy);
+      const resA = await listen(admin.id, a.transcriptId);
+      expect(insertSpy).toHaveBeenCalled();
+      expect(resA.status).toBeGreaterThanOrEqual(500);
+      bodies.push(JSON.stringify(resA.body));
+      insertSpy.mockRestore();
+
+      // (b) Storage fails with a message that contains the key; the route answers 503.
+      const b = await makeCall();
+      const keyB = `call-recordings/${org.id}/${b.recordingId}`;
+      (g.__PB_FAIL__ ??= new Map()).set(keyB, "metadata");
+      try {
+        const resB = await listen(admin.id, b.transcriptId);
+        expect(resB.status, JSON.stringify(resB.body)).toBe(503);
+        bodies.push(JSON.stringify(resB.body));
+      } finally {
+        g.__PB_FAIL__.delete(keyB);
+      }
+      objectKeys = [keyA, keyB];
+    } finally {
+      for (const s of spies) s.mockRestore();
+    }
+
+    // The log was actually captured (request lines at least), so the checks below mean something.
+    const everything = captured.join("\n");
+    expect(everything).toContain("audit_log");
+    for (const key of objectKeys) {
+      expect(everything).not.toContain(key);
+      for (const body of bodies) expect(body).not.toContain(key);
+    }
+  });
+
   it("an agent can listen to calls from phone sessions they placed, and no one else's", async () => {
     // An agent's own call is one linked to a call session they placed.
     const session = async (userId: string, agentId: string) => {
