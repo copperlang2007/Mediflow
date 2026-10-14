@@ -24,7 +24,15 @@ export interface RecordingReader {
 
 export type ListenResult =
   | { ok: true; url: string; expiresInSeconds: number; contentType: string | null; durationSeconds: number | null }
-  | { ok: false; httpStatus: 404; code: "not_found" | "no_recording" | "audio_unavailable"; message: string };
+  | { ok: false; httpStatus: 404 | 503; code: "not_found" | "no_recording" | "audio_unavailable" | "storage_unavailable"; message: string };
+
+// Fixed answer for storage failures: the error itself may name the object key, so it is never logged or returned.
+const STORAGE_DOWN = {
+  ok: false,
+  httpStatus: 503,
+  code: "storage_unavailable",
+  message: "The recording could not be opened right now. Please try again in a moment.",
+} as const;
 
 export async function listenLink(input: {
   orgId: string;
@@ -49,7 +57,12 @@ export async function listenLink(input: {
     return { ok: false, httpStatus: 404, code: "no_recording", message: "There is no recording for this call. Calls added as text have none." };
   }
 
-  const stored = await input.storage.getCallRecordingMetadata(recording.objectKey);
+  let stored: Awaited<ReturnType<RecordingReader["getCallRecordingMetadata"]>>;
+  try {
+    stored = await input.storage.getCallRecordingMetadata(recording.objectKey);
+  } catch {
+    return STORAGE_DOWN;
+  }
   if (!stored) {
     return { ok: false, httpStatus: 404, code: "audio_unavailable", message: "The audio for this call is no longer in storage." };
   }
@@ -66,6 +79,11 @@ export async function listenLink(input: {
     changes: { recordingId: recording.id, linkSeconds: LISTEN_LINK_SECONDS },
   });
 
-  const url = await input.storage.getCallRecordingReadURL(recording.objectKey, LISTEN_LINK_SECONDS);
+  let url: string;
+  try {
+    url = await input.storage.getCallRecordingReadURL(recording.objectKey, LISTEN_LINK_SECONDS);
+  } catch {
+    return STORAGE_DOWN;
+  }
   return { ok: true, url, expiresInSeconds: LISTEN_LINK_SECONDS, contentType: stored.contentType, durationSeconds: recording.durationSeconds };
 }
