@@ -41,9 +41,12 @@ export function RecordingPlayer({ transcriptId }: { transcriptId: string }) {
           aria-label="Call recording"
           className="w-full"
           onError={(e) => {
+            const el = e.currentTarget;
+            const type = link?.contentType;
             setLink(null);
-            // 4 = MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED (literal: jsdom may not define the constant)
-            if (e.currentTarget.error?.code === 4) setUnsupported(true);
+            // 4 = MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED (literal: jsdom may not define the constant).
+            // Chromium also raises 4 for 403/404/expired links, so only blame the format when the browser says it cannot play that type.
+            if (el.error?.code === 4 && !!type && el.canPlayType(type) === "") setUnsupported(true);
             else setLinkEnded(true);
           }}
         />
@@ -66,7 +69,7 @@ export function RecordingPlayer({ transcriptId }: { transcriptId: string }) {
       )}
       {linkEnded && (
         <p role="alert" className="text-sm text-warning">
-          The recording stopped loading, usually because its ten-minute link ended. Press Listen again to get a new one.
+          The recording could not be loaded, usually because its ten-minute link ended. Press Listen again to get a new one.
         </p>
       )}
     </div>
