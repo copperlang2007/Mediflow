@@ -96,6 +96,45 @@ async function makeCall(opts: { callSessionId?: string; recording?: "scored" | "
   return { transcriptId, recordingId };
 }
 
+/** Captures everything the app logger (and per-request children) writes, as JSON strings; restore via spies. */
+async function captureLogs() {
+    const { logger } = await import("../../lib/logger");
+    const captured: unknown[] = [];
+    // Errors stringify to {} by default, so keep message, stack, cause and own fields.
+    // pino-http hands over raw req/res (sockets, circular); real pino serializes them to method/url/status only.
+    const record = (args: unknown[]) => {
+      const seen = new WeakSet<object>();
+      captured.push(
+        JSON.stringify(args, (k, v) => {
+          if (k === "req" || k === "res") return undefined;
+          if (v && typeof v === "object") {
+            if (seen.has(v)) return "[circular]";
+            seen.add(v);
+          }
+          return v instanceof Error ? { ...v, name: v.name, message: v.message, stack: v.stack, cause: v.cause } : v;
+        }),
+      );
+    };
+    const levels = ["trace", "debug", "info", "warn", "error", "fatal"] as const;
+    const spies: Array<{ mockRestore: () => void }> = [];
+    const wrap = (l: any) => {
+      for (const level of levels) {
+        spies.push(vi.spyOn(l, level).mockImplementation(((...args: unknown[]) => record(args)) as never));
+      }
+    };
+    wrap(logger);
+    // Each request's logger (req.log) is a child of the app logger.
+    const realChild = logger.child.bind(logger);
+    spies.push(
+      vi.spyOn(logger, "child").mockImplementation(((...a: unknown[]) => {
+        const c = (realChild as (...x: unknown[]) => unknown)(...a);
+        wrap(c);
+        return c;
+      }) as never),
+    );
+  return { captured, spies };
+}
+
 const listen = (userId: string, transcriptId: string) => request(app).get(`/api/call-scoring/transcripts/${transcriptId}/audio`).set(withAuth(userId));
 const listenAudits = async (transcriptId: string) =>
   handle.db
@@ -216,6 +255,28 @@ describe("listening to a recording", () => {
     }
   });
 
+  it("logs a key-free warning when signing the link fails", async () => {
+    const { captured, spies } = await captureLogs();
+    const { transcriptId, recordingId } = await makeCall();
+    const objectKey = `call-recordings/${org.id}/${recordingId}`;
+    const g = globalThis as { __PB_FAIL__?: Map<string, string> };
+    (g.__PB_FAIL__ ??= new Map()).set(objectKey, "sign");
+    try {
+      const res = await listen(admin.id, transcriptId);
+      expect(res.status, JSON.stringify(res.body)).toBe(503);
+      expect(res.body.code).toBe("storage_unavailable");
+      expect(JSON.stringify(res.body)).not.toContain(objectKey);
+      const log = captured.join("\n");
+      expect(log).toContain("call recording storage unavailable");
+      expect(log).toContain('"step":"sign"');
+      expect(log).toContain(recordingId!);
+      expect(log).not.toContain(objectKey);
+    } finally {
+      g.__PB_FAIL__.delete(objectKey);
+      for (const s of spies) s.mockRestore();
+    }
+  });
+
   it("gives no link when the listen cannot be logged", async () => {
     const { transcriptId } = await makeCall();
     const realInsert = handle.db.insert.bind(handle.db) as (table: unknown) => any;
@@ -240,40 +301,7 @@ describe("listening to a recording", () => {
   });
 
   it("never writes the recording's object key to the server log when playback fails", async () => {
-    const { logger } = await import("../../lib/logger");
-    const captured: unknown[] = [];
-    // Errors stringify to {} by default, so keep message, stack, cause and own fields.
-    // pino-http hands over raw req/res (sockets, circular); real pino serializes them to method/url/status only.
-    const record = (args: unknown[]) => {
-      const seen = new WeakSet<object>();
-      captured.push(
-        JSON.stringify(args, (k, v) => {
-          if (k === "req" || k === "res") return undefined;
-          if (v && typeof v === "object") {
-            if (seen.has(v)) return "[circular]";
-            seen.add(v);
-          }
-          return v instanceof Error ? { ...v, name: v.name, message: v.message, stack: v.stack, cause: v.cause } : v;
-        }),
-      );
-    };
-    const levels = ["trace", "debug", "info", "warn", "error", "fatal"] as const;
-    const spies: Array<{ mockRestore: () => void }> = [];
-    const wrap = (l: any) => {
-      for (const level of levels) {
-        spies.push(vi.spyOn(l, level).mockImplementation(((...args: unknown[]) => record(args)) as never));
-      }
-    };
-    wrap(logger);
-    // Each request's logger (req.log) is a child of the app logger.
-    const realChild = logger.child.bind(logger);
-    spies.push(
-      vi.spyOn(logger, "child").mockImplementation(((...a: unknown[]) => {
-        const c = (realChild as (...x: unknown[]) => unknown)(...a);
-        wrap(c);
-        return c;
-      }) as never),
-    );
+    const { captured, spies } = await captureLogs();
 
     const g = globalThis as { __PB_FAIL__?: Map<string, string> };
     const realInsert = handle.db.insert.bind(handle.db) as (table: unknown) => any;
