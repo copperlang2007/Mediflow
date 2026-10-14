@@ -16,12 +16,14 @@ HTMLElement.prototype.releasePointerCapture = vi.fn();
 // jsdom does not implement media playback.
 HTMLMediaElement.prototype.play = vi.fn(async () => undefined);
 HTMLMediaElement.prototype.pause = vi.fn();
+HTMLMediaElement.prototype.canPlayType = vi.fn((t: string) => (t === "audio/amr" ? "" : "maybe"));
 
 const state = vi.hoisted(() => ({
   listenUrl: "https://storage.example/call-recordings/org/rec?read=1&ttl=600",
   calls: [] as Array<{ url: string; method: string }>,
   detail: null as unknown,
   audio: "ok" as "ok" | "fail",
+  contentType: "audio/mpeg",
 }));
 const LISTEN_URL = state.listenUrl;
 
@@ -31,7 +33,7 @@ vi.mock("@workspace/api-client-react", () => ({
     state.calls.push({ url: String(url), method });
     if (String(url).endsWith("/audio")) {
       if (state.audio === "fail") throw Object.assign(new Error("x"), { status: 404, data: { error: "The audio for this call is no longer in storage." } });
-      return { url: state.listenUrl, expiresInSeconds: 600, contentType: "audio/mpeg", durationSeconds: 120 };
+      return { url: state.listenUrl, expiresInSeconds: 600, contentType: state.contentType, durationSeconds: 120 };
     }
     return state.detail;
   }),
@@ -95,6 +97,7 @@ const transcriptLoaded = () => screen.findByText(/Thank you for calling Sunrise 
 beforeEach(() => {
   state.calls = [];
   state.audio = "ok";
+  state.contentType = "audio/mpeg";
   state.detail = detail({ recordingAvailable: true });
 });
 
@@ -146,6 +149,7 @@ describe("listen to the recording", () => {
   });
 
   it("says the format cannot be played (no retry wording) when the browser does not support it", async () => {
+    state.contentType = "audio/amr";
     renderDetail();
     await userEvent.click(await screen.findByRole("button", { name: /Listen to the recording/ }));
     const player = await screen.findByLabelText("Call recording");
@@ -154,6 +158,18 @@ describe("listen to the recording", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("This recording is in a format your browser cannot play (for example AMR). Ask your agency admin to open it in another player.");
     expect(screen.queryByText(/link ended/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Listen to the recording/ })).toBeInTheDocument();
+  });
+
+  it("treats a code-4 error on a playable type as a load failure, not a format problem", async () => {
+    renderDetail();
+    await userEvent.click(await screen.findByRole("button", { name: /Listen to the recording/ }));
+    const player = await screen.findByLabelText("Call recording");
+    Object.defineProperty(player, "error", { value: { code: 4 }, configurable: true });
+    fireEvent.error(player);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/could not be loaded/);
+    expect(alert).toHaveTextContent(/link ended/);
+    expect(screen.queryByText(/format your browser cannot play/)).not.toBeInTheDocument();
   });
 
   it("when the link ends, says so and a new press asks for a fresh link", async () => {
