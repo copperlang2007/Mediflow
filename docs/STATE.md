@@ -8,20 +8,20 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-14 — Plan data readable in Quoting page (see session log)._
+_Last updated: 2026-10-14 — Merged current main into plan-card PR #296 (see session log)._
 
 ### Health dashboard
 
 | Item | Status | Detail |
 | --- | --- | --- |
-| `main` HEAD | `00c3a40` (2026-10-09) | "STATE: CMS 2027 plan data loaded into production (#286)". Re-check: this row goes stale within hours. |
-| CI: typecheck + test | Green | Run 37867735833 on `f821a54` (2026-10-09) |
+| `main` HEAD | `c37dadb` (2026-10-14) | "Call scoring: listen to the recording from the call page (#297)". Re-check: this row goes stale within hours. |
+| CI: typecheck + test | In progress on latest main | [Run 38630478682](https://github.com/copperlang2007/Mediflow/actions/runs/38630478682) on `c37dadb`; previous main CI [38490634113](https://github.com/copperlang2007/Mediflow/actions/runs/38490634113) on `ad9a122` passed. |
 | CI: `pnpm audit (moderate)` | **Green** — run 37867735833 on `f821a54` passed. Was red on main from 2026-10-08 when four advisories (proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate) were published | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
 | CI: migration journal | Green | Run 37867735833 on `f821a54` |
 | Production deploy (GCP Cloud Run) | **Green** at `f821a54` (run 37867735824), `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
-| Open PRs | Query GitHub live | As of 2026-10-13: #291 (agency invitation fixes, branch `claudemoogs/fix-agency-invite-clean`); also the EnrollHere call-log import PR (branch `claude/agencybridge-compliance-review-s3nc6l`; #287 and #288 merged). No other open PRs. |
+| Open PRs | Query GitHub live | As of 2026-10-14: #295 (Identity Platform sign-in), #296 (Quoting plan cards, branch `claude/admiring-allen-b6wum5`), #298 (recording-player error wording). |
 | Migration high-water mark | `0072_integration_payloads` on main (#288); `0073_call_recordings_fetching` on branch `claude/agencybridge-compliance-review-s3nc6l` | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
@@ -92,6 +92,15 @@ ones with no inbound references.
 
 ## Session log
 
+### 2026-10-14 — Resolve plan-card branch merge conflict — GitHub Copilot — branch `claude/admiring-allen-b6wum5`
+- **Outcome:** done
+- **Changed:** merged main `c37dadb` into PR #296; the only conflict was this ledger. Preserved the plan-card and recording-playback session entries and both branches' application changes.
+- **Verified:** `pnpm install --frozen-lockfile`; `pnpm run typecheck`; `pnpm test artifacts/api-server/src/__tests__/unit/planCard.test.ts artifacts/api-server/src/__tests__/integration/quoting-plans.test.ts artifacts/web-app/src/__tests__/plan-cards.test.tsx artifacts/api-server/src/__tests__/integration/call-scoring-playback.test.ts artifacts/api-server/src/__tests__/integration/csp-media-src.test.ts artifacts/web-app/src/__tests__/call-scoring-recording-player.test.tsx` (6 files, 72 tests passed); `git diff --check`. Main deploy [38630478548](https://github.com/copperlang2007/Mediflow/actions/runs/38630478548) passed; main CI [38630478682](https://github.com/copperlang2007/Mediflow/actions/runs/38630478682) is in progress.
+- **Left undone / broken:** full suite and production behavior not rechecked in this merge-only session; existing review suggestions remain outside this request.
+- **Decisions made:** none.
+- **Next agent should:** review and merge PR #296 once checks pass.
+- **Needs a human:** review plan-card wording for CMS marketing-rule compliance before use with beneficiaries.
+
 ### 2026-10-14 — Plan cards on the Quoting page (decoded premium, costs, extras, compare) — Claude Code — branch `claude/admiring-allen-b6wum5`
 - **Outcome:** done (code); not yet seen by real users until merged and deployed
 - **Changed:** `GET /quoting/plans` now returns a decoded `card` per plan (and `/quoting/plans/:bidId` returns one) from new `lib/planCard.ts`; the Quoting page shows plans as cards with filters (premium, drugs, dental, vision, hearing, OTC, fitness, Part B giveback), sort, plan-type filter, "lowest here" badges and a side-by-side compare of up to 4 (`components/quoting/*`). Also fixes the special-needs type showing as a CMS code ("3") instead of words ("Dual-Eligible").
@@ -100,6 +109,15 @@ ones with no inbound references.
 - **Decisions made:** conservative decoding: anything unreadable shows "See details" instead of a guessed number (see `docs/cms-plan-data.md`, "Plan cards").
 - **Next agent should:** load the CMS Landscape and Star Ratings files (Part D premium, stars) so cards can show a true total premium and star rating; then ZIP→county search.
 - **Needs a human:** review the card wording for CMS marketing-rule compliance before agents show it to beneficiaries.
+
+### 2026-10-14 — Call scoring: listen to the recording — Claude Code — branch `claudemoogs/call-recording-playback-v2` (PR #297)
+- **Outcome:** done (code); not tried against real audio
+- **Changed:** call page has a "Listen to the recording" button (`GET /api/call-scoring/transcripts/:id/audio`): 10-minute private link, link signed first, then the listen logged, then the link returned (a signing failure leaves no audit row; a log failure gives no link), `no-store` on every answer including auth refusals, plain 503 when storage fails (error never echoed or logged), no download control. Reviewers hear any call in their agency. Agents hear only a recording whose OWN call session they placed (`ownRecordingCondition`), because identical speech makes two recordings share one transcript; so agents cannot hear EnrollHere-imported recordings (no session on the row). CSP `media-src` now allows `https://storage.googleapis.com`. Player says plainly when the browser cannot play the format (MediaError code 4). See `docs/call-scoring.md`.
+- **Verified:** `pnpm run typecheck` clean; `pnpm test` 238 files / 2642 tests pass at 430b074; player tests 8/8 after 58dc336. NOT verified: any real EnrollHere recording.
+- **Left undone / broken (follow-ups):** recording objects have no `Cache-Control` metadata (needs both upload paths plus a backfill); no index on `call_recordings(org_id, transcript_id, status)` (needs a migration; check the highest number first); endpoint not in `openapi.yaml` (call-scoring routes are not in it at all); links expire mid-listen on calls over 10 minutes (seeking then fails; refresh the link and restore position); `GET /call-scoring/recordings` uses the `create` permission with org-only scope, so agents may list other agents' recording metadata (unverified). A pasted sample showed a scored recording with only one speaker's words auto-failing every agent-script item instead of going to "needs review"; not yet diagnosed.
+- **Decisions made:** none (no ADR).
+- **Next agent should:** find why a scored recording can contain only one speaker's words and why that fails closed to auto-fail instead of "needs review".
+- **Needs a human:** Michael to review, merge and deploy; Morgan to press Listen on a real call afterwards. Decide whether agents should hear their own EnrollHere recordings.
 
 ### 2026-10-14 — Plan data readable in Quoting page (state/county plan browser) — Claude Code — branch `claudemoogs/quirky-babbage-2e4cjj`
 - **Outcome:** partial

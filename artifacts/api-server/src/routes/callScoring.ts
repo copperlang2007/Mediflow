@@ -5,6 +5,7 @@
  *   POST  /call-scoring/transcripts                         paste or upload + score (rules, AI if set up)
  *   POST  /call-scoring/transcripts/:id/rescore             new automatic result; history kept
  *   POST  /call-scoring/transcripts/:id/agent-speaker       reviewer says which voice is the agent, then rescores
+ *   GET   /call-scoring/transcripts/:id/audio               a 10-minute listening link for the call's recording (logged)
  *   GET   /call-scoring/transcripts                         list + filters
  *   GET   /call-scoring/transcripts/:id                     detail: findings with quotes and positions
  *   PATCH /call-scoring/transcripts/:id/criteria/:criterionId   human override (auto result untouched)
@@ -58,6 +59,7 @@ import { assignAgentSpeaker } from "../lib/callScoring/speakerAssign";
 import { DISCLAIMER, buildDetail, buildList, buildSummary } from "../lib/callScoring/detail";
 import { listDncQueue, resolveDncFinding } from "../lib/callScoring/dncReview";
 import { loadTranscriptRow, retainUntil, type ScopeFilter } from "../lib/callScoring/store";
+import { listenLink } from "../lib/callScoring/playback";
 import { speechSetup } from "../lib/callScoring/speech";
 import { importCallLog, readCallLog } from "../lib/callScoring/enrollhereCallLog";
 import { dailyRecordingLimit, lockRecordings, purgeTime, recordingsToday, UPLOAD_URL_TTL_MS, type RecordingDetails } from "../lib/callScoring/recordings";
@@ -507,6 +509,38 @@ router.post(
       action: result.action,
       optOut: result.optOut,
     });
+  },
+);
+
+// Auth, MFA and permission refusals must not be cached either.
+router.use("/call-scoring/transcripts/:id/audio", (_req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
+
+router.get(
+  "/call-scoring/transcripts/:id/audio",
+  requireAuth,
+  requireMfa,
+  requirePermission("call_scoring", "read"),
+  async (req: Request, res: Response): Promise<void> => {
+    // A link is a secret for ten minutes: never cache any answer, including errors.
+    res.set("Cache-Control", "no-store");
+    const authReq = req as AuthenticatedRequest;
+    const { ObjectStorageService } = await import("../lib/objectStorage");
+    const result = await listenLink({
+      orgId: authReq.orgId,
+      userId: authReq.userId,
+      userRole: authReq.userRole,
+      transcriptId: param(req.params.id),
+      scope: await scopeOf(req),
+      storage: new ObjectStorageService(),
+    });
+    if (!result.ok) {
+      res.status(result.httpStatus).json({ error: result.message, code: result.code });
+      return;
+    }
+    res.json({ url: result.url, expiresInSeconds: result.expiresInSeconds, contentType: result.contentType, durationSeconds: result.durationSeconds });
   },
 );
 
