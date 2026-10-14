@@ -308,6 +308,7 @@ describe("listening to a recording", () => {
       const b = await makeCall();
       const keyB = `call-recordings/${org.id}/${b.recordingId}`;
       (g.__PB_FAIL__ ??= new Map()).set(keyB, "metadata");
+      const logStartB = captured.length;
       try {
         const resB = await listen(admin.id, b.transcriptId);
         expect(resB.status, JSON.stringify(resB.body)).toBe(503);
@@ -315,6 +316,11 @@ describe("listening to a recording", () => {
       } finally {
         g.__PB_FAIL__.delete(keyB);
       }
+      // The storage-failure path itself logged (so the key-absence check below is not vacuous for it).
+      const logB = captured.slice(logStartB).join("\n");
+      expect(logB).toContain("call recording storage unavailable");
+      expect(logB).toContain(b.recordingId!);
+      expect(logB).not.toContain(keyB);
       objectKeys = [keyA, keyB];
     } finally {
       for (const s of spies) s.mockRestore();
