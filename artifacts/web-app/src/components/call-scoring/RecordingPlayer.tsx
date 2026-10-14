@@ -17,6 +17,16 @@ interface ListenLink {
   contentType: string | null;
 }
 
+// Chromium's canPlayType returns "" for these alias MIME strings even though it plays them by sniffing; probe the canonical form.
+const MIME_ALIASES: Record<string, string> = {
+  "audio/opus": "audio/ogg; codecs=opus",
+  "audio/x-flac": "audio/flac",
+  "audio/wave": "audio/wav",
+  "audio/vnd.wave": "audio/wav",
+  "audio/m4a": "audio/mp4",
+  "audio/x-aac": "audio/aac",
+};
+
 export function RecordingPlayer({ transcriptId }: { transcriptId: string }) {
   const [link, setLink] = useState<ListenLink | null>(null);
   const [linkEnded, setLinkEnded] = useState(false);
@@ -46,7 +56,8 @@ export function RecordingPlayer({ transcriptId }: { transcriptId: string }) {
             setLink(null);
             // 4 = MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED (literal: jsdom may not define the constant).
             // Chromium also raises 4 for 403/404/expired links, so only blame the format when the browser says it cannot play that type.
-            if (el.error?.code === 4 && !!type && el.canPlayType(type) === "") setUnsupported(true);
+            const probe = type ? (MIME_ALIASES[type.toLowerCase()] ?? type) : type;
+            if (el.error?.code === 4 && !!probe && el.canPlayType(probe) === "") setUnsupported(true);
             else setLinkEnded(true);
           }}
         />

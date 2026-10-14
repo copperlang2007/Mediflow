@@ -16,7 +16,7 @@ HTMLElement.prototype.releasePointerCapture = vi.fn();
 // jsdom does not implement media playback.
 HTMLMediaElement.prototype.play = vi.fn(async () => undefined);
 HTMLMediaElement.prototype.pause = vi.fn();
-HTMLMediaElement.prototype.canPlayType = vi.fn((t: string) => (t === "audio/amr" ? "" : "maybe"));
+HTMLMediaElement.prototype.canPlayType = vi.fn((t: string) => (["audio/amr", "audio/wave", "audio/opus"].includes(t) ? "" : "maybe"));
 
 const state = vi.hoisted(() => ({
   listenUrl: "https://storage.example/call-recordings/org/rec?read=1&ttl=600",
@@ -161,6 +161,19 @@ describe("listen to the recording", () => {
   });
 
   it("treats a code-4 error on a playable type as a load failure, not a format problem", async () => {
+    renderDetail();
+    await userEvent.click(await screen.findByRole("button", { name: /Listen to the recording/ }));
+    const player = await screen.findByLabelText("Call recording");
+    Object.defineProperty(player, "error", { value: { code: 4 }, configurable: true });
+    fireEvent.error(player);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/could not be loaded/);
+    expect(alert).toHaveTextContent(/link ended/);
+    expect(screen.queryByText(/format your browser cannot play/)).not.toBeInTheDocument();
+  });
+
+  it("probes the canonical form of an alias type, so an ended link on audio/wave is not blamed on the format", async () => {
+    state.contentType = "audio/wave";
     renderDetail();
     await userEvent.click(await screen.findByRole("button", { name: /Listen to the recording/ }));
     const player = await screen.findByLabelText("Call recording");
