@@ -171,4 +171,18 @@ describe("listen to the recording", () => {
     await waitFor(() => expect(audioCalls()).toHaveLength(2));
     expect(await screen.findByLabelText("Call recording")).toHaveAttribute("src", LISTEN_URL);
   });
+
+  it("replaces a stale player error with the server message on a failed retry, as a single alert", async () => {
+    renderDetail();
+    await userEvent.click(await screen.findByRole("button", { name: /Listen to the recording/ }));
+    fireEvent.error(await screen.findByLabelText("Call recording"));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be loaded/);
+    state.audio = "fail";
+    await userEvent.click(screen.getByRole("button", { name: /Listen to the recording/ }));
+    await waitFor(() => expect(audioCalls()).toHaveLength(2));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("The audio for this call is no longer in storage."));
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("The audio for this call is no longer in storage.");
+    expect(screen.queryByText(/could not be loaded/)).not.toBeInTheDocument();
+  });
 });

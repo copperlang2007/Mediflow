@@ -22,6 +22,8 @@ export function RecordingPlayer({ transcriptId }: { transcriptId: string }) {
   const [linkEnded, setLinkEnded] = useState(false);
   const listen = useMutation({
     mutationFn: () => customFetch<ListenLink>(`/api/call-scoring/transcripts/${transcriptId}/audio`),
+    // A new press clears the old "press Listen again" notice, so a refused retry shows only the server's answer.
+    onMutate: () => setLinkEnded(false),
     onSuccess: (data) => {
       setLink(data);
       setLinkEnded(false);
