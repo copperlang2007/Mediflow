@@ -69,7 +69,7 @@ export function RecordingPlayer({ transcriptId }: { transcriptId: string }) {
       )}
       {linkEnded && (
         <p role="alert" className="text-sm text-warning">
-          The recording could not be loaded, usually because its ten-minute link ended. Press Listen again to get a new one.
+          The recording could not be loaded, usually because its ten-minute link ended. Press Listen again to get a new one; if it fails again, ask your agency admin to check the recording.
         </p>
       )}
     </div>
