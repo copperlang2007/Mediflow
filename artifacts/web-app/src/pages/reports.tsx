@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ensureFreshSession } from "@/lib/auth";
 import { useQuery } from "@tanstack/react-query";
 import { useGetMe } from "@workspace/api-client-react";
 import {
@@ -879,6 +880,8 @@ function dateOffset(days: number) { return new Date(Date.now() - days * 24 * 60 
 
 async function downloadCsv(url: string, filename: string) {
   const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+  // The step-up gate wants a recently issued token in the session cookie.
+  await ensureFreshSession();
   const res = await fetch(`${base}${url}`, {
     credentials: "include",
     headers: { "X-Confirm-Export": "true" },

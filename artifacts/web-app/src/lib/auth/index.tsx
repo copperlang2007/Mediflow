@@ -22,6 +22,24 @@ import { authConfigured, firebaseAuth } from "./firebase";
 export const SESSION_COOKIE = "__session";
 const TOKEN_CHECK_EVERY_MS = 4 * 60 * 1000;
 const COOKIE_MAX_AGE_SEC = 60 * 60;
+/**
+ * Oldest ID token the app sends. Google issues hour-long tokens, but the API's
+ * step-up gates (exports, hard deletes) want one issued within 15 minutes, so
+ * tokens are renewed well before that.
+ */
+const TOKEN_MAX_AGE_MS = 10 * 60 * 1000;
+
+let renewing: Promise<string> | null = null;
+/** A current ID token for `user`, renewed when older than TOKEN_MAX_AGE_MS (one renewal at a time). */
+export async function freshIdToken(user: User): Promise<string> {
+  const result = await user.getIdTokenResult();
+  const issued = Date.parse(result.issuedAtTime);
+  if (Number.isFinite(issued) && Date.now() - issued < TOKEN_MAX_AGE_MS) return result.token;
+  renewing ??= user.getIdToken(true).finally(() => {
+    renewing = null;
+  });
+  return renewing;
+}
 
 export interface AppUser {
   id: string;
@@ -92,8 +110,8 @@ export function ensureFreshSession(): Promise<void> | null {
   if (IS_DEMO_BUILD) return null;
   const user = firebaseAuth()?.currentUser;
   if (!user) return null;
-  // Returns the cached token unless it is close to expiry; a new one fires onIdTokenChanged.
-  return user.getIdToken().then(
+  // Cached token unless it is older than TOKEN_MAX_AGE_MS; a renewed one also fires onIdTokenChanged.
+  return freshIdToken(user).then(
     (token) => writeSessionCookie(token),
     // Offline or revoked: the request goes out as is and the API answers 401.
     () => undefined,
@@ -116,7 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState((s) => ({ ...s, isLoaded: true }));
       return;
     }
-    setAuthTokenGetter(async () => (auth.currentUser ? auth.currentUser.getIdToken() : null));
+    setAuthTokenGetter(async () => (auth.currentUser ? freshIdToken(auth.currentUser) : null));
     const unsubscribe = onIdTokenChanged(auth, async (u) => {
       if (!u) {
         writeSessionCookie(null);
@@ -154,7 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const u = firebaseAuth()?.currentUser;
     if (!u) return null;
     try {
-      const token = await u.getIdToken(opts?.skipCache === true);
+      const token = opts?.skipCache === true ? await u.getIdToken(true) : await freshIdToken(u);
       writeSessionCookie(token);
       return token;
     } catch {

@@ -11,6 +11,7 @@ const fb = vi.hoisted(() => ({
   listener: null as null | ((u: unknown) => void | Promise<void>),
   signOut: vi.fn(async () => undefined),
 }));
+const current = vi.hoisted(() => ({ user: null as unknown }));
 const tokenGetter = vi.hoisted(() => ({ current: null as null | (() => unknown) }));
 
 vi.mock("@firebase/auth", () => ({
@@ -22,7 +23,7 @@ vi.mock("@firebase/auth", () => ({
 }));
 vi.mock("@/lib/auth/firebase", () => ({
   authConfigured: true,
-  firebaseAuth: () => ({ currentUser: null }),
+  firebaseAuth: () => ({ currentUser: current.user }),
 }));
 vi.mock("@workspace/api-client-react", () => ({
   setAuthTokenGetter: (g: (() => unknown) | null) => {
@@ -30,7 +31,7 @@ vi.mock("@workspace/api-client-react", () => ({
   },
 }));
 
-import { AuthProvider, useAuth, useUser } from "@/lib/auth";
+import { AuthProvider, ensureFreshSession, useAuth, useUser } from "@/lib/auth";
 
 function Probe() {
   const { isLoaded, isSignedIn } = useAuth();
@@ -74,5 +75,33 @@ describe("AuthProvider", () => {
     });
     expect(screen.getByTestId("state").textContent).toBe("out");
     expect(cookie()).toBeNull();
+  });
+
+  it("renews a token older than 10 minutes before it is sent, so step-up checks (15 min) pass", async () => {
+    const tokenUser = (issuedMinutesAgo: number) => {
+      const getIdToken = vi.fn(async (force?: boolean) => (force ? "renewed.token.sig" : "cached.token.sig"));
+      return {
+        getIdToken,
+        getIdTokenResult: async () => ({
+          token: "cached.token.sig",
+          issuedAtTime: new Date(Date.now() - issuedMinutesAgo * 60_000).toUTCString(),
+        }),
+      };
+    };
+    try {
+      const old = tokenUser(12);
+      current.user = old;
+      await ensureFreshSession();
+      expect(old.getIdToken).toHaveBeenCalledWith(true);
+      expect(cookie()).toBe("__session=renewed.token.sig");
+
+      const recent = tokenUser(2);
+      current.user = recent;
+      await ensureFreshSession();
+      expect(recent.getIdToken).not.toHaveBeenCalled();
+      expect(cookie()).toBe("__session=cached.token.sig");
+    } finally {
+      current.user = null;
+    }
   });
 });

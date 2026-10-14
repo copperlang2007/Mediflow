@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ensureFreshSession } from "@/lib/auth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { useIsAdmin, ADMIN_OR_COMPLIANCE_ROLES } from "@/lib/auth/useIsAdmin";
@@ -149,6 +150,8 @@ function AuditLogTab() {
     if (filterAction && filterAction !== "all") p.set("action", filterAction);
     if (filterResource && filterResource !== "all") p.set("resourceType", filterResource);
     if (filterUserId.trim()) p.set("userId", filterUserId.trim());
+    // The step-up gate wants a recently issued token in the session cookie.
+    await ensureFreshSession();
     const res = await fetch(`${base}/api/admin/audit-log/export?${p.toString()}`, {
       credentials: "include",
       headers: { "X-Confirm-Export": "true" },
@@ -329,6 +332,8 @@ function AccessReviewTab() {
 
   const handleExport = async () => {
     const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+    // The step-up gate wants a recently issued token in the session cookie.
+    await ensureFreshSession();
     const res = await fetch(`${base}/api/admin/access-review/export`, {
       credentials: "include",
       headers: { "X-Confirm-Export": "true" },
