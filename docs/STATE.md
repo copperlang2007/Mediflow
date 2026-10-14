@@ -92,14 +92,14 @@ ones with no inbound references.
 
 ## Session log
 
-### 2026-10-14 — Call scoring: listen to the recording — Claude Code — branch `claudemoogs/call-recording-playback`
+### 2026-10-14 — Call scoring: listen to the recording — Claude Code — branch `claudemoogs/call-recording-playback-v2` (PR #297)
 - **Outcome:** done (code); not tried against real audio
-- **Changed:** call page now has a "Listen to the recording" button (`GET /api/call-scoring/transcripts/:id/audio`, 10-minute private link, listen logged before the link is issued, no-store, no download control). Reviewers hear any call in their agency; agents only their own. See `docs/call-scoring.md`.
-- **Verified:** `pnpm run typecheck` clean; `pnpm test` 236 files / 2625 tests pass, including 8 new server tests (scoping, cross-org, audit) and 7 new page tests.
-- **Left undone / broken:** not tested with a real EnrollHere recording (no production access). Unchecked: `GET /call-scoring/recordings` uses the `create` permission with org-only scope, so agents may be able to list other agents' recording metadata. Word accuracy and turn order are untouched. A sample from Morgan (pasted 2026-10-14) shows the whole call as one speaker with only the client's side, so every agent-script item auto-failed; not yet diagnosed.
-- **Decisions made:** none
+- **Changed:** call page has a "Listen to the recording" button (`GET /api/call-scoring/transcripts/:id/audio`): 10-minute private link, listen logged before the link is issued, `no-store` on every answer including auth refusals, plain 503 when storage fails (error never echoed or logged), no download control. Reviewers hear any call in their agency. Agents hear only a recording whose OWN call session they placed (`ownRecordingCondition`), because identical speech makes two recordings share one transcript; so agents cannot hear EnrollHere-imported recordings (no session on the row). CSP `media-src` now allows `https://storage.googleapis.com`. Player says plainly when the browser cannot play the format (MediaError code 4). See `docs/call-scoring.md`.
+- **Verified:** `pnpm run typecheck` clean; `pnpm test` 238 files / 2642 tests pass at 430b074; player tests 8/8 after 58dc336. NOT verified: any real EnrollHere recording.
+- **Left undone / broken (follow-ups):** recording objects have no `Cache-Control` metadata (needs both upload paths plus a backfill); no index on `call_recordings(org_id, transcript_id, status)` (needs a migration; check the highest number first); endpoint not in `openapi.yaml` (call-scoring routes are not in it at all); links expire mid-listen on calls over 10 minutes (seeking then fails; refresh the link and restore position); a failed signing still leaves a `call_recording_listen` audit row (deliberate log-before-link; consider `linkIssued:false`); `GET /call-scoring/recordings` uses the `create` permission with org-only scope, so agents may list other agents' recording metadata (unverified). A pasted sample showed a scored recording with only one speaker's words auto-failing every agent-script item instead of going to "needs review"; not yet diagnosed.
+- **Decisions made:** none (no ADR).
 - **Next agent should:** find why a scored recording can contain only one speaker's words and why that fails closed to auto-fail instead of "needs review".
-- **Needs a human:** Michael to review and deploy; Morgan to press Listen on a real call afterwards.
+- **Needs a human:** Michael to review, merge and deploy; Morgan to press Listen on a real call afterwards. Decide whether agents should hear their own EnrollHere recordings.
 
 ### 2026-10-14 — Plan data readable in Quoting page (state/county plan browser) — Claude Code — branch `claudemoogs/quirky-babbage-2e4cjj`
 - **Outcome:** partial
