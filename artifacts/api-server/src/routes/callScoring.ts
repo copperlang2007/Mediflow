@@ -512,6 +512,12 @@ router.post(
   },
 );
 
+// Auth, MFA and permission refusals must not be cached either.
+router.use("/call-scoring/transcripts/:id/audio", (_req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
+
 router.get(
   "/call-scoring/transcripts/:id/audio",
   requireAuth,

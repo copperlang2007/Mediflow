@@ -324,6 +324,11 @@ describe("listening to a recording", () => {
     const own = await makeCall({ callSessionId: await session(agentUser.id, agentProfile.id) });
     const theirs = await makeCall({ callSessionId: await session(otherAgentUser.id, otherAgentProfile.id) });
     const unlinked = await makeCall();
+    // The agent's own recording row carries the session too (makeCall leaves it null).
+    await handle.db
+      .update(schema.callRecordingsTable)
+      .set({ callSessionId: (await handle.db.select().from(schema.callTranscriptsTable).where(eq(schema.callTranscriptsTable.id, own.transcriptId)))[0]!.callSessionId })
+      .where(eq(schema.callRecordingsTable.id, own.recordingId!));
     const ok = await listen(agentUser.id, own.transcriptId);
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     const denied = await listen(agentUser.id, theirs.transcriptId);
@@ -343,8 +348,55 @@ describe("listening to a recording", () => {
     const missing = await listen(otherAdmin.id, "does-not-exist");
     expect(other.status).toBe(404);
     expect(other.body).toEqual(missing.body);
-    await listen(viewer.id, transcriptId).expect(403);
-    await request(app).get(`/api/call-scoring/transcripts/${transcriptId}/audio`).expect(401);
+    const forbidden = await listen(viewer.id, transcriptId).expect(403);
+    const signedOut = await request(app).get(`/api/call-scoring/transcripts/${transcriptId}/audio`).expect(401);
+    expect(forbidden.headers["cache-control"]).toContain("no-store");
+    expect(signedOut.headers["cache-control"]).toContain("no-store");
     expect(await listenAudits(transcriptId)).toHaveLength(0);
+  });
+
+  it("an agent cannot hear another agent's recording that shares their transcript", async () => {
+    const session = async (userId: string, agentId: string) => {
+      const id = `cs-pb-session-${randomUUID()}`;
+      await handle.db.insert(schema.callSessionsTable).values({ id, orgId: org.id, userId, agentId, toNumber: "+13105550111", status: "completed" });
+      return id;
+    };
+    const mine = await session(agentUser.id, agentProfile.id);
+    const theirs = await session(otherAgentUser.id, otherAgentProfile.id);
+    const { transcriptId, recordingId: r1 } = await makeCall({ callSessionId: mine });
+    const setR1Session = (callSessionId: string | null) =>
+      handle.db.update(schema.callRecordingsTable).set({ callSessionId }).where(eq(schema.callRecordingsTable.id, r1!));
+    await setR1Session(mine);
+    const r2 = randomUUID();
+    const r2Key = `call-recordings/${org.id}/${r2}`;
+    await handle.db.insert(schema.callRecordingsTable).values({
+      id: r2,
+      orgId: org.id,
+      status: "scored",
+      objectKey: r2Key,
+      transcriptId,
+      callSessionId: theirs,
+      retainUntil: new Date(Date.now() + 10 * 365 * 24 * 3600 * 1000),
+      createdAt: new Date(Date.now() + 60_000),
+    });
+    objects().set(r2Key, { size: 4_000_000, contentType: "audio/mpeg" });
+    const available = async (userId: string) =>
+      (await request(app).get(`/api/call-scoring/transcripts/${transcriptId}`).set(withAuth(userId)).expect(200)).body.transcript.recordingAvailable;
+
+    const ok = await listen(agentUser.id, transcriptId);
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body.url).toContain(r1!);
+    expect(ok.body.url).not.toContain(r2);
+    expect(await available(agentUser.id)).toBe(true);
+
+    await setR1Session(null);
+    const denied = await listen(agentUser.id, transcriptId);
+    expect(denied.status).toBe(404);
+    expect(denied.body.code).toBe("no_recording");
+    expect(await available(agentUser.id)).toBe(false);
+
+    const adminRes = await listen(admin.id, transcriptId);
+    expect(adminRes.status, JSON.stringify(adminRes.body)).toBe(200);
+    expect(adminRes.body.url).toContain(r2);
   });
 });

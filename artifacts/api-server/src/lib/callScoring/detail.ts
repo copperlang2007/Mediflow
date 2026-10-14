@@ -30,6 +30,7 @@ import {
   type ScopeFilter,
   type TranscriptFilters,
 } from "./store";
+import { ownRecordingCondition } from "./playback";
 import { open } from "./seal";
 import { speakerSummary } from "./speakerRoles";
 import { meetsStandard } from "./score";
@@ -298,7 +299,7 @@ export async function buildDetail(orgId: string, transcriptId: string, scope: Sc
   const [recordingRow] = await db
     .select({ id: callRecordingsTable.id })
     .from(callRecordingsTable)
-    .where(and(eq(callRecordingsTable.orgId, orgId), eq(callRecordingsTable.transcriptId, row.id), eq(callRecordingsTable.status, "scored")))
+    .where(and(eq(callRecordingsTable.orgId, orgId), eq(callRecordingsTable.transcriptId, row.id), eq(callRecordingsTable.status, "scored"), ownRecordingCondition(orgId, scope)))
     .limit(1);
   const names = await namesFor(orgId, row.contactId ? [row.contactId] : [], row.agentId ? [row.agentId] : []);
   const base = {

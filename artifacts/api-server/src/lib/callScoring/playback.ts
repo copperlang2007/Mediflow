@@ -9,9 +9,19 @@
  * lifetime, never the link, a file name or a phone number.
  */
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql, type SQL } from "drizzle-orm";
 import { auditLogTable, callRecordingsTable, db } from "@workspace/db";
 import { loadTranscriptRow, type ScopeFilter } from "./store";
+
+/**
+ * Two recordings with identical speech share one transcript, so being allowed
+ * to open the transcript does not make a recording yours. For an agent, only a
+ * recording tied to a phone session THEY placed counts; everyone else is unrestricted.
+ */
+export function ownRecordingCondition(orgId: string, scope: ScopeFilter | undefined): SQL | undefined {
+  if (!scope?.agentUserId) return undefined;
+  return sql`exists (select 1 from call_sessions cs where cs.id = ${callRecordingsTable.callSessionId} and cs.org_id = ${orgId} and cs.user_id = ${scope.agentUserId})`;
+}
 
 /** How long a listening link works. */
 export const LISTEN_LINK_SECONDS = 600;
@@ -50,7 +60,7 @@ export async function listenLink(input: {
   const [recording] = await db
     .select({ id: callRecordingsTable.id, objectKey: callRecordingsTable.objectKey, durationSeconds: callRecordingsTable.durationSeconds })
     .from(callRecordingsTable)
-    .where(and(eq(callRecordingsTable.orgId, input.orgId), eq(callRecordingsTable.transcriptId, transcript.id), eq(callRecordingsTable.status, "scored")))
+    .where(and(eq(callRecordingsTable.orgId, input.orgId), eq(callRecordingsTable.transcriptId, transcript.id), eq(callRecordingsTable.status, "scored"), ownRecordingCondition(input.orgId, input.scope)))
     .orderBy(desc(callRecordingsTable.createdAt), desc(callRecordingsTable.id))
     .limit(1);
   if (!recording) {
