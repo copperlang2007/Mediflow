@@ -142,25 +142,14 @@ router.post("/auth/provision", async (req: Request, res: Response): Promise<void
   // matched to (e.g. two earlier accounts differ only in letter case, or it is
   // already linked to another sign-in). Creating a fresh agency here would
   // silently split the person from their real account; stop and send them to
-<<<<<<< HEAD
   // support instead (docs/AUTH_IDENTITY_PLATFORM.md, connect a login).
   const emailKey = email.trim().toLowerCase();
   const accountExists = (): void => {
-=======
-  // an administrator instead.
-  const [sameEmail] = await db
-    .select({ id: usersTable.id })
-    .from(usersTable)
-    .where(sql`lower(${usersTable.email}) = ${email.trim().toLowerCase()}`)
-    .limit(1);
-  if (sameEmail) {
->>>>>>> origin/main
     res.status(409).json({
       error:
         "An agencyBRIDGE account already uses this email, so a new agency was not created. Contact agencyBRIDGE support to connect this login to your account.",
       code: "account_exists",
     });
-<<<<<<< HEAD
   };
   const emailTaken = async (q: Pick<typeof db, "select">): Promise<boolean> => {
     const [row] = await q
@@ -172,15 +161,12 @@ router.post("/auth/provision", async (req: Request, res: Response): Promise<void
   };
   if (await emailTaken(db)) {
     accountExists();
-=======
->>>>>>> origin/main
     return;
   }
 
   const orgId = randomUUID();
   const slug = orgSlug ?? orgName?.toLowerCase().replace(/[^a-z0-9]/g, "-") ?? orgId;
 
-<<<<<<< HEAD
   const created = await db.transaction(async (tx) => {
     // users.email is not unique (one person may sit in several agencies), so
     // two sign-ups with the same email at the same moment could both pass the
@@ -198,19 +184,6 @@ router.post("/auth/provision", async (req: Request, res: Response): Promise<void
       })
       .returning();
 
-=======
-  const { org, user } = await db.transaction(async (tx) => {
-    const [org] = await tx
-      .insert(organizationsTable)
-      .values({
-        id: orgId,
-        name: orgName ?? `${fullName}'s Agency`,
-        slug: `${slug}-${orgId.slice(0, 8)}`,
-        planTier: "starter",
-      })
-      .returning();
-
->>>>>>> origin/main
     // A new user's id is its sign-in identity's subject.
     const [user] = await tx
       .insert(usersTable)
@@ -227,14 +200,11 @@ router.post("/auth/provision", async (req: Request, res: Response): Promise<void
     await linkNewUser(tx, subject, user.id, "provision");
     return { org, user };
   });
-<<<<<<< HEAD
   if (!created) {
     accountExists();
     return;
   }
   const { org, user } = created;
-=======
->>>>>>> origin/main
 
   // Seed the default Medicare carriers so the Carrier Certification Matrix
   // works out of the box. Failures here shouldn't block provisioning — admins
