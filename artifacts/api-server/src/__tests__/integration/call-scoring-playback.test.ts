@@ -25,10 +25,14 @@ const { dbF, clerkF, jobsF, storageF } = vi.hoisted(() => ({
     const actual = await importOriginal();
     class FakeStorage {
       async getCallRecordingMetadata(key: string) {
+        const fail = (globalThis as { __PB_FAIL__?: Map<string, string> }).__PB_FAIL__;
+        if (fail?.get(key) === "metadata") throw new Error(`storage down for ${key}`);
         const objects = (globalThis as { __PB_OBJECTS__?: Map<string, { size: number; contentType: string | null }> }).__PB_OBJECTS__;
         return objects?.get(key) ?? null;
       }
       async getCallRecordingReadURL(key: string, ttl = 600) {
+        const fail = (globalThis as { __PB_FAIL__?: Map<string, string> }).__PB_FAIL__;
+        if (fail?.get(key) === "sign") throw new Error(`signing failed for ${key}`);
         return `https://storage.example/${key}?read=1&ttl=${ttl}`;
       }
     }
@@ -177,6 +181,24 @@ describe("listening to a recording", () => {
     expect(res.status).toBe(404);
     expect(res.body.code).toBe("audio_unavailable");
     expect(await listenAudits(transcriptId)).toHaveLength(0);
+  });
+
+  it.each(["metadata", "sign"])("answers 503 without leaking the object key when storage fails (%s), and logs nothing", async (mode) => {
+    const { transcriptId, recordingId } = await makeCall();
+    const objectKey = `call-recordings/${org.id}/${recordingId}`;
+    const g = globalThis as { __PB_FAIL__?: Map<string, string> };
+    (g.__PB_FAIL__ ??= new Map()).set(objectKey, mode);
+    try {
+      const res = await listen(admin.id, transcriptId);
+      expect(res.status, JSON.stringify(res.body)).toBe(503);
+      expect(res.body.code).toBe("storage_unavailable");
+      expect(res.headers["cache-control"]).toContain("no-store");
+      expect(JSON.stringify(res.body)).not.toContain(objectKey);
+      expect(JSON.stringify(res.body)).not.toContain(recordingId!);
+      if (mode === "metadata") expect(await listenAudits(transcriptId)).toHaveLength(0);
+    } finally {
+      g.__PB_FAIL__.delete(objectKey);
+    }
   });
 
   it("an agent can listen to calls from phone sessions they placed, and no one else's", async () => {

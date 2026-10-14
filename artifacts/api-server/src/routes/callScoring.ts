@@ -518,6 +518,8 @@ router.get(
   requireMfa,
   requirePermission("call_scoring", "read"),
   async (req: Request, res: Response): Promise<void> => {
+    // A link is a secret for ten minutes: never cache any answer, including errors.
+    res.set("Cache-Control", "no-store");
     const authReq = req as AuthenticatedRequest;
     const { ObjectStorageService } = await import("../lib/objectStorage");
     const result = await listenLink({
@@ -528,8 +530,6 @@ router.get(
       scope: await scopeOf(req),
       storage: new ObjectStorageService(),
     });
-    // A link is a secret for ten minutes: never cache the answer.
-    res.set("Cache-Control", "no-store");
     if (!result.ok) {
       res.status(result.httpStatus).json({ error: result.message, code: result.code });
       return;
