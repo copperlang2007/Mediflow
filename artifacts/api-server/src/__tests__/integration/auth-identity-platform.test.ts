@@ -227,6 +227,18 @@ describe("creating an agency and accepting an invitation", () => {
     expect(link).toMatchObject({ userId: subject, linkedVia: "provision" });
   });
 
+  it("does not create a second agency when the email already has an account it could not be linked to", async () => {
+    await seedUser(handle.db, { id: `user_${randomUUID()}`, orgId: org.id, email: "dup@case.example" });
+    await seedUser(handle.db, { id: `user_${randomUUID()}`, orgId: otherOrg.id, email: "DUP@case.example" });
+    const subject = `uid-${randomUUID()}`;
+    const headers = { ...withAuth(subject), "x-test-email": "dup@case.example" };
+    expect((await request(app).get("/api/auth/status").set(headers)).body).toMatchObject({ provisioned: false });
+    const res = await request(app).post("/api/auth/provision").set(headers).send({ fullName: "Dup", orgName: "Fork" });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("account_exists");
+    expect(await handle.db.select().from(schema.usersTable).where(eq(schema.usersTable.id, subject))).toHaveLength(0);
+  });
+
   it("asks for a verified email before accepting an invitation", async () => {
     const res = await request(app)
       .post("/api/invitations/accept")

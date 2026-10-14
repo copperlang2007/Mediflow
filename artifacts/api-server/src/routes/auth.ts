@@ -138,6 +138,25 @@ router.post("/auth/provision", async (req: Request, res: Response): Promise<void
     return;
   }
 
+  // An account with this email already exists that this sign-in could not be
+  // matched to (e.g. two earlier accounts differ only in letter case, or it is
+  // already linked to another sign-in). Creating a fresh agency here would
+  // silently split the person from their real account; stop and send them to
+  // an administrator instead.
+  const [sameEmail] = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(sql`lower(${usersTable.email}) = ${email.trim().toLowerCase()}`)
+    .limit(1);
+  if (sameEmail) {
+    res.status(409).json({
+      error:
+        "An agencyBRIDGE account already uses this email, so a new agency was not created. Ask your agency administrator or support to connect your login to it.",
+      code: "account_exists",
+    });
+    return;
+  }
+
   const orgId = randomUUID();
   const slug = orgSlug ?? orgName?.toLowerCase().replace(/[^a-z0-9]/g, "-") ?? orgId;
 

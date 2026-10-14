@@ -60,6 +60,17 @@ switches over only when step 4 is done, because the deploy waits for the
 6. **BAA:** confirm Identity Platform is covered by the Google Cloud BAA for
    this project (Google lists it as a HIPAA-covered service).
 
+7. **Check for duplicate emails** (read-only, Cloud SQL Studio). A person
+   whose email appears on two older accounts (even differing only in
+   capitals) cannot be matched automatically; they would see "an account
+   already uses this email". Fix any rows this returns before the switch
+   (change or remove the stale account):
+
+   ```sql
+   SELECT lower(email) AS email, count(*) FROM users
+   WHERE id LIKE 'user\_%' GROUP BY lower(email) HAVING count(*) > 1;
+   ```
+
 The next push to `main` (or a manual run of the deploy workflow) then
 deploys. The server refuses to start without the project setting, so a
 half-configured revision never replaces the working one.
