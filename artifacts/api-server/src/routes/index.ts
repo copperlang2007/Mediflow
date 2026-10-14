@@ -56,6 +56,7 @@ import clientPortalRouter from "./clientPortal";
 import softphoneRouter from "./softphone";
 import supervisorRouter from "./supervisor";
 import quotingRouter from "./quoting";
+import quotingPlansRouter from "./quotingPlans";
 // --- stage2/new-pages-core ---
 import knowledgeBaseRouter from "./knowledgeBase";
 import reconciliationRouter from "./reconciliation";
@@ -131,6 +132,7 @@ router.use(clientPortalRouter);
 router.use(softphoneRouter);
 router.use(supervisorRouter);
 router.use(quotingRouter);
+router.use(quotingPlansRouter);
 // --- stage2/new-pages-core ---
 router.use(knowledgeBaseRouter);
 router.use(reconciliationRouter);

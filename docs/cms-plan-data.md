@@ -24,8 +24,13 @@ Things a reader must know:
 - Individual-market plans only by default. Employer-only plans (800-series,
   1,673 of 7,973 for 2027) are skipped; they cannot be sold by agents and make up
   about 85% of the service-area rows. Pass `--include-employer-groups` to load them.
-- Nothing in the app reads these tables yet (no API route or screen). When one
-  does, add its table to `GLOBAL_TABLES` in `tenant-isolation.test.ts`.
+- Read path: `artifacts/api-server/src/routes/quotingPlans.ts` serves
+  `GET /quoting/plan-areas/states`, `/quoting/plan-areas/counties?state=`,
+  `/quoting/plans?state=&countyCode=&q=&snp=` and `/quoting/plans/:bidId`
+  (latest plan year, employer groups hidden, `contact:read`). The Quoting page
+  "Plan Comparison" tab uses them (county search, raw CMS fields per plan). Regional
+  plans (PDP), Medigap and decoded premiums/drug costs are not shown yet. The
+  tables are listed in `GLOBAL_TABLES` in `tenant-isolation.test.ts`.
 
 ## Loading a new extract (yearly, and each CMS quarterly refresh)
 

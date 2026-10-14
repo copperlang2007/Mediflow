@@ -8,7 +8,7 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-13 — Call scoring agent-voice button (see session log)._
+_Last updated: 2026-10-14 — Plan data readable in Quoting page (see session log)._
 
 ### Health dashboard
 
@@ -64,6 +64,8 @@ Scope of Appointment captured on call recording (no 48-hour wait enforced).
 
 **Platform overview (super admin):** revenue figures are an estimate (active plans at list price from the local `subscriptions` mirror; no seat overage, discounts or proration; Stripe is the source of truth). The 12-month client history is derived from live `contacts` rows (soft-deletes handled via `deleted_at`); a permanent retention purge (`routes/admin.ts` hard-delete) shrinks past months. Fixing that needs a separate store of aggregate lifecycle events (new table, backfill) — a design decision, not done. `commission_line_items` has no index serving the platform-wide GROUP BYs; fine until the table is large, then add a migration or a monthly rollup.
 
+**CMS plan data:** read-only routes `GET /quoting/plan-areas/*` and `/quoting/plans*` serve county-based plans to the Quoting page (branch `claudemoogs/quirky-babbage-2e4cjj`, not yet merged). PDP/regional plans, ZIP lookup, and decoded premiums/out-of-pocket are not built.
+
 **Other:** E-sign provider is Beta · contracting POA PDF is a placeholder · per-carrier
 paperwork templates pending · client portal is staff-preview only · no
 Postgres RLS · dialer Phase 4+ TODOs and auto-dial deferred · some Billing and
@@ -89,6 +91,15 @@ ones with no inbound references.
 ---
 
 ## Session log
+
+### 2026-10-14 — Plan data readable in Quoting page (state/county plan browser) — Claude Code — branch `claudemoogs/quirky-babbage-2e4cjj`
+- **Outcome:** partial
+- **Changed:** The CMS 2027 plan tables (`cms_plan_*`) are now readable. New routes in `routes/quotingPlans.ts` (needs `contact:read`, 120/min per user for search and for details): `GET /quoting/plan-areas/states`, `/quoting/plan-areas/counties?state=`, `/quoting/plans?state=&countyCode=&q=&snp=`, `/quoting/plans/:bidId`. Employer-group plans are hidden. The Quoting page "Plan Comparison" tab has state and county pickers, name search, SNP filter, and expandable raw CMS fields per plan (CMS codes, not decoded). The four tables are in `GLOBAL_TABLES` in `tenant-isolation.test.ts`. Errors log only a Postgres code or error class, never search text. ZIP and Plan type controls are labelled "coming soon". Docs: `docs/cms-plan-data.md`. Not committed or pushed by the agent.
+- **Verified:** `pnpm run typecheck`; vitest on `quoting-plans.test.ts` (11 tests), `tenant-isolation.test.ts`, `portal-dialer.test.ts` and web `portal-dialer-pages.test.tsx` (pnpm run typecheck passed (4 projects); pnpm test passed (235 test files, 2,621 tests) on this branch; the four touched test files (quoting-plans, tenant-isolation, portal-dialer, web portal-dialer-pages) passed 51/51; no lint script exists; UI not rendered in a browser). No lint script exists.
+- **Left undone / broken:** PDP/regional plans and ZIP lookup need a ZIP-to-county source (owner decision; no new vendor without asking). Premiums and out-of-pocket costs are not shown because the real CMS column names are unverified (need the CMS data dictionary). UI not rendered in a browser. Production not checked.
+- **Decisions made:** none (no ADR).
+- **Next agent should:** Decode premium and out-of-pocket columns from `PBP_Benefits_2027_dictionary.xlsx` and add ZIP lookup.
+- **Needs a human:** Confirm the screen on the live site after deploy, and decide the ZIP data source.
 
 ### 2026-10-13 — Call scoring: "Which voice is the agent?" button for one-track recordings — Claude Code — branch `claudemoogs/gracious-brown-0kq356`
 - **Outcome:** done
@@ -150,7 +161,7 @@ Newest first. Template in `AGENTS.md` §7.
 - **Outcome:** done
 - **Changed:** Loaded the CMS 2027 plan benefit data into the production database (`mediflow-prod-db`) using a temporary Cloud Run job built from the live image (`mediflow-prod`, commit `410a7b4`), with the extract staged in a temporary private bucket. Executions: dry run `cms-pbp-import-9x2qs`, then real load `cms-pbp-import-t5vcj` (log line `LOADED — plan year 2027`). The job and bucket were deleted afterwards; the app's service, secrets and the existing buckets were not touched. Only the four `cms_plan_*` tables were written (public CMS data, no PHI).
 - **Verified:** Dry run and real load both reported 6,300 plans, 125,383 county rows, 364 region rows (identical to the local PostgreSQL 16 test); the dry run also proved migration `0071` was live in production. Buckets after cleanup: `agencyportal-501523-mediflow-phi`, `run-sources-agencyportal-501523-us-south1` only. **NOT verified:** a direct row-count query against production (no query path from here); the job's own log is the evidence.
-- **Left undone / broken:** Nothing reads these tables yet (no API route or screen). `county_code` is CMS/SSA, not FIPS. The unzipped extract (`C:\Users\lang2\Downloads\pbp-2027-extract`) and a few `pbp-*.log` files remain on the owner's PC.
+- **Left undone / broken:** Superseded 2026-10-14: the Quoting page now reads these tables (routes in `quotingPlans.ts`). `county_code` is CMS/SSA, not FIPS. The unzipped extract (`C:\Users\lang2\Downloads\pbp-2027-extract`) and a few `pbp-*.log` files remain on the owner's PC.
 - **Decisions made:** none needing an ADR. Production DB stays private-IP only; no public access was opened. The production image already contains the importer, so future loads can reuse the same temporary-job method.
 - **Next agent should:** build the read-only plans-by-county route (OpenAPI + `requirePermission`, add the tables to `GLOBAL_TABLES`), with an SSA-to-FIPS county crosswalk.
 - **Needs a human:** nothing.
@@ -168,7 +179,7 @@ Newest first. Template in `AGENTS.md` §7.
 - **Outcome:** partial (code ready; data NOT yet loaded into any real database)
 - **Changed:** New migration `0071_cms_plan_benefits` (4 global tables: plans, per-plan benefit JSON, plan-to-county, plan-to-region), loader `lib/db/src/cmsPlans/pbpImport.ts`, command `pnpm --filter @workspace/scripts import:pbp`, how-to in `docs/cms-plan-data.md`. The uploaded zip is CMS tab-delimited text, not JSON, and is not committed (252 MB). Employer-only plans (1,673) are skipped by default.
 - **Verified:** loaded the real 2027 extract twice into a throwaway PostgreSQL 16 database: 6,300 plans, 377,453 section rows, 125,383 county rows, 364 region rows, ~320 MB, under a minute; dry run saves nothing. `npx vitest run lib/db/src/cmsPlans` (11 tests) and the tenant guard pass; `pnpm run typecheck` and `check:migration-journal` (72 entries) OK. Full `pnpm test`: 227 files, 2,496 tests passed locally after merging main.
-- **Left undone / broken:** Nothing reads these tables yet (no API route or screen). `county_code` is CMS/SSA, not FIPS (needs a crosswalk to match client counties).
+- **Left undone / broken:** Superseded 2026-10-14: the Quoting page now reads these tables. `county_code` is CMS/SSA, not FIPS (needs a crosswalk to match client counties).
 - **Decisions made:** none needing an ADR (public reference data, global tables like the KB library).
 - **Next agent should:** run the importer against the real database after merge, then add a read-only plans-by-county route (OpenAPI + `requirePermission`, add the tables to `GLOBAL_TABLES`).
 - **Needs a human:** after merge, run the importer on the production database (or approve me doing so); confirm which year/refresh cadence you want.

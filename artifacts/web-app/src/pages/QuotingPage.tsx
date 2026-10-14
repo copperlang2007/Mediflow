@@ -1,18 +1,19 @@
 /**
- * Quoting Engine — page shell.
+ * Quoting Engine page.
  *
- * Mediflow has no plan, premium or formulary data yet, so this page never
- * shows a plan card, premium or star rating. It collects the quote inputs
- * (ZIP, plan type, drugs, doctors), explains exactly what will power the
- * comparison once connected, and uses real data where it exists:
+ * Premium, drug-cost and formulary data are not decoded/loaded yet, so this page
+ * never shows a premium, out-of-pocket figure or star rating. It uses real data
+ * where it exists:
+ *   - CMS plan lists by state + county (GET /quoting/plans*), with each plan's
+ *     raw CMS benefit fields (CMS codes, not decoded);
  *   - your carriers, from the `carriers` table;
  *   - doctor lookup against the public CMS NPPES NPI Registry through the
  *     server-side proxy GET /quoting/providers (validated, rate limited).
  */
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "wouter";
 import {
-  Building2, Database, FileSpreadsheet, Loader2, MapPin, Pill, Plus, Search, Stethoscope, X,
+  Building2, Database, Loader2, MapPin, Pill, Plus, Search, Stethoscope, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,9 +28,13 @@ import {
   formatPhone,
   searchProviders,
   useCarriers,
+  usePlanCounties,
+  usePlanDetail,
+  usePlanSearch,
+  usePlanStates,
   type ProviderResult,
+  type SnpFilter,
 } from "@/lib/portalDialer/api";
-import { useProductName } from "@/lib/branding/BrandingProvider";
 
 const PLAN_TYPES = [
   { k: "MA", label: "Medicare Advantage" },
@@ -73,6 +78,141 @@ function CarriersCard() {
         </div>
       )}
     </SectionCard>
+  );
+}
+
+const selectCls = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm";
+
+function PlanDetailPanel({ bidId }: { bidId: string }) {
+  const { data, isLoading, isError, error } = usePlanDetail(bidId);
+  if (isLoading) return <Skeleton className="h-16 w-full" />;
+  if (isError || !data) return <p className="text-sm text-destructive">{isRateLimited(error) ? "Too many searches, wait a minute and try again." : "Plan details could not be loaded right now."}</p>;
+  if (data.sections.length === 0) return <p className="text-sm text-muted-foreground">No benefit fields are stored for this plan.</p>;
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold">CMS raw fields</p>
+      <p className="text-[11px] text-muted-foreground">Values are CMS codes (for example 1 = yes, 2 = no) and are not decoded yet.</p>
+      {data.sections.map((s) => (
+        <details key={s.section} className="rounded-lg border border-border">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-medium">{s.section}</summary>
+          <div className="space-y-2 overflow-x-auto px-3 pb-3">
+            {s.rows.map((row, i) => (
+              <table key={i} className="w-full text-xs">
+                <tbody>
+                  {Object.entries(row).map(([k, v]) => (
+                    <tr key={k} className="border-t border-border/50">
+                      <td className="py-1 pr-3 font-mono text-muted-foreground">{k}</td>
+                      <td className="py-1 break-all">{v}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ))}
+          </div>
+        </details>
+      ))}
+    </div>
+  );
+}
+
+const isRateLimited = (err: unknown) => (err as { status?: number } | null)?.status === 429;
+const LOAD_ERR = "Plan data could not be loaded right now.";
+
+function PlanBrowser() {
+  const [state, setState] = useState("");
+  const [countyCode, setCountyCode] = useState("");
+  const [q, setQ] = useState("");
+  const [snp, setSnp] = useState<SnpFilter>("all");
+  const [open, setOpen] = useState<string | null>(null);
+  const states = usePlanStates();
+  const counties = usePlanCounties(state);
+  const [debouncedQ, setDebouncedQ] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+  const plans = usePlanSearch({ state, countyCode, q: debouncedQ, snp });
+  const planYear = plans.data?.planYear ?? states.data?.planYear ?? null;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="plan-state">State</Label>
+          <select id="plan-state" className={selectCls} value={state} onChange={(e) => { setState(e.target.value); setCountyCode(""); setOpen(null); }}>
+            <option value="">Select…</option>
+            {(states.data?.data ?? []).map((s) => <option key={s.stateCode} value={s.stateCode}>{s.stateCode}</option>)}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="plan-county">County</Label>
+          <select id="plan-county" className={selectCls} value={countyCode} disabled={!state} onChange={(e) => { setCountyCode(e.target.value); setOpen(null); }}>
+            <option value="">{counties.isLoading ? "Loading…" : "Select…"}</option>
+            {(counties.data?.data ?? []).map((c) => <option key={c.countyCode} value={c.countyCode}>{c.countyName ?? c.countyCode}</option>)}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="plan-q">Plan or carrier name</Label>
+          <Input id="plan-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Optional" maxLength={60} />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="plan-snp">Special needs plans</Label>
+          <select id="plan-snp" className={selectCls} value={snp} onChange={(e) => setSnp(e.target.value as SnpFilter)}>
+            <option value="all">Include</option>
+            <option value="only">Only SNP</option>
+            <option value="exclude">Hide SNP</option>
+          </select>
+        </div>
+      </div>
+
+      {(states.isError || counties.isError) && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{isRateLimited(states.error ?? counties.error) ? "Too many searches, wait a minute and try again." : LOAD_ERR}</p>}
+      {!states.isLoading && !states.isError && (states.data?.data.length ?? 0) === 0 && (
+        <EmptyState compact icon={Database} title="No plan data loaded" description="CMS plan files have not been imported yet." />
+      )}
+      {!countyCode ? (
+        <p className="text-sm text-muted-foreground">Pick a state and county to list the plans sold there.</p>
+      ) : plans.isLoading ? (
+        <Skeleton className="h-24 w-full" />
+      ) : plans.isError ? (
+        <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{isRateLimited(plans.error) ? "Too many searches, wait a minute and try again." : LOAD_ERR}</p>
+      ) : (plans.data?.data.length ?? 0) === 0 ? (
+        <EmptyState compact icon={Search} title="No plans found" description="Try another county or clear the filters." />
+      ) : (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            {plans.data!.truncated ? `Showing the first ${plans.data!.data.length} of ${plans.data!.total} plans — narrow with the name box.` : `${plans.data!.total} plans`}
+          </p>
+          <ul className="divide-y divide-border/60 rounded-xl border border-border">
+            {plans.data!.data.map((p) => (
+              <li key={p.bidId} className="p-3">
+                <button type="button" className="flex w-full flex-col gap-1 text-left" aria-expanded={open === p.bidId} onClick={() => setOpen(open === p.bidId ? null : p.bidId)}>
+                  <span className="text-sm font-semibold">{p.planName ?? p.bidId}</span>
+                  <span className="text-xs text-muted-foreground">{p.orgMarketingName ?? p.orgName ?? "Carrier not listed"} · {p.planTypeLabel ?? "Plan"} · {p.contractId}-{p.planId}-{p.segmentId}</span>
+                  <span className="flex flex-wrap gap-1.5">
+                    {p.isSnp && <StatusPill tone="info">SNP{p.snpType ? `: ${p.snpType}` : ""}</StatusPill>}
+                    {p.partial && <StatusPill tone="warning">Partial county</StatusPill>}
+                  </span>
+                </button>
+                {open === p.bidId && (
+                  <div className="mt-3 space-y-3">
+                    {p.orgWebsite && (
+                      <a className="text-xs underline" href={/^https?:\/\//i.test(p.orgWebsite) ? p.orgWebsite : `https://${p.orgWebsite}`} target="_blank" rel="noopener noreferrer">Carrier website</a>
+                    )}
+                    <PlanDetailPanel bidId={p.bidId} />
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <ul className="list-disc space-y-1 pl-5 text-[11px] text-muted-foreground">
+        <li>Shows Medicare Advantage and other county-based plans only. Part D (PDP) and Medigap plans are not covered yet.</li>
+        <li>Premiums and drug costs need CMS code decoding and are not shown yet.</li>
+        <li>Source: CMS Plan Benefit Package files{planYear ? `, plan year ${planYear}` : ""}.</li>
+      </ul>
+    </div>
   );
 }
 
@@ -160,7 +300,6 @@ function ProviderSearch({ onAdd, added }: { onAdd: (p: ProviderResult) => void; 
 }
 
 export default function QuotingPage() {
-  const productName = useProductName();
   const { role, isLoading } = useIsAdmin(CONTACT_READ_ROLES);
   const allowed = !!role && (CONTACT_READ_ROLES as readonly string[]).includes(role);
 
@@ -178,11 +317,10 @@ export default function QuotingPage() {
     if (d && !drugs.some((x) => x.toLowerCase() === d.toLowerCase())) setDrugs([...drugs, d]);
     setDrugInput("");
   };
-  const zipValid = /^\d{5}$/.test(zip);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
-      <PageHeader title="Quoting Engine" subtitle="Compare MA, MAPD, Medigap and Part D plans by ZIP code with drug and doctor checks" />
+      <PageHeader title="Quoting Engine" subtitle="Browse Medicare Advantage plans by state and county, and look up doctors. ZIP, Part D, Medigap and drug checks are coming soon." />
 
       <div className="rounded-xl border border-warning/30 bg-warning/10 px-5 py-4 text-sm text-amber-900 dark:text-amber-200">
         We do not offer every plan available in your area. Any information we provide is limited to those plans we do offer in your area.
@@ -192,14 +330,14 @@ export default function QuotingPage() {
       <SectionCard contentClassName="py-4 space-y-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
           <div className="space-y-1.5">
-            <Label htmlFor="quote-zip">ZIP code</Label>
+            <Label htmlFor="quote-zip">ZIP code <span className="text-xs font-normal text-muted-foreground">(coming soon)</span></Label>
             <div className="relative w-40">
               <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input id="quote-zip" value={zip} onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))} placeholder="33101" inputMode="numeric" className="pl-9" />
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label>Plan type</Label>
+            <Label>Plan type <span className="text-xs font-normal text-muted-foreground">(coming soon)</span></Label>
             <div className="inline-flex rounded-lg bg-muted p-1" role="radiogroup" aria-label="Plan type">
               {PLAN_TYPES.map((p) => (
                 <button
@@ -207,6 +345,7 @@ export default function QuotingPage() {
                   type="button"
                   role="radio"
                   aria-checked={planType === p.k}
+                  disabled
                   onClick={() => setPlanType(p.k)}
                   className={cn("rounded-md px-3 py-1.5 text-sm font-medium", planType === p.k ? "bg-card shadow-sm" : "text-muted-foreground")}
                 >
@@ -241,7 +380,7 @@ export default function QuotingPage() {
           </div>
         )}
         <p className="text-xs text-muted-foreground">
-          Quote inputs stay on this screen only — nothing here is saved to a client record.
+          ZIP lookup coming — pick state and county on the Plan Comparison tab. Quote inputs stay on this screen only — nothing here is saved to a client record.
         </p>
       </SectionCard>
 
@@ -266,30 +405,8 @@ export default function QuotingPage() {
 
       {tab === "plans" && (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <SectionCard className="lg:col-span-2" title="Plan comparison" icon={Database}>
-            <ComingSoonNote tone="setup" icon={Database} title="Plan data isn't connected yet">
-              {productName} doesn't have plan, premium or star-rating data loaded, so no plans are shown — we never show sample prices.
-            </ComingSoonNote>
-            <div className="mt-5 space-y-3">
-              <p className="text-sm font-semibold">What will power this comparison</p>
-              {[
-                { icon: FileSpreadsheet, t: "CMS plan landscape files", d: "Every MA, MAPD and PDP plan by county: premiums, deductibles, out-of-pocket max and star ratings." },
-                { icon: Pill, t: "CMS formulary files", d: "Which drugs each plan covers, at what tier, with prior-auth and quantity limits — to estimate yearly drug cost." },
-                { icon: Stethoscope, t: "Provider networks", d: "Whether the client's doctors are in each plan's network. Doctor search already works today (Provider Network tab)." },
-                { icon: Building2, t: "Your carriers", d: "Results filtered to the carriers you're appointed with, as the disclaimer above requires." },
-              ].map((x) => (
-                <div key={x.t} className="flex items-start gap-3 rounded-lg border border-border p-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent"><x.icon className="h-4 w-4" /></span>
-                  <span className="text-sm"><span className="font-medium">{x.t}</span><span className="block text-muted-foreground">{x.d}</span></span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-5 flex flex-wrap items-center gap-3">
-              <Button disabled>
-                <Search className="mr-1.5 h-4 w-4" /> Compare plans{zipValid ? ` in ${zip}` : ""}
-              </Button>
-              <SoonBadge />
-            </div>
+          <SectionCard className="lg:col-span-2" title="Plan comparison" icon={Database} description="Medicare Advantage and local plans by county">
+            <PlanBrowser />
           </SectionCard>
           <CarriersCard />
         </div>
