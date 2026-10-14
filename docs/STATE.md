@@ -8,21 +8,21 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-14 — Merged current main into plan-card PR #296 (see session log)._
+_Last updated: 2026-10-14 — Recording player failure message (see session log)._
 
 ### Health dashboard
 
 | Item | Status | Detail |
 | --- | --- | --- |
-| `main` HEAD | `c37dadb` (2026-10-14) | "Call scoring: listen to the recording from the call page (#297)". Re-check: this row goes stale within hours. |
-| CI: typecheck + test | In progress on latest main | [Run 38630478682](https://github.com/copperlang2007/Mediflow/actions/runs/38630478682) on `c37dadb`; previous main CI [38490634113](https://github.com/copperlang2007/Mediflow/actions/runs/38490634113) on `ad9a122` passed. |
+| `main` HEAD | `bb146d7` (2026-10-14) | "Quoting: clean plan cards from CMS 2027 benefit data (#296)". Re-check: this row goes stale within hours. |
+| CI: typecheck + test | Not checked this session for `bb146d7` | Last run seen on main: [38630478682](https://github.com/copperlang2007/Mediflow/actions/runs/38630478682) on `c37dadb`, in progress when recorded. Re-check on GitHub before relying on this row. |
 | CI: `pnpm audit (moderate)` | **Green** — run 37867735833 on `f821a54` passed. Was red on main from 2026-10-08 when four advisories (proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate) were published | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
 | CI: migration journal | Green | Run 37867735833 on `f821a54` |
 | Production deploy (GCP Cloud Run) | **Green** at `f821a54` (run 37867735824), `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
-| Open PRs | Query GitHub live | As of 2026-10-14: #295 (Identity Platform sign-in), #296 (Quoting plan cards, branch `claude/admiring-allen-b6wum5`), #298 (recording-player error wording). |
-| Migration high-water mark | `0072_integration_payloads` on main (#288); `0073_call_recordings_fetching` on branch `claude/agencybridge-compliance-review-s3nc6l` | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
+| Open PRs | Query GitHub live | As of 2026-10-14: #295 (Identity Platform sign-in) and #298 (recording-player error wording) are open. #296 (quoting plan cards) merged as `bb146d7`, #297 (recording playback) as `c37dadb`; #293, #294 merged earlier. |
+| Migration high-water mark | `0073_call_recordings_fetching` on main (landed with #289; checked on `origin/main` 2026-10-14). Next free number is 0074 unless an open PR claims it | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
 ### Owner-only actions
@@ -91,6 +91,17 @@ ones with no inbound references.
 ---
 
 ## Session log
+
+### 2026-10-14 — Recording player: honest message when playback fails — Claude Code — branch `claudemoogs/recording-player-message` (PR #298)
+- **Outcome:** done
+- **Changed:** follow-up to #297 (merged as `c37dadb` just before this fix was pushed). `RecordingPlayer.tsx` no longer guesses whether a playback error is an unsupported format: browsers raise the same `MediaError` code 4 for a bad format and for a 403/404/expired link, and a MIME alias list can never be complete (four review rounds each found more types). Every playback error now shows one honest message: it could not be loaded, usually because the ten-minute link ended, but it can also be an audio format the browser cannot decode; press Listen again, and if it fails again ask the agency admin. A signing or CSP mistake is therefore never mislabelled as a bad file.
+- **Also changed (server):** a storage failure while opening a recording now writes one fixed warning to the server log ("call recording storage unavailable" with the recording id and step only; never the error, object key or URL), so outages are visible. The log-capture test asserts that line is captured and that the object key is absent. Both steps (`metadata` and `sign`) have a test that captures the log and asserts the line is present and the object key absent. The same tests count error-level/fatal log calls (what the global error handler writes): 0 for both storage-failure steps, and at least 1 for the audit-insert failure (positive control, proving the counter sees handler output when a failure does reach it).
+- **Verified:** on the simplified player at `d775e5e` (the code in this PR; later commits touch only `docs/STATE.md`): player tests 8/8, `pnpm --filter @workspace/web-app run typecheck` clean, full `pnpm test` 240 files / 2683 tests passed. Earlier commits on this branch (`f5d19bd` with 10 player tests, `abf86c9`/`d244bc5` storage-failure log line with 15 playback tests) were verified separately at the time but are superseded by this run for the player; the server-side playback tests (15/15) are included in the 2683. Nothing was tried against a real recording.
+- **Also changed (UI, after `d775e5e`):** a new Listen press now clears the old "press Listen again" notice (`onMutate: setLinkEnded(false)`), so a refused retry no longer shows two conflicting alerts. Verified at the commit after `07e4f3a`: player tests 9/9, web typecheck clean, full suite run before pushing.
+- **Left undone / broken:** same follow-ups as the #297 entry below (no-store on recording objects, index on `call_recordings`, link refresh on long calls, OpenAPI, agent access to EnrollHere recordings). Still not tried on a real recording.
+- **Decisions made:** none
+- **Next agent should:** see the #297 entry below.
+- **Needs a human:** Michael to review, merge and deploy; Morgan to press Listen on a real call.
 
 ### 2026-10-14 — Resolve plan-card branch merge conflict — GitHub Copilot — branch `claude/admiring-allen-b6wum5`
 - **Outcome:** done

@@ -11,6 +11,7 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, sql, type SQL } from "drizzle-orm";
 import { auditLogTable, callRecordingsTable, db } from "@workspace/db";
+import { logger } from "../logger";
 import { loadTranscriptRow, type ScopeFilter } from "./store";
 
 /**
@@ -71,6 +72,7 @@ export async function listenLink(input: {
   try {
     stored = await input.storage.getCallRecordingMetadata(recording.objectKey);
   } catch {
+    logger.warn({ recordingId: recording.id, step: "metadata" }, "call recording storage unavailable");
     return STORAGE_DOWN;
   }
   if (!stored) {
@@ -82,6 +84,7 @@ export async function listenLink(input: {
   try {
     url = await input.storage.getCallRecordingReadURL(recording.objectKey, LISTEN_LINK_SECONDS);
   } catch {
+    logger.warn({ recordingId: recording.id, step: "sign" }, "call recording storage unavailable");
     return STORAGE_DOWN;
   }
 

@@ -22,6 +22,7 @@ const state = vi.hoisted(() => ({
   calls: [] as Array<{ url: string; method: string }>,
   detail: null as unknown,
   audio: "ok" as "ok" | "fail",
+  contentType: "audio/mpeg",
 }));
 const LISTEN_URL = state.listenUrl;
 
@@ -31,7 +32,7 @@ vi.mock("@workspace/api-client-react", () => ({
     state.calls.push({ url: String(url), method });
     if (String(url).endsWith("/audio")) {
       if (state.audio === "fail") throw Object.assign(new Error("x"), { status: 404, data: { error: "The audio for this call is no longer in storage." } });
-      return { url: state.listenUrl, expiresInSeconds: 600, contentType: "audio/mpeg", durationSeconds: 120 };
+      return { url: state.listenUrl, expiresInSeconds: 600, contentType: state.contentType, durationSeconds: 120 };
     }
     return state.detail;
   }),
@@ -95,6 +96,7 @@ const transcriptLoaded = () => screen.findByText(/Thank you for calling Sunrise 
 beforeEach(() => {
   state.calls = [];
   state.audio = "ok";
+  state.contentType = "audio/mpeg";
   state.detail = detail({ recordingAvailable: true });
 });
 
@@ -145,14 +147,18 @@ describe("listen to the recording", () => {
     expect(screen.queryByLabelText("Call recording")).not.toBeInTheDocument();
   });
 
-  it("says the format cannot be played (no retry wording) when the browser does not support it", async () => {
+  it("shows the single fallback message for a code-4 error, even on audio/amr, and offers Listen again", async () => {
+    state.contentType = "audio/amr";
     renderDetail();
     await userEvent.click(await screen.findByRole("button", { name: /Listen to the recording/ }));
     const player = await screen.findByLabelText("Call recording");
     Object.defineProperty(player, "error", { value: { code: 4 }, configurable: true });
     fireEvent.error(player);
-    expect(await screen.findByRole("alert")).toHaveTextContent("This recording is in a format your browser cannot play (for example AMR). Ask your agency admin to open it in another player.");
-    expect(screen.queryByText(/link ended/)).not.toBeInTheDocument();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/could not be loaded/);
+    expect(alert).toHaveTextContent(/audio format your browser cannot decode/);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.queryByText(/format your browser cannot play/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Listen to the recording/ })).toBeInTheDocument();
   });
 
@@ -164,5 +170,19 @@ describe("listen to the recording", () => {
     await userEvent.click(screen.getByRole("button", { name: /Listen to the recording/ }));
     await waitFor(() => expect(audioCalls()).toHaveLength(2));
     expect(await screen.findByLabelText("Call recording")).toHaveAttribute("src", LISTEN_URL);
+  });
+
+  it("replaces a stale player error with the server message on a failed retry, as a single alert", async () => {
+    renderDetail();
+    await userEvent.click(await screen.findByRole("button", { name: /Listen to the recording/ }));
+    fireEvent.error(await screen.findByLabelText("Call recording"));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be loaded/);
+    state.audio = "fail";
+    await userEvent.click(screen.getByRole("button", { name: /Listen to the recording/ }));
+    await waitFor(() => expect(audioCalls()).toHaveLength(2));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("The audio for this call is no longer in storage."));
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("The audio for this call is no longer in storage.");
+    expect(screen.queryByText(/could not be loaded/)).not.toBeInTheDocument();
   });
 });
