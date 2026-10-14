@@ -2,7 +2,7 @@
 /**
  * Verifies the canonical "show <Skeleton/> while React Query is loading,
  * swap to data when the query resolves" pattern. Rather than coupling to a
- * specific page (every page that uses Skeleton also pulls in Wouter, Clerk,
+ * specific page (every page that uses Skeleton also pulls in Wouter, sign-in,
  * and the real API client to mount), we declare a tiny inline component that
  * uses the same primitives the rest of the app does — `Skeleton` + `useQuery`
  * — and assert on the swap.

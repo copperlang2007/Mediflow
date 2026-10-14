@@ -4698,7 +4698,7 @@ paths:
       summary: Inbound masterBRIDGE dialer lifecycle event (HMAC-signed webhook)
       description: |
         Receives Dialer → agencyBRIDGE lifecycle events (spec §6). Authenticated
-        by the `X-MB-Signature` HMAC (not a Clerk session). Idempotent on
+        by the `X-MB-Signature` HMAC (not a sign-in session). Idempotent on
         `eventId`; duplicate / out-of-order deliveries are deduped. Unknown
         event `type` values and unknown fields are ignored (forward-compat,
         §6.2). Every event lands in the agencyBRIDGE audit log.
@@ -5526,8 +5526,9 @@ components:
       in: cookie
       name: __session
       description: |
-        Clerk session cookie. Every route under `/api` requires an active
-        authenticated session; routes that need a particular role return
+        Sign-in session cookie: the Google Cloud Identity Platform ID token
+        (also accepted as `Authorization: Bearer <token>`). Every route under
+        `/api` requires an active authenticated session; routes that need a particular role return
         403 once authenticated. The healthcheck (`/healthz`) is the only
         public endpoint.
     mbWebhookSignature:

@@ -1,16 +1,16 @@
 /**
  * Demo mode — no-auth walkthrough support.
  *
- * When `DEMO_MODE=true`, the API skips Clerk authentication entirely and
+ * When `DEMO_MODE=true`, the API skips sign-in entirely and
  * resolves every request to a single seeded demo user (see `requireAuth`).
  * This exists so a design-partner can be shown the real product over a
- * shareable URL without provisioning Clerk identities.
+ * shareable URL without provisioning sign-in identities.
  *
  * SECURITY — this is deliberately hard to enable by accident:
  *   - It is a NO-OP whenever `NODE_ENV === "production"`. The auth bypass
  *     can never activate in a production deploy, regardless of the flag.
  *   - `assertProdEnvIntegrity` (prodEnvGuard) refuses to boot if `DEMO_MODE`
- *     is paired with `NODE_ENV=production` or with real (live Clerk / PHI)
+ *     is paired with `NODE_ENV=production` or with real (live Clerk keys / PHI)
  *     credentials, so a demo build can never sit in front of real PHI.
  *
  * The demo user defaults to the seeded INSUREitALL agency admin

@@ -1,8 +1,8 @@
 /**
  * Remembers an invitation link across sign-up.
  *
- * The invitation token lives only in the accept-invite URL. Signing up with
- * Clerk can lose that URL: the email-verification link opens in a new tab, MFA
+ * The invitation token lives only in the accept-invite URL. Signing up
+ * can lose that URL: the email-verification link opens in a new tab, MFA
  * enrolment redirects, or the sign-up form simply lands on the default page.
  * The person then reaches the provisioning gate with no agency account and is
  * shown "Create your agency" — and if they create one, the invitation can never

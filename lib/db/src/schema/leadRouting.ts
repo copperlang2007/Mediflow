@@ -52,7 +52,7 @@ export const leadRoutingTable = pgTable(
     status: text("status").notNull(),
     // Size of the eligible (and available, if presence-filtered) pool.
     candidatePool: integer("candidate_pool").notNull().default(0),
-    // 'in_app' (Clerk route) | 'public' (HMAC/GHL route).
+    // 'in_app' (signed-in route) | 'public' (HMAC/GHL route).
     source: text("source"),
     // Whether a live-presence filter was applied when this decision was made.
     presenceFiltered: boolean("presence_filtered").notNull().default(false),

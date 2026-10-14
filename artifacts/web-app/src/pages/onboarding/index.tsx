@@ -83,7 +83,7 @@ function useStepParam(): [WizardStep | null, (s: WizardStep) => void] {
 
 export default function OnboardingPage() {
   const { data: me, isLoading: meLoading } = useGetMe();
-  // Find the Agent row linked to the current Clerk user.
+  // Find the Agent row linked to the current user.
   // For non-agent roles, we expose a hint that they should use the admin
   // dashboard instead of this self-service wizard.
   const isAgent = me?.role === "agent";

@@ -5,13 +5,13 @@
 # bypassed so a design partner can click a URL and see the real product.
 #
 # How the demo wiring works:
-#   - VITE_DEMO_MODE=true (build time) swaps Clerk for inert shims in the web
+#   - VITE_DEMO_MODE=true (build time) gives the web app a fixed demo identity (no sign-in) in the web
 #     bundle, so the authenticated shell renders with a fixed seeded identity.
-#   - DEMO_MODE=true (runtime) makes the api-server skip Clerk and resolve every
+#   - DEMO_MODE=true (runtime) makes the api-server skip sign-in and resolve every
 #     request to the seeded demo admin (see lib/demoMode.ts + requireAuth.ts).
 #   - NODE_ENV=development keeps DEMO_MODE active (it is a hard no-op under
 #     NODE_ENV=production) and the prod-env guard refuses to boot if real
-#     Clerk/PHI credentials are ever attached. No Clerk keys are needed.
+#     sign-in/PHI credentials are ever attached. No sign-in settings are needed.
 #
 # This blueprint is intentionally NOT a production template — it deploys an
 # auth-bypassing build against throwaway demo data.

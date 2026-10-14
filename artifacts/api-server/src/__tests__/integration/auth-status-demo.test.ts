@@ -1,21 +1,21 @@
 /**
  * GET /api/auth/status in demo mode.
  *
- * Demo mode never mounts Clerk's middleware, so the route must resolve the
+ * Demo mode never mounts the sign-in middleware, so the route must resolve the
  * seeded demo user itself (like requireAuth does) instead of calling
  * getAuth(), which throws a 500. Outside demo mode — and always under
- * NODE_ENV=production — it keeps requiring a real Clerk session.
+ * NODE_ENV=production — it keeps requiring a real sign-in.
  */
 import { vi, describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 
-const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
+const { dbF, authF, jobsF } = vi.hoisted(() => ({
   dbF: async (): Promise<Record<string, unknown>> => {
     const { dbMockFactory } = await import("../helpers/testApp");
     return dbMockFactory();
   },
-  clerkF: async (): Promise<Record<string, unknown>> => {
-    const { clerkMockFactory } = await import("../helpers/testApp");
-    return clerkMockFactory();
+  authF: async (): Promise<Record<string, unknown>> => {
+    const { identityMockFactory } = await import("../helpers/testApp");
+    return identityMockFactory();
   },
   jobsF: async (): Promise<Record<string, unknown>> => {
     const { jobsMockFactory } = await import("../helpers/testApp");
@@ -23,7 +23,7 @@ const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
   },
 }));
 vi.mock("@workspace/db", dbF);
-vi.mock("@clerk/express", clerkF);
+vi.mock("../../lib/auth/identity", authF);
 vi.mock("../../lib/jobs", jobsF);
 
 import { bootTestDb, shutdownTestDb, withAuth } from "../helpers/testApp";
@@ -69,7 +69,7 @@ afterAll(async () => {
 });
 
 describe("GET /api/auth/status", () => {
-  it("resolves the seeded demo user in demo mode, without a Clerk session", async () => {
+  it("resolves the seeded demo user in demo mode, without a sign-in", async () => {
     process.env["DEMO_MODE"] = "true";
     process.env["NODE_ENV"] = "development";
     process.env["DEMO_USER_ID"] = demoUser.id;

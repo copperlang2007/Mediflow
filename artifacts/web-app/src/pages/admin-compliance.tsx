@@ -842,8 +842,8 @@ function SessionsTab() {
     queryKey: ["admin", "sessions", expandedUserId],
     queryFn: () =>
       expandedUserId
-        ? apiFetch<ClerkSession[]>(`/api/admin/users/${expandedUserId}/sessions`)
-        : Promise.resolve<ClerkSession[]>([]),
+        ? apiFetch<AuthSession[]>(`/api/admin/users/${expandedUserId}/sessions`)
+        : Promise.resolve<AuthSession[]>([]),
     enabled: !!expandedUserId,
   });
 
@@ -1041,7 +1041,7 @@ type BaaControl = { id: string; label: string; status: BaaStatus; note?: string;
 type BaaChecklistResponse = { controls: BaaControl[]; overall: BaaStatus; generatedAt: string };
 type ExportEntry = { id: string; userId: string | null; userFullName: string | null; exportType: string; recordCount: number | null; createdAt: string };
 type ExportLogResponse = { exports: ExportEntry[]; total: number };
-type ClerkSession = { sessionId: string; createdAt: string; lastActiveAt: string; expireAt: string; status: string };
+type AuthSession = { sessionId: string; createdAt: string; lastActiveAt: string; expireAt: string; status: string };
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function AdminCompliancePage() {

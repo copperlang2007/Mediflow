@@ -17,21 +17,6 @@ import compression from "vite-plugin-compression2";
 
 const basePath = process.env.BASE_PATH ?? "/";
 
-// Demo builds (VITE_DEMO_MODE=true) swap the real Clerk SDK for inert local
-// shims so the app renders the authenticated shell with a fixed seeded
-// identity and no Clerk account. Production builds set no such flag and
-// bundle the real "@clerk/*" packages untouched. Finds are EXACT regexes so
-// they match only the bare module specifier — never a subpath like
-// "@clerk/themes/shadcn.css" (imported by index.css) or "@clerk/react/internal".
-const demoMode = process.env.VITE_DEMO_MODE === "true";
-const demoClerkAlias = demoMode
-  ? [
-      { find: /^@clerk\/react\/internal$/, replacement: path.resolve(import.meta.dirname, "src/lib/demo/clerkInternalShim.ts") },
-      { find: /^@clerk\/react$/, replacement: path.resolve(import.meta.dirname, "src/lib/demo/clerkReactShim.tsx") },
-      { find: /^@clerk\/themes$/, replacement: path.resolve(import.meta.dirname, "src/lib/demo/clerkThemesShim.ts") },
-    ]
-  : [];
-
 const rawPort = process.env.PORT;
 const port = rawPort ? Number(rawPort) : 5173;
 if (rawPort !== undefined && (Number.isNaN(port) || port <= 0)) {
@@ -66,7 +51,6 @@ export default defineConfig({
   ],
   resolve: {
     alias: [
-      ...demoClerkAlias,
       { find: "@assets", replacement: path.resolve(import.meta.dirname, "..", "..", "attached_assets") },
       { find: "@", replacement: path.resolve(import.meta.dirname, "src") },
     ],

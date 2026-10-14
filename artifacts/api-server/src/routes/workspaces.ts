@@ -7,7 +7,7 @@
  *
  * super_admin only, MFA-gated like the existing GET /admin/agencies.
  *
- * Sign-in is handled by Clerk, so nothing like a temporary login is issued. A new agency is created
+ * Sign-in is handled by Identity Platform, so nothing like a temporary login is issued. A new agency is created
  * empty and its first administrator is invited through the normal invitation
  * flow (routes/invitations.ts) — the same hashed single-use token, the same
  * seat accounting, the same accept screen. The super_admin who provisions the
@@ -465,7 +465,7 @@ router.post(
           .limit(1);
         if (slugRow) throw new SlugTakenError();
 
-        // A Clerk identity belongs to exactly one agency; accepting would fail
+        // A sign-in identity belongs to exactly one agency; accepting would fail
         // later with `already_provisioned`. Say so now, to the operator.
         const [emailRow] = await tx
           .select({ id: usersTable.id })

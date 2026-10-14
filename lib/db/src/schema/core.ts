@@ -6,6 +6,8 @@ import {
   jsonb,
   pgEnum,
   index,
+  primaryKey,
+  unique,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -68,6 +70,31 @@ export const usersTable = pgTable(
     index("users_org_id_is_active_idx").on(t.orgId, t.isActive),
   ],
 );
+
+/**
+ * Sign-in identities (ADR 0006): which Identity Platform account signs in as
+ * which user. `users.id` is never rewritten, so users created under Clerk keep
+ * their ids and every foreign key to them; new users get the identity's
+ * subject as their id. `linked_via` records how the link was made.
+ */
+export const userIdentitiesTable = pgTable(
+  "user_identities",
+  {
+    provider: text("provider").notNull(),
+    subject: text("subject").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    linkedVia: text("linked_via").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "user_identities_pkey", columns: [t.provider, t.subject] }),
+    unique("user_identities_provider_user_key").on(t.provider, t.userId),
+  ],
+);
+
+export type UserIdentity = typeof userIdentitiesTable.$inferSelect;
 
 export const insertUserSchema = createInsertSchema(usersTable).omit({
   createdAt: true,

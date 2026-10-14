@@ -17,6 +17,8 @@ import {
   dealsTable,
   taskInstancesTable,
   breachNotificationsTable,
+  sessionActivityTable,
+  userIdentitiesTable,
   BREACH_SEVERITIES,
   BREACH_STATUSES,
   type BreachSeverity,
@@ -28,12 +30,14 @@ import {
   type AuthenticatedRequest,
   requireExportConfirm,
   requireDestructiveConfirm,
+  expireSessions,
 } from "../middlewares/requireAuth";
 import { requireMfa } from "../middlewares/requireMfa";
 import { randomUUID } from "crypto";
 import PDFDocument from "pdfkit";
 import { ObjectStorageService } from "../lib/objectStorage";
-import { clerkClient } from "@clerk/express";
+import { revokeRefreshTokens } from "../lib/auth/admin";
+import { IDENTITY_PROVIDER } from "../lib/auth/identity";
 import { safeLimit, safeOffset } from "../lib/listGuards";
 import {
   CMS_RECORD_RETENTION_DAYS,
@@ -382,8 +386,36 @@ router.put(
   },
 );
 
-// ─── Session Management (Clerk-backed) ───────────────────────────────────────
-// List active Clerk sessions for a user in this org
+// ─── Session Management ───────────────────────────────────────────────────────
+// A session is one sign-in: "<identity subject>:<sign-in time>", tracked in
+// session_activity by the inactivity timeout (middlewares/requireAuth.ts).
+
+/** Every identity subject a user signs in with: linked identities, and the user id for accounts created since ADR 0006. */
+async function subjectsOf(userId: string): Promise<string[]> {
+  const links = await db
+    .select({ subject: userIdentitiesTable.subject })
+    .from(userIdentitiesTable)
+    .where(and(eq(userIdentitiesTable.provider, IDENTITY_PROVIDER), eq(userIdentitiesTable.userId, userId)));
+  return [...new Set([userId, ...links.map((l) => l.subject)])];
+}
+
+/** Live sessions of a user in this org (not yet timed out or revoked). */
+async function liveSessionsOf(userId: string, orgId: string) {
+  const subjects = await subjectsOf(userId);
+  const prefix = sql.join(subjects.map((s) => sql`${sessionActivityTable.sessionId} like ${`${s.replace(/[\\%_]/g, "\\$&")}:%`}`), sql` or `);
+  return db
+    .select()
+    .from(sessionActivityTable)
+    .where(and(eq(sessionActivityTable.orgId, orgId), gte(sessionActivityTable.expiresAt, new Date()), sql`(${prefix})`))
+    .orderBy(desc(sessionActivityTable.lastActiveAt));
+}
+
+/** Sign-in time from a session id, when it carries one. */
+function signedInAt(sessionId: string): string | null {
+  const t = Number(sessionId.slice(sessionId.lastIndexOf(":") + 1));
+  return Number.isFinite(t) && t > 0 ? new Date(t * 1000).toISOString() : null;
+}
+
 router.get(
   "/admin/users/:userId/sessions",
   requireAuth,
@@ -400,20 +432,20 @@ router.get(
       .limit(1);
     if (!user) { res.status(404).json({ error: "User not found" }); return; }
 
-    const result = await clerkClient.sessions.getSessionList({ userId, status: "active" });
+    const sessions = await liveSessionsOf(userId, authReq.orgId);
     res.json(
-      result.data.map((s) => ({
-        sessionId: s.id,
-        createdAt: new Date(s.createdAt).toISOString(),
-        lastActiveAt: new Date(s.lastActiveAt).toISOString(),
-        expireAt: new Date(s.expireAt).toISOString(),
-        status: s.status,
+      sessions.map((s) => ({
+        sessionId: s.sessionId,
+        createdAt: signedInAt(s.sessionId) ?? s.lastActiveAt.toISOString(),
+        lastActiveAt: s.lastActiveAt.toISOString(),
+        expireAt: s.expiresAt.toISOString(),
+        status: "active",
       })),
     );
   },
 );
 
-// Revoke a specific Clerk session
+// Revoke a specific session
 router.delete(
   "/admin/sessions/:sessionId",
   requireAuth,
@@ -423,28 +455,23 @@ router.delete(
     const authReq = req as AuthenticatedRequest;
     const sessionId = param(req.params.sessionId);
 
-    // Fetch session from Clerk to get the owning userId
-    let clerkSession: Awaited<ReturnType<typeof clerkClient.sessions.getSession>>;
-    try {
-      clerkSession = await clerkClient.sessions.getSession(sessionId);
-    } catch {
-      res.status(404).json({ error: "Session not found" });
-      return;
-    }
-    if (!clerkSession?.userId) { res.status(404).json({ error: "Session not found" }); return; }
-
-    // Verify the session's user belongs to the caller's org (prevent cross-tenant revocation)
-    const [sessionOwner] = await db
-      .select({ id: usersTable.id })
-      .from(usersTable)
-      .where(and(eq(usersTable.id, clerkSession.userId), eq(usersTable.orgId, authReq.orgId)))
+    // Only a session recorded in the caller's own org can be revoked (prevents cross-tenant revocation).
+    const [session] = await db
+      .select({ sessionId: sessionActivityTable.sessionId })
+      .from(sessionActivityTable)
+      .where(and(eq(sessionActivityTable.sessionId, sessionId), eq(sessionActivityTable.orgId, authReq.orgId)))
       .limit(1);
-    if (!sessionOwner) {
-      res.status(403).json({ error: "Session does not belong to your organization" });
-      return;
-    }
+    if (!session) { res.status(404).json({ error: "Session not found" }); return; }
 
-    await clerkClient.sessions.revokeSession(sessionId);
+    const subject = sessionId.slice(0, sessionId.lastIndexOf(":"));
+    const [link] = await db
+      .select({ userId: userIdentitiesTable.userId })
+      .from(userIdentitiesTable)
+      .where(and(eq(userIdentitiesTable.provider, IDENTITY_PROVIDER), eq(userIdentitiesTable.subject, subject)))
+      .limit(1);
+    const targetUserId = link?.userId ?? subject;
+
+    await expireSessions([sessionId]);
     await db.insert(auditLogTable).values({
       id: randomUUID(),
       orgId: authReq.orgId,
@@ -453,7 +480,7 @@ router.delete(
       action: "revoke_session",
       resourceType: "session",
       resourceId: sessionId,
-      changes: { targetUserId: clerkSession.userId },
+      changes: { targetUserId },
       ipAddress: req.ip ?? null,
     });
 
@@ -461,7 +488,7 @@ router.delete(
   },
 );
 
-// Force-logout: revoke ALL active sessions for a user
+// Force-logout: end ALL active sessions for a user and cancel their stored sign-ins
 router.post(
   "/admin/users/:userId/force-logout",
   requireAuth,
@@ -478,8 +505,11 @@ router.post(
       .limit(1);
     if (!user) { res.status(404).json({ error: "User not found" }); return; }
 
-    const sessions = await clerkClient.sessions.getSessionList({ userId, status: "active" });
-    await Promise.all(sessions.data.map((s) => clerkClient.sessions.revokeSession(s.id)));
+    const sessions = await liveSessionsOf(userId, authReq.orgId);
+    await expireSessions(sessions.map((s) => s.sessionId));
+    // Stops every device minting new tokens; the ended sessions are refused regardless.
+    const subjects = await subjectsOf(userId);
+    const revoked = await Promise.all(subjects.map((s) => revokeRefreshTokens(s)));
 
     await db.insert(auditLogTable).values({
       id: randomUUID(),
@@ -489,11 +519,11 @@ router.post(
       action: "force_logout",
       resourceType: "user",
       resourceId: userId,
-      changes: { revokedSessionCount: sessions.data.length },
+      changes: { revokedSessionCount: sessions.length, signInsCancelled: revoked.some(Boolean) },
       ipAddress: req.ip ?? null,
     });
 
-    res.json({ success: true, revokedCount: sessions.data.length });
+    res.json({ success: true, revokedCount: sessions.length });
   },
 );
 

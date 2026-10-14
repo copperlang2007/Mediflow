@@ -2,7 +2,7 @@
  * User invitations — the only path by which a second person joins an agency.
  *
  * Before this table existed, `POST /auth/provision` created a brand-new
- * organization for every Clerk sign-up. A multi-tenant product in which a
+ * organization for every sign-up. A multi-tenant product in which a
  * tenant can only ever contain one user is not multi-tenant in the way that
  * matters commercially, and it is the reason seats could be sold but never
  * filled. An invitation is the missing edge: an existing admin names an email
@@ -66,7 +66,7 @@ export const userInvitationsTable = pgTable(
     status: invitationStatusEnum("status").notNull().default("pending"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
-    /** The `users.id` (Clerk id) created by accepting this invitation. */
+    /** The `users.id` created by accepting this invitation. */
     acceptedUserId: text("accepted_user_id"),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })

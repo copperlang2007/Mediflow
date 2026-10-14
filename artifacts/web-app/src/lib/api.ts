@@ -1,3 +1,5 @@
+import { ensureFreshSession } from "@/lib/auth";
+
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 function getViewAsOrgId(): string | null {
@@ -27,6 +29,8 @@ export async function apiFetch<T = unknown>(
 ): Promise<T> {
   const url = path.startsWith("http") ? path : `${BASE}${path}`;
   const { signal, ...rest } = init;
+  const fresh = ensureFreshSession();
+  if (fresh) await fresh;
   const res = await fetch(url, {
     ...rest,
     credentials: "include",
@@ -48,6 +52,8 @@ export async function apiRequest<T = unknown>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
+  const fresh = ensureFreshSession();
+  if (fresh) await fresh;
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     credentials: "include",

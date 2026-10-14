@@ -886,7 +886,7 @@ async function downloadCsv(url: string, filename: string) {
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { error?: string; code?: string };
     if (body.code === "STEP_UP_REQUIRED") {
-      // Signal the UI; Clerk session refresh happens on next request
+      // Signal the UI; the sign-in token is refreshed on the next request
       alert("Your session needs to be refreshed. Please reload the page and try again.");
     } else {
       alert(body.error ?? `Export failed (${res.status})`);

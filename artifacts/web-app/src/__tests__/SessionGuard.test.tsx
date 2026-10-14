@@ -11,9 +11,9 @@ const signOut = vi.fn();
 let signedIn = true;
 let sessionPending = false;
 let sessionCreatedAt = 0;
-vi.mock("@clerk/react", () => ({
+vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ isLoaded: true, isSignedIn: signedIn }),
-  useClerk: () => ({ signOut }),
+  useSignOut: () => ({ signOut }),
   useSession: () => ({ session: signedIn && !sessionPending ? { createdAt: new Date(sessionCreatedAt) } : null }),
 }));
 
@@ -66,13 +66,13 @@ describe("SessionGuard", () => {
     renderGuard();
     expect(screen.queryByText("dashboard")).toBeNull();
     await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
-    expect(screen.queryByText("dashboard")).toBeNull(); // still blocked until Clerk confirms
+    expect(screen.queryByText("dashboard")).toBeNull(); // still blocked until the sign-out completes
     await act(async () => release());
   });
 
   it("keeps the app hidden and retries when sign-out fails", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    signOut.mockRejectedValueOnce(new Error("clerk down")).mockResolvedValue(undefined);
+    signOut.mockRejectedValueOnce(new Error("sign-in service down")).mockResolvedValue(undefined);
     renderGuard();
     await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
     expect(screen.queryByText("dashboard")).toBeNull();
@@ -97,12 +97,12 @@ describe("SessionGuard", () => {
     markActivity();
     renderGuard();
     await screen.findByText("dashboard");
-    signOut.mockRejectedValueOnce(new Error("clerk down")).mockResolvedValue(undefined);
+    signOut.mockRejectedValueOnce(new Error("sign-in service down")).mockResolvedValue(undefined);
     act(() => {
       window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
     });
     await waitFor(() => expect(screen.queryByText("dashboard")).toBeNull());
-    // a message, not a blank page, while Clerk is slow
+    // a message, not a blank page, while the sign-in service is slow
     expect(screen.getByRole("status").textContent).toMatch(/signing you out/i);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3500);
@@ -246,13 +246,13 @@ describe("SessionGuard", () => {
     window.history.pushState({}, "", "/");
   });
 
-  it("does not treat Clerk session re-emissions as user activity", async () => {
+  it("does not treat session re-emissions (token refreshes) as user activity", async () => {
     markActivity();
     const view = renderGuard();
     await screen.findByText("dashboard");
     const old = String(Date.now() - 10 * 60 * 1000);
     localStorage.setItem(LAST_ACTIVITY_KEY, old);
-    // Clerk hands back a new session object on each token refresh.
+    // A new session object arrives on each token refresh.
     const qc = new QueryClient();
     view.rerender(
       <QueryClientProvider client={qc}>

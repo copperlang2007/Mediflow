@@ -63,7 +63,7 @@ export interface SignerInput {
 
 export interface SignerContext {
   /**
-   * Caller's Clerk userId. Used to look up the matching `EnvelopeSigner`
+   * Caller's user id. Used to look up the matching `EnvelopeSigner`
    * on the envelope (the userId on the signer row MUST equal this, OR the
    * caller must hold an admin role — that narrowing is the route's job).
    */
@@ -130,7 +130,7 @@ export interface SigningSessionInput {
   envelopeId: string;
   orgId: string;
   /**
-   * Clerk userId of the signer who is about to sign. Must match an
+   * User id of the signer who is about to sign. Must match an
    * `EnvelopeSigner.userId` on the envelope. External providers need
    * this to map our user to a DocuSign recipient client-user-id.
    */

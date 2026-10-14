@@ -75,7 +75,7 @@ const TECH_STACK = `
 - Frontend: React 19 + Vite + Tailwind v4 + shadcn/ui + wouter (routing)
 - API client: orval-generated; consume via customFetch from @workspace/api-client-react
 - Backend: Express 5 + Drizzle ORM + Postgres + pg-boss (job queue)
-- Auth: Clerk (clerkMiddleware, getAuth)
+- Auth: Google Cloud Identity Platform ID tokens (lib/auth/identity.ts: identityMiddleware, getAuth; ADR 0006)
 - Types: Zod for runtime validation, OpenAPI for client codegen
 `.trim();
 

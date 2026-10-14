@@ -20,7 +20,7 @@ export interface SignatureCertificateInput {
   documentName: string;
   /** SHA-256 hex of the signed document bytes. Tamper-evident. */
   documentHash: string;
-  /** Identifies the signer — full name + email + Clerk user id (if applicable). */
+  /** Identifies the signer — full name + email + user id (if applicable). */
   signer: {
     fullName: string;
     email: string;

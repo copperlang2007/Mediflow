@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "@clerk/react";
+import { useAuth } from "@/lib/auth";
 import type {
   Contact, Activity, GetContactTasks200Item, GetContactEnrollments200Item,
   GetDeals200Item, PipelineWithStages, UpdateContactBody,

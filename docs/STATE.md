@@ -8,7 +8,7 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-14 — Plan data readable in Quoting page (see session log)._
+_Last updated: 2026-10-14 — Sign-in moved from Clerk to Google Cloud Identity Platform in code; production switches after owner setup (see session log)._
 
 ### Health dashboard
 
@@ -21,8 +21,8 @@ _Last updated: 2026-10-14 — Plan data readable in Quoting page (see session lo
 | Production deploy (GCP Cloud Run) | **Green** at `f821a54` (run 37867735824), `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
-| Open PRs | Query GitHub live | As of 2026-10-13: #291 (agency invitation fixes, branch `claudemoogs/fix-agency-invite-clean`); also the EnrollHere call-log import PR (branch `claude/agencybridge-compliance-review-s3nc6l`; #287 and #288 merged). No other open PRs. |
-| Migration high-water mark | `0072_integration_payloads` on main (#288); `0073_call_recordings_fetching` on branch `claude/agencybridge-compliance-review-s3nc6l` | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
+| Open PRs | Query GitHub live | As of 2026-10-14: the Clerk → Identity Platform cutover PR (branch `claude/agencybridge-compliance-review-s3nc6l`). |
+| Migration high-water mark | `0073_call_recordings_fetching` on main (#289); `0074_user_identities` on branch `claude/agencybridge-compliance-review-s3nc6l` | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
 ### Owner-only actions
@@ -30,7 +30,7 @@ _Last updated: 2026-10-14 — Plan data readable in Quoting page (see session lo
 1. Confirm the e-sign signing secrets hold real production PEMs. (How the deploy was fixed is now recorded in the health table.) The two placeholder secrets hold `unset`: put the real Twilio API key secret and statement-ingest Google credentials in Secret Manager when those features go live.
 2. **Promote ADR 0004** to Accepted if you consider the production deploy proven; otherwise say what is still missing.
 3. **Confirm the BAAs that are actually needed:** Google Cloud and AWS Bedrock (both receive PHI as built), and **Twilio for client calls** (live call audio, and recordings if enabled, carry health details; texts can be kept PHI-free but calls cannot). Not needed for Stripe, and probably not DocuSign (agent paperwork only). HighLevel/EnrollHere are the agency's own existing relationships. Resend depends on whether email bodies contain PHI. Decide with a compliance advisor and record the outcome here. **2026-10-08 (owner, unverified here):** Google Cloud and AWS BAAs signed long ago; owner says Twilio needs none because calls are not recorded and Twilio only carries the call (owner's conduit reasoning, unverified). Owner also states call recording and transcription do not go through Twilio. The code has two paths: (1) Twilio-side recording (`record="record-from-answer-dual"` in `lib/voice/twiml.ts`), OFF by default and would store PHI at Twilio if switched on; (2) uploaded recordings stored in Google Cloud with Google Speech-to-Text (`call_recordings`, `SPEECH_TO_TEXT_PROVIDER=google`), which falls under the Google BAA. Owner's statement matches path (2) only; path (1) must stay off. Open point for the compliance advisor: confirm the conduit position for live call audio, and keep recording off for INSUREitALL unless a Twilio BAA is in place.
-4. **Verify Clerk is on production keys**, not a development-mode key, before any PHI.
+4. **Finish the sign-in switch to Google Cloud Identity Platform** (ADR 0006, accepted): follow [`docs/AUTH_IDENTITY_PLATFORM.md`](AUTH_IDENTITY_PLATFORM.md) (re-run bootstrap, enable Identity Platform + email/password + TOTP, authorized domains, add GitHub secret `IDENTITY_PLATFORM_API_KEY`). The next deploy then switches; everyone creates a login with their same email. Afterwards delete the Clerk secrets and cancel Clerk.
 5. **Turn on** GitHub setting "Automatically delete head branches".
 6. Approve a branch cleanup (see audit: delete the 93 in buckets A+B, excluding any head of an open PR; spot-check the 62 in C). Existing `.github/scripts/nuke-branches.sh` embeds escaped quotes in its branch list and was not tested; do not run it as-is.
 7. ~~Close #276~~ — already merged (CI: documented audit exception for braces); nothing to do.
@@ -40,7 +40,7 @@ _Last updated: 2026-10-14 — Plan data readable in Quoting page (see session lo
 | Advisory | Package path | Why not reachable | Remove when |
 | --- | --- | --- | --- |
 | `GHSA-86w9-cpqp-85rv` | `node-forge` | E-sign CMS signature verification now uses `node:crypto`, not the node-forge RSA verifier (PR #258; commit "Verify e-sign CMS signatures with node:crypto"). | node-forge is upgraded or dropped. |
-| `GHSA-vfj7-8cjw-p6xm` (`braces` ReDoS-style DoS, no patched release) | `api-server > http-proxy-middleware > micromatch > braces` | `braces` expands glob *patterns*, never request data. The only proxy (`middlewares/clerkProxyMiddleware.ts`, the sole `createProxyMiddleware` call) passes no `pathFilter`, so `micromatch` is never invoked. Verified in code 2026-10-04; fuller analysis in PR #276 / ADR 0007. | A patched `braces` ships (re-run `pnpm audit` with the ignore removed), **or** any `pathFilter` is added to a proxy. |
+| `GHSA-vfj7-8cjw-p6xm` (`braces` ReDoS-style DoS, no patched release) | `mockup-sandbox > fast-glob > micromatch > braces` (development only; the API path via `http-proxy-middleware` was removed with Clerk on 2026-10-14) | `braces` expands glob *patterns*, never request data; the sandbox's patterns are fixed in code. ADR 0007. | A patched `braces` ships, or the mockup sandbox stops using `fast-glob`. |
 
 ### Decided direction (do not reopen without an ADR)
 
@@ -52,8 +52,7 @@ Scope of Appointment captured on call recording (no 48-hour wait enforced).
 ### Open questions
 
 - Is the GCP project actually provisioned, and has any deploy ever succeeded?
-- Clerk → Identity Platform: go or no-go? (ADR 0006, proposed). Production
-  currently reportedly uses a Clerk **development-mode** key — verify before PHI.
+- Clerk → Identity Platform: **go** (owner, 2026-10-14; ADR 0006 accepted). Code done; waits on the owner setup in `docs/AUTH_IDENTITY_PLATFORM.md`.
 - #276 is merged (the braces suppression and ADR 0007 are on main); no action needed.
 
 ### Known gaps
@@ -91,6 +90,19 @@ ones with no inbound references.
 ---
 
 ## Session log
+
+### 2026-10-14 — Sign-in moved from Clerk to Google Cloud Identity Platform — Claude Code — branch `claude/agencybridge-compliance-review-s3nc6l`
+- **Outcome:** done in code; production switch waits on owner setup.
+- **Changed:** Owner said "complete the crossover to google auth and eliminate clerk". ADR 0006 → Accepted, implemented:
+  - **API:** `lib/auth/identity.ts` verifies Identity Platform ID tokens (Bearer or `__session` cookie) with `jose` against Google's keys, issuer and audience. `lib/auth/users.ts` maps sign-ins to users via new table `user_identities` (migration `0074`). Clerk-era accounts link once by **verified** email. Create-your-agency and invitation accept now require a verified email, taken from the token. MFA comes from the token's second-factor claim. Admin session list/revoke/force-logout now use `session_activity`, plus Identity Platform refresh-token revocation. Boot refuses production without a project id. Clerk middleware, proxy, CSP hosts, `@clerk/*` and `http-proxy-middleware` removed.
+  - **Web:** `@firebase/app` + `@firebase/auth` (not the `firebase` bundle, which pulls a vulnerable gRPC). New screens: sign-in (password, then authenticator code), create login + email verification, password reset, authenticator setup with QR, account security (replace authenticator, change password). Same-origin `__session` cookie kept fresh. `@clerk/*` and demo shims removed.
+  - **Deploy:** workflow and `gcp-deploy.sh` take `IDENTITY_PLATFORM_API_KEY` (+ optional auth domain) instead of Clerk keys; bootstrap enables the Identity Toolkit API and grants the run SA *Firebase Authentication Admin*. The deploy gate skips (green) until that secret exists, so production keeps the last Clerk build until then.
+  - **Docs:** new `docs/AUTH_IDENTITY_PLATFORM.md` (owner runbook); README, ARCHITECTURE, DEPLOY_GCP_PRODUCTION, AGENTS direction, ADR 0006/0007, e2e and load-test READMEs updated.
+- **Verified:** `pnpm run typecheck` clean; `pnpm test`; `node --test tests/*.test.mjs`; `check:migration-journal` (76/76 with the duplicate 0064); `pnpm audit --audit-level moderate` (2 ignored, 0 open). New tests: API token verification with real RS256 keys (issuer/audience/expiry/forgery), cookie vs header, verified-email linking rules, provisioning/accept require verified email, admin revoke/force-logout incl. cross-org; web sign-in with TOTP step, redirect safety, AuthProvider cookie, MFA gate hand-off, invite verify-email step. Production web build succeeded. NOT verified: a real sign-in against Identity Platform (not configured yet; no GCP access in this session).
+- **Left undone / broken:** Render (`render.prod.yaml`, `scripts/deploy/render-deploy.mjs`; Render is forbidden for PHI) and `scripts/src/seed-demo.ts` still name Clerk keys; the two boot guards (`prodEnvGuard`, seed-demo) still flag live Clerk keys on purpose (not weakened). Clerk password hashes are not imported: users create a login again with the same email.
+- **Decisions made:** ADR 0006 accepted and implemented (see its Implementation section); verified-email one-time link for Clerk-era accounts; TOTP only (no SMS); session id = identity + sign-in time.
+- **Next agent should:** after the owner's setup and the first deploy, sign in end to end (create login → verify → authenticator → sign in again) and run the e2e auth test with a test login; then delete Clerk secrets.
+- **Needs a human:** the steps in `docs/AUTH_IDENTITY_PLATFORM.md` (Identity Platform setup, TOTP switch, authorized domains, `IDENTITY_PLATFORM_API_KEY` secret, re-run bootstrap, confirm Identity Platform under the Google BAA).
 
 ### 2026-10-14 — Plan data readable in Quoting page (state/county plan browser) — Claude Code — branch `claudemoogs/quirky-babbage-2e4cjj`
 - **Outcome:** partial

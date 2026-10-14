@@ -1,7 +1,7 @@
 /**
  * Public inbound-lead routing endpoint for external callers (GoHighLevel via
- * the Atlas proxy). Mounted OUTSIDE the Clerk-guarded `/api` router — exactly
- * like the dialer event receiver — because GHL has no Clerk session. Trust is
+ * the Atlas proxy). Mounted OUTSIDE the sign-in-guarded `/api` router — exactly
+ * like the dialer event receiver — because GHL has no sign-in session. Trust is
  * established by an HMAC signature instead.
  *
  *   POST /api/queue/v1/route-inbound

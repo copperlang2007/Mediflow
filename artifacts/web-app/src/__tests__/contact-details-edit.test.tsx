@@ -17,7 +17,7 @@ const state = vi.hoisted(() => ({
   },
 }));
 vi.mock("wouter", () => ({ useParams: () => ({ id: "synthetic-contact" }), useLocation: () => ["/crm/synthetic-contact", vi.fn()] }));
-vi.mock("@clerk/react", () => ({ useAuth: () => ({ getToken: vi.fn() }) }));
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ getToken: vi.fn() }) }));
 vi.mock("@/pages/crm/CreateLeadDialog", () => ({ default: () => null }));
 vi.mock("@workspace/api-client-react", () => ({
   useGetContact: () => ({ data: state.contact, isLoading: false }),

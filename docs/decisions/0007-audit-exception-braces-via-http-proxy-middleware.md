@@ -2,8 +2,15 @@
 
 ## Status
 
-Accepted — 2026-10-04. Revisit when a patched `braces` release ships, or if
-`clerkProxyMiddleware` ever gains a `pathFilter`.
+Accepted — 2026-10-04. Revisit when a patched `braces` release ships.
+
+**Update 2026-10-14:** the production path is gone. Moving sign-in to Identity
+Platform (ADR 0006) removed `clerkProxyMiddleware` and the
+`http-proxy-middleware` dependency, so `braces` is no longer in the API
+runtime. The exception stays only for the development-only path
+`artifacts/mockup-sandbox > fast-glob > micromatch > braces`, whose glob
+patterns are fixed in our code (see Context). Remove the exception when
+`braces` ships a fix or the mockup sandbox stops using `fast-glob`.
 
 ## Context
 

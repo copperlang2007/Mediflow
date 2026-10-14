@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAuth, useClerk, useSession } from "@clerk/react";
+import { useAuth, useSignOut, useSession } from "@/lib/auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { IS_DEMO_BUILD } from "@/lib/demo/isDemo";
 import { apiFetch } from "@/lib/api";
@@ -49,13 +49,12 @@ export function SessionGuard({
   children: React.ReactNode;
 }) {
   const { isLoaded, isSignedIn } = useAuth();
-  const { signOut } = useClerk();
-  // useSession (not useClerk().session) so this re-renders when the session arrives.
-  const { session } = useSession();
+  const { signOut } = useSignOut();
+    const { session } = useSession();
   const qc = useQueryClient();
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
   const [checked, setChecked] = useState(false);
-  // True from the moment a sign-out starts until Clerk confirms it, so a
+  // True from the moment a sign-out starts until the sign-out completes, so a
   // failing sign-out never leaves an expired user looking at their data.
   const [blocked, setBlocked] = useState(false);
   const loopRef = useRef(false);
@@ -63,7 +62,7 @@ export function SessionGuard({
   const expiredDuringCallRef = useRef(false);
   const endingRef = useRef(false);
 
-  // Returns true once Clerk has confirmed the sign-out.
+  // Returns true once the sign-out has completed.
   const endSession = useCallback(async (): Promise<boolean> => {
     if (endingRef.current) return false;
     endingRef.current = true;
@@ -73,7 +72,7 @@ export function SessionGuard({
     } catch {
       // ignore
     }
-    // Purge cached data first so it is gone even if Clerk is unreachable.
+    // Purge cached data first so it is gone even if the sign-in service is unreachable.
     qc.clear();
     try {
       await signOut({ redirectUrl: signInUrlAfterSignOut(basePath, window.location) });
@@ -113,12 +112,12 @@ export function SessionGuard({
   const wasSignedInRef = useRef(false);
   useEffect(() => {
     if (IS_DEMO_BUILD || !isLoaded) return;
-    // After a social/SSO redirect Clerk can report "signed in" a moment before
-    // the session object arrives; wait for it rather than guess.
+    // The sign-in time arrives with the first token, a moment after "signed in";
+    // wait for it rather than guess.
     if (isSignedIn && !session) return;
     if (decidedRef.current) {
       // Only a genuine sign-in (signed out -> signed in) starts the activity
-      // clock. Clerk re-emits the session on every token refresh (about once a
+      // clock. The session is re-emitted on every token refresh (about once a
       // minute); treating those as activity would keep the idle timer fresh
       // forever.
       if (isSignedIn && !wasSignedInRef.current) markActivity();
@@ -131,14 +130,14 @@ export function SessionGuard({
     // back from social/SSO login, which has no stored markers yet) is fresh,
     // not an old cookie.
     const createdAt = session?.createdAt ? new Date(session.createdAt).getTime() : 0;
-    // A few seconds of leeway for a clock slightly behind Clerk's; more than
+    // A few seconds of leeway for a clock slightly behind the sign-in service's; more than
     // that (a session "from the future") must not make an old session look new.
     const age = Date.now() - createdAt;
     const justSignedIn = createdAt > 0 && age > -FRESH_LOGIN_SKEW_MS && age < FRESH_LOGIN_MS;
     // The agency's limit isn't known yet (status loads after first render),
     // so use what the previous visit saved; "reopened" doesn't need it at all.
     if (isSignedIn && !justSignedIn && staleReason(storedIdleMinutes() ?? idleMinutes)) {
-      // Nothing is rendered until Clerk confirms the sign-out (retrying if needed).
+      // Nothing is rendered until the sign-out completes (retrying if needed).
       void signOutUntilDone().then(() => setChecked(true));
     } else {
       if (isSignedIn) markActivity();
@@ -266,7 +265,7 @@ export function SessionGuard({
   }, [isLoaded, isSignedIn, checked, signOutUntilDone, minutesNow, qc]);
 
   if (!IS_DEMO_BUILD && blocked) {
-    // No app data is shown; the message avoids a blank page if Clerk is slow.
+    // No app data is shown; the message avoids a blank page if the sign-in service is slow.
     return (
       <div role="status" className="flex min-h-screen flex-col items-center justify-center gap-3 p-6 text-center">
         <p className="text-base font-medium">Signing you out to keep your information safe…</p>

@@ -19747,7 +19747,7 @@ export const getPostDialerV1EventsUrl = () => {
 
 /**
  * Receives Dialer → agencyBRIDGE lifecycle events (spec §6). Authenticated
- * by the `X-MB-Signature` HMAC (not a Clerk session). Idempotent on
+ * by the `X-MB-Signature` HMAC (not a sign-in session). Idempotent on
  * `eventId`; duplicate / out-of-order deliveries are deduped. Unknown
  * event `type` values and unknown fields are ignored (forward-compat,
  * §6.2). Every event lands in the agencyBRIDGE audit log.

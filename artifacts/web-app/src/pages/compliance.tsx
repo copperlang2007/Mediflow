@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { ShieldCheck, Activity, Clock, Sparkles, Loader2, ChevronDown, Download } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
-import { useAuth } from "@clerk/react";
+import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { PageHeader, KpiCard, SectionCard, StatusPill, EmptyState, type StatusTone } from "@/components/shared";
 import { PageShell, KpiGrid } from "@/components/ops";

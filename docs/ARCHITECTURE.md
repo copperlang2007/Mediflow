@@ -21,7 +21,7 @@ The frontend is a React 19 application using Vite, Tailwind v4, shadcn/ui, and w
 ### Technical Implementations
 The project is structured as a pnpm monorepo using Node.js 24 and TypeScript 5.9.
 - **API**: Built with Express 5, PostgreSQL, and Drizzle ORM.
-- **Authentication**: Handled by Clerk, with a proxy at `/api/__clerk`.
+- **Authentication**: Google Cloud Identity Platform ID tokens, verified by the API (`lib/auth/identity.ts`; ADR 0006).
 - **Validation**: Zod v4 with drizzle-zod for schema validation.
 - **API Codegen**: Orval generates API client hooks (React Query v5) and Zod validation schemas from an OpenAPI specification (`lib/api-spec/openapi.yaml`).
 - **Storage**: Google Cloud Storage for file management, using signed URLs. GCS is the BAA-covered path for PHI, and `assertStorageBackendHipaaCompliant()` enforces it at boot. There is no S3 or MinIO code path. See `artifacts/api-server/src/lib/objectStorage.ts`.
@@ -45,7 +45,7 @@ The project is structured as a pnpm monorepo using Node.js 24 and TypeScript 5.9
 - **Import Wizards**: Dedicated wizards for migrating data from Monday.com and GoHighLevel, as well as a generic CSV contact import, with progress tracking and error reporting.
 
 ## External Dependencies
-- **Clerk**: User authentication and authorization service.
+- **Google Cloud Identity Platform**: sign-in (email/password, TOTP MFA). Authorization (roles, tenants) stays in PostgreSQL.
 - **PostgreSQL**: Primary database for all application data, including background job queue data (`pg-boss`).
 - **Google Cloud Storage**: Cloud storage for application assets and documents, accessed via signed URLs.
 - **Resend**: Email sending service.

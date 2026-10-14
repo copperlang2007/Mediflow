@@ -2,7 +2,7 @@
  * Workspaces (stage2/calendar-branding) — modelled on the agencyBRIDGE
  * TenantsPage. super_admin only (the API re-checks role + MFA on every call).
  *
- * Differences from the prototype, on purpose: sign-in is Clerk, so there is no
+ * Differences from the prototype, on purpose: sign-in is Identity Platform, so there is no
  * temporary password. Creating a workspace creates the agency and sends its
  * first administrator a normal invitation; the page shows the one-time link so
  * the operator can hand it over if email is not configured.

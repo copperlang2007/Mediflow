@@ -18,7 +18,7 @@ import { vi, describe, it, expect, beforeAll, afterAll, beforeEach } from "vites
 // ---- Per-test create() impl ref --------------------------------------------
 // Module-scope so the vi.mock factory (which is hoisted) can read it via the
 // closure created inside `vi.hoisted`. Tests overwrite this between cases.
-const { dbF, clerkF, jobsF, openaiF, openaiState } = vi.hoisted(() => {
+const { dbF, authF, jobsF, openaiF, openaiState } = vi.hoisted(() => {
   const state: { createImpl: ((...args: unknown[]) => unknown) | null } = {
     createImpl: null,
   };
@@ -41,9 +41,9 @@ const { dbF, clerkF, jobsF, openaiF, openaiState } = vi.hoisted(() => {
       const { dbMockFactory } = await import("../helpers/testApp");
       return dbMockFactory();
     },
-    clerkF: async (): Promise<Record<string, unknown>> => {
-      const { clerkMockFactory } = await import("../helpers/testApp");
-      return clerkMockFactory();
+    authF: async (): Promise<Record<string, unknown>> => {
+      const { identityMockFactory } = await import("../helpers/testApp");
+      return identityMockFactory();
     },
     jobsF: async (): Promise<Record<string, unknown>> => {
       const { jobsMockFactory } = await import("../helpers/testApp");
@@ -59,7 +59,7 @@ const { dbF, clerkF, jobsF, openaiF, openaiState } = vi.hoisted(() => {
 });
 
 vi.mock("@workspace/db", dbF);
-vi.mock("@clerk/express", clerkF);
+vi.mock("../../lib/auth/identity", authF);
 vi.mock("../../lib/jobs", jobsF);
 vi.mock("openai", openaiF);
 // The bedrock path builds an @anthropic-ai/sdk client. Left unmocked, the

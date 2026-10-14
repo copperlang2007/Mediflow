@@ -1,5 +1,5 @@
 # Live local Docker instance of agencyBRIDGE — demo-mode build (mirrors the
-# no-auth Render demo blueprint in render.yaml), so no Clerk/PHI credentials
+# no-auth Render demo blueprint in render.yaml), so no sign-in/PHI credentials
 # are required to boot. Not for production use.
 #
 # Usage:

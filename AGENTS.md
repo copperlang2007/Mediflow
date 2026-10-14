@@ -35,16 +35,18 @@ clients). Node 24, pnpm 10 only.
 In priority order. If your task conflicts with this list, stop and ask.
 
 1. **Make production trustworthy.** CI and the GCP deploy are green (as of
-   2026-10-04); now prove it for real use: Clerk production keys, confirmed
-   BAAs, working login, then promote ADR 0004 to Accepted. Check `docs/STATE.md`.
+   2026-10-04); now prove it for real use: finish the Identity Platform
+   cutover (`docs/AUTH_IDENTITY_PLATFORM.md`), confirmed BAAs, working login,
+   then promote ADR 0004 to Accepted. Check `docs/STATE.md`.
 2. **Be HIPAA-defensible before adding features.** Confirm BAAs, keep PHI out of
    logs/Sentry/AI prompts, never weaken a boot guard.
 3. **Harden the tenant boundary.** Row-level security is the planned follow-up
    to ADR 0002.
 4. **Finish what is half-built** (Beta e-sign, real carrier paperwork templates,
    client portal logins) before starting new surfaces.
-5. **Possibly migrate auth** Clerk → GCP Identity Platform (ADR 0006, proposed;
-   do not start without the owner's go-ahead).
+5. **Finish the auth cutover** Clerk → GCP Identity Platform (ADR 0006,
+   accepted 2026-10-14; code merged, owner setup in
+   `docs/AUTH_IDENTITY_PLATFORM.md`), then remove the Clerk secrets.
 
 Direction already **decided** — do not reopen without an ADR:
 GCP Cloud Run is production; Render is forbidden for PHI (no BAA); Railway is

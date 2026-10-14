@@ -13,10 +13,12 @@
 #
 # Required env (set by the workflow from GitHub Secrets/Variables):
 #   GCP_PROJECT_ID, GCP_REGION, GCP_RUN_SA_EMAIL, GCP_CLOUDSQL_CONNECTION,
-#   GCP_PHI_BUCKET, CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY,
+#   GCP_PHI_BUCKET, IDENTITY_PLATFORM_API_KEY (the Identity Platform web API
+#   key: public by design, it identifies the project for the browser sign-in),
 #   AI_INTEGRATIONS_BEDROCK_API_KEY, AI_INTEGRATIONS_BEDROCK_BASE_URL
 #   (AI_INTEGRATIONS_OPENAI_BASE_URL is still accepted as a legacy fallback)
 # Optional:
+#   IDENTITY_PLATFORM_AUTH_DOMAIN (default: <GCP_PROJECT_ID>.firebaseapp.com),
 #   GCP_NETWORK (default: default — must match gcp-bootstrap.sh's NETWORK,
 #   since Cloud Run needs Direct VPC egress onto the same network the
 #   private-IP Cloud SQL instance peers with), AI_INTEGRATIONS_MODEL,
@@ -38,8 +40,8 @@ set -euo pipefail
 : "${GCP_RUN_SA_EMAIL:?}"
 : "${GCP_CLOUDSQL_CONNECTION:?}"
 : "${GCP_PHI_BUCKET:?}"
-: "${CLERK_SECRET_KEY:?}"
-: "${CLERK_PUBLISHABLE_KEY:?}"
+: "${IDENTITY_PLATFORM_API_KEY:?Set IDENTITY_PLATFORM_API_KEY (Identity Platform web API key; see docs/AUTH_IDENTITY_PLATFORM.md)}"
+IDENTITY_PLATFORM_AUTH_DOMAIN="${IDENTITY_PLATFORM_AUTH_DOMAIN:-${GCP_PROJECT_ID}.firebaseapp.com}"
 # Canonical name first, legacy name as fallback -- same either-name contract
 # as the base URL. The value is an AWS Bedrock bearer token in both cases.
 if [ -z "$(printf '%s' "${AI_INTEGRATIONS_BEDROCK_API_KEY:-}" | tr -d '[:space:]')" ]; then
@@ -74,7 +76,9 @@ log "Building production image ${IMAGE}…"
 gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 docker build \
   -f docker/Dockerfile.prod \
-  --build-arg "VITE_CLERK_PUBLISHABLE_KEY=${CLERK_PUBLISHABLE_KEY}" \
+  --build-arg "VITE_FIREBASE_API_KEY=${IDENTITY_PLATFORM_API_KEY}" \
+  --build-arg "VITE_FIREBASE_AUTH_DOMAIN=${IDENTITY_PLATFORM_AUTH_DOMAIN}" \
+  --build-arg "VITE_FIREBASE_PROJECT_ID=${GCP_PROJECT_ID}" \
   -t "${IMAGE}" .
 docker push "${IMAGE}"
 
@@ -111,8 +115,6 @@ sync_secret() {
   fi
 }
 log "Syncing credentials to Secret Manager…"
-sync_secret mediflow-clerk-secret-key "${CLERK_SECRET_KEY}"
-sync_secret mediflow-clerk-publishable-key "${CLERK_PUBLISHABLE_KEY}"
 # NOTE: the Secret Manager RESOURCE name stays mediflow-ai-openai-api-key.
 # Renaming it would require gcp-bootstrap.sh to create a new secret and grant
 # the deploy SA access to it before the next deploy could run -- a forced
@@ -187,8 +189,6 @@ PHI_HMAC_KEY=mediflow-phi-hmac-key:latest,\
 METRICS_TOKEN=mediflow-metrics-token:latest,\
 DIALER_WEBHOOK_SECRET=mediflow-dialer-webhook-secret:latest,\
 LEAD_QUEUE_WEBHOOK_SECRET=mediflow-lead-queue-webhook-secret:latest,\
-CLERK_SECRET_KEY=mediflow-clerk-secret-key:latest,\
-CLERK_PUBLISHABLE_KEY=mediflow-clerk-publishable-key:latest,\
 ESIGN_SIGNING_CERT_PEM=mediflow-esign-cert-pem:latest,\
 ESIGN_SIGNING_KEY_PEM=mediflow-esign-key-pem:latest,\
 AI_INTEGRATIONS_BEDROCK_API_KEY=mediflow-ai-openai-api-key:latest,\
@@ -203,6 +203,7 @@ LOG_LEVEL=${LOG_LEVEL:-info},\
 WEB_STATIC_DIR=/app/artifacts/web-app/dist/public,\
 PRIVATE_OBJECT_DIR=${GCP_PHI_BUCKET}/private,\
 GOOGLE_CLOUD_PROJECT=${GCP_PROJECT_ID},\
+IDENTITY_PLATFORM_PROJECT_ID=${GCP_PROJECT_ID},\
 BUILD_SHA=${SHA}${OPTIONAL_ENV_FLAG:+,${OPTIONAL_ENV_FLAG%,}}"
 
 log "Deploying ${SERVICE} to Cloud Run (${GCP_REGION})…"

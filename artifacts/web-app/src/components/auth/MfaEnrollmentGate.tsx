@@ -1,49 +1,29 @@
-import { useState } from "react";
-import { UserProfile, useAuth, useClerk, useSession } from "@clerk/react";
-import { Loader2, LogOut, ShieldAlert } from "lucide-react";
+import { LogOut, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BrandMark } from "@/components/brand/BrandMark";
+import { TotpEnrollment } from "@/components/auth/TotpEnrollment";
+import { useSignOut, useUser } from "@/lib/auth";
 
-// Clerk's app-wide appearance pins cardBox to the 440px sign-in width; the
-// profile needs its sidebar and content pane, so let it fill the column.
-const userProfileAppearance = {
-  elements: {
-    rootBox: "!w-full !block",
-    cardBox: "!w-full !max-w-none min-h-[36rem] !rounded-xl !shadow-sm",
-  },
-};
+const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 /**
- * Mandatory MFA: shown instead of the app until the signed-in user has a
- * second factor on their agencyBRIDGE (Clerk) account. The API answers every
- * authenticated route with 403 mfa_required until then (requireAuth), so
- * there is nothing else the user could load.
+ * Mandatory MFA: shown instead of the app until the signed-in user signs in
+ * with a second factor. The API answers every authenticated route with 403
+ * mfa_required until then (requireAuth), so there is nothing else the user
+ * could load.
  *
- * `onEnrolled` re-reads /auth/status. The session token carries the MFA flag,
- * so it is refreshed first; otherwise the old token would still say "off".
+ * Setting up the authenticator app happens right here. The sign-in that is
+ * open now was made without a second step, so once the app is set up the
+ * user signs in again (password + code) and the API sees MFA on that sign-in.
  */
-export function MfaEnrollmentGate({ onEnrolled }: { onEnrolled: () => Promise<boolean> }) {
-  const { session } = useSession();
-  const { getToken } = useAuth();
-  const { signOut } = useClerk();
-  const [checking, setChecking] = useState(false);
-  const [stillOff, setStillOff] = useState(false);
-
-  const check = async () => {
-    setChecking(true);
-    setStillOff(false);
-    try {
-      await session?.reload();
-      await getToken({ skipCache: true });
-      setStillOff(!(await onEnrolled()));
-    } finally {
-      setChecking(false);
-    }
-  };
+export function MfaEnrollmentGate() {
+  const { firebaseUser } = useUser();
+  const { signOut } = useSignOut();
+  const afterEnrol = `${basePath}/sign-in?notice=mfa-on&redirect_url=${encodeURIComponent(`${basePath}/dashboard`)}`;
 
   return (
     <div className="min-h-[100dvh] bg-gradient-to-br from-navy-900 via-navy-800 to-navy-950 px-4 py-8">
-      <div className="mx-auto max-w-5xl space-y-6">
+      <div className="mx-auto max-w-2xl space-y-6">
         <div className="flex items-center gap-3 text-white">
           <BrandMark size={40} tone="light" decorative className="rounded-xl" />
           <span className="font-display text-xl font-bold tracking-tight">
@@ -57,31 +37,24 @@ export function MfaEnrollmentGate({ onEnrolled }: { onEnrolled: () => Promise<bo
             <div className="space-y-2 text-sm">
               <h1 className="text-base font-semibold">Turn on two-step verification to continue</h1>
               <p>
-                agencyBRIDGE holds Medicare beneficiaries' health information, so every account needs a
-                second sign-in step. Open <strong>Security</strong> below and add an authenticator app under{" "}
-                <strong>Two-step verification</strong>. The code Google sends when you sign in with Google
-                does not count here.
+                agencyBRIDGE holds Medicare beneficiaries' health information, so every account needs a second sign-in
+                step: a code from an authenticator app on your phone. Set it up below, then sign in again with your
+                password and a code.
               </p>
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <Button size="sm" onClick={check} disabled={checking}>
-                  {checking && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
-                  I've turned it on
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => signOut()}>
-                  <LogOut className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> Sign out
-                </Button>
-              </div>
-              {stillOff && (
-                <p role="alert" className="font-medium">
-                  Two-step verification isn't on yet. Finish adding the authenticator app, then try again.
-                  If you just added it, sign out and back in.
-                </p>
-              )}
+              <Button size="sm" variant="ghost" onClick={() => void signOut()}>
+                <LogOut className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> Sign out
+              </Button>
             </div>
           </div>
         </div>
 
-        <UserProfile routing="hash" appearance={userProfileAppearance} />
+        <div className="rounded-xl border bg-card p-6 text-card-foreground shadow-sm">
+          {firebaseUser ? (
+            <TotpEnrollment user={firebaseUser} onEnrolled={() => void signOut({ redirectUrl: afterEnrol })} />
+          ) : (
+            <p className="text-sm text-muted-foreground">Sign in again to set up two-step verification.</p>
+          )}
+        </div>
       </div>
     </div>
   );

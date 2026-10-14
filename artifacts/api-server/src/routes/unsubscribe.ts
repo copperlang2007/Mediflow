@@ -8,7 +8,7 @@
  * GET never changes state: corporate mail scanners follow every link in a
  * message, and a GET that unsubscribed would opt people out without their
  * action. Trust comes from the signed token (lib/compliance/unsubscribe.ts),
- * so this router is mounted above the Clerk-guarded /api router.
+ * so this router is mounted above the sign-in-guarded /api router.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import { and, eq } from "drizzle-orm";

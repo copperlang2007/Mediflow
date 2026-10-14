@@ -8,9 +8,11 @@ the web app end-to-end against a real, running dev server.
 These tests need real infrastructure:
 
 - a real `DATABASE_URL` (Postgres),
-- real Clerk publishable + secret keys,
+- Identity Platform sign-in configured (`VITE_FIREBASE_*` on the web build,
+  `IDENTITY_PLATFORM_PROJECT_ID` on the API),
 - a running web dev server (and the API server it talks to),
-- a Clerk test user (`E2E_TEST_EMAIL` / `E2E_TEST_PASSWORD`).
+- a test login with two-step verification set up (`E2E_TEST_EMAIL` /
+  `E2E_TEST_PASSWORD` / `E2E_TEST_TOTP_SECRET`).
 
 CI doesn't have any of that, so every test in this folder is wrapped with:
 
@@ -28,14 +30,15 @@ suite); they are a separate runner under `pnpm e2e`.
 # 1. one-time: install the chromium browser binary
 pnpm e2e:install
 
-# 2. terminal A: run the dev server (with DATABASE_URL + Clerk keys configured)
+# 2. terminal A: run the dev server (with DATABASE_URL + Identity Platform configured)
 pnpm dev
 
 # 3. terminal B: run the e2e suite
 E2E_ENABLED=true \
 E2E_BASE_URL=http://localhost:5173 \
 E2E_TEST_EMAIL=you+e2e@example.com \
-E2E_TEST_PASSWORD='<clerk test user password>' \
+E2E_TEST_PASSWORD='<test login password>' \
+E2E_TEST_TOTP_SECRET='<authenticator key shown at setup>' \
 pnpm e2e
 ```
 
@@ -55,8 +58,9 @@ E2E_ENABLED=true pnpm e2e e2e/contacts-list.test.ts
 | -------------------- | -------------------------------------------------------- |
 | `E2E_ENABLED`        | Master switch. Anything truthy enables the suite.        |
 | `E2E_BASE_URL`       | Base URL of the running dev server. Default `:5173`.     |
-| `E2E_TEST_EMAIL`     | Clerk test-user email used to log in.                    |
-| `E2E_TEST_PASSWORD`  | Clerk test-user password.                                |
+| `E2E_TEST_EMAIL`     | Test login email.                                        |
+| `E2E_TEST_PASSWORD`  | Test login password.                                     |
+| `E2E_TEST_TOTP_SECRET` | Base32 authenticator key of the test login (shown when two-step verification was set up); the helper computes the 6-digit code. |
 
 ## What's covered
 
@@ -72,7 +76,5 @@ E2E_ENABLED=true pnpm e2e e2e/contacts-list.test.ts
 
 - These tests assume an empty DB. Several flows have `TODO` comments for cases
   where seed data would make the assertions stronger.
-- Clerk programmatic sign-in is fragile (their UI is captcha-prone). The
-  helper in `e2e/_helpers/auth.ts` does a best-effort form fill; if Clerk has
-  bot detection enabled you may need to use a pre-authenticated storage
-  state instead. See Playwright's `storageState` docs.
+- Sign-in goes through the app's own sign-in page (`e2e/_helpers/auth.ts`):
+  email, password, then a code computed from `E2E_TEST_TOTP_SECRET`.

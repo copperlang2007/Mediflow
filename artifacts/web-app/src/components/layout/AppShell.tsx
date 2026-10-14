@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { useUser, useClerk } from "@clerk/react";
+import { useUser, useSignOut } from "@/lib/auth";
 import {
   useGetMe,
   useGetAgent,
@@ -208,7 +208,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [viewAsOpen, setViewAsOpen] = useState(false);
   const [location] = useLocation();
   const { user } = useUser();
-  const { signOut } = useClerk();
+  const { signOut } = useSignOut();
   const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
   const aiContext = useAiContext();
 

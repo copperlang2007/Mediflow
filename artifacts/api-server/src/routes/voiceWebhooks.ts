@@ -1,6 +1,6 @@
 /**
  * Twilio Voice webhooks for native browser calling. Mounted in app.ts ABOVE
- * the Clerk-guarded `/api` router (Twilio has no Clerk session): trust comes
+ * the sign-in-guarded `/api` router (Twilio has no sign-in session): trust comes
  * from the X-Twilio-Signature HMAC, validated with the same validator and
  * TWILIO_WEBHOOK_PUBLIC_HOST host pinning as the SMS webhook.
  *

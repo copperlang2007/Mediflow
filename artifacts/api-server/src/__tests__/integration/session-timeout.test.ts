@@ -19,14 +19,14 @@ import {
   beforeEach,
 } from "vitest";
 
-const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
+const { dbF, authF, jobsF } = vi.hoisted(() => ({
   dbF: async (): Promise<Record<string, unknown>> => {
     const { dbMockFactory } = await import("../helpers/testApp");
     return dbMockFactory();
   },
-  clerkF: async (): Promise<Record<string, unknown>> => {
-    const { clerkMockFactory } = await import("../helpers/testApp");
-    return clerkMockFactory();
+  authF: async (): Promise<Record<string, unknown>> => {
+    const { identityMockFactory } = await import("../helpers/testApp");
+    return identityMockFactory();
   },
   jobsF: async (): Promise<Record<string, unknown>> => {
     const { jobsMockFactory } = await import("../helpers/testApp");
@@ -35,7 +35,7 @@ const { dbF, clerkF, jobsF } = vi.hoisted(() => ({
 }));
 
 vi.mock("@workspace/db", dbF);
-vi.mock("@clerk/express", clerkF);
+vi.mock("../../lib/auth/identity", authF);
 vi.mock("../../lib/jobs", jobsF);
 
 import { randomUUID } from "node:crypto";
@@ -83,7 +83,7 @@ beforeEach(async () => {
   // Each test starts from a clean session_activity table so the in-process
   // 60-second cache in requireAuth doesn't carry state across tests. The
   // cache is keyed by sessionId and we use a distinct sessionId per test
-  // to bypass it entirely (matches what Clerk does — every new sign-in
+  // to bypass it entirely (a session id is one sign-in — every new sign-in
   // mints a new session id).
   const handle = await bootTestDb();
   await handle.db.delete(sessionActivityTable);
