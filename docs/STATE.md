@@ -8,7 +8,7 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-14 — Call scoring recording playback (see session log)._
+_Last updated: 2026-10-14 — Recording player failure message (see session log)._
 
 ### Health dashboard
 
@@ -91,6 +91,15 @@ ones with no inbound references.
 ---
 
 ## Session log
+
+### 2026-10-14 — Recording player: honest message when playback fails — Claude Code — branch `claudemoogs/recording-player-message` (PR #298)
+- **Outcome:** done
+- **Changed:** follow-up to #297 (merged as `c37dadb` just before this fix was pushed). `RecordingPlayer.tsx` now shows the "format your browser cannot play" message only when the media error is code 4 AND the server gave a content type AND `canPlayType()` returns an empty string. Every other failure (403/404/expired link, CSP block, or a codec the browser says "maybe" to) shows a neutral message that names both causes and says to ask the agency admin if a second try also fails.
+- **Verified:** player tests 9/9; `pnpm --filter @workspace/web-app run typecheck` clean; full `pnpm test` 238 files / 2645 tests passed before the last wording change.
+- **Left undone / broken:** same follow-ups as the #297 entry below (no-store on recording objects, index on `call_recordings`, link refresh on long calls, OpenAPI, agent access to EnrollHere recordings). Still not tried on a real recording.
+- **Decisions made:** none
+- **Next agent should:** see the #297 entry below.
+- **Needs a human:** Michael to review, merge and deploy; Morgan to press Listen on a real call.
 
 ### 2026-10-14 — Call scoring: listen to the recording — Claude Code — branch `claudemoogs/call-recording-playback-v2` (PR #297)
 - **Outcome:** done (code); not tried against real audio
