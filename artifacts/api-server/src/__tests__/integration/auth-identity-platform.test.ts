@@ -259,6 +259,20 @@ describe("creating an agency and accepting an invitation", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("the same sign-in sent twice at once gets its one new account back, not an error", async () => {
+    const subject = `uid-${randomUUID()}`;
+    const send = () =>
+      request(app)
+        .post("/api/auth/provision")
+        .set({ ...withAuth(subject), "x-test-email": "retry@new-agency.example" })
+        .send({ fullName: "Retrier", orgName: "Retry Agency" });
+    const results = await Promise.all([send(), send()]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 201]);
+    expect(results.every((r) => r.body.user?.id === subject)).toBe(true);
+    const rows = await handle.db.select().from(schema.usersTable).where(eq(schema.usersTable.id, subject));
+    expect(rows).toHaveLength(1);
+  });
+
   it("asks for a verified email before accepting an invitation", async () => {
     const res = await request(app)
       .post("/api/invitations/accept")

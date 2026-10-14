@@ -172,6 +172,10 @@ router.post("/auth/provision", async (req: Request, res: Response): Promise<void
     // two sign-ups with the same email at the same moment could both pass the
     // check above. Serialise them per email and check again under the lock.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`provision:${emailKey}`}))`);
+    // The same sign-in retried while its first request was running: that
+    // request created this account, so hand it back rather than refuse.
+    const [mine] = await tx.select().from(usersTable).where(eq(usersTable.id, subject)).limit(1);
+    if (mine) return { existing: mine };
     if (await emailTaken(tx)) return null;
 
     const [org] = await tx
@@ -202,6 +206,10 @@ router.post("/auth/provision", async (req: Request, res: Response): Promise<void
   });
   if (!created) {
     accountExists();
+    return;
+  }
+  if ("existing" in created) {
+    res.json({ user: created.existing, isNew: false });
     return;
   }
   const { org, user } = created;
