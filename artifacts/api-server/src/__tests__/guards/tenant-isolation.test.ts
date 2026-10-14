@@ -43,6 +43,11 @@ const GLOBAL_TABLES = new Set([
   // (MFA) can write them; agencies read them and record their own choices in
   // kbLibraryChoicesTable, which IS org-scoped and still guarded.
   "kbLibraryArticlesTable",
+  // CMS public plan data, no org_id by design (lib/db/src/schema/cmsPlans.ts)
+  "cmsPlanBenefitPackagesTable",
+  "cmsPlanBenefitSectionsTable",
+  "cmsPlanServiceAreasTable",
+  "cmsPlanRegionsTable",
 ]);
 
 /**
