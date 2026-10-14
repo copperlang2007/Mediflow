@@ -93,13 +93,13 @@ ones with no inbound references.
 ## Session log
 
 ### 2026-10-14 — Resolve plan-card branch merge conflict — GitHub Copilot — branch `claude/admiring-allen-b6wum5`
-- **Outcome:** done
-- **Changed:** merged main `c37dadb` into PR #296; the only conflict was this ledger. Preserved the plan-card and recording-playback session entries and both branches' application changes.
+- **Outcome:** blocked
+- **Changed:** locally merged main `c37dadb` into PR #296 in commit `06d97d6`; the only conflict was this ledger. Preserved the plan-card and recording-playback session entries and both branches' application changes. Publishing was rejected by GitHub (`GH013: Cannot update this protected ref`).
 - **Verified:** `pnpm install --frozen-lockfile`; `pnpm run typecheck`; `pnpm test artifacts/api-server/src/__tests__/unit/planCard.test.ts artifacts/api-server/src/__tests__/integration/quoting-plans.test.ts artifacts/web-app/src/__tests__/plan-cards.test.tsx artifacts/api-server/src/__tests__/integration/call-scoring-playback.test.ts artifacts/api-server/src/__tests__/integration/csp-media-src.test.ts artifacts/web-app/src/__tests__/call-scoring-recording-player.test.tsx` (6 files, 72 tests passed); `git diff --check`. Main deploy [38630478548](https://github.com/copperlang2007/Mediflow/actions/runs/38630478548) passed; main CI [38630478682](https://github.com/copperlang2007/Mediflow/actions/runs/38630478682) is in progress.
-- **Left undone / broken:** full suite and production behavior not rechecked in this merge-only session; existing review suggestions remain outside this request.
+- **Left undone / broken:** merge is NOT published because of the protected-ref rule. Full suite and production behavior not rechecked in this merge-only session; existing review suggestions remain outside this request. Automated review unavailable; independent read-only merge review found no significant issues. CodeQL skipped the documentation-only resolution.
 - **Decisions made:** none.
-- **Next agent should:** review and merge PR #296 once checks pass.
-- **Needs a human:** review plan-card wording for CMS marketing-rule compliance before use with beneficiaries.
+- **Next agent should:** publish the verified merge after the owner resolves the branch-update restriction.
+- **Needs a human:** allow the authorized agent to update this PR branch, or merge main into it using an authorized account. Review plan-card wording for CMS marketing-rule compliance before use with beneficiaries.
 
 ### 2026-10-14 — Plan cards on the Quoting page (decoded premium, costs, extras, compare) — Claude Code — branch `claude/admiring-allen-b6wum5`
 - **Outcome:** done (code); not yet seen by real users until merged and deployed
