@@ -201,6 +201,29 @@ describe("listening to a recording", () => {
     }
   });
 
+  it("gives no link when the listen cannot be logged", async () => {
+    const { transcriptId } = await makeCall();
+    const realInsert = handle.db.insert.bind(handle.db) as (table: unknown) => any;
+    const spy = vi.spyOn(handle.db, "insert").mockImplementation(((table: unknown) => {
+      const builder = realInsert(table);
+      if (table !== schema.auditLogTable) return builder;
+      return {
+        values: (v: { action?: string }) =>
+          v?.action === "call_recording_listen" ? Promise.reject(new Error("audit write failed")) : builder.values(v),
+      };
+    }) as never);
+    try {
+      const res = await listen(admin.id, transcriptId);
+      expect(spy).toHaveBeenCalled();
+      expect(res.status).toBeGreaterThanOrEqual(500);
+      expect(res.body).not.toHaveProperty("url");
+      expect(JSON.stringify(res.body)).not.toContain("storage.example");
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await listenAudits(transcriptId)).toHaveLength(0);
+  });
+
   it("an agent can listen to calls from phone sessions they placed, and no one else's", async () => {
     // An agent's own call is one linked to a call session they placed.
     const session = async (userId: string, agentId: string) => {
