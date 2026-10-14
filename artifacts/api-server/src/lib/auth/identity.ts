@@ -98,36 +98,48 @@ export async function verifyIdToken(token: string, projectId: string | null = id
   };
 }
 
-function tokenFrom(req: Request): string | null {
+/** Most `__session` cookies tried per request (a stale one from an older sign-in can sit next to the current one). */
+const MAX_COOKIE_TOKENS = 3;
+
+/** Candidate tokens, best first: the Bearer header, then each `__session` cookie. */
+function tokensFrom(req: Request): string[] {
+  const out: string[] = [];
   const header = req.headers.authorization;
   if (typeof header === "string" && header.startsWith("Bearer ")) {
     const t = header.slice(7).trim();
-    if (t) return t;
+    if (t) out.push(t);
   }
   const cookie = req.headers.cookie;
   if (typeof cookie === "string") {
     for (const part of cookie.split(";")) {
+      if (out.length >= MAX_COOKIE_TOKENS + 1) break;
       const eq = part.indexOf("=");
       if (eq > 0 && part.slice(0, eq).trim() === SESSION_COOKIE) {
         const v = part.slice(eq + 1).trim();
-        if (v) {
-          try {
-            return decodeURIComponent(v);
-          } catch {
-            return null;
-          }
+        if (!v) continue;
+        try {
+          out.push(decodeURIComponent(v));
+        } catch {
+          // not a token
         }
       }
     }
   }
-  return null;
+  return out;
 }
 
 /** Verify the request's token, if any, and remember the result for getAuth. Never rejects a request itself. */
 export function identityMiddleware() {
   return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
-    const token = tokenFrom(req);
-    (req as unknown as Record<symbol, IdentityAuth>)[AUTH] = token ? ((await verifyIdToken(token)) ?? SIGNED_OUT) : SIGNED_OUT;
+    let auth: IdentityAuth = SIGNED_OUT;
+    for (const token of tokensFrom(req)) {
+      const verified = await verifyIdToken(token);
+      if (verified) {
+        auth = verified;
+        break;
+      }
+    }
+    (req as unknown as Record<symbol, IdentityAuth>)[AUTH] = auth;
     next();
   };
 }

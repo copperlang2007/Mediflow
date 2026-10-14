@@ -123,6 +123,7 @@ export const dbMockFactory = async (): Promise<Record<string, unknown>> => {
  *   x-test-session-id    → the session id
  *   x-test-mfa-enrolled  → "true" when this sign-in passed a second factor
  *   x-test-email / x-test-email-verified → the token's email and whether it is verified
+ *   x-test-auth-time     → sign-in time in seconds (default: now)
  */
 export const identityMockFactory = async (): Promise<Record<string, unknown>> => {
   const actual = await import("../../lib/auth/identity");
@@ -146,8 +147,9 @@ export const identityMockFactory = async (): Promise<Record<string, unknown>> =>
         email: h("x-test-email"),
         emailVerified: h("x-test-email-verified") !== "false",
         mfa: h("x-test-mfa-enrolled") === "true",
-        // Always treat the synthetic token as freshly minted so requireRecentAuth passes.
-        sessionClaims: subject ? { iat: now, auth_time: now } : null,
+        // Treat the synthetic token as freshly minted so requireRecentAuth passes;
+        // x-test-auth-time (seconds) sets an older sign-in time.
+        sessionClaims: subject ? { iat: now, auth_time: Number(h("x-test-auth-time") ?? now) } : null,
       };
     },
   };

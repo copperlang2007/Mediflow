@@ -7,7 +7,7 @@
  * the deployment-config screen instead of a sign-in that cannot work.
  */
 import { initializeApp, type FirebaseApp } from "@firebase/app";
-import { getAuth, type Auth } from "@firebase/auth";
+import { browserLocalPersistence, indexedDBLocalPersistence, initializeAuth, type Auth } from "@firebase/auth";
 
 const env = import.meta.env as Record<string, string | undefined>;
 
@@ -26,7 +26,10 @@ let auth: Auth | null = null;
 export function firebaseAuth(): Auth | null {
   if (!authConfigured) return null;
   app ??= initializeApp(firebaseConfig);
-  auth ??= getAuth(app);
+  // initializeAuth without a popup/redirect resolver (getAuth() adds one): we
+  // only use email/password, and the resolver would load the auth-domain
+  // iframe and apis.google.com scripts on Safari/iOS, which the CSP blocks.
+  auth ??= initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
   return auth;
 }
 

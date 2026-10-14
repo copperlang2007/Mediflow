@@ -41,19 +41,26 @@ function TwoStep() {
   if (!firebaseUser) return null;
   const factors = multiFactor(firebaseUser).enrolledFactors;
 
-  async function removeAndReplace() {
-    setError(null);
-    try {
-      for (const f of multiFactor(firebaseUser!).enrolledFactors) await multiFactor(firebaseUser!).unenroll(f);
-      setMode("enrol");
-    } catch (err) {
-      setError(authErrorMessage(err, "Couldn't remove the old authenticator. Try again."));
-      setMode("view");
+  // Replace = add the new authenticator first, then remove the old ones, so a
+  // failure part-way never leaves the account without a second step. Removing
+  // the factor this sign-in used ends the sign-in, so errors there are
+  // expected; the user signs in again with the new code either way.
+  async function replaceDone(oldFactorUids: string[]) {
+    for (const uid of oldFactorUids) {
+      try {
+        await multiFactor(firebaseUser!).unenroll(uid);
+      } catch {
+        // Session ended by the removal, or already gone: nothing to do.
+      }
     }
+    await signOut({ redirectUrl: signInAgain });
   }
 
-  if (mode === "enrol") return <TotpEnrollment user={firebaseUser} onEnrolled={() => void signOut({ redirectUrl: signInAgain })} />;
-  if (mode === "confirm") return <Reauthenticate user={firebaseUser} action="Remove and set up a new one" onDone={() => void removeAndReplace()} />;
+  if (mode === "enrol") {
+    const oldUids = factors.map((f) => f.uid);
+    return <TotpEnrollment user={firebaseUser} onEnrolled={() => void replaceDone(oldUids)} />;
+  }
+  if (mode === "confirm") return <Reauthenticate user={firebaseUser} action="Set up the new one" onDone={() => setMode("enrol")} />;
 
   return factors.length ? (
     <div className="space-y-3">

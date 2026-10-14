@@ -3,7 +3,7 @@
  * All endpoints require super_admin or agency_admin role.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, gte, lte, sql, desc, count, isNull, lt, isNotNull, inArray } from "drizzle-orm";
+import { eq, and, gt, gte, lte, sql, desc, count, isNull, lt, isNotNull, inArray } from "drizzle-orm";
 import {
   db,
   auditLogTable,
@@ -406,7 +406,7 @@ async function liveSessionsOf(userId: string, orgId: string) {
   return db
     .select()
     .from(sessionActivityTable)
-    .where(and(eq(sessionActivityTable.orgId, orgId), gte(sessionActivityTable.expiresAt, new Date()), sql`(${prefix})`))
+    .where(and(eq(sessionActivityTable.orgId, orgId), gt(sessionActivityTable.expiresAt, new Date()), sql`(${prefix})`))
     .orderBy(desc(sessionActivityTable.lastActiveAt));
 }
 

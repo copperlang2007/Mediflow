@@ -3,7 +3,7 @@ import { getAuth } from "../lib/auth/identity";
 import { resolveUserId } from "../lib/auth/users";
 import { randomUUID } from "node:crypto";
 import { db, usersTable, organizationsTable, orgSettingsTable, sessionActivityTable, auditLogTable } from "@workspace/db";
-import { eq, inArray, lt } from "drizzle-orm";
+import { eq, gt, inArray, lt } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
 import { isDemoMode, demoUserId } from "../lib/demoMode";
 import { logger } from "../lib/logger";
@@ -39,6 +39,12 @@ export async function getOrgSessionTimeout(orgId: string): Promise<number> {
  * - On startup the DB provides authoritative last-active timestamps.
  */
 const sessionLocalCache = new Map<string, { lastActiveAt: number; syncedAt: number; expired?: boolean }>();
+/**
+ * How long an ended session's row is kept, and so the oldest sign-in that is
+ * accepted at all: a sign-in older than this can no longer prove (by its row)
+ * that it was not ended, so it must sign in again.
+ */
+export const SESSION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SESSION_CACHE_SYNC_MS = 60_000; // re-read from DB after 60 s
 
 /**
@@ -94,29 +100,36 @@ async function checkAndUpdateSessionActivity(
     return markExpired(sessionId, lastActiveAt);
   }
 
-  // Active — upsert new last-active timestamp into DB
+  // Active — upsert new last-active timestamp into DB. Conditional: a row that
+  // has expired meanwhile (timed out, or ended by an admin on another
+  // instance) is never brought back; the write is refused and so is the request.
   const expiresAt = new Date(now + timeoutMs);
-  await db
+  const written = await db
     .insert(sessionActivityTable)
     .values({ sessionId, orgId, lastActiveAt: new Date(now), expiresAt })
     .onConflictDoUpdate({
       target: sessionActivityTable.sessionId,
       set: { lastActiveAt: new Date(now), expiresAt },
-    });
-  sessionLocalCache.set(sessionId, { lastActiveAt: now, syncedAt: now });
+      setWhere: gt(sessionActivityTable.expiresAt, new Date(now)),
+    })
+    .returning({ sessionId: sessionActivityTable.sessionId });
+  if (!written.length) return markExpired(sessionId, lastActiveAt);
+  // syncedAt is kept from the last read: the row is re-read within a minute
+  // even while the session is busy.
+  sessionLocalCache.set(sessionId, { lastActiveAt: now, syncedAt: cached?.syncedAt ?? now });
 
   return "ok";
 }
 
 // Periodic cleanup of long-dead session rows and stale local cache entries.
-// Expired rows are kept for 30 days, longer than Identity Platform keeps a
-// sign-in alive without the user signing in again, so an expired session can
-// never be mistaken for a new one.
+// Expired rows are kept for SESSION_RETENTION_MS, and requireAuth refuses any
+// sign-in older than that, so an expired session can never come back as a
+// "new" one after its row is gone.
 // Runs every 15 minutes; won't block process exit.
 setInterval(
   async () => {
     try {
-      await db.delete(sessionActivityTable).where(lt(sessionActivityTable.expiresAt, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)));
+      await db.delete(sessionActivityTable).where(lt(sessionActivityTable.expiresAt, new Date(Date.now() - SESSION_RETENTION_MS)));
     } catch {
       // non-fatal
     }
@@ -343,6 +356,14 @@ export const requireAuth = async (
     return;
   }
 
+  // A sign-in older than the retention window has no row left to say whether
+  // it was ended or timed out; sign in again.
+  const authTime = auth.sessionClaims?.auth_time;
+  if (authTime && Date.now() - authTime * 1000 > SESSION_RETENTION_MS) {
+    res.status(401).json({ error: "Session expired due to inactivity", code: "SESSION_TIMEOUT" });
+    return;
+  }
+
   // Session inactivity enforcement — true idle timeout backed by durable DB store
   const sessionId = auth.sessionId;
   if (sessionId) {
@@ -479,9 +500,11 @@ export function requireDestructiveConfirm(req: Request, res: Response, next: Nex
 export async function expireSessions(sessionIds: string[]): Promise<void> {
   if (!sessionIds.length) return;
   const now = new Date();
+  // Expired as of now (not epoch): the row is kept for the full retention
+  // window like any ended session, and the conditional upsert never revives it.
   await db
     .update(sessionActivityTable)
-    .set({ expiresAt: new Date(0) })
+    .set({ expiresAt: now })
     .where(inArray(sessionActivityTable.sessionId, sessionIds));
   for (const id of sessionIds) markExpired(id, now.getTime());
 }

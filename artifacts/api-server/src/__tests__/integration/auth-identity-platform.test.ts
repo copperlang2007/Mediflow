@@ -134,6 +134,9 @@ describe("verifying an Identity Platform ID token", () => {
       expect((await run({ authorization: `Bearer ${t}` })).subject).toBe("uid-123");
       expect((await run({ cookie: `theme=dark; __session=${encodeURIComponent(t)}` })).subject).toBe("uid-123");
       expect((await run({ authorization: "Bearer forged" })).subject).toBeNull();
+      // A stale cookie from an earlier sign-in next to the current one: the valid one wins.
+      const stale = await sign({}, { exp: Math.floor(Date.now() / 1000) - 600 });
+      expect((await run({ cookie: `__session=${stale}; __session=${encodeURIComponent(t)}` })).subject).toBe("uid-123");
       expect((await run({})).subject).toBeNull();
     } finally {
       delete process.env.IDENTITY_PLATFORM_PROJECT_ID;
@@ -275,6 +278,45 @@ describe("admin session controls", () => {
       .from(schema.auditLogTable)
       .where(and(eq(schema.auditLogTable.action, "revoke_session"), eq(schema.auditLogTable.resourceId, s1)));
     expect(audit?.changes).toMatchObject({ targetUserId: target.id });
+  });
+
+  it("a session ended on another server stays ended, even while this server remembers it as active", async () => {
+    const s = sessionOf(target.id, 1_800_000_600);
+    expect((await signIn(s)).status).toBe(200);
+    // Another instance ends it (admin revoke): only the row changes, this instance's cache is still warm.
+    await handle.db
+      .update(schema.sessionActivityTable)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.sessionActivityTable.sessionId, s));
+    const refused = await signIn(s);
+    expect(refused.status).toBe(401);
+    expect(refused.body.code).toBe("SESSION_TIMEOUT");
+    const [row] = await handle.db.select().from(schema.sessionActivityTable).where(eq(schema.sessionActivityTable.sessionId, s));
+    expect(row!.expiresAt.getTime()).toBeLessThan(Date.now());
+  });
+
+  it("a revoked session's row is kept as ended (not epoch), so cleanup keeps it for the full retention window", async () => {
+    const s = sessionOf(target.id, 1_800_000_700);
+    await signIn(s);
+    const before = Date.now();
+    await request(app).delete(`/api/admin/sessions/${encodeURIComponent(s)}`).set(withAuth(admin.id));
+    const [row] = await handle.db.select().from(schema.sessionActivityTable).where(eq(schema.sessionActivityTable.sessionId, s));
+    expect(row!.expiresAt.getTime()).toBeGreaterThanOrEqual(before - 1000);
+  });
+
+  it("refuses a sign-in older than the retention window: no row could still prove it was not ended", async () => {
+    const { SESSION_RETENTION_MS } = await import("../../middlewares/requireAuth");
+    const old = Math.floor((Date.now() - SESSION_RETENTION_MS) / 1000) - 60;
+    const res = await request(app)
+      .get("/api/users/me")
+      .set({ ...withAuth(target.id, sessionOf(target.id, old)), "x-test-auth-time": String(old) });
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe("SESSION_TIMEOUT");
+    const recent = Math.floor(Date.now() / 1000) - 3600;
+    const ok = await request(app)
+      .get("/api/users/me")
+      .set({ ...withAuth(target.id, sessionOf(target.id, recent)), "x-test-auth-time": String(recent) });
+    expect(ok.status).toBe(200);
   });
 
   it("another agency's admin can neither list nor revoke them", async () => {
