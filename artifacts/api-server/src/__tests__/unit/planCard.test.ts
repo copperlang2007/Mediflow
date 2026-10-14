@@ -1,0 +1,174 @@
+import { describe, expect, it } from "vitest";
+import fixtures from "../fixtures/planCards.json";
+import { buildPlanCard, CARD_COLUMNS, formatMoney, snpTypeLabel, type Sections } from "../../lib/planCard";
+
+/**
+ * Real CMS PBP 2027 plans, trimmed to the columns the card reads. Expected
+ * values were checked by hand against the raw CMS fields printed next to them.
+ */
+const byCase = Object.fromEntries(
+  (fixtures as { case: string; sections: Sections }[]).map((f) => [f.case, buildPlanCard(f.sections)]),
+);
+
+describe("buildPlanCard on real 2027 plans", () => {
+  it("HMO with a Part B giveback", () => {
+    const c = byCase.hmo_zero_giveback!;
+    expect(c.premium).toBe(0);
+    expect(c.partBGiveback).toBe(113);
+    expect(c.moopInNetwork).toBe(9850);
+    expect(c.deductible).toBeNull(); // CMS left the question blank: not claimed
+    expect(c.costs.pcp).toEqual({ kind: "copay", label: "$0" });
+    expect(c.costs.specialist?.label).toBe("$40");
+    expect(c.costs.er?.label).toBe("$115");
+    expect(c.costs.urgentCare?.label).toBe("$40");
+    expect(c.costs.hospital).toBe("$385 per day, days 1–7; $0 for days 8–90");
+    expect(c.extras.vision).toEqual({ exam: true, eyewear: true, allowance: "$100 per year" });
+    expect(c.extras.dental.maximum).toBeNull();
+    expect(c.extras.meals).toBe(true);
+    expect(c.extras.otc.offered).toBe(false);
+    expect(c.drugs).toEqual({ covered: true, deductible: "Standard Part D deductible" });
+  });
+
+  it("PPO with a deductible, combined limit and coinsurance", () => {
+    const c = byCase.ppo_combined_coins!;
+    expect(c.deductible).toBe(800);
+    expect(c.moopInNetwork).toBe(9850);
+    expect(c.moopCombined).toBe(14800);
+    expect(c.costs.pcp).toEqual({ kind: "none", label: "$0" });
+    expect(c.costs.specialist).toEqual({ kind: "coinsurance", label: "30%" });
+    expect(c.costs.urgentCare?.label).toBe("0%–20%");
+    expect(c.costs.hospital).toBe("$2,241 per stay");
+    expect(c.extras.dental.maximum).toBe("$3,000 per year (preventive + comprehensive)");
+    expect(c.extras.otc).toEqual({ offered: true, allowance: "$50 per quarter" });
+    expect(c.extras.fitness).toBe(true);
+    expect(c.drugs.deductible).toBe("$461");
+  });
+
+  it("D-SNP with no cost sharing", () => {
+    const c = byCase.dsnp_zero_share!;
+    expect(c.costs.pcp?.label).toBe("$0");
+    expect(c.costs.specialist?.kind).toBe("none");
+    expect(c.costs.er?.label).toBe("$0");
+    expect(c.costs.hospital).toBe("$0 per stay");
+    expect(c.extras.transportation).toBe(true);
+    expect(c.extras.otc.allowance).toBe("$210 per quarter");
+  });
+
+  it("plan with a monthly premium and a deductible", () => {
+    const c = byCase.premium_deductible!;
+    expect(c.premium).toBe(2);
+    expect(c.deductible).toBe(400);
+    expect(c.moopInNetwork).toBe(4450);
+    expect(c.moopCombined).toBe(4450);
+    expect(c.drugs.deductible).toBe("$450");
+  });
+
+  it("plan without drug coverage", () => {
+    const c = byCase.no_drugs!;
+    expect(c.drugs).toEqual({ covered: false, deductible: null });
+    expect(c.deductible).toBe(0); // CMS says "no" explicitly
+    expect(c.partBGiveback).toBe(140.5);
+  });
+
+  it("coinsurance everywhere, hospital left unreadable instead of guessed", () => {
+    const c = byCase.hospital_coins!;
+    expect(c.costs.pcp).toEqual({ kind: "coinsurance", label: "20%" });
+    expect(c.costs.hospital).toBeNull();
+  });
+
+  it("copay ranges", () => {
+    const c = byCase.urgent_range!;
+    expect(c.costs.specialist?.label).toBe("$0–$35");
+    expect(c.costs.urgentCare?.label).toBe("$0–$50");
+    expect(c.extras.vision.allowance).toBe("$250 every 2 years");
+    expect(c.extras.hearing.allowance).toBe("$700 per year");
+  });
+
+  it("zero drug deductible and a combined dental limit", () => {
+    const c = byCase.dental_shared!;
+    expect(c.drugs.deductible).toBe("$0");
+    expect(c.moopInNetwork).toBe(1100);
+    expect(c.extras.dental.maximum).toBe("$3,000 per year (preventive + comprehensive)");
+  });
+
+  it("per-ear hearing allowance and a monthly OTC allowance", () => {
+    const c = byCase.drug_std_ded!;
+    expect(c.extras.hearing.allowance).toBe("$1,500 per year per ear");
+    expect(c.extras.otc.allowance).toBe("$100 per month");
+  });
+});
+
+describe("buildPlanCard never guesses", () => {
+  it("returns nulls and false flags when nothing is known", () => {
+    const c = buildPlanCard({});
+    expect(c.premium).toBeNull();
+    expect(c.moopInNetwork).toBeNull();
+    expect(c.costs).toEqual({ pcp: null, specialist: null, er: null, urgentCare: null, hospital: null });
+    expect(c.drugs).toEqual({ covered: null, deductible: null });
+    expect(c.extras.dental).toEqual({ preventive: false, comprehensive: false, maximum: null });
+  });
+
+  it("a 'yes' copay with no amount stays unknown, not $0", () => {
+    const c = buildPlanCard({ b7_health_prof: [{ pbp_b7a_copay_yn: "1", pbp_b7a_coins_yn: "2" }] });
+    expect(c.costs.pcp).toBeNull();
+  });
+
+  it("ignores an allowance with an unknown period", () => {
+    const c = buildPlanCard({
+      b13_other_services: [
+        { pbp_b13b_bendesc_otc: "1", pbp_b13b_maxplan_yn: "1", pbp_b13b_maxplan_amt: "75.00", pbp_b13b_otc_maxplan_per: "6" },
+      ],
+    });
+    expect(c.extras.otc).toEqual({ offered: true, allowance: null });
+  });
+
+  it("optional-only benefits (type 3) are not counted as included", () => {
+    const c = buildPlanCard({
+      b16_dental: [{ pbp_b16b_bendesc_oe_amo: "3", pbp_b16c_bendesc_rs_amo: "3" }],
+      b14_preventive: [{ pbp_b14c_bendesc_amo_mhc: "3" }],
+    });
+    expect(c.extras.dental.preventive).toBe(false);
+    expect(c.extras.dental.comprehensive).toBe(false);
+    expect(c.extras.fitness).toBe(false);
+  });
+
+  it("a tiered hospital structure is left out of the card", () => {
+    const c = buildPlanCard({
+      b1a_inpat_hosp: [{ pbp_b1a_cost_vary_tiers_yn: "1", pbp_b1a_copay_yn: "1", pbp_b1a_copay_mcs_amt_t1: "300.00" }],
+    });
+    expect(c.costs.hospital).toBeNull();
+  });
+});
+
+describe("CARD_COLUMNS", () => {
+  it("lists only lower-case column names (the API builds SQL from them)", () => {
+    for (const cols of Object.values(CARD_COLUMNS)) {
+      for (const c of cols) expect(c).toMatch(/^[a-z0-9_]+$/);
+    }
+  });
+  it("covers every column the fixtures use", () => {
+    for (const f of fixtures as { sections: Sections }[]) {
+      for (const [section, rows] of Object.entries(f.sections)) {
+        for (const key of Object.keys(rows[0] ?? {})) expect(CARD_COLUMNS[section]).toContain(key);
+      }
+    }
+  });
+});
+
+describe("formatMoney", () => {
+  it("drops cents on whole dollars", () => {
+    expect(formatMoney(1500)).toBe("$1,500");
+    expect(formatMoney(140.5)).toBe("$140.50");
+  });
+});
+
+describe("snpTypeLabel", () => {
+  it("turns CMS codes into words and leaves anything else alone", () => {
+    expect(snpTypeLabel("3")).toBe("Dual-Eligible");
+    expect(snpTypeLabel("4")).toBe("Chronic or Disabling Condition");
+    expect(snpTypeLabel("1")).toBe("Institutional");
+    expect(snpTypeLabel("9")).toBe("9");
+    expect(snpTypeLabel(null)).toBeNull();
+    expect(snpTypeLabel("")).toBeNull();
+  });
+});

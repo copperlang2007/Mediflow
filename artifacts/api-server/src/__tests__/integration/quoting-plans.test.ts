@@ -65,7 +65,7 @@ beforeAll(async () => {
 
   await handle.db.insert(cmsPlanBenefitPackagesTable).values([
     pkgRow("H1111_001_0", "Alpha Saver (HMO)"),
-    pkgRow("H2222_001_0", "Beta 100% Plus", { orgName: "Zed Co", orgMarketingName: "Zed", isSnp: true, snpType: "Dual-Eligible" }),
+    pkgRow("H2222_001_0", "Beta 100% Plus", { orgName: "Zed Co", orgMarketingName: "Zed", isSnp: true, snpType: "3" }),
     pkgRow("H3333_800_0", "Employer Only", { isEmployerGroup: true }),
     pkgRow("H4444_001_0", "Old Year", { planYear: 2026 }),
   ] as never);
@@ -82,6 +82,20 @@ beforeAll(async () => {
     { planYear: 2027, bidId: "H1111_001_0", section: "b16_dental", rowSeq: 1, data: { a: "2" } },
     { planYear: 2027, bidId: "H1111_001_0", section: "b16_dental", rowSeq: 0, data: { a: "1" } },
     { planYear: 2027, bidId: "H1111_001_0", section: "b1_inpat", rowSeq: 0, data: { b: "1" } },
+    // What the plan card reads (real CMS column names; unrelated keys are ignored).
+    {
+      planYear: 2027, bidId: "H1111_001_0", section: "section_d", rowSeq: 0,
+      data: { pbp_d_mplusc_premium: "0.00", pbp_d_out_pocket_amt_yn: "1", pbp_d_out_pocket_amt: "5900.00", pbp_d_noise: "x" },
+    },
+    {
+      planYear: 2027, bidId: "H1111_001_0", section: "b7_health_prof", rowSeq: 0,
+      data: { pbp_b7a_copay_yn: "1", pbp_b7a_coins_yn: "2", pbp_b7a_copay_amt_mc_min: "0.00", pbp_b7a_copay_amt_mc_max: "0.00" },
+    },
+    // A second row of a card section must not change the card (only row 0 is read).
+    {
+      planYear: 2027, bidId: "H1111_001_0", section: "b7_health_prof", rowSeq: 1,
+      data: { pbp_b7a_copay_yn: "1", pbp_b7a_coins_yn: "2", pbp_b7a_copay_amt_mc_min: "99.00", pbp_b7a_copay_amt_mc_max: "99.00" },
+    },
   ]);
 });
 
@@ -147,10 +161,15 @@ describe("quoting plans", () => {
     const res = await get("/api/quoting/plans/H1111_001_0");
     expect(res.status).toBe(200);
     expect(res.body.plan.planName).toBe("Alpha Saver (HMO)");
-    expect(res.body.sections).toEqual([
-      { section: "b16_dental", rows: [{ a: "1" }, { a: "2" }] },
-      { section: "b1_inpat", rows: [{ b: "1" }] },
+    expect(res.body.sections.map((x: { section: string }) => x.section)).toEqual([
+      "b16_dental",
+      "b1_inpat",
+      "b7_health_prof",
+      "section_d",
     ]);
+    expect(res.body.sections[0]).toEqual({ section: "b16_dental", rows: [{ a: "1" }, { a: "2" }] });
+    expect(res.body.sections[2].rows).toHaveLength(2); // all rows, in order
+    expect(res.body.sections[2].rows[1].pbp_b7a_copay_amt_mc_min).toBe("99.00");
   });
 
   it("404s for employer group and unknown ids", async () => {
@@ -182,5 +201,36 @@ describe("quoting plans", () => {
     const b = await get(url, otherAdmin.id);
     expect(b.status).toBe(200);
     expect(b.body).toEqual(a.body);
+  });
+  it("adds a decoded plan card to each plan in a county search", async () => {
+    const res = await get("/api/quoting/plans?state=TX&countyCode=45910");
+    expect(res.status).toBe(200);
+    const alpha = res.body.data.find((p: { bidId: string }) => p.bidId === "H1111_001_0");
+    expect(alpha.card.premium).toBe(0);
+    expect(alpha.card.moopInNetwork).toBe(5900);
+    expect(alpha.card.costs.pcp).toEqual({ kind: "copay", label: "$0" });
+    expect(alpha.card.costs.specialist).toBeNull(); // not in the data: never guessed
+    expect(JSON.stringify(res.body)).not.toContain("pbp_d_noise");
+  });
+
+  it("gives plans with no benefit rows a null card instead of failing", async () => {
+    const res = await get("/api/quoting/plans?state=FL&countyCode=10010");
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].bidId).toBe("H2222_001_0");
+    expect(res.body.data[0].card).toBeNull();
+  });
+
+  it("returns the card with the plan detail", async () => {
+    const res = await get("/api/quoting/plans/H1111_001_0");
+    expect(res.status).toBe(200);
+    expect(res.body.card.moopInNetwork).toBe(5900);
+    expect(res.body.sections.length).toBeGreaterThan(0);
+  });
+
+  it("shows the special-needs type in words, not as a CMS code", async () => {
+    const res = await get("/api/quoting/plans?state=FL&countyCode=10010");
+    expect(res.body.data[0].snpType).toBe("Dual-Eligible");
+    const detail = await get("/api/quoting/plans/H2222_001_0");
+    expect(detail.body.plan.snpType).toBe("Dual-Eligible");
   });
 });

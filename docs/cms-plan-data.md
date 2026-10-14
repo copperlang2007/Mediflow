@@ -28,9 +28,40 @@ Things a reader must know:
   `GET /quoting/plan-areas/states`, `/quoting/plan-areas/counties?state=`,
   `/quoting/plans?state=&countyCode=&q=&snp=` and `/quoting/plans/:bidId`
   (latest plan year, employer groups hidden, `contact:read`). The Quoting page
-  "Plan Comparison" tab uses them (county search, raw CMS fields per plan). Regional
-  plans (PDP), Medigap and decoded premiums/drug costs are not shown yet. The
-  tables are listed in `GLOBAL_TABLES` in `tenant-isolation.test.ts`.
+  "Plan Comparison" tab uses them. Regional plans (PDP) and Medigap are not shown
+  yet. The tables are listed in `GLOBAL_TABLES` in `tenant-isolation.test.ts`.
+
+## Plan cards
+
+Each plan in a county search comes back with a `card`, built by
+`artifacts/api-server/src/lib/planCard.ts` from the plan's raw CMS rows; the
+Quoting page shows it as a card (and a side-by-side compare of up to 4).
+
+What a card shows, and the CMS columns it reads (checked against the CMS data
+dictionary and against value distributions across all individual-market plans):
+
+| Card field | CMS source |
+| --- | --- |
+| Monthly premium | `section_d.pbp_d_mplusc_premium` (health plan only) |
+| Part B premium paid back | `pbp_d_mco_pay_reduct_yn` / `_amt` |
+| Out-of-pocket max | `pbp_d_out_pocket_amt` (in-network), `pbp_d_comb_max_enr_amt` (combined, PPOs) |
+| Medical deductible | `pbp_d_ann_deduct_yn` / `_amt` (shown only when CMS answers; a blank answer is not claimed as $0) |
+| Primary care, specialist | `b7_health_prof` `pbp_b7a_*`, `pbp_b7d_*` |
+| ER, urgent care | `b4_emerg_urgent` `pbp_b4a_*`, `pbp_b4b_*` |
+| Hospital stay | `b1a_inpat_hosp` `pbp_b1a_copay_mcs_*` ("Copayment for Medicare-covered stay", day ranges) |
+| Dental, vision, hearing, OTC, fitness, meals, rides | `b16`, `b17`, `b18`, `b13`, `b14`, `b10_amb_trans` (included only when the benefit type is mandatory/both, never optional) |
+| Drug coverage and deductible | `mrx.mrx_drug_ben_yn`, `mrx_alt_ded_charge` / `_amount` |
+
+Rules the decoder follows: a service with copay "no" and coinsurance "no" has no
+cost share ($0); a "yes" with no readable amount stays unknown; tiered hospital
+structures are left out of the card; unknown shows "See details", never a guess.
+
+**Not in the CMS plan benefit file, so never shown on a card:** the Part D (drug
+plan) premium, star ratings, provider networks, drug lists (formularies) and
+Medigap. The premium on a card is the health plan premium only, and cards for
+plans with drug coverage say so. A dual-eligible (D-SNP) card also notes that
+Medicaid may cover the cost-sharing shown. Adding the drug premium and star
+ratings needs the CMS Landscape / Star Ratings files.
 
 ## Loading a new extract (yearly, and each CMS quarterly refresh)
 

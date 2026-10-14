@@ -8,20 +8,20 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-14 — Recording player failure message (see session log)._
+_Last updated: 2026-10-14 — Merged current main into recording-player PR #298 (see session log)._
 
 ### Health dashboard
 
 | Item | Status | Detail |
 | --- | --- | --- |
-| `main` HEAD | `c37dadb` (2026-10-14) | "Call scoring: listen to the recording from the call page (#297)". Re-check: this row goes stale within hours. |
-| CI: typecheck + test | Green | Run 37867735833 on `f821a54` (2026-10-09) |
+| `main` HEAD | `bb146d7` (2026-10-14) | "Quoting: clean plan cards from CMS 2027 benefit data (#296)". Re-check: this row goes stale within hours. |
+| CI: typecheck + test | Green | [Run 38630478682](https://github.com/copperlang2007/Mediflow/actions/runs/38630478682) on `c37dadb` passed; the newer main commit's dependency-free smoke [run 38638359238](https://github.com/copperlang2007/Mediflow/actions/runs/38638359238) also passed. |
 | CI: `pnpm audit (moderate)` | **Green** — run 37867735833 on `f821a54` passed. Was red on main from 2026-10-08 when four advisories (proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate) were published | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
 | CI: migration journal | Green | Run 37867735833 on `f821a54` |
 | Production deploy (GCP Cloud Run) | **Green** at `f821a54` (run 37867735824), `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
-| Open PRs | Query GitHub live | As of 2026-10-14: #298 (recording player failure message, branch `claudemoogs/recording-player-message`). #297 (recording playback) merged as `c37dadb`; #293, #294 merged earlier. |
+| Open PRs | Query GitHub live | As of 2026-10-14: #295 (Identity Platform sign-in) and #298 (recording player failure message, branch `claudemoogs/recording-player-message`). #296 plan cards and #297 recording playback merged. |
 | Migration high-water mark | `0073_call_recordings_fetching` on main (landed with #289; checked on `origin/main` 2026-10-14). Next free number is 0074 unless an open PR claims it | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
@@ -92,6 +92,15 @@ ones with no inbound references.
 
 ## Session log
 
+### 2026-10-14 — Merge current main into recording-player PR #298 — GitHub Copilot — branch `claudemoogs/recording-player-message`
+- **Outcome:** done
+- **Changed:** merged `main` at `bb146d7` into PR #298; the only conflict was this state ledger. Preserved the newer main entries and current-state details alongside the recording-player entry.
+- **Verified:** `corepack pnpm install --frozen-lockfile`; `pnpm vitest run artifacts/web-app/src/__tests__/call-scoring-recording-player.test.tsx artifacts/api-server/src/__tests__/integration/call-scoring-playback.test.ts artifacts/api-server/src/__tests__/integration/csp-media-src.test.ts` (3 files, 26 tests passed); `pnpm run typecheck`; `git diff --cached --check`.
+- **Left undone / broken:** none known.
+- **Decisions made:** none.
+- **Next agent should:** review PR #298 after checks pass.
+- **Needs a human:** nothing.
+
 ### 2026-10-14 — Recording player: honest message when playback fails — Claude Code — branch `claudemoogs/recording-player-message` (PR #298)
 - **Outcome:** done
 - **Changed:** follow-up to #297 (merged as `c37dadb` just before this fix was pushed). `RecordingPlayer.tsx` now shows the "format your browser cannot play" message only when the media error is code 4 AND the server gave a content type AND `canPlayType()` returns an empty string. Every other failure (403/404/expired link, CSP block, or a codec the browser says "maybe" to) shows a neutral message that names both causes and says to ask the agency admin if a second try also fails.
@@ -101,6 +110,24 @@ ones with no inbound references.
 - **Decisions made:** none
 - **Next agent should:** see the #297 entry below.
 - **Needs a human:** Michael to review, merge and deploy; Morgan to press Listen on a real call.
+
+### 2026-10-14 — Resolve plan-card branch merge conflict — GitHub Copilot — branch `claude/admiring-allen-b6wum5`
+- **Outcome:** done
+- **Changed:** merged main `c37dadb` into PR #296 in commit `06d97d6`; the only conflict was this ledger. Preserved the plan-card and recording-playback session entries and both branches' application changes. Initial publishing was rejected by GitHub (`GH013`); the subsequent publish succeeded, verified with `git ls-remote` at `757a754`.
+- **Verified:** `pnpm install --frozen-lockfile`; `pnpm run typecheck`; `pnpm test artifacts/api-server/src/__tests__/unit/planCard.test.ts artifacts/api-server/src/__tests__/integration/quoting-plans.test.ts artifacts/web-app/src/__tests__/plan-cards.test.tsx artifacts/api-server/src/__tests__/integration/call-scoring-playback.test.ts artifacts/api-server/src/__tests__/integration/csp-media-src.test.ts artifacts/web-app/src/__tests__/call-scoring-recording-player.test.tsx` (6 files, 72 tests passed); `git diff --check`. Main deploy [38630478548](https://github.com/copperlang2007/Mediflow/actions/runs/38630478548) passed; main CI [38630478682](https://github.com/copperlang2007/Mediflow/actions/runs/38630478682) is in progress.
+- **Left undone / broken:** full suite and production behavior not rechecked in this merge-only session; existing review suggestions remain outside this request. Automated review unavailable; independent read-only merge review found no significant issues. CodeQL skipped the documentation-only resolution.
+- **Decisions made:** none.
+- **Next agent should:** review and merge PR #296 once checks pass.
+- **Needs a human:** review plan-card wording for CMS marketing-rule compliance before use with beneficiaries.
+
+### 2026-10-14 — Plan cards on the Quoting page (decoded premium, costs, extras, compare) — Claude Code — branch `claude/admiring-allen-b6wum5`
+- **Outcome:** done (code); not yet seen by real users until merged and deployed
+- **Changed:** `GET /quoting/plans` now returns a decoded `card` per plan (and `/quoting/plans/:bidId` returns one) from new `lib/planCard.ts`; the Quoting page shows plans as cards with filters (premium, drugs, dental, vision, hearing, OTC, fitness, Part B giveback), sort, plan-type filter, "lowest here" badges and a side-by-side compare of up to 4 (`components/quoting/*`). Also fixes the special-needs type showing as a CMS code ("3") instead of words ("Dual-Eligible").
+- **Verified:** `pnpm run typecheck` clean; new tests `planCard.test.ts` (real 2027 plans, hand-checked), `quoting-plans.test.ts`, `plan-cards.test.tsx`; rendered in the demo build at 375/768/1440 px with real 2027 plan data, no horizontal overflow, compare dialog checked. Full `pnpm test`: 237 files / 2,659 tests passed. **NOT verified:** against the production database (the card query runs on PGlite in tests and on local PostgreSQL 16 data, not on Cloud SQL).
+- **Left undone / broken:** The CMS plan benefit file has no Part D premium, star ratings, provider networks or formularies, so cards show the health plan premium only and say so. PDP and Medigap plans are not covered. ZIP search still needs a ZIP→county lookup. Medical deductible shows only when CMS states it (most plans leave it blank).
+- **Decisions made:** conservative decoding: anything unreadable shows "See details" instead of a guessed number (see `docs/cms-plan-data.md`, "Plan cards").
+- **Next agent should:** load the CMS Landscape and Star Ratings files (Part D premium, stars) so cards can show a true total premium and star rating; then ZIP→county search.
+- **Needs a human:** review the card wording for CMS marketing-rule compliance before agents show it to beneficiaries.
 
 ### 2026-10-14 — Call scoring: listen to the recording — Claude Code — branch `claudemoogs/call-recording-playback-v2` (PR #297)
 - **Outcome:** done (code); not tried against real audio
