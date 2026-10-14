@@ -186,6 +186,11 @@ describe("which user a sign-in is", () => {
     expect(await users.resolveUserId(auth(`uid-${randomUUID()}`, "newstyle@agency.example"))).toBeNull();
   });
 
+  it("matches the Clerk id prefix literally (in LIKE, `_` would match any character)", async () => {
+    await seedUser(handle.db, { id: `userX${randomUUID()}`, orgId: org.id, email: "lookalike@agency.example" });
+    expect(await users.resolveUserId(auth(`uid-${randomUUID()}`, "lookalike@agency.example"))).toBeNull();
+  });
+
   it("a linked Clerk-era user signs in and uses the app as themselves", async () => {
     const legacy = await seedUser(handle.db, { id: `user_${randomUUID()}`, orgId: org.id, role: "agency_admin", email: "returning@agency.example" });
     const subject = `uid-${randomUUID()}`;
@@ -237,6 +242,21 @@ describe("creating an agency and accepting an invitation", () => {
     expect(res.status).toBe(409);
     expect(res.body.code).toBe("account_exists");
     expect(await handle.db.select().from(schema.usersTable).where(eq(schema.usersTable.id, subject))).toHaveLength(0);
+  });
+
+  it("two simultaneous sign-ups with one email create one agency, not two", async () => {
+    const send = (subject: string) =>
+      request(app)
+        .post("/api/auth/provision")
+        .set({ ...withAuth(subject), "x-test-email": "race@new-agency.example" })
+        .send({ fullName: "Racer", orgName: "Race Agency" });
+    const results = await Promise.all([send(`uid-${randomUUID()}`), send(`uid-${randomUUID()}`)]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    const rows = await handle.db
+      .select()
+      .from(schema.usersTable)
+      .where(eq(schema.usersTable.email, "race@new-agency.example"));
+    expect(rows).toHaveLength(1);
   });
 
   it("asks for a verified email before accepting an invitation", async () => {

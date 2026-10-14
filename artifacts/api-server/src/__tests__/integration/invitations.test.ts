@@ -165,7 +165,7 @@ describe("invitation lifecycle", () => {
     const newIdentityId = `identity-${randomUUID()}`;
     const accepted = await request(app)
       .post("/api/invitations/accept")
-      .set(withAuth(newIdentityId))
+      .set({ ...withAuth(newIdentityId), "x-test-email": "new.hire@alpha.test" })
       .send({ token, fullName: "Nora Newhire" });
 
     expect(accepted.status).toBe(201);
@@ -175,19 +175,36 @@ describe("invitation lifecycle", () => {
     expect(accepted.body.user.email).toBe("new.hire@alpha.test");
   });
 
+  it("refuses a sign-in whose verified email is not the invited address (a forwarded link is not enough)", async () => {
+    const created = await invite(adminA, { email: "intended@alpha.test" });
+    const token = new URL(created.body.acceptUrl).searchParams.get("token")!;
+    const wrong = await request(app)
+      .post("/api/invitations/accept")
+      .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": "someone.else@elsewhere.test" })
+      .send({ token, fullName: "Not Invited" });
+    expect(wrong.status).toBe(403);
+    expect(wrong.body.code).toBe("email_mismatch");
+    // The invitation is untouched: the right person can still accept it.
+    const right = await request(app)
+      .post("/api/invitations/accept")
+      .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": "Intended@Alpha.test" })
+      .send({ token, fullName: "Intended Person" });
+    expect(right.status).toBe(201);
+  });
+
   it("is single-use", async () => {
     const created = await invite(adminA, { email: "once@alpha.test" });
     const token = new URL(created.body.acceptUrl).searchParams.get("token")!;
 
     const first = await request(app)
       .post("/api/invitations/accept")
-      .set(withAuth(`identity-${randomUUID()}`))
+      .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": "once@alpha.test" })
       .send({ token, fullName: "First Arrival" });
     expect(first.status).toBe(201);
 
     const second = await request(app)
       .post("/api/invitations/accept")
-      .set(withAuth(`identity-${randomUUID()}`))
+      .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": "once@alpha.test" })
       .send({ token, fullName: "Second Arrival" });
     expect(second.status).toBe(410);
     expect(second.body.code).toBe("accepted");
@@ -206,7 +223,7 @@ describe("invitation lifecycle", () => {
 
     const accepted = await request(app)
       .post("/api/invitations/accept")
-      .set(withAuth(`identity-${randomUUID()}`))
+      .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": "stale@alpha.test" })
       .send({ token, fullName: "Too Late" });
 
     expect(accepted.status).toBe(410);
@@ -310,7 +327,7 @@ describe("seat accounting", () => {
 
     const accepted = await request(app)
       .post("/api/invitations/accept")
-      .set(withAuth(`identity-${randomUUID()}`))
+      .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": "downgraded@alpha.test" })
       .send({ token, fullName: "Late Joiner" });
 
     expect(accepted.status).toBe(402);
@@ -330,7 +347,7 @@ describe("seat accounting", () => {
 
     const accepted = await request(app)
       .post("/api/invitations/accept")
-      .set(withAuth(`identity-${randomUUID()}`))
+      .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": "last-seat@alpha.test" })
       .send({ token, fullName: "Last Seat" });
 
     expect(accepted.status).toBe(201);
@@ -348,22 +365,22 @@ describe("seat accounting", () => {
 
     await setSeats(orgA.id, 2);
 
-    const accept = (token: string) =>
+    const accept = (token: string, email: string) =>
       request(app)
         .post("/api/invitations/accept")
-        .set(withAuth(`identity-${randomUUID()}`))
+        .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": email })
         .send({ token, fullName: "Joiner" });
 
     // Still over the plan (adminA + two reservations = 3 > 2): refuse both,
     // rather than let a reservation quietly become an over-limit member.
-    expect((await accept(tokenOf(first))).status).toBe(402);
-    expect((await accept(tokenOf(second))).status).toBe(402);
+    expect((await accept(tokenOf(first), "first-in@alpha.test")).status).toBe(402);
+    expect((await accept(tokenOf(second), "second-in@alpha.test")).status).toBe(402);
 
     // Free one reservation: now exactly one seat's worth of room remains.
     await request(app)
       .delete(`/api/invitations/${second.body.invitation.id}`)
       .set(withAuth(adminA.id));
-    expect((await accept(tokenOf(first))).status).toBe(201);
+    expect((await accept(tokenOf(first), "first-in@alpha.test")).status).toBe(201);
   });
 });
 
