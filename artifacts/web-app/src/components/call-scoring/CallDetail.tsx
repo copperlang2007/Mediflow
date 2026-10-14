@@ -17,6 +17,7 @@ import { StatusPill } from "@/components/shared";
 import { AlertTriangle, LocateFixed, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DncResolveControls } from "./DncResolveControls";
+import { RecordingPlayer } from "./RecordingPlayer";
 import { SpeakerRoleControls } from "./SpeakerRoleControls";
 import {
   COMPLIANCE_TONE,
@@ -376,6 +377,7 @@ export function CallDetail({ transcriptId, canReview, onClose }: { transcriptId:
               </section>
               <section aria-label="Transcript" className="space-y-3 lg:sticky lg:top-0 lg:max-h-[80vh] lg:self-start lg:overflow-y-auto">
                 <h3 className="font-display text-base font-semibold">Transcript</h3>
+                {data.transcript.recordingAvailable && <RecordingPlayer transcriptId={data.transcript.id} />}
                 <TranscriptPane detail={data} jump={jump} />
               </section>
             </div>

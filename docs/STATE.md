@@ -8,7 +8,7 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-14 — Plan data readable in Quoting page (see session log)._
+_Last updated: 2026-10-14 — Call scoring recording playback (see session log)._
 
 ### Health dashboard
 
@@ -91,6 +91,15 @@ ones with no inbound references.
 ---
 
 ## Session log
+
+### 2026-10-14 — Call scoring: listen to the recording — Claude Code — branch `claudemoogs/call-recording-playback`
+- **Outcome:** done (code); not tried against real audio
+- **Changed:** call page now has a "Listen to the recording" button (`GET /api/call-scoring/transcripts/:id/audio`, 10-minute private link, listen logged before the link is issued, no-store, no download control). Reviewers hear any call in their agency; agents only their own. See `docs/call-scoring.md`.
+- **Verified:** `pnpm run typecheck` clean; `pnpm test` 236 files / 2625 tests pass, including 8 new server tests (scoping, cross-org, audit) and 7 new page tests.
+- **Left undone / broken:** not tested with a real EnrollHere recording (no production access). Unchecked: `GET /call-scoring/recordings` uses the `create` permission with org-only scope, so agents may be able to list other agents' recording metadata. Word accuracy and turn order are untouched. A sample from Morgan (pasted 2026-10-14) shows the whole call as one speaker with only the client's side, so every agent-script item auto-failed; not yet diagnosed.
+- **Decisions made:** none
+- **Next agent should:** find why a scored recording can contain only one speaker's words and why that fails closed to auto-fail instead of "needs review".
+- **Needs a human:** Michael to review and deploy; Morgan to press Listen on a real call afterwards.
 
 ### 2026-10-14 — Plan data readable in Quoting page (state/county plan browser) — Claude Code — branch `claudemoogs/quirky-babbage-2e4cjj`
 - **Outcome:** partial
