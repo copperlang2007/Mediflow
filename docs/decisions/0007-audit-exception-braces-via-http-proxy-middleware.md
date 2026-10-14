@@ -68,13 +68,10 @@ or when a fixed `braces` release is published.
 
 `scripts/src/check-braces-audit-exception.ts` (CI step "Verify braces audit
 exception", `pnpm --filter @workspace/scripts check:braces-audit-exception`)
-enforces both invalidation conditions automatically. It fails if the
-production dependency path to `braces` from `@workspace/api-server` is
-anything other than
-`http-proxy-middleware@3.0.7 > micromatch@4.0.8 > braces@3.0.3` (so a version
-bump or a new path forces re-review), if `createProxyMiddleware` options are
-not an inline object literal it can inspect, if they set `pathFilter`, or if
-the number of `createProxyMiddleware` calls changes.
+enforces this automatically. Since 2026-10-14 (Clerk removed, ADR 0006) it
+fails if `@workspace/api-server` has `braces` anywhere in its production
+dependency tree, or if `createProxyMiddleware` appears anywhere in API source,
+so the exception can never silently cover production code again.
 
 ## Reversibility
 
