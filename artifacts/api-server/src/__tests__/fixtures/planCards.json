@@ -1,0 +1,971 @@
+[
+ {
+  "case": "hmo_zero_giveback",
+  "bidId": "H1036_334_0",
+  "planName": "Humana Gold Plus Giveback H1036-334 (HMO)",
+  "sections": {
+   "section_d": [
+    {
+     "pbp_d_out_pocket_amt_yn": "1",
+     "pbp_d_out_pocket_amt": "9850.00",
+     "pbp_d_mplusc_premium": "0.00",
+     "pbp_d_mco_pay_reduct_yn": "1",
+     "pbp_d_mco_pay_reduct_amt": "113.00"
+    }
+   ],
+   "b7_health_prof": [
+    {
+     "pbp_b7a_coins_yn": "2",
+     "pbp_b7a_copay_yn": "1",
+     "pbp_b7a_copay_amt_mc_min": "0.00",
+     "pbp_b7a_copay_amt_mc_max": "0.00",
+     "pbp_b7d_coins_yn": "2",
+     "pbp_b7d_copay_yn": "1",
+     "pbp_b7d_copay_amt_mc_min": "40.00",
+     "pbp_b7d_copay_amt_mc_max": "40.00"
+    }
+   ],
+   "b4_emerg_urgent": [
+    {
+     "pbp_b4a_coins_yn": "2",
+     "pbp_b4a_copay_yn": "1",
+     "pbp_b4a_copay_amt_mc_min": "115.00",
+     "pbp_b4a_copay_amt_mc_max": "115.00",
+     "pbp_b4b_coins_yn": "2",
+     "pbp_b4b_copay_yn": "1",
+     "pbp_b4b_copay_amt_mc_min": "40.00",
+     "pbp_b4b_copay_amt_mc_max": "40.00"
+    }
+   ],
+   "b1a_inpat_hosp": [
+    {
+     "pbp_b1a_cost_vary_tiers_yn": "2",
+     "pbp_b1a_coins_yn": "2",
+     "pbp_b1a_copay_yn": "1",
+     "pbp_b1a_copay_mcs_amt_t1": "0.00",
+     "pbp_b1a_copay_mcs_amt_int1_t1": "385.00",
+     "pbp_b1a_copay_mcs_bgnd_int1_t1": "1",
+     "pbp_b1a_copay_mcs_endd_int1_t1": "7",
+     "pbp_b1a_copay_mcs_amt_int2_t1": "0.00",
+     "pbp_b1a_copay_mcs_bgnd_int2_t1": "8",
+     "pbp_b1a_copay_mcs_endd_int2_t1": "90"
+    }
+   ],
+   "b16_dental": [
+    {
+     "pbp_b16b_maxplan_pv_yn": "2",
+     "pbp_b16b_bendesc_oe_amo": "4",
+     "pbp_b16b_bendesc_dx_amo": "4",
+     "pbp_b16b_bendesc_pc_amo": "4",
+     "pbp_b16c_maxplan_cmp_yn": "2",
+     "pbp_b16c_bendesc_rs_amo": "3",
+     "pbp_b16c_bendesc_end_amo": "3",
+     "pbp_b16c_bendesc_peri_amo": "4",
+     "pbp_b16c_bendesc_prm_amo": "3",
+     "pbp_b16c_bendesc_prf_amo": "3",
+     "pbp_b16c_bendesc_omsg_amo": "3",
+     "pbp_b16c_bendesc_ags_amo": "4"
+    }
+   ],
+   "b17_eye_exams_wear": [
+    {
+     "pbp_b17a_bendesc_yn": "1",
+     "pbp_b17b_bendesc_yn": "1",
+     "pbp_b17b_comb_maxplan_yn": "1",
+     "pbp_b17b_comb_maxplan_amt": "100.00",
+     "pbp_b17b_comb_maxplan_per": "3"
+    }
+   ],
+   "b18_hearing_exams_aids": [
+    {
+     "pbp_b18a_bendesc_yn": "1",
+     "pbp_b18b_bendesc_yn": "1",
+     "pbp_b18b_maxplan_yn": "2"
+    }
+   ],
+   "b13_other_services": [
+    {
+     "pbp_b13b_bendesc_otc": "2",
+     "pbp_b13c_bendesc_service": "1"
+    }
+   ],
+   "b14_preventive": [
+    {}
+   ],
+   "b10_amb_trans": [
+    {
+     "pbp_b10b_bendesc_yn": "2"
+    }
+   ],
+   "mrx": [
+    {
+     "mrx_drug_ben_yn": "1",
+     "mrx_alt_ded_charge": "1",
+     "mrx_alt_ded_amount": "700.00"
+    }
+   ]
+  }
+ },
+ {
+  "case": "ppo_combined_coins",
+  "bidId": "H4348_004_0",
+  "planName": "DEVOTED C-SNP CHOICE PLUS 004 KS (PPO C-SNP)",
+  "sections": {
+   "section_d": [
+    {
+     "pbp_d_ann_deduct_yn": "1",
+     "pbp_d_ann_deduct_amt": "800.00",
+     "pbp_d_out_pocket_amt_yn": "1",
+     "pbp_d_out_pocket_amt": "9850.00",
+     "pbp_d_comb_max_enr_amt_yn": "1",
+     "pbp_d_comb_max_enr_amt": "14800.00",
+     "pbp_d_mplusc_premium": "0.00",
+     "pbp_d_mco_pay_reduct_yn": "2"
+    }
+   ],
+   "b7_health_prof": [
+    {
+     "pbp_b7a_coins_yn": "2",
+     "pbp_b7a_copay_yn": "2",
+     "pbp_b7d_coins_yn": "1",
+     "pbp_b7d_coins_pct_mc_min": "30",
+     "pbp_b7d_coins_pct_mc_max": "30",
+     "pbp_b7d_copay_yn": "2"
+    }
+   ],
+   "b4_emerg_urgent": [
+    {
+     "pbp_b4a_coins_yn": "2",
+     "pbp_b4a_copay_yn": "1",
+     "pbp_b4a_copay_amt_mc_min": "115.00",
+     "pbp_b4a_copay_amt_mc_max": "115.00",
+     "pbp_b4b_coins_yn": "1",
+     "pbp_b4b_coins_pct_mc_min": "0",
+     "pbp_b4b_coins_pct_mc_max": "20",
+     "pbp_b4b_copay_yn": "2"
+    }
+   ],
+   "b1a_inpat_hosp": [
+    {
+     "pbp_b1a_cost_vary_tiers_yn": "2",
+     "pbp_b1a_coins_yn": "2",
+     "pbp_b1a_copay_yn": "1",
+     "pbp_b1a_copay_mcs_amt_t1": "2241.00"
+    }
+   ],
+   "b16_dental": [
+    {
+     "pbp_b16b_maxplan_pv_yn": "1",
+     "pbp_b16b_maxplan_pv_amt": "3000.00",
+     "pbp_b16b_maxplan_pv_per": "3",
+     "pbp_b16b_bendesc_oe_amo": "2",
+     "pbp_b16b_bendesc_dx_amo": "2",
+     "pbp_b16b_bendesc_pc_amo": "2",
+     "pbp_b16b_bendesc_ft_amo": "2",
+     "pbp_b16c_maxplan_cmp_yn": "1",
+     "pbp_b16c_maxplan_cmp_type": "1",
+     "pbp_b16c_bendesc_rs_amo": "2",
+     "pbp_b16c_bendesc_end_amo": "2",
+     "pbp_b16c_bendesc_peri_amo": "2",
+     "pbp_b16c_bendesc_prm_amo": "2",
+     "pbp_b16c_bendesc_impl_amo": "2",
+     "pbp_b16c_bendesc_prf_amo": "2",
+     "pbp_b16c_bendesc_omsg_amo": "2",
+     "pbp_b16c_bendesc_ags_amo": "2"
+    }
+   ],
+   "b17_eye_exams_wear": [
+    {
+     "pbp_b17a_bendesc_yn": "1",
+     "pbp_b17b_bendesc_yn": "1",
+     "pbp_b17b_comb_maxplan_yn": "1",
+     "pbp_b17b_comb_maxplan_amt": "300.00",
+     "pbp_b17b_comb_maxplan_per": "3"
+    }
+   ],
+   "b18_hearing_exams_aids": [
+    {
+     "pbp_b18a_bendesc_yn": "1",
+     "pbp_b18b_bendesc_yn": "1",
+     "pbp_b18b_maxplan_yn": "2"
+    }
+   ],
+   "b13_other_services": [
+    {
+     "pbp_b13b_bendesc_otc": "1",
+     "pbp_b13b_maxplan_yn": "1",
+     "pbp_b13b_maxplan_amt": "50.00",
+     "pbp_b13b_otc_maxplan_per": "5",
+     "pbp_b13c_bendesc_service": "2"
+    }
+   ],
+   "b14_preventive": [
+    {
+     "pbp_b14c_bendesc_amo_mhc": "2"
+    }
+   ],
+   "b10_amb_trans": [
+    {
+     "pbp_b10b_bendesc_yn": "2"
+    }
+   ],
+   "mrx": [
+    {
+     "mrx_drug_ben_yn": "1",
+     "mrx_alt_ded_charge": "2",
+     "mrx_alt_ded_amount": "461.00"
+    }
+   ]
+  }
+ },
+ {
+  "case": "dsnp_zero_share",
+  "bidId": "H5410_042_0",
+  "planName": "HealthSpring TotalCare Plus (HMO D-SNP)",
+  "sections": {
+   "section_d": [
+    {
+     "pbp_d_out_pocket_amt_yn": "1",
+     "pbp_d_out_pocket_amt": "9850.00",
+     "pbp_d_mplusc_premium": "0.00",
+     "pbp_d_mco_pay_reduct_yn": "2"
+    }
+   ],
+   "b7_health_prof": [
+    {
+     "pbp_b7a_coins_yn": "2",
+     "pbp_b7a_copay_yn": "2",
+     "pbp_b7d_coins_yn": "2",
+     "pbp_b7d_copay_yn": "2"
+    }
+   ],
+   "b4_emerg_urgent": [
+    {
+     "pbp_b4a_coins_yn": "2",
+     "pbp_b4a_copay_yn": "2",
+     "pbp_b4b_coins_yn": "2",
+     "pbp_b4b_copay_yn": "2"
+    }
+   ],
+   "b1a_inpat_hosp": [
+    {
+     "pbp_b1a_cost_vary_tiers_yn": "2",
+     "pbp_b1a_coins_yn": "2",
+     "pbp_b1a_copay_yn": "1",
+     "pbp_b1a_copay_mcs_amt_t1": "0.00"
+    }
+   ],
+   "b16_dental": [
+    {
+     "pbp_b16b_maxplan_pv_yn": "1",
+     "pbp_b16b_maxplan_pv_amt": "3000.00",
+     "pbp_b16b_maxplan_pv_per": "3",
+     "pbp_b16b_bendesc_oe_amo": "2",
+     "pbp_b16b_bendesc_dx_amo": "2",
+     "pbp_b16b_bendesc_ods_amo": "2",
+     "pbp_b16b_bendesc_pc_amo": "2",
+     "pbp_b16b_bendesc_ft_amo": "2",
+     "pbp_b16b_bendesc_ops_amo": "2",
+     "pbp_b16c_maxplan_cmp_yn": "1",
+     "pbp_b16c_maxplan_cmp_type": "1",
+     "pbp_b16c_bendesc_rs_amo": "2",
+     "pbp_b16c_bendesc_end_amo": "2",
+     "pbp_b16c_bendesc_peri_amo": "2",
+     "pbp_b16c_bendesc_prm_amo": "2",
+     "pbp_b16c_bendesc_mxpr_amo": "2",
+     "pbp_b16c_bendesc_impl_amo": "2",
+     "pbp_b16c_bendesc_prf_amo": "2",
+     "pbp_b16c_bendesc_omsg_amo": "2",
+     "pbp_b16c_bendesc_orth_amo": "2",
+     "pbp_b16c_bendesc_ags_amo": "2"
+    }
+   ],
+   "b17_eye_exams_wear": [
+    {
+     "pbp_b17a_bendesc_yn": "1",
+     "pbp_b17b_bendesc_yn": "1",
+     "pbp_b17b_comb_maxplan_yn": "1",
+     "pbp_b17b_comb_maxplan_amt": "350.00",
+     "pbp_b17b_comb_maxplan_per": "3"
+    }
+   ],
+   "b18_hearing_exams_aids": [
+    {
+     "pbp_b18a_bendesc_yn": "1",
+     "pbp_b18b_bendesc_yn": "1",
+     "pbp_b18b_maxplan_yn": "2"
+    }
+   ],
+   "b13_other_services": [
+    {
+     "pbp_b13b_bendesc_otc": "1",
+     "pbp_b13b_maxplan_yn": "1",
+     "pbp_b13b_maxplan_amt": "210.00",
+     "pbp_b13b_otc_maxplan_per": "5",
+     "pbp_b13c_bendesc_service": "1"
+    }
+   ],
+   "b14_preventive": [
+    {
+     "pbp_b14c_bendesc_amo_mhc": "2"
+    }
+   ],
+   "b10_amb_trans": [
+    {
+     "pbp_b10b_bendesc_yn": "1"
+    }
+   ],
+   "mrx": [
+    {
+     "mrx_drug_ben_yn": "1",
+     "mrx_alt_ded_charge": "1",
+     "mrx_alt_ded_amount": "700.00"
+    }
+   ]
+  }
+ },
+ {
+  "case": "premium_deductible",
+  "bidId": "H5525_030_0",
+  "planName": "HumanaChoice H5525-030 (PPO)",
+  "sections": {
+   "section_d": [
+    {
+     "pbp_d_ann_deduct_yn": "1",
+     "pbp_d_ann_deduct_amt": "400.00",
+     "pbp_d_out_pocket_amt_yn": "1",
+     "pbp_d_out_pocket_amt": "4450.00",
+     "pbp_d_comb_max_enr_amt_yn": "1",
+     "pbp_d_comb_max_enr_amt": "4450.00",
+     "pbp_d_mplusc_premium": "2.00",
+     "pbp_d_mco_pay_reduct_yn": "2"
+    }
+   ],
+   "b7_health_prof": [
+    {
+     "pbp_b7a_coins_yn": "2",
+     "pbp_b7a_copay_yn": "1",
+     "pbp_b7a_copay_amt_mc_min": "0.00",
+     "pbp_b7a_copay_amt_mc_max": "0.00",
+     "pbp_b7d_coins_yn": "2",
+     "pbp_b7d_copay_yn": "1",
+     "pbp_b7d_copay_amt_mc_min": "40.00",
+     "pbp_b7d_copay_amt_mc_max": "40.00"
+    }
+   ],
+   "b4_emerg_urgent": [
+    {
+     "pbp_b4a_coins_yn": "2",
+     "pbp_b4a_copay_yn": "1",
+     "pbp_b4a_copay_amt_mc_min": "150.00",
+     "pbp_b4a_copay_amt_mc_max": "150.00",
+     "pbp_b4b_coins_yn": "2",
+     "pbp_b4b_copay_yn": "1",
+     "pbp_b4b_copay_amt_mc_min": "65.00",
+     "pbp_b4b_copay_amt_mc_max": "65.00"
+    }
+   ],
+   "b1a_inpat_hosp": [
+    {
+     "pbp_b1a_cost_vary_tiers_yn": "2",
+     "pbp_b1a_coins_yn": "2",
+     "pbp_b1a_copay_yn": "1",
+     "pbp_b1a_copay_mcs_amt_t1": "0.00",
+     "pbp_b1a_copay_mcs_amt_int1_t1": "460.00",
+     "pbp_b1a_copay_mcs_bgnd_int1_t1": "1",
+     "pbp_b1a_copay_mcs_endd_int1_t1": "7",
+     "pbp_b1a_copay_mcs_amt_int2_t1": "0.00",
+     "pbp_b1a_copay_mcs_bgnd_int2_t1": "8",
+     "pbp_b1a_copay_mcs_endd_int2_t1": "90"
+    }
+   ],
+   "b16_dental": [
+    {
+     "pbp_b16b_maxplan_pv_yn": "1",
+     "pbp_b16b_maxplan_pv_amt": "1000.00",
+     "pbp_b16b_maxplan_pv_per": "3",
+     "pbp_b16b_bendesc_oe_amo": "4",
+     "pbp_b16b_bendesc_dx_amo": "4",
+     "pbp_b16b_bendesc_pc_amo": "4",
+     "pbp_b16c_maxplan_cmp_yn": "1",
+     "pbp_b16c_maxplan_cmp_type": "1",
+     "pbp_b16c_bendesc_rs_amo": "4",
+     "pbp_b16c_bendesc_end_amo": "3",
+     "pbp_b16c_bendesc_peri_amo": "4",
+     "pbp_b16c_bendesc_prm_amo": "3",
+     "pbp_b16c_bendesc_prf_amo": "3",
+     "pbp_b16c_bendesc_omsg_amo": "3",
+     "pbp_b16c_bendesc_ags_amo": "4"
+    }
+   ],
+   "b17_eye_exams_wear": [
+    {
+     "pbp_b17a_bendesc_yn": "1",
+     "pbp_b17b_bendesc_yn": "1",
+     "pbp_b17b_comb_maxplan_yn": "1",
+     "pbp_b17b_comb_maxplan_amt": "100.00",
+     "pbp_b17b_comb_maxplan_per": "3"
+    }
+   ],
+   "b18_hearing_exams_aids": [
+    {
+     "pbp_b18a_bendesc_yn": "1",
+     "pbp_b18b_bendesc_yn": "1",
+     "pbp_b18b_maxplan_yn": "2"
+    }
+   ],
+   "b13_other_services": [
+    {
+     "pbp_b13b_bendesc_otc": "2",
+     "pbp_b13c_bendesc_service": "1"
+    }
+   ],
+   "b14_preventive": [
+    {
+     "pbp_b14c_bendesc_amo_mhc": "2"
+    }
+   ],
+   "b10_amb_trans": [
+    {
+     "pbp_b10b_bendesc_yn": "2"
+    }
+   ],
+   "mrx": [
+    {
+     "mrx_drug_ben_yn": "1",
+     "mrx_alt_ded_charge": "2",
+     "mrx_alt_ded_amount": "450.00"
+    }
+   ]
+  }
+ },
+ {
+  "case": "no_drugs",
+  "bidId": "H5216_256_0",
+  "planName": "Humana USAA Honor Giveback (PPO)",
+  "sections": {
+   "section_d": [
+    {
+     "pbp_d_ann_deduct_yn": "2",
+     "pbp_d_out_pocket_amt_yn": "1",
+     "pbp_d_out_pocket_amt": "4900.00",
+     "pbp_d_comb_max_enr_amt_yn": "1",
+     "pbp_d_comb_max_enr_amt": "6700.00",
+     "pbp_d_mplusc_premium": "0.00",
+     "pbp_d_mco_pay_reduct_yn": "1",
+     "pbp_d_mco_pay_reduct_amt": "140.50"
+    }
+   ],
+   "b7_health_prof": [
+    {
+     "pbp_b7a_coins_yn": "2",
+     "pbp_b7a_copay_yn": "1",
+     "pbp_b7a_copay_amt_mc_min": "0.00",
+     "pbp_b7a_copay_amt_mc_max": "0.00",
+     "pbp_b7d_coins_yn": "2",
+     "pbp_b7d_copay_yn": "1",
+     "pbp_b7d_copay_amt_mc_min": "40.00",
+     "pbp_b7d_copay_amt_mc_max": "40.00"
+    }
+   ],
+   "b4_emerg_urgent": [
+    {
+     "pbp_b4a_coins_yn": "2",
+     "pbp_b4a_copay_yn": "1",
+     "pbp_b4a_copay_amt_mc_min": "130.00",
+     "pbp_b4a_copay_amt_mc_max": "130.00",
+     "pbp_b4b_coins_yn": "2",
+     "pbp_b4b_copay_yn": "1",
+     "pbp_b4b_copay_amt_mc_min": "15.00",
+     "pbp_b4b_copay_amt_mc_max": "15.00"
+    }
+   ],
+   "b1a_inpat_hosp": [
+    {
+     "pbp_b1a_cost_vary_tiers_yn": "2",
+     "pbp_b1a_coins_yn": "2",
+     "pbp_b1a_copay_yn": "1",
+     "pbp_b1a_copay_mcs_amt_t1": "0.00",
+     "pbp_b1a_copay_mcs_amt_int1_t1": "225.00",
+     "pbp_b1a_copay_mcs_bgnd_int1_t1": "1",
+     "pbp_b1a_copay_mcs_endd_int1_t1": "8",
+     "pbp_b1a_copay_mcs_amt_int2_t1": "0.00",
+     "pbp_b1a_copay_mcs_bgnd_int2_t1": "9",
+     "pbp_b1a_copay_mcs_endd_int2_t1": "90"
+    }
+   ],
+   "b16_dental": [
+    {
+     "pbp_b16b_maxplan_pv_yn": "1",
+     "pbp_b16b_maxplan_pv_amt": "4000.00",
+     "pbp_b16b_maxplan_pv_per": "3",
+     "pbp_b16b_bendesc_oe_amo": "2",
+     "pbp_b16b_bendesc_dx_amo": "2",
+     "pbp_b16b_bendesc_pc_amo": "2",
+     "pbp_b16c_maxplan_cmp_yn": "1",
+     "pbp_b16c_maxplan_cmp_type": "1",
+     "pbp_b16c_bendesc_rs_amo": "2",
+     "pbp_b16c_bendesc_end_amo": "2",
+     "pbp_b16c_bendesc_peri_amo": "2",
+     "pbp_b16c_bendesc_prm_amo": "2",
+     "pbp_b16c_bendesc_omsg_amo": "2",
+     "pbp_b16c_bendesc_ags_amo": "2"
+    }
+   ],
+   "b17_eye_exams_wear": [
+    {
+     "pbp_b17a_bendesc_yn": "1",
+     "pbp_b17b_bendesc_yn": "1",
+     "pbp_b17b_comb_maxplan_yn": "1",
+     "pbp_b17b_comb_maxplan_amt": "100.00",
+     "pbp_b17b_comb_maxplan_per": "3"
+    }
+   ],
+   "b18_hearing_exams_aids": [
+    {
+     "pbp_b18a_bendesc_yn": "1",
+     "pbp_b18b_bendesc_yn": "1",
+     "pbp_b18b_maxplan_yn": "2"
+    }
+   ],
+   "b13_other_services": [
+    {
+     "pbp_b13b_bendesc_otc": "1",
+     "pbp_b13b_maxplan_yn": "2",
+     "pbp_b13c_bendesc_service": "2"
+    }
+   ],
+   "b14_preventive": [
+    {
+     "pbp_b14c_bendesc_amo_mhc": "2"
+    }
+   ],
+   "b10_amb_trans": [
+    {
+     "pbp_b10b_bendesc_yn": "2"
+    }
+   ],
+   "mrx": [
+    {
+     "mrx_drug_ben_yn": "2"
+    }
+   ]
+  }
+ },
+ {
+  "case": "hospital_coins",
+  "bidId": "H5314_002_0",
+  "planName": "Tufts Health One Care CW (HMO D-SNP)",
+  "sections": {
+   "section_d": [
+    {
+     "pbp_d_out_pocket_amt_yn": "1",
+     "pbp_d_out_pocket_amt": "9850.00",
+     "pbp_d_mplusc_premium": "0.00",
+     "pbp_d_mco_pay_reduct_yn": "2"
+    }
+   ],
+   "b7_health_prof": [
+    {
+     "pbp_b7a_coins_yn": "1",
+     "pbp_b7a_coins_pct_mc_min": "20",
+     "pbp_b7a_coins_pct_mc_max": "20",
+     "pbp_b7a_copay_yn": "2",
+     "pbp_b7d_coins_yn": "1",
+     "pbp_b7d_coins_pct_mc_min": "20",
+     "pbp_b7d_coins_pct_mc_max": "20",
+     "pbp_b7d_copay_yn": "2"
+    }
+   ],
+   "b4_emerg_urgent": [
+    {
+     "pbp_b4a_coins_yn": "1",
+     "pbp_b4a_coins_pct_mc_min": "20",
+     "pbp_b4a_coins_pct_mc_max": "20",
+     "pbp_b4a_copay_yn": "2",
+     "pbp_b4b_coins_yn": "1",
+     "pbp_b4b_coins_pct_mc_min": "20",
+     "pbp_b4b_coins_pct_mc_max": "20",
+     "pbp_b4b_copay_yn": "2"
+    }
+   ],
+   "b1a_inpat_hosp": [
+    {
+     "pbp_b1a_cost_vary_tiers_yn": "2",
+     "pbp_b1a_coins_yn": "1",
+     "pbp_b1a_copay_yn": "2"
+    }
+   ],
+   "b16_dental": [
+    {}
+   ],
+   "b17_eye_exams_wear": [
+    {
+     "pbp_b17a_bendesc_yn": "2",
+     "pbp_b17b_bendesc_yn": "2"
+    }
+   ],
+   "b18_hearing_exams_aids": [
+    {
+     "pbp_b18a_bendesc_yn": "2",
+     "pbp_b18b_bendesc_yn": "2"
+    }
+   ],
+   "b13_other_services": [
+    {
+     "pbp_b13b_bendesc_otc": "2",
+     "pbp_b13c_bendesc_service": "2"
+    }
+   ],
+   "b14_preventive": [
+    {}
+   ],
+   "b10_amb_trans": [
+    {
+     "pbp_b10b_bendesc_yn": "2"
+    }
+   ],
+   "mrx": [
+    {
+     "mrx_drug_ben_yn": "1",
+     "mrx_alt_ded_amount": "700.00"
+    }
+   ]
+  }
+ },
+ {
+  "case": "urgent_range",
+  "bidId": "H4527_039_0",
+  "planName": "UHC Complete Care TX-16 (HMO-POS C-SNP)",
+  "sections": {
+   "section_d": [
+    {
+     "pbp_d_out_pocket_amt_yn": "1",
+     "pbp_d_out_pocket_amt": "5900.00",
+     "pbp_d_comb_max_enr_amt_yn": "2",
+     "pbp_d_mplusc_premium": "0.00",
+     "pbp_d_mco_pay_reduct_yn": "1",
+     "pbp_d_mco_pay_reduct_amt": "16.00"
+    }
+   ],
+   "b7_health_prof": [
+    {
+     "pbp_b7a_coins_yn": "2",
+     "pbp_b7a_copay_yn": "1",
+     "pbp_b7a_copay_amt_mc_min": "0.00",
+     "pbp_b7a_copay_amt_mc_max": "0.00",
+     "pbp_b7d_coins_yn": "2",
+     "pbp_b7d_copay_yn": "1",
+     "pbp_b7d_copay_amt_mc_min": "0.00",
+     "pbp_b7d_copay_amt_mc_max": "35.00"
+    }
+   ],
+   "b4_emerg_urgent": [
+    {
+     "pbp_b4a_coins_yn": "2",
+     "pbp_b4a_copay_yn": "1",
+     "pbp_b4a_copay_amt_mc_min": "130.00",
+     "pbp_b4a_copay_amt_mc_max": "130.00",
+     "pbp_b4b_coins_yn": "2",
+     "pbp_b4b_copay_yn": "1",
+     "pbp_b4b_copay_amt_mc_min": "0.00",
+     "pbp_b4b_copay_amt_mc_max": "50.00"
+    }
+   ],
+   "b1a_inpat_hosp": [
+    {
+     "pbp_b1a_cost_vary_tiers_yn": "2",
+     "pbp_b1a_coins_yn": "2",
+     "pbp_b1a_copay_yn": "1",
+     "pbp_b1a_copay_mcs_amt_t1": "0.00",
+     "pbp_b1a_copay_mcs_amt_int1_t1": "350.00",
+     "pbp_b1a_copay_mcs_bgnd_int1_t1": "1",
+     "pbp_b1a_copay_mcs_endd_int1_t1": "6",
+     "pbp_b1a_copay_mcs_amt_int2_t1": "0.00",
+     "pbp_b1a_copay_mcs_bgnd_int2_t1": "7",
+     "pbp_b1a_copay_mcs_endd_int2_t1": "90"
+    }
+   ],
+   "b16_dental": [
+    {
+     "pbp_b16b_maxplan_pv_yn": "2",
+     "pbp_b16b_bendesc_oe_amo": "4",
+     "pbp_b16b_bendesc_dx_amo": "4",
+     "pbp_b16b_bendesc_ods_amo": "3",
+     "pbp_b16b_bendesc_pc_amo": "4",
+     "pbp_b16b_bendesc_ft_amo": "4",
+     "pbp_b16b_bendesc_ops_amo": "4"
+    }
+   ],
+   "b17_eye_exams_wear": [
+    {
+     "pbp_b17a_bendesc_yn": "1",
+     "pbp_b17b_bendesc_yn": "1",
+     "pbp_b17b_comb_maxplan_yn": "1",
+     "pbp_b17b_comb_maxplan_amt": "250.00",
+     "pbp_b17b_comb_maxplan_per": "2"
+    }
+   ],
+   "b18_hearing_exams_aids": [
+    {
+     "pbp_b18a_bendesc_yn": "1",
+     "pbp_b18b_bendesc_yn": "1",
+     "pbp_b18b_maxplan_yn": "1",
+     "pbp_b18b_maxplan_perear": "3",
+     "pbp_b18b_maxplan_amt": "700.00",
+     "pbp_b18b_maxplan_per": "3"
+    }
+   ],
+   "b13_other_services": [
+    {
+     "pbp_b13b_bendesc_otc": "1",
+     "pbp_b13b_maxplan_yn": "2",
+     "pbp_b13c_bendesc_service": "1"
+    }
+   ],
+   "b14_preventive": [
+    {
+     "pbp_b14c_bendesc_amo_mhc": "2"
+    }
+   ],
+   "b10_amb_trans": [
+    {
+     "pbp_b10b_bendesc_yn": "2"
+    }
+   ],
+   "mrx": [
+    {
+     "mrx_drug_ben_yn": "1",
+     "mrx_alt_ded_charge": "2",
+     "mrx_alt_ded_amount": "440.00"
+    }
+   ]
+  }
+ },
+ {
+  "case": "dental_shared",
+  "bidId": "H4346_005_0",
+  "planName": "Anthem I CareMore Lung Care (HMO-POS C-SNP)",
+  "sections": {
+   "section_d": [
+    {
+     "pbp_d_out_pocket_amt_yn": "1",
+     "pbp_d_out_pocket_amt": "1100.00",
+     "pbp_d_comb_max_enr_amt_yn": "2",
+     "pbp_d_mplusc_premium": "0.00",
+     "pbp_d_mco_pay_reduct_yn": "2"
+    }
+   ],
+   "b7_health_prof": [
+    {
+     "pbp_b7a_coins_yn": "2",
+     "pbp_b7a_copay_yn": "1",
+     "pbp_b7a_copay_amt_mc_min": "0.00",
+     "pbp_b7a_copay_amt_mc_max": "0.00",
+     "pbp_b7d_coins_yn": "2",
+     "pbp_b7d_copay_yn": "1",
+     "pbp_b7d_copay_amt_mc_min": "0.00",
+     "pbp_b7d_copay_amt_mc_max": "0.00"
+    }
+   ],
+   "b4_emerg_urgent": [
+    {
+     "pbp_b4a_coins_yn": "2",
+     "pbp_b4a_copay_yn": "1",
+     "pbp_b4a_copay_amt_mc_min": "120.00",
+     "pbp_b4a_copay_amt_mc_max": "120.00",
+     "pbp_b4b_coins_yn": "2",
+     "pbp_b4b_copay_yn": "1",
+     "pbp_b4b_copay_amt_mc_min": "0.00",
+     "pbp_b4b_copay_amt_mc_max": "0.00"
+    }
+   ],
+   "b1a_inpat_hosp": [
+    {
+     "pbp_b1a_cost_vary_tiers_yn": "2",
+     "pbp_b1a_coins_yn": "2",
+     "pbp_b1a_copay_yn": "1",
+     "pbp_b1a_copay_mcs_amt_t1": "0.00"
+    }
+   ],
+   "b16_dental": [
+    {
+     "pbp_b16b_maxplan_pv_yn": "1",
+     "pbp_b16b_maxplan_pv_amt": "3000.00",
+     "pbp_b16b_maxplan_pv_per": "3",
+     "pbp_b16b_bendesc_oe_amo": "4",
+     "pbp_b16b_bendesc_dx_amo": "4",
+     "pbp_b16b_bendesc_ods_amo": "2",
+     "pbp_b16b_bendesc_pc_amo": "4",
+     "pbp_b16b_bendesc_ft_amo": "4",
+     "pbp_b16b_bendesc_ops_amo": "2",
+     "pbp_b16c_maxplan_cmp_yn": "1",
+     "pbp_b16c_maxplan_cmp_type": "1",
+     "pbp_b16c_bendesc_rs_amo": "4",
+     "pbp_b16c_bendesc_end_amo": "4",
+     "pbp_b16c_bendesc_peri_amo": "4",
+     "pbp_b16c_bendesc_prm_amo": "4",
+     "pbp_b16c_bendesc_prf_amo": "2",
+     "pbp_b16c_bendesc_omsg_amo": "4",
+     "pbp_b16c_bendesc_ags_amo": "4"
+    }
+   ],
+   "b17_eye_exams_wear": [
+    {
+     "pbp_b17a_bendesc_yn": "1",
+     "pbp_b17b_bendesc_yn": "1",
+     "pbp_b17b_comb_maxplan_yn": "1",
+     "pbp_b17b_comb_maxplan_amt": "250.00",
+     "pbp_b17b_comb_maxplan_per": "3"
+    }
+   ],
+   "b18_hearing_exams_aids": [
+    {
+     "pbp_b18a_bendesc_yn": "1",
+     "pbp_b18b_bendesc_yn": "1",
+     "pbp_b18b_maxplan_yn": "1",
+     "pbp_b18b_maxplan_perear": "3",
+     "pbp_b18b_maxplan_amt": "3000.00",
+     "pbp_b18b_maxplan_per": "3"
+    }
+   ],
+   "b13_other_services": [
+    {
+     "pbp_b13b_bendesc_otc": "1",
+     "pbp_b13b_maxplan_yn": "2",
+     "pbp_b13c_bendesc_service": "1"
+    }
+   ],
+   "b14_preventive": [
+    {
+     "pbp_b14c_bendesc_amo_mhc": "2"
+    }
+   ],
+   "b10_amb_trans": [
+    {
+     "pbp_b10b_bendesc_yn": "1"
+    }
+   ],
+   "mrx": [
+    {
+     "mrx_drug_ben_yn": "1",
+     "mrx_alt_ded_charge": "3"
+    }
+   ]
+  }
+ },
+ {
+  "case": "drug_std_ded",
+  "bidId": "H3931_175_0",
+  "planName": "Aetna Medicare Dual Extra Care (HMO D-SNP)",
+  "sections": {
+   "section_d": [
+    {
+     "pbp_d_out_pocket_amt_yn": "1",
+     "pbp_d_out_pocket_amt": "9850.00",
+     "pbp_d_mplusc_premium": "0.00",
+     "pbp_d_mco_pay_reduct_yn": "2"
+    }
+   ],
+   "b7_health_prof": [
+    {
+     "pbp_b7a_coins_yn": "1",
+     "pbp_b7a_coins_pct_mc_min": "20",
+     "pbp_b7a_coins_pct_mc_max": "20",
+     "pbp_b7a_copay_yn": "2",
+     "pbp_b7d_coins_yn": "1",
+     "pbp_b7d_coins_pct_mc_min": "20",
+     "pbp_b7d_coins_pct_mc_max": "20",
+     "pbp_b7d_copay_yn": "2"
+    }
+   ],
+   "b4_emerg_urgent": [
+    {
+     "pbp_b4a_coins_yn": "2",
+     "pbp_b4a_copay_yn": "1",
+     "pbp_b4a_copay_amt_mc_min": "115.00",
+     "pbp_b4a_copay_amt_mc_max": "115.00",
+     "pbp_b4b_coins_yn": "2",
+     "pbp_b4b_copay_yn": "1",
+     "pbp_b4b_copay_amt_mc_min": "40.00",
+     "pbp_b4b_copay_amt_mc_max": "40.00"
+    }
+   ],
+   "b1a_inpat_hosp": [
+    {
+     "pbp_b1a_cost_vary_tiers_yn": "2",
+     "pbp_b1a_coins_yn": "2",
+     "pbp_b1a_copay_yn": "1",
+     "pbp_b1a_copay_mcs_amt_t1": "2240.00"
+    }
+   ],
+   "b16_dental": [
+    {
+     "pbp_b16b_maxplan_pv_yn": "1",
+     "pbp_b16b_maxplan_pv_amt": "1000.00",
+     "pbp_b16b_maxplan_pv_per": "3",
+     "pbp_b16b_bendesc_oe_amo": "2",
+     "pbp_b16b_bendesc_dx_amo": "2",
+     "pbp_b16b_bendesc_ods_amo": "2",
+     "pbp_b16b_bendesc_pc_amo": "2",
+     "pbp_b16b_bendesc_ft_amo": "2",
+     "pbp_b16b_bendesc_ops_amo": "2",
+     "pbp_b16c_maxplan_cmp_yn": "1",
+     "pbp_b16c_maxplan_cmp_type": "1",
+     "pbp_b16c_bendesc_rs_amo": "2",
+     "pbp_b16c_bendesc_end_amo": "2",
+     "pbp_b16c_bendesc_peri_amo": "2",
+     "pbp_b16c_bendesc_prm_amo": "2",
+     "pbp_b16c_bendesc_prf_amo": "2",
+     "pbp_b16c_bendesc_omsg_amo": "2",
+     "pbp_b16c_bendesc_ags_amo": "2"
+    }
+   ],
+   "b17_eye_exams_wear": [
+    {
+     "pbp_b17a_bendesc_yn": "1",
+     "pbp_b17b_bendesc_yn": "1",
+     "pbp_b17b_comb_maxplan_yn": "1",
+     "pbp_b17b_comb_maxplan_amt": "100.00",
+     "pbp_b17b_comb_maxplan_per": "3"
+    }
+   ],
+   "b18_hearing_exams_aids": [
+    {
+     "pbp_b18a_bendesc_yn": "1",
+     "pbp_b18b_bendesc_yn": "1",
+     "pbp_b18b_maxplan_yn": "1",
+     "pbp_b18b_maxplan_perear": "1",
+     "pbp_b18b_maxplan_amt": "1500.00",
+     "pbp_b18b_maxplan_per": "3"
+    }
+   ],
+   "b13_other_services": [
+    {
+     "pbp_b13b_bendesc_otc": "1",
+     "pbp_b13b_maxplan_yn": "1",
+     "pbp_b13b_maxplan_amt": "100.00",
+     "pbp_b13b_otc_maxplan_per": "7",
+     "pbp_b13c_bendesc_service": "1"
+    }
+   ],
+   "b14_preventive": [
+    {
+     "pbp_b14c_bendesc_amo_mhc": "2"
+    }
+   ],
+   "b10_amb_trans": [
+    {
+     "pbp_b10b_bendesc_yn": "2"
+    }
+   ],
+   "mrx": [
+    {
+     "mrx_drug_ben_yn": "1",
+     "mrx_alt_ded_charge": "1",
+     "mrx_alt_ded_amount": "700.00"
+    }
+   ]
+  }
+ }
+]

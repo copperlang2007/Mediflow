@@ -320,6 +320,16 @@ call log from EnrollHere and uploads it (twice a day if wanted).
 - Every route requires sign-in and MFA (mandatory for every user), and stays
   inside your agency.
 
+## Listening to a recording
+
+When a call came from a stored recording, its page shows a **Listen to the recording** button. Nothing loads until you press it.
+
+- **Who:** anyone who can read call scores. Agents can only hear calls linked to a softphone call they placed.
+- **Link:** the server hands out a private link that works for 10 minutes, never cached. Press Listen again for a new one.
+- **Logged:** every press writes an audit-log entry (`call_recording_listen`) before the link is given out. The entry holds the recording id only, never the link or file path. If the log cannot be written, no link is given.
+- **No download button:** the player hides it, but this only discourages saving; it is not a lock.
+- **Endpoint:** `GET /api/call-scoring/transcripts/:id/audio`. Another agency's call answers the same as a missing call.
+
 ## Who can do what
 
 | Role | Read | Upload / rescore / import | Override grades / resolve do-not-contact |

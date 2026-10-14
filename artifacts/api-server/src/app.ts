@@ -104,7 +104,7 @@ app.use(helmet({
         "https://storage.googleapis.com",
       ],
       // The Voice SDK plays its ring / disconnect tones from Twilio's CDN.
-      "media-src": ["'self'", "https://sdk.twilio.com", "data:", "blob:"],
+      "media-src": ["'self'", "https://sdk.twilio.com", "https://storage.googleapis.com", "data:", "blob:"],
       "frame-src": ["'self'"],
       "img-src": ["'self'", "data:"],
       "worker-src": ["'self'", "blob:"],
