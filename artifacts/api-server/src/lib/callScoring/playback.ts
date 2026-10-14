@@ -77,7 +77,15 @@ export async function listenLink(input: {
     return { ok: false, httpStatus: 404, code: "audio_unavailable", message: "The audio for this call is no longer in storage." };
   }
 
-  // Logged first: if the log cannot be written, no link is given out.
+  // Signed first so a signing failure leaves no audit row (nothing was handed out yet).
+  let url: string;
+  try {
+    url = await input.storage.getCallRecordingReadURL(recording.objectKey, LISTEN_LINK_SECONDS);
+  } catch {
+    return STORAGE_DOWN;
+  }
+
+  // Still logged before the link is returned: if the log cannot be written, no link is given out.
   await db.insert(auditLogTable).values({
     id: randomUUID(),
     orgId: input.orgId,
@@ -89,11 +97,5 @@ export async function listenLink(input: {
     changes: { recordingId: recording.id, linkSeconds: LISTEN_LINK_SECONDS },
   });
 
-  let url: string;
-  try {
-    url = await input.storage.getCallRecordingReadURL(recording.objectKey, LISTEN_LINK_SECONDS);
-  } catch {
-    return STORAGE_DOWN;
-  }
   return { ok: true, url, expiresInSeconds: LISTEN_LINK_SECONDS, contentType: stored.contentType, durationSeconds: recording.durationSeconds };
 }

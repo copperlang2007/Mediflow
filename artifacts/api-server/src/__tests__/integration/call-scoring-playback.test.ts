@@ -201,6 +201,21 @@ describe("listening to a recording", () => {
     }
   });
 
+  it("leaves no audit row when signing the link fails", async () => {
+    const { transcriptId, recordingId } = await makeCall();
+    const objectKey = `call-recordings/${org.id}/${recordingId}`;
+    const g = globalThis as { __PB_FAIL__?: Map<string, string> };
+    (g.__PB_FAIL__ ??= new Map()).set(objectKey, "sign");
+    try {
+      const res = await listen(admin.id, transcriptId);
+      expect(res.status, JSON.stringify(res.body)).toBe(503);
+      expect(res.body.code).toBe("storage_unavailable");
+      expect(await listenAudits(transcriptId)).toHaveLength(0);
+    } finally {
+      g.__PB_FAIL__.delete(objectKey);
+    }
+  });
+
   it("gives no link when the listen cannot be logged", async () => {
     const { transcriptId } = await makeCall();
     const realInsert = handle.db.insert.bind(handle.db) as (table: unknown) => any;
