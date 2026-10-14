@@ -476,7 +476,36 @@ export interface PlanSummary {
   snpType: string | null;
   orgWebsite: string | null;
   partial: boolean;
+  /** null when the plan has no benefit rows loaded. */
+  card: PlanCardData | null;
 }
+/** What a plan card shows, decoded server-side from the CMS plan benefit files. */
+export interface PlanCardData {
+  /** Plan (Part C) monthly premium only: any Part D premium is NOT included. */
+  premium: number | null;
+  partBGiveback: number | null;
+  moopInNetwork: number | null;
+  moopCombined: number | null;
+  deductible: number | null;
+  costs: {
+    pcp: { kind: string; label: string } | null;
+    specialist: { kind: string; label: string } | null;
+    er: { kind: string; label: string } | null;
+    urgentCare: { kind: string; label: string } | null;
+    hospital: string | null;
+  };
+  extras: {
+    dental: { preventive: boolean; comprehensive: boolean; maximum: string | null };
+    vision: { exam: boolean; eyewear: boolean; allowance: string | null };
+    hearing: { exam: boolean; aids: boolean; allowance: string | null };
+    otc: { offered: boolean; allowance: string | null };
+    fitness: boolean;
+    meals: boolean;
+    transportation: boolean;
+  };
+  drugs: { covered: boolean | null; deductible: string | null };
+}
+
 export interface PlanSearchResult {
   data: PlanSummary[];
   total: number;
@@ -487,6 +516,7 @@ export interface PlanSearchResult {
 export interface PlanDetail {
   plan: PlanSummary & { planYear: number; geographyName: string | null };
   sections: { section: string; rows: Record<string, string>[] }[];
+  card: PlanCardData | null;
   planYear: number;
 }
 export type SnpFilter = "all" | "only" | "exclude";
