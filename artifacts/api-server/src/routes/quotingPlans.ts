@@ -4,6 +4,8 @@
  *   GET /quoting/plan-areas/states
  *   GET /quoting/plan-areas/counties?state=TX
  *   GET /quoting/plans?state=TX&countyCode=45910&q=&snp=all|only|exclude
+ *       each plan carries a `card` (premium, out-of-pocket max, copays, extras)
+ *       decoded from its CMS benefit rows by lib/planCard.ts
  *   GET /quoting/plans/:bidId
  *
  * Reads the `cms_plan_*` tables (latest plan year loaded). Employer/union group
@@ -15,7 +17,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
-import { and, asc, count, eq, ilike, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import {
   db,
   cmsPlanBenefitPackagesTable,
@@ -28,6 +30,7 @@ import {
   type AuthenticatedRequest,
 } from "../middlewares/requireAuth";
 import { logger } from "../lib/logger";
+import { buildPlanCard, CARD_COLUMNS, snpTypeLabel, type PlanCard, type Sections } from "../lib/planCard";
 
 const router: IRouter = Router();
 
@@ -78,6 +81,56 @@ function sendPlanLoadError(res: Response, err: unknown): void {
   const kind = typeof code === "string" ? code : err instanceof Error ? err.constructor.name : "unknown";
   logger.warn({ errKind: kind }, "quoting plans: query failed");
   res.status(500).json({ error: LOAD_ERROR });
+}
+
+
+/**
+ * The card facts for many plans in one query. Only the columns the card reads
+ * are pulled out of each section's JSON (never the whole section), so a county
+ * with 300 plans stays a small response. Keys are bound parameters.
+ */
+async function loadCards(planYear: number, bidIds: string[]): Promise<Map<string, PlanCard | null>> {
+  const cards = new Map<string, PlanCard | null>();
+  if (bidIds.length === 0) return cards;
+  const pick = sql.join(
+    Object.entries(CARD_COLUMNS).map(
+      ([section, cols]) =>
+        sql`WHEN ${section}::text THEN jsonb_build_object(${sql.join(
+          cols.map((c) => sql`${c}::text, ${cmsPlanBenefitSectionsTable.data} -> ${c}::text`),
+          sql`, `,
+        )})`,
+    ),
+    sql` `,
+  );
+  const rows = await db
+    .select({
+      bidId: cmsPlanBenefitSectionsTable.bidId,
+      section: cmsPlanBenefitSectionsTable.section,
+      data: sql<Record<string, string>>`jsonb_strip_nulls(CASE ${cmsPlanBenefitSectionsTable.section} ${pick} END)`,
+    })
+    .from(cmsPlanBenefitSectionsTable)
+    .where(
+      and(
+        eq(cmsPlanBenefitSectionsTable.planYear, planYear),
+        inArray(cmsPlanBenefitSectionsTable.bidId, bidIds),
+        inArray(cmsPlanBenefitSectionsTable.section, Object.keys(CARD_COLUMNS)),
+        eq(cmsPlanBenefitSectionsTable.rowSeq, 0),
+      ),
+    );
+  const byBid = new Map<string, Sections>();
+  for (const r of rows) {
+    const sections = byBid.get(r.bidId) ?? {};
+    sections[r.section] = [r.data];
+    byBid.set(r.bidId, sections);
+  }
+  for (const bidId of bidIds) {
+    try {
+      cards.set(bidId, byBid.has(bidId) ? buildPlanCard(byBid.get(bidId)!) : null);
+    } catch {
+      cards.set(bidId, null); // a malformed row must not break the whole list
+    }
+  }
+  return cards;
 }
 
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -184,7 +237,13 @@ router.get("/quoting/plans", ...guards, async (req: Request, res: Response): Pro
       .where(where)
       .orderBy(asc(cmsPlanBenefitPackagesTable.orgMarketingName), asc(cmsPlanBenefitPackagesTable.planName), asc(cmsPlanBenefitPackagesTable.bidId))
       .limit(PLAN_LIMIT);
-    const data = rows.map(({ partialFlag, ...r }) => ({ ...r, partial: partialFlag === "1" }));
+    const cards = await loadCards(planYear, rows.map((r) => r.bidId));
+    const data = rows.map(({ partialFlag, ...r }) => ({
+      ...r,
+      snpType: snpTypeLabel(r.snpType),
+      partial: partialFlag === "1",
+      card: cards.get(r.bidId) ?? null,
+    }));
     logger.info({ results: data.length, total }, "quoting plans: search ok");
     res.json({ data, total, truncated: total > PLAN_LIMIT, planYear, source: SOURCE });
   } catch (err) {
@@ -224,7 +283,15 @@ router.get("/quoting/plans/:bidId", ...detailGuards, async (req: Request, res: R
       if (last && last.section === r.section) last.rows.push(r.data);
       else grouped.push({ section: r.section, rows: [r.data] });
     }
-    res.json({ plan, sections: grouped, planYear, source: SOURCE });
+    const bySection: Sections = {};
+    for (const g of grouped) bySection[g.section] = g.rows;
+    let card: PlanCard | null = null;
+    try {
+      card = buildPlanCard(bySection);
+    } catch {
+      card = null;
+    }
+    res.json({ plan: { ...plan, snpType: snpTypeLabel(plan.snpType) }, sections: grouped, card, planYear, source: SOURCE });
   } catch (err) {
     sendPlanLoadError(res, err);
   }
