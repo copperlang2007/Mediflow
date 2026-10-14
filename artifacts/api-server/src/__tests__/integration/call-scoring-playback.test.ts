@@ -102,7 +102,9 @@ async function captureLogs() {
     const captured: unknown[] = [];
     // Errors stringify to {} by default, so keep message, stack, cause and own fields.
     // pino-http hands over raw req/res (sockets, circular); real pino serializes them to method/url/status only.
-    const record = (args: unknown[]) => {
+    const levelOf: string[] = []; // parallel to captured: the level of each call
+    const record = (args: unknown[], level: string) => {
+      levelOf.push(level);
       const seen = new WeakSet<object>();
       captured.push(
         JSON.stringify(args, (k, v) => {
@@ -119,7 +121,7 @@ async function captureLogs() {
     const spies: Array<{ mockRestore: () => void }> = [];
     const wrap = (l: any) => {
       for (const level of levels) {
-        spies.push(vi.spyOn(l, level).mockImplementation(((...args: unknown[]) => record(args)) as never));
+        spies.push(vi.spyOn(l, level).mockImplementation(((...args: unknown[]) => record(args, level)) as never));
       }
     };
     wrap(logger);
@@ -132,7 +134,9 @@ async function captureLogs() {
         return c;
       }) as never),
     );
-  return { captured, spies };
+  /** Calls at error or fatal level, counting from captured index `from` (default: the whole window). */
+  const errorLevelCalls = (from = 0) => levelOf.slice(from).filter((l) => l === "error" || l === "fatal").length;
+  return { captured, spies, errorLevelCalls };
 }
 
 const listen = (userId: string, transcriptId: string) => request(app).get(`/api/call-scoring/transcripts/${transcriptId}/audio`).set(withAuth(userId));
@@ -256,7 +260,7 @@ describe("listening to a recording", () => {
   });
 
   it("logs a key-free warning when signing the link fails", async () => {
-    const { captured, spies } = await captureLogs();
+    const { captured, spies, errorLevelCalls } = await captureLogs();
     const { transcriptId, recordingId } = await makeCall();
     const objectKey = `call-recordings/${org.id}/${recordingId}`;
     const g = globalThis as { __PB_FAIL__?: Map<string, string> };
@@ -266,6 +270,8 @@ describe("listening to a recording", () => {
       expect(res.status, JSON.stringify(res.body)).toBe(503);
       expect(res.body.code).toBe("storage_unavailable");
       expect(JSON.stringify(res.body)).not.toContain(objectKey);
+      // A storage failure is handled in the route; it never reaches the global error handler (req.log.error).
+      expect(errorLevelCalls()).toBe(0);
       const log = captured.join("\n");
       expect(log).toContain("call recording storage unavailable");
       expect(log).toContain('"step":"sign"');
@@ -301,7 +307,7 @@ describe("listening to a recording", () => {
   });
 
   it("never writes the recording's object key to the server log when playback fails", async () => {
-    const { captured, spies } = await captureLogs();
+    const { captured, spies, errorLevelCalls } = await captureLogs();
 
     const g = globalThis as { __PB_FAIL__?: Map<string, string> };
     const realInsert = handle.db.insert.bind(handle.db) as (table: unknown) => any;
@@ -310,6 +316,7 @@ describe("listening to a recording", () => {
     try {
       // (a) The listen cannot be logged; the database error carries real ids, as drizzle's does.
       const a = await makeCall();
+      const logStartA = captured.length;
       const keyA = `call-recordings/${org.id}/${a.recordingId}`;
       const insertSpy = vi.spyOn(handle.db, "insert").mockImplementation(((table: unknown) => {
         const builder = realInsert(table);
@@ -331,6 +338,8 @@ describe("listening to a recording", () => {
       expect(resA.status).toBeGreaterThanOrEqual(500);
       bodies.push(JSON.stringify(resA.body));
       insertSpy.mockRestore();
+      // Positive control: an unhandled failure does reach the global handler, and the counter sees it.
+      expect(errorLevelCalls(logStartA)).toBeGreaterThanOrEqual(1);
 
       // (b) Storage fails with a message that contains the key; the route answers 503.
       const b = await makeCall();
@@ -345,6 +354,7 @@ describe("listening to a recording", () => {
         g.__PB_FAIL__.delete(keyB);
       }
       // The storage-failure path itself logged (so the key-absence check below is not vacuous for it).
+      expect(errorLevelCalls(logStartB)).toBe(0);
       const logB = captured.slice(logStartB).join("\n");
       expect(logB).toContain("call recording storage unavailable");
       expect(logB).toContain(b.recordingId!);
