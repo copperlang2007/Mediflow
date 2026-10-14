@@ -186,11 +186,14 @@ describe("which user a sign-in is", () => {
     expect(await users.resolveUserId(auth(`uid-${randomUUID()}`, "newstyle@agency.example"))).toBeNull();
   });
 
+<<<<<<< HEAD
   it("matches the Clerk id prefix literally (in LIKE, `_` would match any character)", async () => {
     await seedUser(handle.db, { id: `userX${randomUUID()}`, orgId: org.id, email: "lookalike@agency.example" });
     expect(await users.resolveUserId(auth(`uid-${randomUUID()}`, "lookalike@agency.example"))).toBeNull();
   });
 
+=======
+>>>>>>> origin/main
   it("a linked Clerk-era user signs in and uses the app as themselves", async () => {
     const legacy = await seedUser(handle.db, { id: `user_${randomUUID()}`, orgId: org.id, role: "agency_admin", email: "returning@agency.example" });
     const subject = `uid-${randomUUID()}`;
@@ -244,6 +247,7 @@ describe("creating an agency and accepting an invitation", () => {
     expect(await handle.db.select().from(schema.usersTable).where(eq(schema.usersTable.id, subject))).toHaveLength(0);
   });
 
+<<<<<<< HEAD
   it("two simultaneous sign-ups with one email create one agency, not two", async () => {
     const send = (subject: string) =>
       request(app)
@@ -259,6 +263,8 @@ describe("creating an agency and accepting an invitation", () => {
     expect(rows).toHaveLength(1);
   });
 
+=======
+>>>>>>> origin/main
   it("asks for a verified email before accepting an invitation", async () => {
     const res = await request(app)
       .post("/api/invitations/accept")

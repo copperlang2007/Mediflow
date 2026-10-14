@@ -165,7 +165,11 @@ describe("invitation lifecycle", () => {
     const newIdentityId = `identity-${randomUUID()}`;
     const accepted = await request(app)
       .post("/api/invitations/accept")
+<<<<<<< HEAD
       .set({ ...withAuth(newIdentityId), "x-test-email": "new.hire@alpha.test" })
+=======
+      .set(withAuth(newIdentityId))
+>>>>>>> origin/main
       .send({ token, fullName: "Nora Newhire" });
 
     expect(accepted.status).toBe(201);
@@ -198,13 +202,21 @@ describe("invitation lifecycle", () => {
 
     const first = await request(app)
       .post("/api/invitations/accept")
+<<<<<<< HEAD
       .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": "once@alpha.test" })
+=======
+      .set(withAuth(`identity-${randomUUID()}`))
+>>>>>>> origin/main
       .send({ token, fullName: "First Arrival" });
     expect(first.status).toBe(201);
 
     const second = await request(app)
       .post("/api/invitations/accept")
+<<<<<<< HEAD
       .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": "once@alpha.test" })
+=======
+      .set(withAuth(`identity-${randomUUID()}`))
+>>>>>>> origin/main
       .send({ token, fullName: "Second Arrival" });
     expect(second.status).toBe(410);
     expect(second.body.code).toBe("accepted");
@@ -223,7 +235,11 @@ describe("invitation lifecycle", () => {
 
     const accepted = await request(app)
       .post("/api/invitations/accept")
+<<<<<<< HEAD
       .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": "stale@alpha.test" })
+=======
+      .set(withAuth(`identity-${randomUUID()}`))
+>>>>>>> origin/main
       .send({ token, fullName: "Too Late" });
 
     expect(accepted.status).toBe(410);
@@ -327,7 +343,11 @@ describe("seat accounting", () => {
 
     const accepted = await request(app)
       .post("/api/invitations/accept")
+<<<<<<< HEAD
       .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": "downgraded@alpha.test" })
+=======
+      .set(withAuth(`identity-${randomUUID()}`))
+>>>>>>> origin/main
       .send({ token, fullName: "Late Joiner" });
 
     expect(accepted.status).toBe(402);
@@ -347,7 +367,11 @@ describe("seat accounting", () => {
 
     const accepted = await request(app)
       .post("/api/invitations/accept")
+<<<<<<< HEAD
       .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": "last-seat@alpha.test" })
+=======
+      .set(withAuth(`identity-${randomUUID()}`))
+>>>>>>> origin/main
       .send({ token, fullName: "Last Seat" });
 
     expect(accepted.status).toBe(201);
@@ -368,7 +392,11 @@ describe("seat accounting", () => {
     const accept = (token: string, email: string) =>
       request(app)
         .post("/api/invitations/accept")
+<<<<<<< HEAD
         .set({ ...withAuth(`identity-${randomUUID()}`), "x-test-email": email })
+=======
+        .set(withAuth(`identity-${randomUUID()}`))
+>>>>>>> origin/main
         .send({ token, fullName: "Joiner" });
 
     // Still over the plan (adminA + two reservations = 3 > 2): refuse both,

@@ -15,7 +15,11 @@
  * Returns null when the identity has no agencyBRIDGE account yet (the web app
  * then offers create-your-agency, or the invitation it came from).
  */
+<<<<<<< HEAD
 import { and, eq, isNull, sql } from "drizzle-orm";
+=======
+import { and, eq, isNull, like, sql } from "drizzle-orm";
+>>>>>>> origin/main
 import { db, userIdentitiesTable, usersTable } from "@workspace/db";
 import { logger } from "../logger";
 import { IDENTITY_PROVIDER, type IdentityAuth } from "./identity";
@@ -48,8 +52,12 @@ export async function resolveUserId(auth: IdentityAuth): Promise<string | null> 
     .where(
       and(
         sql`lower(${usersTable.email}) = ${auth.email}`,
+<<<<<<< HEAD
         // Literal prefix: in LIKE, `_` would match any character.
         sql`starts_with(${usersTable.id}, ${CLERK_ID_PREFIX})`,
+=======
+        like(usersTable.id, `${CLERK_ID_PREFIX}%`),
+>>>>>>> origin/main
         isNull(userIdentitiesTable.userId),
       ),
     )
