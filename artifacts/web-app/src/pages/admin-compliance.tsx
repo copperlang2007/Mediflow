@@ -443,6 +443,8 @@ function LoginHistoryTab() {
 
   const handleExport = async () => {
     const base = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
+    // The step-up gate wants a recently issued token in the session cookie.
+    await ensureFreshSession();
     const res = await fetch(`${base}/api/admin/login-history/export`, {
       credentials: "include",
       headers: { "X-Confirm-Export": "true" },

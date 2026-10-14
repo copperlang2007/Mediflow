@@ -77,30 +77,35 @@ describe("AuthProvider", () => {
     expect(cookie()).toBeNull();
   });
 
-  it("renews a token older than 10 minutes before it is sent, so step-up checks (15 min) pass", async () => {
-    const tokenUser = (issuedMinutesAgo: number) => {
-      const getIdToken = vi.fn(async (force?: boolean) => (force ? "renewed.token.sig" : "cached.token.sig"));
-      return {
-        getIdToken,
-        getIdTokenResult: async () => ({
-          token: "cached.token.sig",
-          issuedAtTime: new Date(Date.now() - issuedMinutesAgo * 60_000).toUTCString(),
-        }),
-      };
-    };
+  it("renews a token this page did not obtain, or obtained over 10 minutes ago, timed by this page's clock", async () => {
+    let current_token = "restored.from.storage";
+    let renewals = 0;
+    const getIdToken = vi.fn(async (force?: boolean) => {
+      if (force) current_token = `renewed.${++renewals}`;
+      return current_token;
+    });
+    const t0 = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(t0);
+    current.user = { getIdToken };
     try {
-      const old = tokenUser(12);
-      current.user = old;
+      // A token restored from storage has an unknown age: renewed once.
       await ensureFreshSession();
-      expect(old.getIdToken).toHaveBeenCalledWith(true);
-      expect(cookie()).toBe("__session=renewed.token.sig");
+      expect(renewals).toBe(1);
+      expect(cookie()).toBe("__session=renewed.1");
 
-      const recent = tokenUser(2);
-      current.user = recent;
+      // Within 10 minutes: the same token, no renewal.
+      clock.mockReturnValue(t0 + 9 * 60_000);
       await ensureFreshSession();
-      expect(recent.getIdToken).not.toHaveBeenCalled();
-      expect(cookie()).toBe("__session=cached.token.sig");
+      await ensureFreshSession();
+      expect(renewals).toBe(1);
+
+      // Past 10 minutes since this page got it: renewed.
+      clock.mockReturnValue(t0 + 11 * 60_000);
+      await ensureFreshSession();
+      expect(renewals).toBe(2);
+      expect(cookie()).toBe("__session=renewed.2");
     } finally {
+      clock.mockRestore();
       current.user = null;
     }
   });

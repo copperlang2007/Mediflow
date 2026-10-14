@@ -307,6 +307,27 @@ describe("admin session controls", () => {
     expect(row!.expiresAt.getTime()).toBeLessThan(Date.now());
   });
 
+  it("a busy session is re-read from the database about once a minute, not on every request", async () => {
+    const s = sessionOf(target.id, 1_800_000_660);
+    const t0 = Date.now();
+    const spy = vi.spyOn(Date, "now");
+    try {
+      spy.mockReturnValue(t0);
+      expect((await signIn(s)).status).toBe(200);
+      spy.mockReturnValue(t0 + 70_000); // past the 60 s window: re-reads the row
+      expect((await signIn(s)).status).toBe(200);
+      // Make the row say "idle for 2 hours"; a request served from the fresh cache does not see it yet.
+      await handle.db
+        .update(schema.sessionActivityTable)
+        .set({ lastActiveAt: new Date(t0 - 2 * 60 * 60 * 1000) })
+        .where(eq(schema.sessionActivityTable.sessionId, s));
+      spy.mockReturnValue(t0 + 80_000);
+      expect((await signIn(s)).status).toBe(200);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("a revoked session's row is kept as ended (not epoch), so cleanup keeps it for the full retention window", async () => {
     const s = sessionOf(target.id, 1_800_000_700);
     await signIn(s);

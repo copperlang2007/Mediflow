@@ -3,7 +3,7 @@ import { getAuth } from "../lib/auth/identity";
 import { resolveUserId } from "../lib/auth/users";
 import { randomUUID } from "node:crypto";
 import { db, usersTable, organizationsTable, orgSettingsTable, sessionActivityTable, auditLogTable } from "@workspace/db";
-import { eq, gt, inArray, lt } from "drizzle-orm";
+import { eq, gt, inArray, lt, sql } from "drizzle-orm";
 import { type Role, type Resource, type Action, can } from "../lib/permissions";
 import { isDemoMode, demoUserId } from "../lib/demoMode";
 import { logger } from "../lib/logger";
@@ -110,13 +110,15 @@ async function checkAndUpdateSessionActivity(
     .onConflictDoUpdate({
       target: sessionActivityTable.sessionId,
       set: { lastActiveAt: new Date(now), expiresAt },
-      setWhere: gt(sessionActivityTable.expiresAt, new Date(now)),
+      // Database clock, not this request's: a revoke committed on another
+      // server a moment after this request started must still win.
+      setWhere: gt(sessionActivityTable.expiresAt, sql`now()`),
     })
     .returning({ sessionId: sessionActivityTable.sessionId });
   if (!written.length) return markExpired(sessionId, lastActiveAt);
-  // syncedAt is kept from the last read: the row is re-read within a minute
-  // even while the session is busy.
-  sessionLocalCache.set(sessionId, { lastActiveAt: now, syncedAt: cached?.syncedAt ?? now });
+  // syncedAt moves only when this request read the row, so a busy session is
+  // still re-read from the database once a minute (not on every request).
+  sessionLocalCache.set(sessionId, { lastActiveAt: now, syncedAt: needsDbRead ? now : cached!.syncedAt });
 
   return "ok";
 }

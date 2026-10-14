@@ -30,14 +30,31 @@ const COOKIE_MAX_AGE_SEC = 60 * 60;
 const TOKEN_MAX_AGE_MS = 10 * 60 * 1000;
 
 let renewing: Promise<string> | null = null;
-/** A current ID token for `user`, renewed when older than TOKEN_MAX_AGE_MS (one renewal at a time). */
+/**
+ * The token this page last renewed and when, by this computer's clock. Age is
+ * measured from here, never against the token's own issue time, so a fast or
+ * slow computer clock can neither force a renewal on every call nor let a
+ * stale token through.
+ */
+let known: { token: string; at: number } | null = null;
+
+/**
+ * A current ID token for `user`, renewed when this page did not obtain it
+ * (restored from storage, renewed elsewhere) or obtained it more than
+ * TOKEN_MAX_AGE_MS ago. One renewal at a time.
+ */
 export async function freshIdToken(user: User): Promise<string> {
-  const result = await user.getIdTokenResult();
-  const issued = Date.parse(result.issuedAtTime);
-  if (Number.isFinite(issued) && Date.now() - issued < TOKEN_MAX_AGE_MS) return result.token;
-  renewing ??= user.getIdToken(true).finally(() => {
-    renewing = null;
-  });
+  const token = await user.getIdToken();
+  if (known && known.token === token && Date.now() - known.at < TOKEN_MAX_AGE_MS) return token;
+  renewing ??= user
+    .getIdToken(true)
+    .then((fresh) => {
+      known = { token: fresh, at: Date.now() };
+      return fresh;
+    })
+    .finally(() => {
+      renewing = null;
+    });
   return renewing;
 }
 

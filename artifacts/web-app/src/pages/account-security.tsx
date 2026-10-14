@@ -42,16 +42,25 @@ function TwoStep() {
   const factors = multiFactor(firebaseUser).enrolledFactors;
 
   // Replace = add the new authenticator first, then remove the old ones, so a
-  // failure part-way never leaves the account without a second step. Removing
-  // the factor this sign-in used ends the sign-in, so errors there are
-  // expected; the user signs in again with the new code either way.
+  // failure part-way never leaves the account without a second step. If any
+  // old one could not be removed (network error, or removing one ended this
+  // sign-in), say so instead of claiming success: an old, possibly lost
+  // authenticator would still work.
   async function replaceDone(oldFactorUids: string[]) {
+    let failed = 0;
     for (const uid of oldFactorUids) {
       try {
         await multiFactor(firebaseUser!).unenroll(uid);
       } catch {
-        // Session ended by the removal, or already gone: nothing to do.
+        failed += 1;
       }
+    }
+    if (failed) {
+      setMode("view");
+      setError(
+        "Your new authenticator app is set up, but the old one could not be removed, so it still works. Sign out, sign in with the new app, then choose Replace authenticator app again to remove it.",
+      );
+      return;
     }
     await signOut({ redirectUrl: signInAgain });
   }

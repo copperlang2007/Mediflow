@@ -151,7 +151,7 @@ router.post("/auth/provision", async (req: Request, res: Response): Promise<void
   if (sameEmail) {
     res.status(409).json({
       error:
-        "An agencyBRIDGE account already uses this email, so a new agency was not created. Ask your agency administrator or support to connect your login to it.",
+        "An agencyBRIDGE account already uses this email, so a new agency was not created. Contact agencyBRIDGE support to connect this login to your account.",
       code: "account_exists",
     });
     return;

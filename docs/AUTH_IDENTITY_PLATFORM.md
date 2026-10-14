@@ -79,11 +79,45 @@ half-configured revision never replaces the working one.
 
 - Sign in yourself first (Create your login → verify → authenticator → sign
   in again) and check the dashboard.
+- **Then keep using the app for 15 minutes.** The app renews its sign-in
+  every 10 minutes, and each renewed sign-in must still say it passed the
+  authenticator step. If you are sent back to *set up two-step
+  verification*, roll back (below) and report it. Nothing else will work
+  until it is fixed.
 - Tell the team the steps under *What people will see*.
 - **Remove Clerk:** delete the GitHub secrets `CLERK_SECRET_KEY` and
   `CLERK_PUBLISHABLE_KEY`, the Secret Manager secrets
   `mediflow-clerk-secret-key` and `mediflow-clerk-publishable-key`, and cancel
   the Clerk plan.
+
+### Support: connect a login to an existing account
+
+When someone sees *"An agencyBRIDGE account already uses this email"*, the app
+could not match their new login to their account by itself. This happens
+when two older accounts share the email, or when the account is already
+connected to a different login (for example, the person deleted and
+recreated it). Fix it only after confirming the person's identity outside
+the app (phone call to a known number, or their agency admin).
+
+1. Identity Platform console → **Users**: find their email and copy the
+   **User UID**.
+2. Cloud SQL Studio: find the right account
+   (`SELECT id, org_id, role, is_active FROM users WHERE lower(email) = lower('<their email>');`).
+   If two rows come back, ask their agency admin which agency is current.
+3. Connect them. This also disconnects any older login from that account:
+
+   ```sql
+   BEGIN;
+   DELETE FROM user_identities WHERE provider = 'identity_platform' AND user_id = '<users.id>';
+   INSERT INTO user_identities (provider, subject, user_id, linked_via)
+   VALUES ('identity_platform', '<User UID>', '<users.id>', 'support');
+   COMMIT;
+   ```
+
+   If the INSERT fails with a duplicate key, that login is already connected
+   to another account. Stop and investigate; don't delete it blindly.
+4. Note who asked, who confirmed their identity, and when (your support log).
+   They can now sign in.
 
 **Rollback:** in Cloud Run, send traffic back to the last revision deployed
 before the switch (it still has Clerk). The only database change (table
