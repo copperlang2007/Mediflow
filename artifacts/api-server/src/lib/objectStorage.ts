@@ -333,6 +333,16 @@ export class ObjectStorageService {
   }
 
   /**
+   * A short-lived signed URL a browser can stream a stored recording from. The
+   * object key is always built on the server (callRecordingKey), never taken
+   * from a client; the caller must already have checked the person may listen.
+   */
+  async getCallRecordingReadURL(objectKey: string, ttlSec = 600): Promise<string> {
+    const { bucketName, objectName } = parseObjectPath(`${this.getPrivateObjectDir()}/${objectKey}`);
+    return signObjectURL({ bucketName, objectName, method: "GET", ttlSec });
+  }
+
+  /**
    * Write a recording the server downloaded itself (EnrollHere call-log
    * import). Create-only like the signed upload URL: an object already at
    * this key is never overwritten (the caller checks for it first).

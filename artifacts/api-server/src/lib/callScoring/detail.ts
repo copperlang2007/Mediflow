@@ -8,6 +8,7 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
   agentsTable,
   callScoreFindingsTable,
+  callRecordingsTable,
   callScoreReviewsTable,
   callScoresTable,
   callTranscriptsTable,
@@ -29,6 +30,7 @@ import {
   type ScopeFilter,
   type TranscriptFilters,
 } from "./store";
+import { ownRecordingCondition } from "./playback";
 import { open } from "./seal";
 import { speakerSummary } from "./speakerRoles";
 import { meetsStandard } from "./score";
@@ -294,6 +296,11 @@ export async function buildDetail(orgId: string, transcriptId: string, scope: Sc
     .where(and(eq(callScoresTable.orgId, orgId), eq(callScoresTable.transcriptId, row.id)))
     .orderBy(desc(callScoresTable.createdAt));
 
+  const [recordingRow] = await db
+    .select({ id: callRecordingsTable.id })
+    .from(callRecordingsTable)
+    .where(and(eq(callRecordingsTable.orgId, orgId), eq(callRecordingsTable.transcriptId, row.id), eq(callRecordingsTable.status, "scored"), ownRecordingCondition(orgId, scope)))
+    .limit(1);
   const names = await namesFor(orgId, row.contactId ? [row.contactId] : [], row.agentId ? [row.agentId] : []);
   const base = {
     transcript: {
@@ -313,6 +320,8 @@ export async function buildDetail(orgId: string, transcriptId: string, scope: Sc
       // Which voices a reviewer can choose between (one-track recordings only).
       speakers: speakerSummary(utterances, { reassigning: Boolean(payload?.speakerAssignment) }),
       speakerAssignedAt: payload?.speakerAssignment?.at ?? null,
+      // True when a stored recording can be played (the page shows "Listen to the recording").
+      recordingAvailable: Boolean(recordingRow),
       // False when a reviewer's choice was saved but the call was not scored again under it.
       speakerScoreCurrent: payload?.speakerAssignment ? payload.speakerAssignment.scoredId === payload.speakerAssignment.id : true,
       callSessionLinked: Boolean(row.callSessionId),
