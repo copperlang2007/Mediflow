@@ -1,11 +1,13 @@
 /**
  * Quoting Engine page.
  *
- * Premium, drug-cost and formulary data are not decoded/loaded yet, so this page
- * never shows a premium, out-of-pocket figure or star rating. It uses real data
- * where it exists:
- *   - CMS plan lists by state + county (GET /quoting/plans*), with each plan's
- *     raw CMS benefit fields (CMS codes, not decoded);
+ * Plans come from the CMS Plan Benefit Package files and are shown as cards:
+ * health plan premium, out-of-pocket max, visit / ER / hospital costs and the
+ * included extras, decoded server-side (lib/planCard.ts). The CMS file has no
+ * Part D premium, star ratings, networks or formularies, so none are shown.
+ * Real data sources on this page:
+ *   - CMS plan lists by state + county (GET /quoting/plans*), with a decoded
+ *     card per plan and the raw CMS fields behind "Full details";
  *   - your carriers, from the `carriers` table;
  *   - doctor lookup against the public CMS NPPES NPI Registry through the
  *     server-side proxy GET /quoting/providers (validated, rate limited).
@@ -20,6 +22,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader, SectionCard, StatusPill, EmptyState } from "@/components/shared";
+import { PlanCard } from "@/components/quoting/PlanCard";
+import { MAX_COMPARE, PlanCompare } from "@/components/quoting/PlanCompare";
+import { FILTERS, SORT_OPTIONS, bestFlags, filterPlans, planTypes, sortPlans, type FilterKey, type SortKey } from "@/components/quoting/planCardModel";
 import { ComingSoonNote, NoAccess, SoonBadge } from "@/components/portal-dialer";
 import { useIsAdmin } from "@/lib/auth/useIsAdmin";
 import { cn } from "@/lib/utils";
@@ -32,6 +37,7 @@ import {
   usePlanDetail,
   usePlanSearch,
   usePlanStates,
+  type PlanSummary,
   type ProviderResult,
   type SnpFilter,
 } from "@/lib/portalDialer/api";
@@ -118,12 +124,133 @@ function PlanDetailPanel({ bidId }: { bidId: string }) {
 const isRateLimited = (err: unknown) => (err as { status?: number } | null)?.status === 429;
 const LOAD_ERR = "Plan data could not be loaded right now.";
 
+function PlanResults(props: {
+  plans: PlanSummary[];
+  total: number;
+  truncated: boolean;
+  sort: SortKey;
+  setSort: (k: SortKey) => void;
+  filters: Set<FilterKey>;
+  setFilters: (f: Set<FilterKey>) => void;
+  planType: string;
+  setPlanType: (t: string) => void;
+  compare: string[];
+  setCompare: (ids: string[]) => void;
+  compareOpen: boolean;
+  setCompareOpen: (o: boolean) => void;
+  open: string | null;
+  setOpen: (id: string | null) => void;
+}) {
+  const { plans, filters, compare } = props;
+  const shown = sortPlans(filterPlans(plans, filters, props.planType), props.sort);
+  const flags = bestFlags(shown);
+  const types = planTypes(plans);
+  const picked = compare.map((id) => plans.find((p) => p.bidId === id)).filter((p): p is PlanSummary => !!p);
+  const toggleFilter = (k: FilterKey) => {
+    const next = new Set(filters);
+    if (next.has(k)) next.delete(k);
+    else next.add(k);
+    props.setFilters(next);
+  };
+  const toggleCompare = (id: string) =>
+    props.setCompare(compare.includes(id) ? compare.filter((x) => x !== id) : compare.length < MAX_COMPARE ? [...compare, id] : compare);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Show only plans with">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              aria-pressed={filters.has(f.key)}
+              onClick={() => toggleFilter(f.key)}
+              className={cn(
+                "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                filters.has(f.key) ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card hover:bg-muted",
+              )}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          {types.length > 1 && (
+            <div className="space-y-1">
+              <Label htmlFor="plan-type" className="text-xs">Plan type</Label>
+              <select id="plan-type" className={selectCls} value={props.planType} onChange={(e) => props.setPlanType(e.target.value)}>
+                <option value="">All types</option>
+                {types.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="space-y-1">
+            <Label htmlFor="plan-sort" className="text-xs">Sort by</Label>
+            <select id="plan-sort" className={selectCls} value={props.sort} onChange={(e) => props.setSort(e.target.value as SortKey)}>
+              {SORT_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <p className="text-xs text-muted-foreground" aria-live="polite">
+        {props.truncated
+          ? `Showing ${shown.length} of the first ${plans.length} of ${props.total} plans — narrow with the name box.`
+          : shown.length === plans.length
+            ? `${props.total} plans`
+            : `${shown.length} of ${props.total} plans match`}
+      </p>
+
+      {shown.length === 0 ? (
+        <EmptyState compact icon={Search} title="No plans match those filters" description="Turn a filter off to see more plans." />
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {shown.map((p) => (
+            <PlanCard
+              key={p.bidId}
+              plan={p}
+              flags={flags.get(p.bidId)}
+              compareSelected={compare.includes(p.bidId)}
+              compareDisabled={compare.length >= MAX_COMPARE}
+              onToggleCompare={toggleCompare}
+              open={props.open === p.bidId}
+              onToggleOpen={(id) => props.setOpen(props.open === id ? null : id)}
+              details={props.open === p.bidId ? <PlanDetailPanel bidId={p.bidId} /> : undefined}
+            />
+          ))}
+        </div>
+      )}
+
+      {compare.length > 0 && (
+        <div className="sticky bottom-3 z-30 flex items-center justify-between gap-3 rounded-xl border border-primary/40 bg-card px-4 py-3 shadow-lg">
+          <p className="text-sm font-medium">
+            {compare.length} plan{compare.length === 1 ? "" : "s"} selected
+            {compare.length >= MAX_COMPARE && <span className="text-muted-foreground"> (max {MAX_COMPARE})</span>}
+          </p>
+          <div className="flex gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => props.setCompare([])}>Clear</Button>
+            <Button type="button" size="sm" disabled={compare.length < 2} onClick={() => props.setCompareOpen(true)}>
+              Compare {compare.length < 2 ? "(pick 2+)" : ""}
+            </Button>
+          </div>
+        </div>
+      )}
+      <PlanCompare plans={picked} open={props.compareOpen && picked.length >= 2} onOpenChange={props.setCompareOpen} />
+    </div>
+  );
+}
+
 function PlanBrowser() {
   const [state, setState] = useState("");
   const [countyCode, setCountyCode] = useState("");
   const [q, setQ] = useState("");
   const [snp, setSnp] = useState<SnpFilter>("all");
   const [open, setOpen] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortKey>("carrier");
+  const [filters, setFilters] = useState<Set<FilterKey>>(new Set());
+  const [planType, setPlanType] = useState("");
+  const [compare, setCompare] = useState<string[]>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
   const states = usePlanStates();
   const counties = usePlanCounties(state);
   const [debouncedQ, setDebouncedQ] = useState("");
@@ -139,14 +266,14 @@ function PlanBrowser() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <div className="space-y-1.5">
           <Label htmlFor="plan-state">State</Label>
-          <select id="plan-state" className={selectCls} value={state} onChange={(e) => { setState(e.target.value); setCountyCode(""); setOpen(null); }}>
+          <select id="plan-state" className={selectCls} value={state} onChange={(e) => { setState(e.target.value); setCountyCode(""); setOpen(null); setCompare([]); setPlanType(""); }}>
             <option value="">Select…</option>
             {(states.data?.data ?? []).map((s) => <option key={s.stateCode} value={s.stateCode}>{s.stateCode}</option>)}
           </select>
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="plan-county">County</Label>
-          <select id="plan-county" className={selectCls} value={countyCode} disabled={!state} onChange={(e) => { setCountyCode(e.target.value); setOpen(null); }}>
+          <select id="plan-county" className={selectCls} value={countyCode} disabled={!state} onChange={(e) => { setCountyCode(e.target.value); setOpen(null); setCompare([]); setPlanType(""); }}>
             <option value="">{counties.isLoading ? "Loading…" : "Select…"}</option>
             {(counties.data?.data ?? []).map((c) => <option key={c.countyCode} value={c.countyCode}>{c.countyName ?? c.countyCode}</option>)}
           </select>
@@ -178,38 +305,29 @@ function PlanBrowser() {
       ) : (plans.data?.data.length ?? 0) === 0 ? (
         <EmptyState compact icon={Search} title="No plans found" description="Try another county or clear the filters." />
       ) : (
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">
-            {plans.data!.truncated ? `Showing the first ${plans.data!.data.length} of ${plans.data!.total} plans — narrow with the name box.` : `${plans.data!.total} plans`}
-          </p>
-          <ul className="divide-y divide-border/60 rounded-xl border border-border">
-            {plans.data!.data.map((p) => (
-              <li key={p.bidId} className="p-3">
-                <button type="button" className="flex w-full flex-col gap-1 text-left" aria-expanded={open === p.bidId} onClick={() => setOpen(open === p.bidId ? null : p.bidId)}>
-                  <span className="text-sm font-semibold">{p.planName ?? p.bidId}</span>
-                  <span className="text-xs text-muted-foreground">{p.orgMarketingName ?? p.orgName ?? "Carrier not listed"} · {p.planTypeLabel ?? "Plan"} · {p.contractId}-{p.planId}-{p.segmentId}</span>
-                  <span className="flex flex-wrap gap-1.5">
-                    {p.isSnp && <StatusPill tone="info">SNP{p.snpType ? `: ${p.snpType}` : ""}</StatusPill>}
-                    {p.partial && <StatusPill tone="warning">Partial county</StatusPill>}
-                  </span>
-                </button>
-                {open === p.bidId && (
-                  <div className="mt-3 space-y-3">
-                    {p.orgWebsite && (
-                      <a className="text-xs underline" href={/^https?:\/\//i.test(p.orgWebsite) ? p.orgWebsite : `https://${p.orgWebsite}`} target="_blank" rel="noopener noreferrer">Carrier website</a>
-                    )}
-                    <PlanDetailPanel bidId={p.bidId} />
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
+        <PlanResults
+          plans={plans.data!.data}
+          total={plans.data!.total}
+          truncated={plans.data!.truncated}
+          sort={sort}
+          setSort={setSort}
+          filters={filters}
+          setFilters={setFilters}
+          planType={planType}
+          setPlanType={setPlanType}
+          compare={compare}
+          setCompare={setCompare}
+          compareOpen={compareOpen}
+          setCompareOpen={setCompareOpen}
+          open={open}
+          setOpen={setOpen}
+        />
       )}
 
       <ul className="list-disc space-y-1 pl-5 text-[11px] text-muted-foreground">
         <li>Shows Medicare Advantage and other county-based plans only. Part D (PDP) and Medigap plans are not covered yet.</li>
-        <li>Premiums and drug costs need CMS code decoding and are not shown yet.</li>
+        <li>The premium is the health plan premium only. The CMS file has no Part D drug premium, star ratings, doctor networks or drug lists, so those are not shown.</li>
+        <li>Benefits, premiums and copays can change and vary by provider. Confirm the details with the carrier before enrolling a client.</li>
         <li>Source: CMS Plan Benefit Package files{planYear ? `, plan year ${planYear}` : ""}.</li>
       </ul>
     </div>
@@ -404,8 +522,8 @@ export default function QuotingPage() {
       </div>
 
       {tab === "plans" && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <SectionCard className="lg:col-span-2" title="Plan comparison" icon={Database} description="Medicare Advantage and local plans by county">
+        <div className="space-y-6">
+          <SectionCard title="Plan comparison" icon={Database} description="Medicare Advantage and local plans by county">
             <PlanBrowser />
           </SectionCard>
           <CarriersCard />

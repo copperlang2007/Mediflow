@@ -92,6 +92,15 @@ ones with no inbound references.
 
 ## Session log
 
+### 2026-10-14 — Plan cards on the Quoting page (decoded premium, costs, extras, compare) — Claude Code — branch `claude/admiring-allen-b6wum5`
+- **Outcome:** done (code); not yet seen by real users until merged and deployed
+- **Changed:** `GET /quoting/plans` now returns a decoded `card` per plan (and `/quoting/plans/:bidId` returns one) from new `lib/planCard.ts`; the Quoting page shows plans as cards with filters (premium, drugs, dental, vision, hearing, OTC, fitness, Part B giveback), sort, plan-type filter, "lowest here" badges and a side-by-side compare of up to 4 (`components/quoting/*`). Also fixes the special-needs type showing as a CMS code ("3") instead of words ("Dual-Eligible").
+- **Verified:** `pnpm run typecheck` clean; new tests `planCard.test.ts` (real 2027 plans, hand-checked), `quoting-plans.test.ts`, `plan-cards.test.tsx`; rendered in the demo build at 375/768/1440 px with real 2027 plan data, no horizontal overflow, compare dialog checked. Full `pnpm test`: see PR. **NOT verified:** against the production database (the card query runs on PGlite in tests and on local PostgreSQL 16 data, not on Cloud SQL).
+- **Left undone / broken:** The CMS plan benefit file has no Part D premium, star ratings, provider networks or formularies, so cards show the health plan premium only and say so. PDP and Medigap plans are not covered. ZIP search still needs a ZIP→county lookup. Medical deductible shows only when CMS states it (most plans leave it blank).
+- **Decisions made:** conservative decoding: anything unreadable shows "See details" instead of a guessed number (see `docs/cms-plan-data.md`, "Plan cards").
+- **Next agent should:** load the CMS Landscape and Star Ratings files (Part D premium, stars) so cards can show a true total premium and star rating; then ZIP→county search.
+- **Needs a human:** review the card wording for CMS marketing-rule compliance before agents show it to beneficiaries.
+
 ### 2026-10-14 — Plan data readable in Quoting page (state/county plan browser) — Claude Code — branch `claudemoogs/quirky-babbage-2e4cjj`
 - **Outcome:** partial
 - **Changed:** The CMS 2027 plan tables (`cms_plan_*`) are now readable. New routes in `routes/quotingPlans.ts` (needs `contact:read`, 120/min per user for search and for details): `GET /quoting/plan-areas/states`, `/quoting/plan-areas/counties?state=`, `/quoting/plans?state=&countyCode=&q=&snp=`, `/quoting/plans/:bidId`. Employer-group plans are hidden. The Quoting page "Plan Comparison" tab has state and county pickers, name search, SNP filter, and expandable raw CMS fields per plan (CMS codes, not decoded). The four tables are in `GLOBAL_TABLES` in `tenant-isolation.test.ts`. Errors log only a Postgres code or error class, never search text. ZIP and Plan type controls are labelled "coming soon". Docs: `docs/cms-plan-data.md`. Not committed or pushed by the agent.
