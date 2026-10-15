@@ -14,8 +14,10 @@ switches over only when step 4 is done, because the deploy waits for the
   before. After clicking the link in the verification email, their agency,
   role and history come back automatically. Then they set up the
   authenticator app once and sign in again.
-- **New people:** invitations work as before: open the invitation link,
-  create a login, verify the email, accept.
+- **New people:** open the invitation link, create a login **with the
+  email address the invitation was sent to**, verify it, accept. A login
+  with any other email is refused, so a forwarded link cannot be used by
+  someone else.
 - Forgot password: a reset link by email. Sessions still end after the
   agency's idle timeout.
 

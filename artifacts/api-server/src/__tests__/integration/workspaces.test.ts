@@ -154,7 +154,7 @@ describe("workspaces", () => {
     const token = new URL(acceptUrl).searchParams.get("token")!;
     const res = await request(app)
       .post("/api/invitations/accept")
-      .set(withAuth("identity-dana"))
+      .set({ ...withAuth("identity-dana"), "x-test-email": "dana@cascade.test" })
       .send({ token, fullName: "Dana Whitfield" });
     expect(res.status).toBe(201);
     expect(res.body.user.orgId).toBe(newOrgId);

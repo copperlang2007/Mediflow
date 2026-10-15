@@ -142,25 +142,42 @@ router.post("/auth/provision", async (req: Request, res: Response): Promise<void
   // matched to (e.g. two earlier accounts differ only in letter case, or it is
   // already linked to another sign-in). Creating a fresh agency here would
   // silently split the person from their real account; stop and send them to
-  // an administrator instead.
-  const [sameEmail] = await db
-    .select({ id: usersTable.id })
-    .from(usersTable)
-    .where(sql`lower(${usersTable.email}) = ${email.trim().toLowerCase()}`)
-    .limit(1);
-  if (sameEmail) {
+  // support instead (docs/AUTH_IDENTITY_PLATFORM.md, connect a login).
+  const emailKey = email.trim().toLowerCase();
+  const accountExists = (): void => {
     res.status(409).json({
       error:
         "An agencyBRIDGE account already uses this email, so a new agency was not created. Contact agencyBRIDGE support to connect this login to your account.",
       code: "account_exists",
     });
+  };
+  const emailTaken = async (q: Pick<typeof db, "select">): Promise<boolean> => {
+    const [row] = await q
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(sql`lower(${usersTable.email}) = ${emailKey}`)
+      .limit(1);
+    return Boolean(row);
+  };
+  if (await emailTaken(db)) {
+    accountExists();
     return;
   }
 
   const orgId = randomUUID();
   const slug = orgSlug ?? orgName?.toLowerCase().replace(/[^a-z0-9]/g, "-") ?? orgId;
 
-  const { org, user } = await db.transaction(async (tx) => {
+  const created = await db.transaction(async (tx) => {
+    // users.email is not unique (one person may sit in several agencies), so
+    // two sign-ups with the same email at the same moment could both pass the
+    // check above. Serialise them per email and check again under the lock.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`provision:${emailKey}`}))`);
+    // The same sign-in retried while its first request was running: that
+    // request created this account, so hand it back rather than refuse.
+    const [mine] = await tx.select().from(usersTable).where(eq(usersTable.id, subject)).limit(1);
+    if (mine) return { existing: mine };
+    if (await emailTaken(tx)) return null;
+
     const [org] = await tx
       .insert(organizationsTable)
       .values({
@@ -187,6 +204,15 @@ router.post("/auth/provision", async (req: Request, res: Response): Promise<void
     await linkNewUser(tx, subject, user.id, "provision");
     return { org, user };
   });
+  if (!created) {
+    accountExists();
+    return;
+  }
+  if ("existing" in created) {
+    res.json({ user: created.existing, isNew: false });
+    return;
+  }
+  const { org, user } = created;
 
   // Seed the default Medicare carriers so the Carrier Certification Matrix
   // works out of the box. Failures here shouldn't block provisioning — admins

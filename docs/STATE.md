@@ -8,7 +8,7 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-14 — Sign-in moved from Clerk to Google Cloud Identity Platform in code (production switches after owner setup); recording player failure message (see session log)._
+_Last updated: 2026-10-14 — Identity Platform sign-in merged (#295; production switches after owner setup); follow-up sign-in fixes in review (see session log)._
 
 ### Health dashboard
 
@@ -21,8 +21,8 @@ _Last updated: 2026-10-14 — Sign-in moved from Clerk to Google Cloud Identity 
 | Production deploy (GCP Cloud Run) | **Green** at `f821a54` (run 37867735824), `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
-| Open PRs | Query GitHub live | As of 2026-10-14: #295 (Identity Platform sign-in, branch `claude/agencybridge-compliance-review-s3nc6l`) is open. #298 (recording-player error wording) merged as `a01cd24`; #296 (quoting plan cards) as `bb146d7`, #297 (recording playback) as `c37dadb`; #293, #294 merged earlier. |
-| Migration high-water mark | `0073_call_recordings_fetching` on main (landed with #289); `0074_user_identities` claimed by #295 | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
+| Open PRs | Query GitHub live | As of 2026-10-14: the sign-in follow-up PR (invitation email must match, duplicate sign-up lock, literal Clerk prefix; branch `claude/agencybridge-compliance-review-s3nc6l`). #295 (Identity Platform sign-in) merged as `99ca2e9`; #298 as `a01cd24`; #296 as `bb146d7`; #297 as `c37dadb`. |
+| Migration high-water mark | `0073_call_recordings_fetching` on main (landed with #289); `0074_user_identities` landed with #295 (main high-water mark is now 0074) | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
 ### Owner-only actions
@@ -90,6 +90,15 @@ ones with no inbound references.
 ---
 
 ## Session log
+
+### 2026-10-14 — Sign-in follow-up: invitation email must match, no duplicate sign-ups — Claude Code — branch `claude/agencybridge-compliance-review-s3nc6l`
+- **Outcome:** done (in review)
+- **Changed:** #295 merged (`99ca2e9`) about 20 minutes before the third round of review fixes was pushed, so they are in this follow-up PR. (1) Accepting an invitation now requires the signed-in, verified email to be the invited address (403 `email_mismatch`). This was not checked under Clerk either: a forwarded or leaked link alone took the seat. (2) Create-your-agency takes a per-email lock and re-checks under it, so two simultaneous sign-ups with one email cannot create two agencies. (3) The Clerk-era account match uses a literal `user_` prefix (`starts_with`); in `LIKE`, `_` matched any character. Runbook: invitees must sign up with the invited address.
+- **Verified:** `pnpm run typecheck` clean; `pnpm test` 2714 passed; `pnpm audit --audit-level moderate` (2 ignored); braces guard passed. New tests: wrong-email accept refused, then the right one accepted; simultaneous sign-ups give one 201 and one 409; `userX…` not linked (this one fails on the old `LIKE`). The race test runs on single-connection PGlite, so it checks the outcome, not a true interleaving.
+- **Left undone / broken:** a real Identity Platform sign-in is still unverified (owner setup pending). No in-app tool to reconnect a login to an existing account (support SQL procedure in the runbook).
+- **Decisions made:** an invitation is bound to its address, not just its link.
+- **Next agent should:** after the owner switches, follow the runbook's post-switch 15-minute check.
+- **Needs a human:** the owner setup in `docs/AUTH_IDENTITY_PLATFORM.md`. Decide whether agency staff should get an in-app "reconnect login" tool.
 
 ### 2026-10-14 — Sign-in moved from Clerk to Google Cloud Identity Platform — Claude Code — branch `claude/agencybridge-compliance-review-s3nc6l`
 - **Outcome:** done in code; production switch waits on owner setup.

@@ -576,6 +576,13 @@ router.post(
         const state = effectiveState(invite.status, invite.expiresAt);
         if (state !== "pending") throw new InviteUnusableError(state, 410);
 
+        // The link is not enough on its own: the verified sign-in must be the
+        // address the admin invited, or a forwarded or leaked link would let
+        // someone else take the seat.
+        if ((auth.email ?? "").trim().toLowerCase() !== invite.email.trim().toLowerCase()) {
+          throw new InviteEmailMismatchError(invite.email);
+        }
+
         await lockOrgSeats(invite.orgId, tx);
         // This invitation's own reservation becomes the new member's seat, so
         // it must not be counted against itself (see requireSeat).
@@ -649,6 +656,14 @@ router.post(
         });
         return;
       }
+      if (err instanceof InviteEmailMismatchError) {
+        // The invited address is already shown to anyone holding the link (lookup).
+        res.status(403).json({
+          error: `This invitation was sent to ${err.invitedEmail}. Sign in with that email address to accept it.`,
+          code: "email_mismatch",
+        });
+        return;
+      }
       if (err instanceof InviteUnusableError) {
         res
           .status(err.statusCode)
@@ -679,6 +694,12 @@ class AlreadyMemberError extends Error {
 class AlreadyProvisionedError extends Error {
   constructor() {
     super("already provisioned");
+  }
+}
+
+class InviteEmailMismatchError extends Error {
+  constructor(readonly invitedEmail: string) {
+    super("email mismatch");
   }
 }
 
