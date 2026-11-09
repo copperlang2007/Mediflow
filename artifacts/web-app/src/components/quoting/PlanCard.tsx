@@ -76,7 +76,7 @@ export function PlanCard({ plan, flags, compareSelected, compareDisabled, onTogg
             <p className="flex items-baseline gap-1.5">
               <span className="text-3xl font-bold tracking-tight">{card.premium != null ? money(card.premium) : "—"}</span>
               <span className="text-sm text-muted-foreground">/ month</span>
-              {flags?.lowestPremium && <StatusPill tone="success" className="ml-auto self-center">Lowest here</StatusPill>}
+              {flags?.lowestPremium && <StatusPill tone="success" className="ml-auto self-center">Lowest health plan premium here</StatusPill>}
             </p>
             <p className="text-xs text-muted-foreground">{card.premium != null ? "Health plan premium" : "Premium not listed"}</p>
             {card.partBGiveback != null && (

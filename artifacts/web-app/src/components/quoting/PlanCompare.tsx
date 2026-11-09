@@ -59,7 +59,7 @@ export function PlanCompare({ plans, open, onOpenChange }: { plans: PlanSummary[
         <DialogHeader className="px-5 pt-5">
           <DialogTitle>Compare plans</DialogTitle>
           <DialogDescription>
-            Health plan premiums only — Part D drug premiums are not in this data. The best premium and out-of-pocket max are highlighted.
+            Health plan premiums only — Part D drug premiums are not in this data. The lowest health plan premium and out-of-pocket max are highlighted.
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-[70vh] overflow-auto px-5 pb-5">
