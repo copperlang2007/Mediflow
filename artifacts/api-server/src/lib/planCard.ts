@@ -326,11 +326,15 @@ export function buildPlanCard(sections: Sections): PlanCard {
     } else if (mrx.mrx_alt_ded_charge === "1") drugDeductible = "Standard Part D deductible";
   }
 
-  // The plan has a medical deductible and the file's per-service deductible
-  // flags are not read here, so "$0" cannot be told apart from "$0 after the
-  // deductible". Show "See details" instead of a $0 that may be wrong.
+  // The plan has (or may have) a medical deductible and the file's per-service
+  // deductible flags are not read here, so a leading "$0" cannot be told apart
+  // from "$0 after the deductible". Show "See details" instead of a $0 that may
+  // be wrong. A deductible flagged "yes" with no amount counts as possible.
+  const mayHaveDeductible =
+    (d.pbp_d_ann_deduct_yn === "1" && deductible == null) || (deductible != null && deductible > 0);
   const noDeductibleClaim = (c: CostShare | null): CostShare | null =>
-    c?.kind === "none" && deductible != null && deductible > 0 ? null : c;
+    c && mayHaveDeductible && (c.kind === "none" || c.label.startsWith("$0")) ? null : c;
+  const hospital = hospitalStay(first(sections, "b1a_inpat_hosp"));
 
   return {
     premium,
@@ -343,7 +347,7 @@ export function buildPlanCard(sections: Sections): PlanCard {
       specialist: noDeductibleClaim(costShare(b7, "pbp_b7d")),
       er: noDeductibleClaim(costShare(b4, "pbp_b4a")),
       urgentCare: noDeductibleClaim(costShare(b4, "pbp_b4b")),
-      hospital: hospitalStay(first(sections, "b1a_inpat_hosp")),
+      hospital: hospital && mayHaveDeductible && hospital.startsWith("$0") ? null : hospital,
     },
     extras: {
       dental: { preventive, comprehensive, maximum: dentalMax },

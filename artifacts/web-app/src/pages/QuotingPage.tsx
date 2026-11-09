@@ -268,6 +268,15 @@ function PlanBrowser() {
   }, [q]);
   const plans = usePlanSearch({ state, countyCode, q: debouncedQ, snp });
   const planYear = plans.data?.planYear ?? states.data?.planYear ?? null;
+  // PlanResults is not mounted while there are no plans, so it cannot prune
+  // the picks itself: clear them here or they come back after the search is cleared.
+  const noPlans = plans.data != null && plans.data.data.length === 0;
+  useEffect(() => {
+    if (noPlans) {
+      setCompare([]);
+      setCompareOpen(false);
+    }
+  }, [noPlans]);
 
   return (
     <div className="space-y-4">

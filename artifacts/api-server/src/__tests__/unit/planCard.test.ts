@@ -171,6 +171,19 @@ describe("buildPlanCard never shows a partial or understated cost", () => {
     expect(buildPlanCard({ b7_health_prof: [row], section_d: [{ pbp_d_ann_deduct_yn: "2" }] }).costs.pcp).toEqual({ kind: "none", label: "$0" });
   });
 
+  it("any $0-leading cost is hidden when a deductible may apply (set, or flagged with no amount)", () => {
+    const zeroCopay = { pbp_b7a_copay_yn: "1", pbp_b7a_coins_yn: "2", pbp_b7a_copay_amt_mc_min: "0", pbp_b7a_copay_amt_mc_max: "0" };
+    const range = { pbp_b7a_copay_yn: "3", pbp_b7a_coins_yn: "2", pbp_b7a_copay_amt_mc_min: "0", pbp_b7a_copay_amt_mc_max: "40" };
+    const deductibles: Record<string, string>[] = [{ pbp_d_ann_deduct_yn: "1", pbp_d_ann_deduct_amt: "500" }, { pbp_d_ann_deduct_yn: "1" }];
+    for (const d of deductibles) {
+      expect(buildPlanCard({ b7_health_prof: [zeroCopay], section_d: [d] }).costs.pcp).toBeNull();
+      expect(buildPlanCard({ b7_health_prof: [range], section_d: [d] }).costs.pcp).toBeNull();
+      expect(buildPlanCard({ b1a_inpat_hosp: [{ pbp_b1a_copay_yn: "2", pbp_b1a_coins_yn: "2" }], section_d: [d] }).costs.hospital).toBeNull();
+    }
+    const none = { pbp_d_ann_deduct_yn: "2" };
+    expect(buildPlanCard({ b7_health_prof: [zeroCopay], section_d: [none] }).costs.pcp?.label).toBe("$0");
+  });
+
   const hosp = (o: Record<string, string>) => buildPlanCard({ b1a_inpat_hosp: [o] }).costs.hospital;
 
   it("hospital: a half-filled interval is unknown, not a placeholder or partial price", () => {

@@ -273,6 +273,18 @@ describe("Quoting page plan cards", () => {
     expect(screen.getByRole("checkbox", { name: "Compare Alpha Gold" })).not.toBeChecked();
   });
 
+  it("does not bring old picks or the dialog back after a search with no results is cleared", async () => {
+    await openCounty();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Compare Alpha Gold" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Compare Beta Plus" }));
+    await userEvent.type(screen.getByLabelText("Plan or carrier name"), "zzz");
+    await screen.findByText("No plans found");
+    await userEvent.clear(screen.getByLabelText("Plan or carrier name"));
+    await waitFor(() => expect(screen.getAllByTestId("plan-card")).toHaveLength(4));
+    expect(screen.queryByText(/plans? selected/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("keeps the plan type menu while a type is chosen so the filter can be cleared", async () => {
     await openCounty();
     const typeMenu = () => document.getElementById("plan-type") as HTMLSelectElement;
