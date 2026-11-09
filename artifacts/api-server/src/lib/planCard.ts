@@ -332,8 +332,9 @@ export function buildPlanCard(sections: Sections): PlanCard {
   // be wrong. A deductible flagged "yes" with no amount counts as possible.
   const mayHaveDeductible =
     (d.pbp_d_ann_deduct_yn === "1" && deductible == null) || (deductible != null && deductible > 0);
+  const looksFree = (label: string) => label.startsWith("$0") || label.startsWith("0%");
   const noDeductibleClaim = (c: CostShare | null): CostShare | null =>
-    c && mayHaveDeductible && (c.kind === "none" || c.label.startsWith("$0")) ? null : c;
+    c && mayHaveDeductible && (c.kind === "none" || looksFree(c.label)) ? null : c;
   const hospital = hospitalStay(first(sections, "b1a_inpat_hosp"));
 
   return {
@@ -347,7 +348,7 @@ export function buildPlanCard(sections: Sections): PlanCard {
       specialist: noDeductibleClaim(costShare(b7, "pbp_b7d")),
       er: noDeductibleClaim(costShare(b4, "pbp_b4a")),
       urgentCare: noDeductibleClaim(costShare(b4, "pbp_b4b")),
-      hospital: hospital && mayHaveDeductible && hospital.startsWith("$0") ? null : hospital,
+      hospital: hospital && mayHaveDeductible && looksFree(hospital) ? null : hospital,
     },
     extras: {
       dental: { preventive, comprehensive, maximum: dentalMax },

@@ -206,6 +206,7 @@ beforeEach(() => {
     if (url.includes("plan-areas/counties")) return json({ data: [{ countyCode: "45910", countyName: "Tarrant" }], planYear: 2027 });
     if (url.includes("/api/quoting/plans?")) {
       const q = (new URL(url, "http://x").searchParams.get("q") ?? "").toLowerCase();
+      if (q === "boom") return json({ error: "boom" }, 500);
       const data = [A, B, C, D].filter((p) => !q || (p.planName ?? "").toLowerCase().includes(q));
       return json({ data, total: data.length, truncated: false, planYear: 2027 });
     }
@@ -279,6 +280,18 @@ describe("Quoting page plan cards", () => {
     await userEvent.click(screen.getByRole("checkbox", { name: "Compare Beta Plus" }));
     await userEvent.type(screen.getByLabelText("Plan or carrier name"), "zzz");
     await screen.findByText("No plans found");
+    await userEvent.clear(screen.getByLabelText("Plan or carrier name"));
+    await waitFor(() => expect(screen.getAllByTestId("plan-card")).toHaveLength(4));
+    expect(screen.queryByText(/plans? selected/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("does not bring old picks back after a failed search is cleared", async () => {
+    await openCounty();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Compare Alpha Gold" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Compare Beta Plus" }));
+    await userEvent.type(screen.getByLabelText("Plan or carrier name"), "boom");
+    await waitFor(() => expect(screen.queryAllByTestId("plan-card")).toHaveLength(0));
     await userEvent.clear(screen.getByLabelText("Plan or carrier name"));
     await waitFor(() => expect(screen.getAllByTestId("plan-card")).toHaveLength(4));
     expect(screen.queryByText(/plans? selected/)).not.toBeInTheDocument();

@@ -38,7 +38,8 @@ describe("buildPlanCard on real 2027 plans", () => {
     // that may apply: not claimed as $0.
     expect(c.costs.pcp).toBeNull();
     expect(c.costs.specialist).toEqual({ kind: "coinsurance", label: "30%" });
-    expect(c.costs.urgentCare?.label).toBe("0%–20%");
+    // "0%–20%" may mean 0% only after the $800 deductible: not claimed.
+    expect(c.costs.urgentCare).toBeNull();
     expect(c.costs.hospital).toBe("$2,241 per stay");
     expect(c.extras.dental.maximum).toBe("$3,000 per year (preventive + comprehensive)");
     expect(c.extras.otc).toEqual({ offered: true, allowance: "$50 per quarter" });
@@ -180,6 +181,9 @@ describe("buildPlanCard never shows a partial or understated cost", () => {
       expect(buildPlanCard({ b7_health_prof: [range], section_d: [d] }).costs.pcp).toBeNull();
       expect(buildPlanCard({ b1a_inpat_hosp: [{ pbp_b1a_copay_yn: "2", pbp_b1a_coins_yn: "2" }], section_d: [d] }).costs.hospital).toBeNull();
     }
+    const zeroPct = { pbp_b7a_copay_yn: "2", pbp_b7a_coins_yn: "3", pbp_b7a_coins_pct_mc_min: "0", pbp_b7a_coins_pct_mc_max: "20" };
+    expect(buildPlanCard({ b7_health_prof: [zeroPct], section_d: [deductibles[0]!] }).costs.pcp).toBeNull();
+    expect(buildPlanCard({ b1a_inpat_hosp: [{ pbp_b1a_coins_yn: "1", pbp_b1a_copay_yn: "2", pbp_b1a_coins_mcs_pct_t1: "0" }], section_d: [deductibles[0]!] }).costs.hospital).toBeNull();
     const none = { pbp_d_ann_deduct_yn: "2" };
     expect(buildPlanCard({ b7_health_prof: [zeroCopay], section_d: [none] }).costs.pcp?.label).toBe("$0");
   });
