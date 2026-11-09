@@ -146,14 +146,22 @@ function PlanResults(props: {
   const flags = bestFlags(shown);
   const types = planTypes(plans);
   const picked = compare.map((id) => plans.find((p) => p.bidId === id)).filter((p): p is PlanSummary => !!p);
+  // A search or special-needs change can drop picked plans from the results.
+  // Forget those picks so the bar, the 4-plan limit and the dialog agree.
+  const { setCompare, setCompareOpen, planType, compareOpen } = props;
+  useEffect(() => {
+    if (picked.length !== compare.length) setCompare(picked.map((p) => p.bidId));
+    if (compareOpen && picked.length < 2) setCompareOpen(false);
+  }, [plans]); // eslint-disable-line react-hooks/exhaustive-deps
   const toggleFilter = (k: FilterKey) => {
     const next = new Set(filters);
     if (next.has(k)) next.delete(k);
     else next.add(k);
     props.setFilters(next);
   };
+  const ids = picked.map((p) => p.bidId);
   const toggleCompare = (id: string) =>
-    props.setCompare(compare.includes(id) ? compare.filter((x) => x !== id) : compare.length < MAX_COMPARE ? [...compare, id] : compare);
+    props.setCompare(ids.includes(id) ? ids.filter((x) => x !== id) : ids.length < MAX_COMPARE ? [...ids, id] : ids);
 
   return (
     <div className="space-y-3">
@@ -175,12 +183,12 @@ function PlanResults(props: {
           ))}
         </div>
         <div className="flex gap-2">
-          {types.length > 1 && (
+          {(types.length > 1 || planType) && (
             <div className="space-y-1">
               <Label htmlFor="plan-type" className="text-xs">Plan type</Label>
               <select id="plan-type" className={selectCls} value={props.planType} onChange={(e) => props.setPlanType(e.target.value)}>
                 <option value="">All types</option>
-                {types.map((t) => <option key={t} value={t}>{t}</option>)}
+                {(planType && !types.includes(planType) ? [...types, planType].sort() : types).map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
           )}
@@ -210,8 +218,8 @@ function PlanResults(props: {
               key={p.bidId}
               plan={p}
               flags={flags.get(p.bidId)}
-              compareSelected={compare.includes(p.bidId)}
-              compareDisabled={compare.length >= MAX_COMPARE}
+              compareSelected={ids.includes(p.bidId)}
+              compareDisabled={ids.length >= MAX_COMPARE}
               onToggleCompare={toggleCompare}
               open={props.open === p.bidId}
               onToggleOpen={(id) => props.setOpen(props.open === id ? null : id)}
@@ -221,16 +229,16 @@ function PlanResults(props: {
         </div>
       )}
 
-      {compare.length > 0 && (
+      {ids.length > 0 && (
         <div className="sticky bottom-3 z-30 flex items-center justify-between gap-3 rounded-xl border border-primary/40 bg-card px-4 py-3 shadow-lg">
           <p className="text-sm font-medium">
-            {compare.length} plan{compare.length === 1 ? "" : "s"} selected
-            {compare.length >= MAX_COMPARE && <span className="text-muted-foreground"> (max {MAX_COMPARE})</span>}
+            {ids.length} plan{ids.length === 1 ? "" : "s"} selected
+            {ids.length >= MAX_COMPARE && <span className="text-muted-foreground"> (max {MAX_COMPARE})</span>}
           </p>
           <div className="flex gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => props.setCompare([])}>Clear</Button>
-            <Button type="button" size="sm" disabled={compare.length < 2} onClick={() => props.setCompareOpen(true)}>
-              Compare {compare.length < 2 ? "(pick 2+)" : ""}
+            <Button type="button" size="sm" disabled={ids.length < 2} onClick={() => props.setCompareOpen(true)}>
+              Compare {ids.length < 2 ? "(pick 2+)" : ""}
             </Button>
           </div>
         </div>

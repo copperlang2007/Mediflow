@@ -34,7 +34,9 @@ describe("buildPlanCard on real 2027 plans", () => {
     expect(c.deductible).toBe(800);
     expect(c.moopInNetwork).toBe(9850);
     expect(c.moopCombined).toBe(14800);
-    expect(c.costs.pcp).toEqual({ kind: "none", label: "$0" });
+    // CMS says "no copay, no coinsurance", but the plan has an $800 deductible
+    // that may apply: not claimed as $0.
+    expect(c.costs.pcp).toBeNull();
     expect(c.costs.specialist).toEqual({ kind: "coinsurance", label: "30%" });
     expect(c.costs.urgentCare?.label).toBe("0%–20%");
     expect(c.costs.hospital).toBe("$2,241 per stay");
@@ -137,6 +139,47 @@ describe("buildPlanCard never guesses", () => {
       b1a_inpat_hosp: [{ pbp_b1a_cost_vary_tiers_yn: "1", pbp_b1a_copay_yn: "1", pbp_b1a_copay_mcs_amt_t1: "300.00" }],
     });
     expect(c.costs.hospital).toBeNull();
+  });
+});
+
+describe("buildPlanCard never shows a partial or understated cost", () => {
+  const b7 = (o: Record<string, string>) => buildPlanCard({ b7_health_prof: [o] }).costs.pcp;
+
+  it("copay and coinsurance both apply but only one is readable: unknown", () => {
+    expect(b7({ pbp_b7a_copay_yn: "1", pbp_b7a_copay_amt_mc_min: "40", pbp_b7a_copay_amt_mc_max: "40", pbp_b7a_coins_yn: "1" })).toBeNull();
+    expect(b7({ pbp_b7a_copay_yn: "1", pbp_b7a_coins_yn: "1", pbp_b7a_coins_pct_mc_min: "20", pbp_b7a_coins_pct_mc_max: "20" })).toBeNull();
+  });
+
+  it("both readable: shown together", () => {
+    expect(
+      b7({
+        pbp_b7a_copay_yn: "1", pbp_b7a_copay_amt_mc_min: "40", pbp_b7a_copay_amt_mc_max: "40",
+        pbp_b7a_coins_yn: "1", pbp_b7a_coins_pct_mc_min: "20", pbp_b7a_coins_pct_mc_max: "20",
+      }),
+    ).toEqual({ kind: "mixed", label: "$40 or 20%" });
+  });
+
+  it("a min-and-max range with a missing bound is unknown, not a fixed price", () => {
+    expect(b7({ pbp_b7a_copay_yn: "3", pbp_b7a_copay_amt_mc_min: "0", pbp_b7a_coins_yn: "2" })).toBeNull();
+    expect(b7({ pbp_b7a_copay_yn: "3", pbp_b7a_copay_amt_mc_max: "35", pbp_b7a_coins_yn: "2" })).toBeNull();
+    expect(b7({ pbp_b7a_copay_yn: "3", pbp_b7a_copay_amt_mc_min: "0", pbp_b7a_copay_amt_mc_max: "35", pbp_b7a_coins_yn: "2" })?.label).toBe("$0–$35");
+  });
+
+  it("a plan deductible stops a bare $0 from being claimed", () => {
+    const row = { pbp_b7a_copay_yn: "2", pbp_b7a_coins_yn: "2" };
+    expect(buildPlanCard({ b7_health_prof: [row], section_d: [{ pbp_d_ann_deduct_yn: "1", pbp_d_ann_deduct_amt: "500" }] }).costs.pcp).toBeNull();
+    expect(buildPlanCard({ b7_health_prof: [row], section_d: [{ pbp_d_ann_deduct_yn: "2" }] }).costs.pcp).toEqual({ kind: "none", label: "$0" });
+  });
+
+  const hosp = (o: Record<string, string>) => buildPlanCard({ b1a_inpat_hosp: [o] }).costs.hospital;
+
+  it("hospital: a half-filled interval is unknown, not a placeholder or partial price", () => {
+    expect(hosp({ pbp_b1a_copay_yn: "1", pbp_b1a_copay_mcs_amt_int1_t1: "0", pbp_b1a_copay_mcs_bgnd_int1_t1: "8", pbp_b1a_copay_mcs_endd_int1_t1: "90", pbp_b1a_copay_mcs_amt_int2_t1: "385", pbp_b1a_copay_mcs_amt_t1: "0" })).toBeNull();
+    expect(hosp({ pbp_b1a_copay_yn: "1", pbp_b1a_copay_mcs_amt_int1_t1: "385", pbp_b1a_copay_mcs_bgnd_int1_t1: "1", pbp_b1a_copay_mcs_endd_int1_t1: "7", pbp_b1a_copay_mcs_amt_int2_t1: "0", pbp_b1a_copay_mcs_bgnd_int2_t1: "8", pbp_b1a_copay_mcs_endd_int2_t1: "90" })).toBe("$385 per day, days 1–7; $0 for days 8–90");
+  });
+
+  it("hospital: copay and coinsurance together is not collapsed to one of them", () => {
+    expect(hosp({ pbp_b1a_copay_yn: "1", pbp_b1a_coins_yn: "1", pbp_b1a_coins_mcs_pct_t1: "20", pbp_b1a_copay_mcs_amt_int1_t1: "300", pbp_b1a_copay_mcs_bgnd_int1_t1: "1", pbp_b1a_copay_mcs_endd_int1_t1: "5" })).toBeNull();
   });
 });
 

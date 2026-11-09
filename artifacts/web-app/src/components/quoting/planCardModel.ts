@@ -8,7 +8,7 @@ export type SortKey = "carrier" | "premium" | "moop" | "giveback" | "name";
 
 export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "carrier", label: "Carrier A–Z" },
-  { key: "premium", label: "Lowest monthly premium" },
+  { key: "premium", label: "Lowest health plan premium" },
   { key: "moop", label: "Lowest out-of-pocket max" },
   { key: "giveback", label: "Highest Part B giveback" },
   { key: "name", label: "Plan name A–Z" },
@@ -17,7 +17,7 @@ export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
 export type FilterKey = "zeroPremium" | "drugs" | "dental" | "vision" | "hearing" | "otc" | "fitness" | "giveback";
 
 export const FILTERS: { key: FilterKey; label: string; test: (c: PlanCardData) => boolean }[] = [
-  { key: "zeroPremium", label: "$0 premium", test: (c) => c.premium === 0 },
+  { key: "zeroPremium", label: "$0 health plan premium", test: (c) => c.premium === 0 },
   { key: "drugs", label: "Drug coverage", test: (c) => c.drugs.covered === true },
   { key: "dental", label: "Dental", test: (c) => c.extras.dental.preventive || c.extras.dental.comprehensive },
   { key: "vision", label: "Vision", test: (c) => c.extras.vision.exam || c.extras.vision.eyewear },
@@ -60,7 +60,7 @@ export function sortPlans(plans: PlanSummary[], key: SortKey): PlanSummary[] {
     case "moop":
       return out.sort((a, b) => byNumber((p) => moopOf(p.card), 1)(a, b) || tie(a, b));
     case "giveback":
-      return out.sort((a, b) => byNumber((p) => p.card?.partBGiveback ?? 0, -1)(a, b) || tie(a, b));
+      return out.sort((a, b) => byNumber((p) => (p.card ? p.card.partBGiveback ?? 0 : null), -1)(a, b) || tie(a, b));
     case "name":
       return out.sort((a, b) => nameOf(a).localeCompare(nameOf(b)) || tie(a, b));
     default:

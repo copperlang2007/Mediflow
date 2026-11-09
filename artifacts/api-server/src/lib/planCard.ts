@@ -160,7 +160,12 @@ function num(v: string | undefined): number | null {
 
 const first = (sections: Sections, name: string): Row => sections[name]?.[0] ?? {};
 
-/** CMS special-needs plan type codes (pbp_a_special_need_plan_type). */
+/**
+ * CMS special-needs plan type codes (pbp_a_special_need_plan_type in
+ * pbp_Section_A.txt). Checked against the CMS PBP data dictionary for plan year
+ * 2027; re-check this map against the dictionary of any new plan year, because
+ * the label decides whether the card shows the Medicaid note.
+ */
 const SNP_TYPE_LABEL: Record<string, string> = {
   "1": "Institutional",
   "3": "Dual-Eligible",
@@ -180,25 +185,36 @@ export function formatMoney(n: number): string {
 
 const formatPct = (n: number) => `${Number.isInteger(n) ? n : n.toFixed(1)}%`;
 
-function range(min: number | null, max: number | null, fmt: (n: number) => string): string | null {
+/**
+ * A min–max range. With `needBoth` (CMS code 3, "min and max") a missing bound
+ * means the range is unknown, so it returns null rather than a single price.
+ */
+function range(min: number | null, max: number | null, fmt: (n: number) => string, needBoth = false): string | null {
+  if (needBoth && (min == null || max == null)) return null;
   const lo = min ?? max;
   const hi = max ?? min;
   if (lo == null || hi == null) return null;
   return lo === hi ? fmt(lo) : `${fmt(Math.min(lo, hi))}–${fmt(Math.max(lo, hi))}`;
 }
 
-/** Copay and/or coinsurance for one service, or null when it cannot be read. */
+/**
+ * Copay and/or coinsurance for one service, or null when it cannot be read.
+ * If CMS says a part applies (copay or coinsurance) but its amount cannot be
+ * read, the whole cost is unknown: showing only the readable part would
+ * understate what the member pays.
+ */
 function costShare(row: Row, p: string): CostShare | null {
   const copayYn = row[`${p}_copay_yn`];
   const coinsYn = row[`${p}_coins_yn`];
-  const copay =
-    copayYn === "1" || copayYn === "3"
-      ? range(num(row[`${p}_copay_amt_mc_min`]), num(row[`${p}_copay_amt_mc_max`]), formatMoney)
-      : null;
-  const coins =
-    coinsYn === "1" || coinsYn === "3"
-      ? range(num(row[`${p}_coins_pct_mc_min`]), num(row[`${p}_coins_pct_mc_max`]), formatPct)
-      : null;
+  const copayApplies = copayYn === "1" || copayYn === "3";
+  const coinsApplies = coinsYn === "1" || coinsYn === "3";
+  const copay = copayApplies
+    ? range(num(row[`${p}_copay_amt_mc_min`]), num(row[`${p}_copay_amt_mc_max`]), formatMoney, copayYn === "3")
+    : null;
+  const coins = coinsApplies
+    ? range(num(row[`${p}_coins_pct_mc_min`]), num(row[`${p}_coins_pct_mc_max`]), formatPct, coinsYn === "3")
+    : null;
+  if ((copayApplies && !copay) || (coinsApplies && !coins)) return null;
   if (copay && coins) return { kind: "mixed", label: `${copay} or ${coins}` };
   if (copay) return { kind: "copay", label: copay };
   if (coins) return { kind: "coinsurance", label: coins };
@@ -224,8 +240,12 @@ function allowanceLabel(amount: number | null, period: string | undefined): stri
 
 const included = (v: string | undefined) => v === "2" || v === "4";
 
+const applies = (v: string | undefined) => v === "1" || v === "3";
+
 function hospitalStay(row: Row): string | null {
   if (row.pbp_b1a_cost_vary_tiers_yn === "1") return null; // tiered by hospital: too long for a card
+  // Copay and coinsurance together is too involved for a card line.
+  if (applies(row.pbp_b1a_copay_yn) && applies(row.pbp_b1a_coins_yn)) return null;
   if (row.pbp_b1a_coins_yn === "1") {
     const pct = num(row.pbp_b1a_coins_mcs_pct_t1);
     if (pct != null) return `${formatPct(pct)} of the cost`;
@@ -238,7 +258,8 @@ function hospitalStay(row: Row): string | null {
     const amt = num(row[`pbp_b1a_copay_mcs_amt_int${i}_t1`]);
     const from = num(row[`pbp_b1a_copay_mcs_bgnd_int${i}_t1`]);
     const to = num(row[`pbp_b1a_copay_mcs_endd_int${i}_t1`]);
-    if (amt == null || from == null || to == null) continue;
+    if (amt == null && from == null && to == null) continue; // interval not used
+    if (amt == null || from == null || to == null) return null; // present but unreadable
     const days = from === to ? `day ${from}` : `days ${from}–${to}`;
     parts.push(amt === 0 ? `$0 for ${days}` : `${formatMoney(amt)} per day, ${days}`);
   }
@@ -305,6 +326,12 @@ export function buildPlanCard(sections: Sections): PlanCard {
     } else if (mrx.mrx_alt_ded_charge === "1") drugDeductible = "Standard Part D deductible";
   }
 
+  // The plan has a medical deductible and the file's per-service deductible
+  // flags are not read here, so "$0" cannot be told apart from "$0 after the
+  // deductible". Show "See details" instead of a $0 that may be wrong.
+  const noDeductibleClaim = (c: CostShare | null): CostShare | null =>
+    c?.kind === "none" && deductible != null && deductible > 0 ? null : c;
+
   return {
     premium,
     partBGiveback: giveback != null && giveback > 0 ? giveback : null,
@@ -312,10 +339,10 @@ export function buildPlanCard(sections: Sections): PlanCard {
     moopCombined: d.pbp_d_comb_max_enr_amt_yn === "1" ? num(d.pbp_d_comb_max_enr_amt) : null,
     deductible,
     costs: {
-      pcp: costShare(b7, "pbp_b7a"),
-      specialist: costShare(b7, "pbp_b7d"),
-      er: costShare(b4, "pbp_b4a"),
-      urgentCare: costShare(b4, "pbp_b4b"),
+      pcp: noDeductibleClaim(costShare(b7, "pbp_b7a")),
+      specialist: noDeductibleClaim(costShare(b7, "pbp_b7d")),
+      er: noDeductibleClaim(costShare(b4, "pbp_b4a")),
+      urgentCare: noDeductibleClaim(costShare(b4, "pbp_b4b")),
       hospital: hospitalStay(first(sections, "b1a_inpat_hosp")),
     },
     extras: {

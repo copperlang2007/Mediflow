@@ -112,6 +112,15 @@ function renderCard(plan: PlanSummary, props: Partial<React.ComponentProps<typeo
   return { onToggleCompare, onToggleOpen };
 }
 
+describe("plan ordering with missing data", () => {
+  it("giveback sort puts plans without benefit data after a real $0 giveback", () => {
+    const zero = mkPlan("H7000_001_0", "Zzz Zero", "Z", baseCard({ partBGiveback: null }));
+    const none = mkPlan("H7001_001_0", "Aaa None", "A", null);
+    const fifty = mkPlan("H7002_001_0", "Yyy Fifty", "Y", baseCard({ partBGiveback: 50 }));
+    expect(sortPlans([zero, none, fifty], "giveback").map((p) => p.planName)).toEqual(["Yyy Fifty", "Zzz Zero", "Aaa None"]);
+  });
+});
+
 describe("PlanCard", () => {
   it("shows premium, giveback, key costs and extras in plain words", () => {
     renderCard(B);
@@ -121,7 +130,8 @@ describe("PlanCard", () => {
     expect(within(card).getByText(/Pays back \$50\/mo of your Part B premium/)).toBeInTheDocument();
     expect(within(card).getByText("Out-of-pocket max")).toBeInTheDocument();
     expect(within(card).getByText("$6,500")).toBeInTheDocument();
-    expect(within(card).getByText("Specialist visit")).toBeInTheDocument();
+    const specialistRow = within(card).getByText("Specialist visit").parentElement!;
+    expect(within(specialistRow).getByText("$40")).toBeInTheDocument();
     expect(within(card).getByText("$115")).toBeInTheDocument();
     expect(within(card).getByText("$75 per quarter")).toBeInTheDocument();
     expect(within(card).getByText(/Prescription drugs:/)).toBeInTheDocument();
@@ -151,9 +161,14 @@ describe("PlanCard", () => {
 
   it("toggles compare and details from the keyboard-reachable controls", async () => {
     const { onToggleCompare, onToggleOpen } = renderCard(A);
-    await userEvent.click(screen.getByRole("checkbox", { name: "Compare Alpha Gold" }));
+    const user = userEvent.setup();
+    await user.tab();
+    expect(screen.getByRole("checkbox", { name: "Compare Alpha Gold" })).toHaveFocus();
+    await user.keyboard(" ");
     expect(onToggleCompare).toHaveBeenCalledWith(A.bidId);
-    await userEvent.click(screen.getByRole("button", { name: /Full details/ }));
+    await user.tab();
+    expect(screen.getByRole("button", { name: /Full details/ })).toHaveFocus();
+    await user.keyboard("{Enter}");
     expect(onToggleOpen).toHaveBeenCalledWith(A.bidId);
   });
 
@@ -189,7 +204,11 @@ beforeEach(() => {
     if (url.includes("/api/carriers")) return json([]);
     if (url.includes("plan-areas/states")) return json({ data: [{ stateCode: "TX" }], planYear: 2027 });
     if (url.includes("plan-areas/counties")) return json({ data: [{ countyCode: "45910", countyName: "Tarrant" }], planYear: 2027 });
-    if (url.includes("/api/quoting/plans?")) return json({ data: [A, B, C, D], total: 4, truncated: false, planYear: 2027 });
+    if (url.includes("/api/quoting/plans?")) {
+      const q = (new URL(url, "http://x").searchParams.get("q") ?? "").toLowerCase();
+      const data = [A, B, C, D].filter((p) => !q || (p.planName ?? "").toLowerCase().includes(q));
+      return json({ data, total: data.length, truncated: false, planYear: 2027 });
+    }
     return json({ error: "not found" }, 404);
   }));
 });
@@ -238,5 +257,36 @@ describe("Quoting page plan cards", () => {
     expect(within(premiumRow).getByText("$0")).toBeInTheDocument();
     expect(within(premiumRow).getByText("$25")).toBeInTheDocument();
     await waitFor(() => expect(within(dialog).getAllByText(/\(best\)/).length).toBeGreaterThan(0));
+  });
+
+  it("forgets picked plans that a search removes, so Compare never does nothing", async () => {
+    await openCounty();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Compare Alpha Gold" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Compare Beta Plus" }));
+    expect(screen.getByText("2 plans selected")).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Plan or carrier name"), "cobalt");
+    await waitFor(() => expect(screen.getAllByTestId("plan-card")).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByText(/plans? selected/)).not.toBeInTheDocument());
+    await userEvent.clear(screen.getByLabelText("Plan or carrier name"));
+    await waitFor(() => expect(screen.getAllByTestId("plan-card")).toHaveLength(4));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Compare Alpha Gold" })).not.toBeChecked();
+  });
+
+  it("keeps the plan type menu while a type is chosen so the filter can be cleared", async () => {
+    await openCounty();
+    const typeMenu = () => document.getElementById("plan-type") as HTMLSelectElement;
+    await userEvent.selectOptions(typeMenu(), "PPO");
+    expect(screen.getAllByTestId("plan-card")).toHaveLength(1);
+    await userEvent.type(screen.getByLabelText("Plan or carrier name"), "cobalt");
+    await screen.findByText("No plans match those filters");
+    await userEvent.selectOptions(typeMenu(), "");
+    await waitFor(() => expect(screen.getAllByTestId("plan-card")).toHaveLength(1));
+  });
+
+  it("labels the premium filter and sort as the health plan premium", async () => {
+    await openCounty();
+    expect(screen.getByRole("button", { name: "$0 health plan premium" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Lowest health plan premium" })).toBeInTheDocument();
   });
 });
