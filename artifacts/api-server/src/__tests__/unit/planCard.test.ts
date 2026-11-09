@@ -184,6 +184,11 @@ describe("buildPlanCard never shows a partial or understated cost", () => {
     const zeroPct = { pbp_b7a_copay_yn: "2", pbp_b7a_coins_yn: "3", pbp_b7a_coins_pct_mc_min: "0", pbp_b7a_coins_pct_mc_max: "20" };
     expect(buildPlanCard({ b7_health_prof: [zeroPct], section_d: [deductibles[0]!] }).costs.pcp).toBeNull();
     expect(buildPlanCard({ b1a_inpat_hosp: [{ pbp_b1a_coins_yn: "1", pbp_b1a_copay_yn: "2", pbp_b1a_coins_mcs_pct_t1: "0" }], section_d: [deductibles[0]!] }).costs.hospital).toBeNull();
+    const mixed = { pbp_b7a_copay_yn: "1", pbp_b7a_copay_amt_mc_min: "40", pbp_b7a_copay_amt_mc_max: "40", pbp_b7a_coins_yn: "1", pbp_b7a_coins_pct_mc_min: "0", pbp_b7a_coins_pct_mc_max: "0" };
+    expect(buildPlanCard({ b7_health_prof: [mixed], section_d: [deductibles[0]!] }).costs.pcp).toBeNull();
+    // 10% and $40 are not free.
+    const tenPct = { pbp_b7a_copay_yn: "2", pbp_b7a_coins_yn: "1", pbp_b7a_coins_pct_mc_min: "10", pbp_b7a_coins_pct_mc_max: "10" };
+    expect(buildPlanCard({ b7_health_prof: [tenPct], section_d: [deductibles[0]!] }).costs.pcp?.label).toBe("10%");
     const none = { pbp_d_ann_deduct_yn: "2" };
     expect(buildPlanCard({ b7_health_prof: [zeroCopay], section_d: [none] }).costs.pcp?.label).toBe("$0");
   });

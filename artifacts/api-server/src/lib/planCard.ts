@@ -332,7 +332,9 @@ export function buildPlanCard(sections: Sections): PlanCard {
   // be wrong. A deductible flagged "yes" with no amount counts as possible.
   const mayHaveDeductible =
     (d.pbp_d_ann_deduct_yn === "1" && deductible == null) || (deductible != null && deductible > 0);
-  const looksFree = (label: string) => label.startsWith("$0") || label.startsWith("0%");
+  // A free-looking amount anywhere in a label, e.g. "$0", "0%–20%" or "$40 or 0%"
+  // (not "$05" or "10%"), as long as it is its own number.
+  const looksFree = (label: string) => /(^|[^\d.])(\$0(\.00)?|0%)(?![\d.])/.test(label);
   const noDeductibleClaim = (c: CostShare | null): CostShare | null =>
     c && mayHaveDeductible && (c.kind === "none" || looksFree(c.label)) ? null : c;
   const hospital = hospitalStay(first(sections, "b1a_inpat_hosp"));
