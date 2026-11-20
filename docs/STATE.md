@@ -91,6 +91,15 @@ ones with no inbound references.
 
 ## Session log
 
+### 2026-11-20 — AI workspace product design (docs only) — Claude — branch `claude/hipaa-workspace-design`
+- **Outcome:** investigation-only (design and build plan proposed; no code, no cloud changes)
+- **Changed:** added `docs/product/DESIGN.md`, `docs/product/BUILD_PLAN.md`, ADR 0008 (open-weight models on Bedrock behind a model gateway, Proposed) and ADR 0009 (staged learning; pooled training on customer data blocked, Proposed). Owner decisions recorded there: sell agencyBRIDGE as a HIPAA-covered AI workspace for Medicare agencies, $75 to $100 per user per month, first outside agency paying by 2027-01-19.
+- **Verified:** read this repo at `8e26ea6` and myCALL at `c7a2f0b`; listed the Neon organization (HIPAA projects `agencybridge`, `mediflow-canonical`, `iia-workspace`, `iia-retention` exist, all reporting zero stored data); open PRs on GitHub are Dependabot only (#301 to #305). Unit-economics arithmetic was run by script. NOT verified: anything in AWS (no credentials in this session), the Bedrock open-weight catalog in the owner's account, per-model HIPAA eligibility, and no model evaluations were run. Prices are from public listings read 2026-11-20.
+- **Left undone / broken:** the move to AWS + Neon that the owner decided on 2026-11-19 has not started in this repo (no ledger, no AWS deploy script, no ADR); `AGENTS.md` section 2 and "Decided direction" above still say Google Cloud and Claude-only. They were left unchanged because ADRs 0008 and 0009 are only Proposed.
+- **Decisions made:** none accepted; ADR 0008 and ADR 0009 proposed.
+- **Next agent should:** run the go-live work (build plan Phase 0) and write the AWS + Neon hosting ADR; do not start workspace features before the PHI gates pass.
+- **Needs a human:** review and merge or correct this PR; engage a HIPAA attorney; confirm with AWS which open-weight Bedrock models the BAA covers; decide per-user pricing and whether myCALL becomes the only call grader (assumptions A2 and A3 in the design).
+
 ### 2026-11-09 — Plan cards: review follow-ups (wrong prices, stale compare, labels) — Claude Code — branch `claude/admiring-allen-b6wum5`
 - **Outcome:** done (pending CI/review)
 - **Changed:** Follow-up to merged PR #296, fixing what its reviewers found. Cards now show "See details" instead of a partial price when copay and coinsurance both apply but only one is readable, when a min–max range is missing a bound, when a hospital interval is half-filled, or when copay and coinsurance both apply to a hospital stay. Any $0- or 0%-leading cost (copay, range, coinsurance, hospital) is no longer shown for a plan that has, or is flagged as having, a medical deductible (the per-service deductible flags are not read). Page: picked plans that a search removes are forgotten (bar, 4-plan limit and Compare agree); the Plan type menu stays while a type is chosen; giveback sort puts plans with no data last; picks and the dialog are also cleared when a search returns no plans or fails. Premium wording now says "health plan premium" on the filter, sort, badge and compare note.
