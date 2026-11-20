@@ -94,8 +94,22 @@ make everything else a module inside it.
 - **Documents and retrieval.** Files in S3 under a per-tenant prefix, encrypted.
   Text chunks and embeddings in Neon with pgvector, each row tagged with the
   tenant. No separate vector database: one less vendor and one less bill.
-- **Prompts never contain more PHI than the task needs**, and never go to logs
-  or error tracking (existing rule in `AGENTS.md`).
+- **PHI and prompts.** The existing rule in `AGENTS.md` section 5 stands: no
+  Medicare ID, SSN, date of birth, diagnosis or recording content in an AI
+  prompt, log or error report, and those fields are removed structurally
+  before a prompt is built (pick the safe fields; never interpolate a record).
+  The assistant and agent tools are designed to that rule: tools return masked
+  records to the model, and the user sees the full record in the app, not in
+  the model's context.
+- **Where the product collides with that rule.** Call review sends call
+  transcripts, which are recording content, to a model. myCALL removes
+  Medicare IDs, SSNs, phone numbers, card numbers, emails and dates first, but
+  spoken health details remain. The code comment in `lib/aiProvider.ts` also
+  says today's AI features send contact Medicare profiles in the system
+  prompt. This design does not relax the rule. Either call grading runs on
+  redacted transcripts that meet it, or the owner changes the rule by ADR
+  with a compliance advisor (assumption A6). No workspace feature ships on
+  real data until that is settled.
 
 ## 3. Model plan
 
@@ -242,7 +256,8 @@ Against a price of $75 to $100 per user:
 | 5 | The agent takes a wrong action on real records | Tools act with the user's permissions, writes need a click, no bulk tools in v1, full audit |
 | 6 | Call review cost exceeds the price for heavy users | Fair-use limit or add-on pricing; batch transcription only |
 | 7 | Two call-scoring engines give different grades | Consolidate on one engine (assumption A3) |
-| 8 | Parallel agent sessions collide in this repo | `AGENTS.md` rules: state ledger, migration numbering, PR checks |
+| 8 | Call review needs recording content in prompts, which `AGENTS.md` forbids | Decide A6 by ADR before Phase 4; redaction pass and synthetic data until then |
+| 9 | Parallel agent sessions collide in this repo | `AGENTS.md` rules: state ledger, migration numbering, PR checks |
 
 ## Assumptions to confirm
 
@@ -252,4 +267,8 @@ Against a price of $75 to $100 per user:
   per-agency tiers.
 - **A3.** myCALL's engine becomes the only call grader.
 - **A4.** The customer-facing builder and pooled training are after v1.
+- **A6.** Whether transcripts (recording content) may be sent to a
+  BAA-covered model for call grading. `AGENTS.md` forbids it today; changing
+  that needs an ADR and a compliance advisor. Until decided, grading uses
+  redacted transcripts or synthetic data only.
 - **A5.** us-east-2 is the home region (the newest HIPAA Neon projects are there).

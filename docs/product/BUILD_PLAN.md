@@ -19,6 +19,9 @@ slips, cut Phase 3 down to read-only tools before moving any PHI gate.
 3. Decide A2 (per-user pricing) and A3 (one call-scoring engine) in `DESIGN.md`.
 4. Name the first outside agency and a contact there.
 5. Complete a HIPAA risk assessment and name a security contact.
+6. Decide A6 with a compliance advisor: may call transcripts go to a
+   BAA-covered model for grading? `AGENTS.md` forbids recording content in
+   prompts today. Phase 4 cannot use real calls until this is decided by ADR.
 
 ## Phase 0. Go-live on AWS + Neon (weeks 1 to 3)
 
