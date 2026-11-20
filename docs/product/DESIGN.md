@@ -72,16 +72,31 @@ make everything else a module inside it.
   Neon and S3, drops the shared token, and accepts the same sign-in session.
   It appears as "Call review" in the sidebar. Its Chrome extension keeps
   working against the same server.
+- **myCALL's model calls go through the gateway.** myCALL does not hold its
+  own model credentials. It sends grading requests to an authenticated
+  internal endpoint on the agencyBRIDGE model gateway, so the model allow-list
+  and the HIPAA guard live in one place.
 - **One call-scoring engine.** Two engines grading the same calls will disagree.
   Recommendation: myCALL's engine becomes the only grader; agencyBRIDGE's
   call-scoring screens read myCALL results. agencyBRIDGE's do-not-contact queue
-  is kept. This needs the owner's decision (assumption A3).
-- **Single sign-on with MFA.** One identity system for both apps, hosted under
-  the AWS BAA. Which one is decided in the go-live work, not here.
+  is kept. That queue reads agencyBRIDGE's own `call_scores` and
+  `call_score_findings` tables today, so myCALL's do-not-contact findings
+  must be synced into those tables (or the queue's reader changed), with a
+  test that a request spoken on a myCALL-graded call appears in the queue.
+  This needs the owner's decision (assumption A3).
+- **Single sign-on with MFA.** One identity system for both apps. The repo's
+  accepted decision is Google Cloud Identity Platform (ADR 0006), with owner
+  setup still pending. Whether sign-in stays there or moves under AWS is the
+  owner's call and needs an ADR if it changes (assumption A7); this design
+  works with either and does not choose.
 - **Tenant isolation.** Every query, file path and retrieval call carries the
   caller's organization id. The existing static guard stays. Add Postgres
   row-level security before a second agency is onboarded, so one missed filter
-  cannot leak across agencies. Each cross-tenant path gets a test that tries to
+  cannot leak across agencies. Row-level security only works if two things
+  are also true: the app connects as a database role that does not own the
+  tables and cannot bypass the policies, and every request sets the caller's
+  organization inside its transaction for the policies to check. Both are
+  part of that milestone. Each cross-tenant path gets a test that tries to
   cross and must fail.
 - **Agent tool layer.** The agent never touches the database. Each tool is a
   thin wrapper over an existing API route and runs with the signed-in user's
@@ -94,6 +109,12 @@ make everything else a module inside it.
 - **Documents and retrieval.** Files in S3 under a per-tenant prefix, encrypted.
   Text chunks and embeddings in Neon with pgvector, each row tagged with the
   tenant. No separate vector database: one less vendor and one less bill.
+- **Background jobs with scale-to-zero.** Today the job workers (pg-boss)
+  start inside the API process, so an API that scales to zero would leave
+  scheduled and queued work with nothing to run it. The AWS deployment needs
+  a worker that runs independently of web traffic: a scheduled task that
+  starts, drains the queue and exits, plus an event that starts it when work
+  is queued.
 - **PHI and prompts.** The existing rule in `AGENTS.md` section 5 stands: no
   Medicare ID, SSN, date of birth, diagnosis or recording content in an AI
   prompt, log or error report, and those fields are removed structurally
@@ -156,7 +177,7 @@ per job, each with a pass/fail check that a script can run:
 | Agency questions (chat) | Answer matches a reference; no invented CMS rule |
 | Document extraction | Fields match exactly on carrier statements and applications |
 | Agent tool use | Right tool, right arguments, stops for confirmation on writes |
-| Call grading | Agrees with myCALL's existing scoring tests and its human-reviewed calls; every finding cites real transcript text |
+| Call grading | Agrees with myCALL's existing scoring tests and with synthetic rewrites of human-reviewed calls (transcript, labels and quoted evidence all rewritten; no real call text in any fixture); every finding cites text that is in the fixture transcript |
 | Code changes | Feature-builder plans that typecheck and pass tests |
 
 A model is chosen per job on quality first, then cost. **Call grading:** myCALL
@@ -278,4 +299,11 @@ Against a price of $75 to $100 per user:
   BAA-covered model for call grading. `AGENTS.md` forbids it today; changing
   that needs an ADR and a compliance advisor. Until decided, grading uses
   redacted transcripts or synthetic data only.
+- **A7.** Which sign-in system the product uses: Google Cloud Identity
+  Platform (accepted in ADR 0006) or one under AWS.
+- **A8.** Priority order. `AGENTS.md` section 2 says to finish half-built work
+  (e-sign, carrier paperwork templates, client portal logins) before starting
+  new surfaces. This plan starts the assistant first. The owner must either
+  confirm the new order and update `AGENTS.md`, or schedule that work ahead
+  of Phase 2.
 - **A5.** us-east-2 is the home region (the newest HIPAA Neon projects are there).

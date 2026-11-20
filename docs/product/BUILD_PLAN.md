@@ -22,17 +22,39 @@ slips, cut Phase 3 down to read-only tools before moving any PHI gate.
 6. Decide A6 with a compliance advisor: may call transcripts go to a
    BAA-covered model for grading? `AGENTS.md` forbids recording content in
    prompts today. Phase 4 cannot use real calls until this is decided by ADR.
+7. Write a breach-notification procedure and keep workforce HIPAA training
+   records (with the attorney).
+8. Decide A7 (which sign-in system) and A8 (whether the assistant may start
+   before the half-built work `AGENTS.md` lists is finished).
 
 ## Phase 0. Go-live on AWS + Neon (weeks 1 to 3)
 
-This is a new migration that has not started. Its scope: both apps on AWS and
-Neon, one sign-in with MFA, myCALL off SQLite, Deepgram and the direct
-Anthropic API, INSUREitALL loaded.
+This is a new migration that has not started. **No migration work begins
+until the hosting ADR below is accepted**; until then the repo's decided
+direction is still Google Cloud.
+
+Scope: both apps on AWS and Neon with one sign-in and MFA. myCALL stops using
+SQLite, Deepgram and the direct Anthropic API, none of which may receive real
+call data: storage moves to Neon and S3, transcription to Amazon Transcribe,
+and model calls to Bedrock through the gateway. INSUREitALL is loaded last.
 
 Deliverables that do not exist yet and come first:
 - An accepted ADR recording AWS + Neon as production hosting (replaces ADR 0004's direction).
-- An AWS deploy path for both apps.
+- An AWS deploy path for both apps, including a job worker that runs
+  independently of web traffic (see `DESIGN.md` section 2).
 - `docs/GO_LIVE_LEDGER.md`, listing each PHI gate and its evidence.
+- Migration of existing myCALL records and files from SQLite and local disk,
+  with counts reconciled and old call reviews opened successfully before
+  SQLite is retired.
+
+The PHI gates the ledger tracks, each with evidence, per environment:
+1. Sign-in with MFA works for a real user.
+2. Data is encrypted in transit and at rest.
+3. Every PHI read is audit-logged, including contact reads.
+4. Tenant-isolation tests pass.
+5. Backups are on and one restore has been tested.
+6. No vendor without a BAA receives PHI (configuration review plus a check of
+   outbound calls during a test run).
 
 Done when:
 - `docs/GO_LIVE_LEDGER.md` shows every PHI gate passed with evidence.
@@ -53,9 +75,15 @@ Done when:
 - Each job has a recommended model with its pass rate and cost per 1,000 runs.
 - myCALL's scoring tests have been run against at least two open models and
   the result reported to the owner.
-- No evaluation case contains real data (checked by a script).
+- No evaluation case contains real data (checked by a script). Call-grading
+  cases are synthetic rewrites only.
+- For each recommended model, AWS's written confirmation of BAA coverage is
+  recorded, or the model is marked "synthetic data only".
 
 ## Phase 2. Assistant: chat and documents (weeks 3 to 4)
+
+Starts only after every Phase 0 PHI gate has passed and the owner has decided
+A8. The week numbers are a target, not permission to begin.
 
 - Assistant panel in agencyBRIDGE. Upload, ask, draft.
 - Per-tenant retrieval in Neon (pgvector). Per-tenant memory (stage 1).
@@ -96,6 +124,10 @@ Done when:
 - Before any real call: AWS has confirmed in writing that the grading model is
   covered by the BAA, and assumption A6 (transcripts in prompts) is decided by ADR.
 - The retention setting is stored per tenant and a test shows it is honored.
+- myCALL's grading requests go through the model gateway (no model
+  credentials in myCALL).
+- A do-not-contact request on a myCALL-graded call appears in the existing
+  review queue (test).
 - A new INSUREitALL recording is graded with quoted, timestamped evidence and
   no person touches it, shown on five real calls.
 - Cost per graded call is measured.
@@ -103,15 +135,18 @@ Done when:
 ## Phase 5. Ready to sell (weeks 6 to 8)
 
 - Per-user plan in Stripe, seat counting, fair-use limit on call minutes.
-- Row-level security in Postgres before the second tenant.
+- Row-level security in Postgres before the second tenant, with the app on a
+  database role that cannot bypass it and the organization set per request.
 - Onboarding checklist and import tooling; customer BAA signed; per-tenant
   call-recording retention configured.
 - Dry run: onboard a fake second agency end to end.
 
 Done when:
 - The dry-run agency cannot see INSUREitALL data by any route tried.
-- The risk assessment, named security contact and breach-notification
-  procedure are on file before any outside data is loaded.
+- The risk assessment, named security contact, breach-notification procedure
+  and workforce training records are on file before any outside data is loaded.
+- A test connects as the app's database role and fails to read another
+  tenant's rows with the application filter removed.
 - The first outside agency has signed the BAA, is onboarded and has paid an invoice.
 
 ## After version 1
