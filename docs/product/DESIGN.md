@@ -95,8 +95,12 @@ make everything else a module inside it.
   cannot leak across agencies. Row-level security only works if two things
   are also true: the app connects as a database role that does not own the
   tables and cannot bypass the policies, and every request sets the caller's
-  organization inside its transaction for the policies to check. Both are
-  part of that milestone. Each cross-tenant path gets a test that tries to
+  organization inside its transaction for the policies to check. Background
+  jobs have no caller, so every job carries the organization it is working
+  for and its worker sets that the same way, on the same restricted role. A
+  job that spans agencies (a nightly report, for example) loops one agency at
+  a time; it does not get a role that sees everything. All of this is part of
+  that milestone. Each cross-tenant path gets a test that tries to
   cross and must fail.
 - **Agent tool layer.** The agent never touches the database. Each tool is a
   thin wrapper over an existing API route and runs with the signed-in user's

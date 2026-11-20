@@ -21,7 +21,7 @@ gateway and for the job evaluations.
 ## Decision
 
 1. Add a model gateway: one internal interface for every AI call. Behind it,
-   the existing provider paths in `lib/aiProvider.ts` (`bedrock` through the
+   the existing provider dispatch in `lib/ai/buildAiClient.ts` (`bedrock` through the
    Anthropic Messages adapter, `azure`, and `openai` for development and
    tests only) plus a new adapter for Bedrock's open-weight models. No client
    is constructed outside the gateway, so the HIPAA guard in

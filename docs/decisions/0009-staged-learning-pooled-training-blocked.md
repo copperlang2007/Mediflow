@@ -34,7 +34,8 @@ carries the liability for how their PHI is used.
 
 - "Constantly improving" in version 1 means stages 1 and 2.
 - No attorney is engaged as of 2026-11-20. Engaging one is an owner task.
-- Any PR that trains on customer content, pools it across agencies, or moves
-  it into a learning or evaluation pipeline before stage 3 is unblocked is a
-  defect. Ordinary exports an agency makes of its own data (for example the
-  existing audited CSV export) are not affected.
+- Any PR that trains a model on customer content, pools it across agencies, or
+  moves it into a shared learning or evaluation set before stage 3 is
+  unblocked is a defect. Stage 1 per-tenant memory and ordinary exports an
+  agency makes of its own data (for example the existing audited CSV export)
+  are not affected.

@@ -43,6 +43,11 @@ Deliverables that do not exist yet and come first:
 - An AWS deploy path for both apps, including a job worker that runs
   independently of web traffic (see `DESIGN.md` section 2).
 - `docs/GO_LIVE_LEDGER.md`, listing each PHI gate and its evidence.
+- Migration of agencyBRIDGE's existing data from Google Cloud (the Cloud SQL
+  database and stored files such as documents and recordings) to Neon and S3:
+  row counts and file counts reconciled, a sample of records and files opened
+  in the new environment, and the Google Cloud copy kept read-only until the
+  owner confirms the cutover.
 - Migration of existing myCALL records and files from SQLite and local disk,
   with counts reconciled and old call reviews opened successfully before
   SQLite is retired.
@@ -146,7 +151,8 @@ Done when:
 - The risk assessment, named security contact, breach-notification procedure
   and workforce training records are on file before any outside data is loaded.
 - A test connects as the app's database role and fails to read another
-  tenant's rows with the application filter removed.
+  tenant's rows with the application filter removed. The same test passes
+  for a background job running for one agency.
 - The first outside agency has signed the BAA, is onboarded and has paid an invoice.
 
 ## After version 1
