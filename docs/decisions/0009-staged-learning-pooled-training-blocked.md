@@ -1,6 +1,6 @@
 # 9. The product learns in three stages; pooled training on customer data is blocked
 
-- **Status:** Proposed (owner decision 2026-11-19; becomes Accepted when the owner merges this)
+- **Status:** Proposed (owner stated this direction on 2026-11-19). Merging this file does not accept it. Acceptance is a separate change that sets this status to Accepted and updates `AGENTS.md` section 2 and the "Decided direction" block in `docs/STATE.md` in the same commit.
 - **Date:** 2026-11-20
 
 ## Context
@@ -23,7 +23,9 @@ carries the liability for how their PHI is used.
 3. **Stage 3, pooled fine-tuning on de-identified data.** No code may be built
    or run for this until all three exist and the owner confirms in writing:
    - a de-identification method that meets HIPAA (Safe Harbor or expert
-     determination) and has been tested on call transcripts;
+     determination) and has been tested on every type of data that would be
+     pooled (call transcripts, documents, chat and agent history, and any
+     other), with a type excluded until it has passed;
    - an executed BAA (or signed opt-in) that permits it from every agency
      whose data would be pooled; an agency that has not agreed is excluded;
    - written sign-off from a HIPAA attorney.

@@ -106,9 +106,16 @@ make everything else a module inside it.
   Medicare IDs, SSNs, phone numbers, card numbers, emails and dates first, but
   spoken health details remain. The code comment in `lib/aiProvider.ts` also
   says today's AI features send contact Medicare profiles in the system
-  prompt. This design does not relax the rule. Either call grading runs on
-  redacted transcripts that meet it, or the owner changes the rule by ADR
-  with a compliance advisor (assumption A6). No workspace feature ships on
+  prompt. This design does not relax the rule. There are two ways
+  out, and neither is available today. (1) Grade only transcripts redacted to
+  the rule's standard: **unproven**. myCALL's current redaction does not meet
+  it, removing spoken health details from free speech reliably is a hard
+  problem, and heavy redaction may remove the words the grader needs. It would
+  need its own evaluation before anyone relies on it. (2) The owner changes
+  the rule by ADR with a compliance advisor, allowing transcript content to go
+  to a BAA-covered model (assumption A6). Until one of these is true, the AI
+  reviewer runs on synthetic calls only; myCALL's phrase-rule engine, which
+  sends nothing to a model, can still grade real calls. No workspace feature ships on
   real data until that is settled.
 
 ## 3. Model plan

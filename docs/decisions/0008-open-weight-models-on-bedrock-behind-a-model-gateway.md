@@ -1,6 +1,6 @@
 # 8. Open-weight models on Amazon Bedrock, behind one model gateway
 
-- **Status:** Proposed (owner decision 2026-11-20; becomes Accepted when the owner merges this)
+- **Status:** Proposed (owner stated this direction on 2026-11-20). Merging this file does not accept it. Acceptance is a separate change that sets this status to Accepted and updates `AGENTS.md` section 2 and the "Decided direction" block in `docs/STATE.md` in the same commit.
 - **Date:** 2026-11-20
 
 ## Context
@@ -10,8 +10,13 @@ the Anthropic Messages API (ADR 0005). The owner now wants to sell agencyBRIDGE
 as an AI workspace at $75 to $100 per user per month with idle cost near zero,
 and has chosen open-weight models on Bedrock, paid per use, as the default.
 
-Open-weight models on Bedrock do not use the Anthropic Messages API. The four
-existing AI call sites cannot reach them.
+Open-weight models on Bedrock do not use the Anthropic Messages API. The
+existing AI call sites cannot reach them. ADR 0005 lists four
+(`routes/ai.ts`, `routes/dev/feature-builder.ts`,
+`workers/weeklyComplianceReport.ts`, `lib/dialer/transcriptParse.ts`); a fifth
+has been added since, `lib/callScoring/aiReviewer.ts`. All five construct
+their client through `buildAiClient()` and all five are in scope for the
+gateway and for the job evaluations.
 
 ## Decision
 
