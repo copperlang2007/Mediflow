@@ -8,20 +8,20 @@ Newest information first. If this file contradicts another doc, this file wins.
 
 ## Current state
 
-_Last updated: 2026-10-14 — Identity Platform sign-in merged (#295; production switches after owner setup); follow-up sign-in fixes in review (see session log)._
+_Last updated: 2026-11-20 — dashboard rows for main, CI and open PRs refreshed; AI workspace design proposed in PR #306 (docs only). Rows not listed as refreshed are unchanged since 2026-10-14 and were not re-checked._
 
 ### Health dashboard
 
 | Item | Status | Detail |
 | --- | --- | --- |
-| `main` HEAD | `bb146d7` (2026-10-14) | "Quoting: clean plan cards from CMS 2027 benefit data (#296)". Re-check: this row goes stale within hours. |
-| CI: typecheck + test | Not checked this session for `bb146d7` | Last run seen on main: [38630478682](https://github.com/copperlang2007/Mediflow/actions/runs/38630478682) on `c37dadb`, in progress when recorded. Re-check on GitHub before relying on this row. |
+| `main` HEAD | `8e26ea6` (2026-11-09) | "Plan cards: fix review findings from #296 (#300)". Checked 2026-11-20. Re-check: this row goes stale within hours. |
+| CI: typecheck + test | **Not running (2026-11-20)** | GitHub Actions refuses to start jobs: "The job was not started because your account is locked due to a billing issue." Seen on PR #306 (all four checks ended in under three seconds with no steps) and on scheduled runs on main since 2026-11-17. Owner must resolve billing in GitHub. The audit, migration-journal and deploy rows below were not re-checked and cannot run until then. |
 | CI: `pnpm audit (moderate)` | **Green** — run 37867735833 on `f821a54` passed. Was red on main from 2026-10-08 when four advisories (proxy-addr critical, source-map-js high, fast-copy and postcss-selector-parser moderate) were published | `braces` advisory `GHSA-vfj7-8cjw-p6xm` is suppressed (landed in #272); see the exceptions register below. |
 | CI: migration journal | Green | Run 37867735833 on `f821a54` |
 | Production deploy (GCP Cloud Run) | **Green** at `f821a54` (run 37867735824), `d9ba459` (run 37861974648, 2026-10-08), `2a29f04` (run 37230136675) and `4911b43` (run 37229595531) | Red 2026-10-02 → 2026-10-04 because Secret Manager secrets `mediflow-twilio-api-key-secret` and `mediflow-statement-ingest-google-credentials` did not exist (the bootstrap was not re-run after they were added to the deploy script). Fixed 2026-10-04 by creating both as `unset` placeholders with the bootstrap's IAM bindings (run SA: secretAccessor; deploy SA: secretVersionAdder), with the owner's approval. The run SA was also granted Token Creator on itself (needed to sign recording upload links). |
 | Production verified live? | **Partly** | A deploy succeeded and the post-deploy page check passed. Not confirmed: real-user login, Clerk production keys, the Google Cloud and AWS BAAs. ADR 0004 still "Proposed". |
 | Real PHI allowed? | **No** | Not until production is verified and BAAs confirmed. Owner stated 2026-10-08 (not independently verified): Google Cloud and AWS BAAs are signed. Still open: Clerk production keys and real-user login check, and the Twilio live-call-audio position (owner: conduit, nothing stored or processed; needs compliance-advisor confirmation, recording must stay off). |
-| Open PRs | Query GitHub live | As of 2026-10-14: the sign-in follow-up PR (invitation email must match, duplicate sign-up lock, literal Clerk prefix; branch `claude/agencybridge-compliance-review-s3nc6l`). #295 (Identity Platform sign-in) merged as `99ca2e9`; #298 as `a01cd24`; #296 as `bb146d7`; #297 as `c37dadb`. |
+| Open PRs | Query GitHub live | As of 2026-11-20: #306 (AI workspace design, docs only) and Dependabot PRs #301 to #305. |
 | Migration high-water mark | `0073_call_recordings_fetching` on main (landed with #289); `0074_user_identities` landed with #295 (main high-water mark is now 0074) | Two files share `0064`. Check `origin/main` and open PRs before numbering a new one. |
 | Remote branches | 156 (excl. main), snapshot | 72 fully merged + 21 tree-neutral (safe to delete), 62 landed-then-evolved, 1 open PR. 72+21+62+1 = 156 at snapshot (two of the 72 were then reused for open PRs #273/#275 — never delete a head of an open PR). See branch audit and its `.tsv`. |
 
@@ -48,6 +48,11 @@ GCP Cloud Run + Cloud SQL is production · Render forbidden for PHI · Railway i
 demo only · Claude on Bedrock via Anthropic Messages API · MFA mandatory for all
 · tenant isolation in app code with static guard (RLS is a later follow-up) ·
 Scope of Appointment captured on call recording (no 48-hour wait enforced).
+
+**Pending owner decisions, not yet accepted in this repo (see the 2026-11-20
+session entry):** move production to AWS + Neon (owner stated 2026-11-19; no
+ADR yet), and open-weight models on Bedrock behind a model gateway (ADR 0008,
+Proposed). Until an ADR is accepted, the line above is what the code does.
 
 ### Open questions
 
@@ -90,6 +95,16 @@ ones with no inbound references.
 ---
 
 ## Session log
+
+### 2026-11-20 — AI workspace product design (docs only) — Claude — branch `claude/hipaa-workspace-design`
+- **Outcome:** investigation-only (design and build plan proposed; no code, no cloud changes)
+- **Changed:** added `docs/product/DESIGN.md`, `docs/product/BUILD_PLAN.md`, ADR 0008 (open-weight models on Bedrock behind a model gateway, Proposed) and ADR 0009 (staged learning; pooled training on customer data blocked, Proposed). Owner decisions recorded there: sell agencyBRIDGE as a HIPAA-covered AI workspace for Medicare agencies, $75 to $100 per user per month, first outside agency paying by 2027-01-19.
+- **Verified:** read this repo at `8e26ea6` and myCALL at `c7a2f0b`; listed the Neon organization (HIPAA projects `agencybridge`, `mediflow-canonical`, `iia-workspace`, `iia-retention` exist, all reporting zero stored data); open PRs on GitHub are Dependabot only (#301 to #305). Unit-economics arithmetic was run by script. NOT verified: anything in AWS (no credentials in this session), the Bedrock open-weight catalog in the owner's account, per-model HIPAA eligibility, and no model evaluations were run. Prices are from public listings read 2026-11-20.
+- **Left undone / broken:** the move to AWS + Neon that the owner decided on 2026-11-19 has not started in this repo (no ledger, no AWS deploy script, no ADR); `AGENTS.md` section 2 and "Decided direction" above still say Google Cloud and Claude-only. They were left unchanged because ADRs 0008 and 0009 are only Proposed, and merging PR #306 does not accept them: acceptance is a separate change that sets the ADR status to Accepted and updates `AGENTS.md` section 2 and "Decided direction" together.
+- **Review follow-up (same day):** the design first described the prompt rule as "no more PHI than the task needs"; that is weaker than `AGENTS.md` section 5. Corrected: the structural exclusion stands, and the conflict with call grading (transcripts are recording content) is now an open owner decision (A6), not a silent change. A second automated review raised ten points, all applied: model BAA confirmation and audit checks added to the phase gates, Phase 0 deliverables spelled out, retention and risk-assessment gates added, ADR 0008 and 0009 tightened, and a pending-decision note added under "Decided direction". A third pass added five more: the redaction option for call grading is marked unproven, the fifth AI call site (`lib/callScoring/aiReviewer.ts`) is in the gateway inventory, de-identification must be tested per data type, the ADRs state that merging does not accept them, and the dashboard rows above were refreshed. A fourth pass (Sourcery, 15 points; three already fixed) added: Phase 0 waits for an accepted hosting ADR and lists its PHI gates, existing myCALL data must be migrated and reconciled, job workers must run independently of a scale-to-zero API, row-level security needs a non-bypassing database role and per-request organization context, myCALL's do-not-contact findings must reach the existing queue, myCALL calls models through the gateway, and two more owner decisions (A7 sign-in system, A8 priority order against `AGENTS.md` section 2). A fifth pass added: agencyBRIDGE's own Google Cloud data must be migrated and reconciled before cutover, and background jobs must carry their agency and run under the same restricted database role. A sixth pass added a write freeze (or snapshot plus replayed changes) to the data migration and made the executed AWS and Neon BAAs a precondition for copying any data. CI on PR #306 did not run: GitHub reports the account is locked for a billing issue (all jobs ended in under three seconds with no steps).
+- **Decisions made:** none accepted; ADR 0008 and ADR 0009 proposed.
+- **Next agent should:** write the AWS + Neon hosting ADR and get the owner to accept it. No migration work before that; no workspace features before the Phase 0 PHI gates pass.
+- **Needs a human:** review and merge or correct this PR; engage a HIPAA attorney; confirm with AWS which open-weight Bedrock models the BAA covers; decide per-user pricing and whether myCALL becomes the only call grader (assumptions A2 and A3 in the design).
 
 ### 2026-11-09 — Plan cards: review follow-ups (wrong prices, stale compare, labels) — Claude Code — branch `claude/admiring-allen-b6wum5`
 - **Outcome:** done (pending CI/review)
