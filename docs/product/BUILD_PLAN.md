@@ -58,8 +58,11 @@ Deliverables that do not exist yet and come first:
   since the snapshot before switching. The Google Cloud copy stays read-only
   until the owner confirms the cutover.
 - Migration of existing myCALL records and files from SQLite and local disk,
-  with counts reconciled and old call reviews opened successfully before
-  SQLite is retired.
+  under the same rules as the agencyBRIDGE migration above: BAAs on file,
+  HIPAA-enabled target, PHI gates passed in the target first, and writes
+  stopped (or a snapshot plus every later change replayed) before the copy.
+  Counts are reconciled and old call reviews opened successfully before
+  SQLite is retired. Neither source is copied until those rules are met.
 
 The PHI gates the ledger tracks, each with evidence, per environment:
 1. Sign-in with MFA works for a real user.
