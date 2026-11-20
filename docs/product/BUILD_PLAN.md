@@ -26,6 +26,9 @@ slips, cut Phase 3 down to read-only tools before moving any PHI gate.
    records (with the attorney).
 8. Decide A7 (which sign-in system) and A8 (whether the assistant may start
    before the half-built work `AGENTS.md` lists is finished).
+9. Put the executed AWS BAA and Neon BAA on file where an agent can cite
+   them (date signed, account or organization covered). The ledger so far
+   records them only as stated by the owner, not verified.
 
 ## Phase 0. Go-live on AWS + Neon (weeks 1 to 3)
 
@@ -44,10 +47,16 @@ Deliverables that do not exist yet and come first:
   independently of web traffic (see `DESIGN.md` section 2).
 - `docs/GO_LIVE_LEDGER.md`, listing each PHI gate and its evidence.
 - Migration of agencyBRIDGE's existing data from Google Cloud (the Cloud SQL
-  database and stored files such as documents and recordings) to Neon and S3:
-  row counts and file counts reconciled, a sample of records and files opened
-  in the new environment, and the Google Cloud copy kept read-only until the
-  owner confirms the cutover.
+  database and stored files such as documents and recordings) to Neon and S3.
+  Before any copy starts: the executed AWS and Neon BAAs are on file (owner
+  task 9), the target Neon project has HIPAA enabled, and the PHI gates
+  below have passed in the target environment. The copy itself: stop writes
+  to the Google Cloud app (maintenance mode), take the export from that
+  frozen state, reconcile row counts and file counts, open a sample of
+  records and files in the new environment, then switch. If a freeze is not
+  acceptable, copy from a snapshot and replay and reconcile every change made
+  since the snapshot before switching. The Google Cloud copy stays read-only
+  until the owner confirms the cutover.
 - Migration of existing myCALL records and files from SQLite and local disk,
   with counts reconciled and old call reviews opened successfully before
   SQLite is retired.
