@@ -63,6 +63,13 @@ Deliverables that do not exist yet and come first:
   stopped (or a snapshot plus every later change replayed) before the copy.
   Counts are reconciled and old call reviews opened successfully before
   SQLite is retired. Neither source is copied until those rules are met.
+- Disposal of the old copies. Every old source (the Google Cloud database and
+  files, myCALL's SQLite file and its recordings on local disk, and any
+  export files made during the move) stays read-only until the owner confirms
+  the cutover. After that, each one is either securely deleted or kept under
+  a retention decision the owner has approved, and the ledger records which,
+  when and by whom. Phase 0 is not complete while any old copy is unaccounted
+  for.
 
 The PHI gates the ledger tracks, each with evidence, per environment:
 1. Sign-in with MFA works for a real user.
