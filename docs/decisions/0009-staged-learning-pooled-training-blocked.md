@@ -17,17 +17,22 @@ carries the liability for how their PHI is used.
 2. **Stage 2, product-wide tuning without customer content.** Prompts, tool
    definitions and model routing change only when they beat the current version
    on a fixed evaluation set. Evaluation cases are synthetic; a real
-   interaction may inspire a case only after a person rewrites it.
+   interaction may inspire a case only after a person rewrites it with
+   synthetic details throughout (names, dates, identifiers, health details and
+   wording), so no customer content enters the shared set.
 3. **Stage 3, pooled fine-tuning on de-identified data.** No code may be built
    or run for this until all three exist and the owner confirms in writing:
    - a de-identification method that meets HIPAA (Safe Harbor or expert
      determination) and has been tested on call transcripts;
-   - customer BAA wording that permits it;
+   - an executed BAA (or signed opt-in) that permits it from every agency
+     whose data would be pooled; an agency that has not agreed is excluded;
    - written sign-off from a HIPAA attorney.
 
 ## Consequences
 
 - "Constantly improving" in version 1 means stages 1 and 2.
 - No attorney is engaged as of 2026-11-20. Engaging one is an owner task.
-- Any PR that trains on, exports, or pools customer content before stage 3 is
-  unblocked is a defect.
+- Any PR that trains on customer content, pools it across agencies, or moves
+  it into a learning or evaluation pipeline before stage 3 is unblocked is a
+  defect. Ordinary exports an agency makes of its own data (for example the
+  existing audited CSV export) are not affected.

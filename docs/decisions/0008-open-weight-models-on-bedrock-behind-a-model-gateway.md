@@ -16,8 +16,11 @@ existing AI call sites cannot reach them.
 ## Decision
 
 1. Add a model gateway: one internal interface for every AI call. Behind it,
-   two adapters: the existing Anthropic Messages adapter and a new one for
-   Bedrock's open-weight models.
+   the existing provider paths in `lib/aiProvider.ts` (`bedrock` through the
+   Anthropic Messages adapter, `azure`, and `openai` for development and
+   tests only) plus a new adapter for Bedrock's open-weight models. No client
+   is constructed outside the gateway, so the HIPAA guard in
+   `resolveAiProvider()` keeps applying to every path.
 2. Open-weight models are the default for new workspace features. Which model
    serves which job is decided by the evaluation set in
    `docs/product/DESIGN.md`, not by preference.

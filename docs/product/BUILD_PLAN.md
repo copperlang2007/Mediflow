@@ -25,8 +25,14 @@ slips, cut Phase 3 down to read-only tools before moving any PHI gate.
 
 ## Phase 0. Go-live on AWS + Neon (weeks 1 to 3)
 
-The existing go-live plan: both apps on AWS and Neon, one sign-in with MFA,
-myCALL off SQLite, Deepgram and the direct Anthropic API, INSUREitALL loaded.
+This is a new migration that has not started. Its scope: both apps on AWS and
+Neon, one sign-in with MFA, myCALL off SQLite, Deepgram and the direct
+Anthropic API, INSUREitALL loaded.
+
+Deliverables that do not exist yet and come first:
+- An accepted ADR recording AWS + Neon as production hosting (replaces ADR 0004's direction).
+- An AWS deploy path for both apps.
+- `docs/GO_LIVE_LEDGER.md`, listing each PHI gate and its evidence.
 
 Done when:
 - `docs/GO_LIVE_LEDGER.md` shows every PHI gate passed with evidence.
@@ -53,8 +59,12 @@ Done when:
 
 - Assistant panel in agencyBRIDGE. Upload, ask, draft.
 - Per-tenant retrieval in Neon (pgvector). Per-tenant memory (stage 1).
+- Every document read and assistant read of PHI written to the append-only audit log.
 
 Done when:
+- Before any real data: AWS has confirmed in writing that the model in use is
+  covered by the BAA, and that model is on the in-code allow-list.
+- A test shows a document read and an assistant answer each produce an audit record.
 - A user in tenant A cannot retrieve a document from tenant B (automated test).
 - No PHI appears in logs or error tracking during a test session (checked).
 - Thumbs up/down is recorded per answer.
@@ -79,7 +89,13 @@ Done when:
 - Recordings are transcribed in batch and graded automatically.
 - One grading engine (if A3 is accepted).
 
+- Per-tenant retention setting for recordings and transcripts; deletion is a
+  deliberate, audited action.
+
 Done when:
+- Before any real call: AWS has confirmed in writing that the grading model is
+  covered by the BAA, and assumption A6 (transcripts in prompts) is decided by ADR.
+- The retention setting is stored per tenant and a test shows it is honored.
 - A new INSUREitALL recording is graded with quoted, timestamped evidence and
   no person touches it, shown on five real calls.
 - Cost per graded call is measured.
@@ -88,11 +104,14 @@ Done when:
 
 - Per-user plan in Stripe, seat counting, fair-use limit on call minutes.
 - Row-level security in Postgres before the second tenant.
-- Onboarding checklist and import tooling; customer BAA signed.
+- Onboarding checklist and import tooling; customer BAA signed; per-tenant
+  call-recording retention configured.
 - Dry run: onboard a fake second agency end to end.
 
 Done when:
 - The dry-run agency cannot see INSUREitALL data by any route tried.
+- The risk assessment, named security contact and breach-notification
+  procedure are on file before any outside data is loaded.
 - The first outside agency has signed the BAA, is onboarded and has paid an invoice.
 
 ## After version 1

@@ -49,6 +49,11 @@ demo only · Claude on Bedrock via Anthropic Messages API · MFA mandatory for a
 · tenant isolation in app code with static guard (RLS is a later follow-up) ·
 Scope of Appointment captured on call recording (no 48-hour wait enforced).
 
+**Pending owner decisions, not yet accepted in this repo (see the 2026-11-20
+session entry):** move production to AWS + Neon (owner stated 2026-11-19; no
+ADR yet), and open-weight models on Bedrock behind a model gateway (ADR 0008,
+Proposed). Until an ADR is accepted, the line above is what the code does.
+
 ### Open questions
 
 - Is the GCP project actually provisioned, and has any deploy ever succeeded?
@@ -96,7 +101,7 @@ ones with no inbound references.
 - **Changed:** added `docs/product/DESIGN.md`, `docs/product/BUILD_PLAN.md`, ADR 0008 (open-weight models on Bedrock behind a model gateway, Proposed) and ADR 0009 (staged learning; pooled training on customer data blocked, Proposed). Owner decisions recorded there: sell agencyBRIDGE as a HIPAA-covered AI workspace for Medicare agencies, $75 to $100 per user per month, first outside agency paying by 2027-01-19.
 - **Verified:** read this repo at `8e26ea6` and myCALL at `c7a2f0b`; listed the Neon organization (HIPAA projects `agencybridge`, `mediflow-canonical`, `iia-workspace`, `iia-retention` exist, all reporting zero stored data); open PRs on GitHub are Dependabot only (#301 to #305). Unit-economics arithmetic was run by script. NOT verified: anything in AWS (no credentials in this session), the Bedrock open-weight catalog in the owner's account, per-model HIPAA eligibility, and no model evaluations were run. Prices are from public listings read 2026-11-20.
 - **Left undone / broken:** the move to AWS + Neon that the owner decided on 2026-11-19 has not started in this repo (no ledger, no AWS deploy script, no ADR); `AGENTS.md` section 2 and "Decided direction" above still say Google Cloud and Claude-only. They were left unchanged because ADRs 0008 and 0009 are only Proposed.
-- **Review follow-up (same day):** the design first described the prompt rule as "no more PHI than the task needs"; that is weaker than `AGENTS.md` section 5. Corrected: the structural exclusion stands, and the conflict with call grading (transcripts are recording content) is now an open owner decision (A6), not a silent change. CI on PR #306 did not run: GitHub reports the account is locked for a billing issue (all jobs ended in under three seconds with no steps).
+- **Review follow-up (same day):** the design first described the prompt rule as "no more PHI than the task needs"; that is weaker than `AGENTS.md` section 5. Corrected: the structural exclusion stands, and the conflict with call grading (transcripts are recording content) is now an open owner decision (A6), not a silent change. A second automated review raised ten points, all applied: model BAA confirmation and audit checks added to the phase gates, Phase 0 deliverables spelled out, retention and risk-assessment gates added, ADR 0008 and 0009 tightened, and a pending-decision note added under "Decided direction". CI on PR #306 did not run: GitHub reports the account is locked for a billing issue (all jobs ended in under three seconds with no steps).
 - **Decisions made:** none accepted; ADR 0008 and ADR 0009 proposed.
 - **Next agent should:** run the go-live work (build plan Phase 0) and write the AWS + Neon hosting ADR; do not start workspace features before the PHI gates pass.
 - **Needs a human:** review and merge or correct this PR; engage a HIPAA attorney; confirm with AWS which open-weight Bedrock models the BAA covers; decide per-user pricing and whether myCALL becomes the only call grader (assumptions A2 and A3 in the design).
